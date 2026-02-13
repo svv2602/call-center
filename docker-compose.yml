@@ -1,0 +1,46 @@
+services:
+  call-processor:
+    build: .
+    ports:
+      - "9092:9092"   # AudioSocket
+      - "8080:8080"   # API / Prometheus metrics
+    environment:
+      - GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-key.json
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - STORE_API_URL=http://store-api:3000/api/v1
+      - STORE_API_KEY=${STORE_API_KEY}
+      - DATABASE_URL=postgresql+asyncpg://callcenter:${POSTGRES_PASSWORD}@postgres:5432/callcenter
+      - REDIS_URL=redis://redis:6379/0
+      - ARI_URL=http://asterisk:8088/ari
+      - ARI_USER=${ARI_USER}
+      - ARI_PASSWORD=${ARI_PASSWORD}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    environment:
+      POSTGRES_DB: callcenter
+      POSTGRES_USER: callcenter
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U callcenter -d callcenter"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:

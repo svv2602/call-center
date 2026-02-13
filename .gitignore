@@ -1,8 +1,12 @@
-# Secrets
+# Secrets & env files
 .env
+.env.local
+.env.*
+!.env.example
 secrets/
 *.pem
 *.key
+gcp-key.json
 
 # Python
 __pycache__/
