@@ -1,12 +1,12 @@
 # Фаза 2: AudioSocket сервер
 
 ## Статус
-- [ ] Не начата
-- [ ] В процессе
-- [ ] Завершена
+- [x] Не начата
+- [x] В процессе
+- [x] Завершена
 
-**Начата:** -
-**Завершена:** -
+**Начата:** 2026-02-13
+**Завершена:** 2026-02-13
 
 ## Цель фазы
 
@@ -17,9 +17,9 @@
 ### 2.0 ОБЯЗАТЕЛЬНО: Анализ и планирование
 
 #### A. Анализ существующего кода
-- [ ] Проверить наличие `src/core/audio_socket.py`, `src/core/call_session.py`
-- [ ] Изучить паттерн asyncio TCP-сервера (`asyncio.start_server`)
-- [ ] Определить формат протокола AudioSocket
+- [x] Проверить наличие `src/core/audio_socket.py`, `src/core/call_session.py`
+- [x] Изучить паттерн asyncio TCP-сервера (`asyncio.start_server`)
+- [x] Определить формат протокола AudioSocket
 
 **Команды для поиска:**
 ```bash
@@ -29,9 +29,9 @@ grep -rn "AudioSocket\|audio_socket" src/
 ```
 
 #### B. Анализ зависимостей
-- [ ] Нужна ли абстракция Protocol для AudioSocket? — Нет, единственная реализация
-- [ ] Нужны ли новые env variables? — `AUDIOSOCKET_HOST`, `AUDIOSOCKET_PORT` (уже в config)
-- [ ] Нужна ли интеграция с Redis для сессий? — Да, Session Manager хранит state в Redis
+- [x] Нужна ли абстракция Protocol для AudioSocket? — Нет, единственная реализация
+- [x] Нужны ли новые env variables? — `AUDIOSOCKET_HOST`, `AUDIOSOCKET_PORT` (уже в config)
+- [x] Нужна ли интеграция с Redis для сессий? — Да, Session Manager хранит state в Redis
 
 **Новые абстракции:** Нет
 **Новые env variables:** Нет (уже определены в phase-01)
@@ -39,25 +39,25 @@ grep -rn "AudioSocket\|audio_socket" src/
 **Миграции БД:** Нет
 
 #### C. Проверка архитектуры
-- [ ] Каждый звонок — отдельная `asyncio.Task`
-- [ ] Graceful shutdown при hangup (type=0x00) или отключении клиента
-- [ ] `call_id` = UUID из AudioSocket (type=0x01)
+- [x] Каждый звонок — отдельная `asyncio.Task`
+- [x] Graceful shutdown при hangup (type=0x00) или отключении клиента
+- [x] `call_id` = UUID из AudioSocket (type=0x01)
 
 **Референс-модуль:** `doc/technical/architecture.md` — секции 3.1, 3.2
 
 **Цель:** Понять протокол AudioSocket и архитектуру Session Manager.
 
-**Заметки для переиспользования:** -
+**Заметки для переиспользования:** Протокол прост: 3-байтовый заголовок + payload. `asyncio.StreamReader.readexactly()` обеспечивает буферизацию неполных пакетов.
 
 ---
 
 ### 2.1 Парсинг протокола AudioSocket
 
-- [ ] Реализовать парсер пакетов AudioSocket: `[type:1B][length:2B BE][payload:NB]`
-- [ ] Обработка типов: `0x01` = UUID, `0x10` = audio, `0x00` = hangup, `0xFF` = error
-- [ ] Валидация длины пакета (length соответствует payload)
-- [ ] Обработка неполных пакетов (буферизация до полного получения)
-- [ ] Функция формирования исходящих аудио-пакетов (type=0x10)
+- [x] Реализовать парсер пакетов AudioSocket: `[type:1B][length:2B BE][payload:NB]`
+- [x] Обработка типов: `0x01` = UUID, `0x10` = audio, `0x00` = hangup, `0xFF` = error
+- [x] Валидация длины пакета (length соответствует payload)
+- [x] Обработка неполных пакетов (буферизация до полного получения)
+- [x] Функция формирования исходящих аудио-пакетов (type=0x10)
 
 **Файлы:** `src/core/audio_socket.py`
 
@@ -69,31 +69,31 @@ Type 0x00 = Hangup (клиент повесил трубку)
 Type 0xFF = Error
 ```
 
-**Заметки:** Аудио: 16kHz × 16-bit = 32000 bytes/sec. Фрейм 20ms = 640 bytes.
+**Заметки:** `read_packet()` и `build_audio_packet()` — основные функции. `readexactly()` автоматически буферизует неполные данные. Аудио отправляется чанками по 640 байт (20ms фрейм).
 
 ---
 
 ### 2.2 TCP-сервер (asyncio)
 
-- [ ] Реализовать `AudioSocketServer` на базе `asyncio.start_server`
-- [ ] Обработка каждого соединения в отдельной `asyncio.Task`
-- [ ] При подключении: прочитать UUID-пакет (type=0x01), создать сессию
-- [ ] Цикл чтения: читать пакеты, dispatch по типу
-- [ ] Запись аудио: метод для отправки TTS-аудио обратно в Asterisk
-- [ ] Graceful shutdown: обработка SIGINT/SIGTERM, закрытие всех соединений
+- [x] Реализовать `AudioSocketServer` на базе `asyncio.start_server`
+- [x] Обработка каждого соединения в отдельной `asyncio.Task`
+- [x] При подключении: прочитать UUID-пакет (type=0x01), создать сессию
+- [x] Цикл чтения: читать пакеты, dispatch по типу
+- [x] Запись аудио: метод для отправки TTS-аудио обратно в Asterisk
+- [x] Graceful shutdown: обработка SIGINT/SIGTERM, закрытие всех соединений
 
 **Файлы:** `src/core/audio_socket.py`
-**Заметки:** Порт по умолчанию: 9092
+**Заметки:** `AudioSocketServer` принимает `on_connection` callback. `_handle_client` читает UUID, создаёт `AudioSocketConnection`, делегирует обработку. `stop()` отменяет все задачи.
 
 ---
 
 ### 2.3 Session Manager
 
-- [ ] Реализовать `CallSession` — state machine для жизненного цикла звонка
-- [ ] Состояния: Connected → Greeting → Listening → Processing → Speaking → Transferring → Ended
-- [ ] Хранение истории диалога (messages для LLM)
-- [ ] Таймаут тишины: 10 сек → "Ви ще на лінії?", ещё 10 сек → hangup
-- [ ] Максимальная длительность звонка — настраиваемый параметр
+- [x] Реализовать `CallSession` — state machine для жизненного цикла звонка
+- [x] Состояния: Connected → Greeting → Listening → Processing → Speaking → Transferring → Ended
+- [x] Хранение истории диалога (messages для LLM)
+- [x] Таймаут тишины: 10 сек → "Ви ще на лінії?", ещё 10 сек → hangup
+- [x] Максимальная длительность звонка — настраиваемый параметр
 
 **Файлы:** `src/core/call_session.py`
 
@@ -104,17 +104,17 @@ Connected → Greeting → Listening → Processing → Speaking → Listening (
 Listening → Timeout (10s) → "Ви ще на лінії?" → Timeout (10s) → Ended
 ```
 
-**Заметки:** -
+**Заметки:** `CallState` enum + `_VALID_TRANSITIONS` dict для валидации переходов. `record_timeout()` возвращает True при достижении `MAX_TIMEOUTS_BEFORE_HANGUP` (2). `messages_for_llm` — property для формата Claude API.
 
 ---
 
 ### 2.4 Хранение сессий в Redis
 
-- [ ] Сериализация/десериализация `CallSession` в Redis
-- [ ] Ключ: `call_session:{channel_uuid}`
-- [ ] TTL: 1800 секунд (30 мин) — защита от утечки памяти при аварийных обрывах
-- [ ] Обновление TTL при каждой активности
-- [ ] Удаление сессии при нормальном завершении звонка
+- [x] Сериализация/десериализация `CallSession` в Redis
+- [x] Ключ: `call_session:{channel_uuid}`
+- [x] TTL: 1800 секунд (30 мин) — защита от утечки памяти при аварийных обрывах
+- [x] Обновление TTL при каждой активности
+- [x] Удаление сессии при нормальном завершении звонка
 
 **Файлы:** `src/core/call_session.py`
 
@@ -127,21 +127,21 @@ await redis.setex(
 )
 ```
 
-**Заметки:** Stateless Call Processor → сессии в Redis → горизонтальное масштабирование
+**Заметки:** `SessionStore` класс инкапсулирует Redis-операции: `save()`, `load()`, `delete()`, `exists()`. JSON-сериализация через `serialize()`/`deserialize()`.
 
 ---
 
 ### 2.5 Точка входа (main.py)
 
-- [ ] Создать `src/main.py` — запуск AudioSocket сервера
-- [ ] Загрузка конфигурации из env
-- [ ] Инициализация подключений (Redis, PostgreSQL)
-- [ ] Запуск AudioSocket TCP-сервера
-- [ ] Graceful shutdown (закрытие всех соединений, flush логов)
-- [ ] Health-check endpoint (FastAPI на порту 8080)
+- [x] Создать `src/main.py` — запуск AudioSocket сервера
+- [x] Загрузка конфигурации из env
+- [x] Инициализация подключений (Redis, PostgreSQL)
+- [x] Запуск AudioSocket TCP-сервера
+- [x] Graceful shutdown (закрытие всех соединений, flush логов)
+- [x] Health-check endpoint (FastAPI на порту 8080)
 
 **Файлы:** `src/main.py`
-**Заметки:** Запуск: `python -m src.main`
+**Заметки:** Redis graceful degradation: если недоступен, приложение продолжает с in-memory сессиями. Health-check возвращает `active_calls` и статус Redis.
 
 ---
 
