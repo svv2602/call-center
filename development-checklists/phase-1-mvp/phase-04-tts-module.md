@@ -1,12 +1,12 @@
 # Фаза 4: TTS модуль (Text-to-Speech)
 
 ## Статус
-- [ ] Не начата
-- [ ] В процессе
-- [ ] Завершена
+- [x] Не начата
+- [x] В процессе
+- [x] Завершена
 
-**Начата:** -
-**Завершена:** -
+**Начата:** 2026-02-13
+**Завершена:** 2026-02-13
 
 ## Цель фазы
 
@@ -17,21 +17,14 @@
 ### 4.0 ОБЯЗАТЕЛЬНО: Анализ и планирование
 
 #### A. Анализ существующего кода
-- [ ] Проверить наличие `src/tts/base.py`, `src/tts/google_tts.py`
-- [ ] Изучить Google Cloud TTS API
-- [ ] Изучить паттерн из `src/stt/base.py` (аналогичная абстракция)
-
-**Команды для поиска:**
-```bash
-ls src/tts/
-grep -rn "class.*Protocol\|class.*TTS" src/
-grep -rn "TextToSpeech\|synthesize" src/
-```
+- [x] Проверить наличие `src/tts/base.py`, `src/tts/google_tts.py`
+- [x] Изучить Google Cloud TTS API
+- [x] Изучить паттерн из `src/stt/base.py` (аналогичная абстракция)
 
 #### B. Анализ зависимостей
-- [ ] Нужна абстракция Protocol для TTS? — Да, `TTSEngine(Protocol)`
-- [ ] Нужны ли новые env variables? — `GOOGLE_TTS_VOICE`, `GOOGLE_TTS_SPEAKING_RATE`
-- [ ] Метрики: `tts_latency_ms`, `tts_cache_hit_rate`
+- [x] Нужна абстракция Protocol для TTS? — Да, `TTSEngine(Protocol)`
+- [x] Нужны ли новые env variables? — `GOOGLE_TTS_VOICE`, `GOOGLE_TTS_SPEAKING_RATE`
+- [x] Метрики: `tts_latency_ms`, `tts_cache_hit_rate`
 
 **Новые абстракции:** `TTSEngine(Protocol)` в `src/tts/base.py`
 **Новые env variables:** TTS voice config (уже в phase-01)
@@ -39,109 +32,72 @@ grep -rn "TextToSpeech\|synthesize" src/
 **Миграции БД:** Нет
 
 #### C. Проверка архитектуры
-- [ ] Формат аудио: LINEAR16, 16kHz — совпадает с AudioSocket
-- [ ] Кэширование частых фраз (приветствие, прощание, ожидание)
-- [ ] Streaming по предложениям для длинных ответов
-- [ ] Бюджет задержки TTS: ≤ 400ms (из NFR)
+- [x] Формат аудио: LINEAR16, 16kHz — совпадает с AudioSocket
+- [x] Кэширование частых фраз (приветствие, прощание, ожидание)
+- [x] Streaming по предложениям для длинных ответов
+- [x] Бюджет задержки TTS: ≤ 400ms (из NFR)
 
 **Референс-модуль:** `src/stt/base.py` (аналогичная структура)
 
-**Цель:** Понять API Google TTS и определить стратегию кэширования.
-
-**Заметки для переиспользования:** Паттерн Protocol из STT модуля
+**Заметки для переиспользования:** Паттерн Protocol + frozen dataclass из STT полностью переиспользован. SHA256 хеш текста как ключ кэша.
 
 ---
 
 ### 4.1 Абстрактный интерфейс TTS (Protocol)
 
-- [ ] Создать `src/tts/base.py` с Protocol-классом `TTSEngine`
-- [ ] Методы: `synthesize(text) -> bytes`, `synthesize_stream(text) -> AsyncIterator[bytes]`
-- [ ] Dataclass `TTSConfig`: `language_code`, `voice_name`, `speaking_rate`, `sample_rate_hertz`
+- [x] Создать `src/tts/base.py` с Protocol-классом `TTSEngine`
+- [x] Методы: `synthesize(text) -> bytes`, `synthesize_stream(text) -> AsyncIterator[bytes]`
+- [x] Dataclass `TTSConfig`: `language_code`, `voice_name`, `speaking_rate`, `sample_rate_hertz`
 
 **Файлы:** `src/tts/base.py`
-
-**Интерфейс:**
-```python
-class TTSEngine(Protocol):
-    async def synthesize(self, text: str) -> bytes: ...
-    async def synthesize_stream(self, text: str) -> AsyncIterator[bytes]: ...
-```
-
-**Заметки:** -
+**Заметки:** `@runtime_checkable Protocol`, `TTSConfig` — frozen dataclass с slots.
 
 ---
 
 ### 4.2 Google Cloud TTS реализация
 
-- [ ] Создать `src/tts/google_tts.py` — реализация `TTSEngine`
-- [ ] Конфигурация голоса: `uk-UA-Standard-A` (или Neural2 для лучшего качества)
-- [ ] Формат аудио: `LINEAR16`, `sample_rate_hertz=16000`
-- [ ] `speaking_rate=1.0` (нормальная скорость)
-- [ ] Обработка ошибок API с логированием
+- [x] Создать `src/tts/google_tts.py` — реализация `TTSEngine`
+- [x] Конфигурация голоса: `uk-UA-Standard-A` (или Neural2 для лучшего качества)
+- [x] Формат аудио: `LINEAR16`, `sample_rate_hertz=16000`
+- [x] `speaking_rate=1.0` (нормальная скорость)
+- [x] Обработка ошибок API с логированием
 
 **Файлы:** `src/tts/google_tts.py`
-
-**Конфигурация:**
-```python
-voice = texttospeech.VoiceSelectionParams(
-    language_code="uk-UA",
-    name="uk-UA-Standard-A",
-    ssml_gender=texttospeech.SsmlVoiceGender.FEMALE,
-)
-audio_config = texttospeech.AudioConfig(
-    audio_encoding=texttospeech.AudioEncoding.LINEAR16,
-    sample_rate_hertz=16000,
-    speaking_rate=1.0,
-)
-```
-
-**Заметки:** Neural2 голоса качественнее, но дороже
+**Заметки:** Использует `TextToSpeechAsyncClient`. `initialize()` создаёт клиента и предзагружает кэш.
 
 ---
 
 ### 4.3 Кэширование частых фраз
 
-- [ ] Реализовать `CachedTTSEngine` — обёртка с кэшированием
-- [ ] Кэш в памяти (dict) для часто используемых фраз
-- [ ] Предзагрузка фраз при старте: "Добрий день!", "Зачекайте, будь ласка", "Дякую за дзвінок!"
-- [ ] Метрика: cache hit rate
+- [x] Реализовать кэширование в `GoogleTTSEngine`
+- [x] Кэш в памяти (dict) для часто используемых фраз
+- [x] Предзагрузка фраз при старте: "Добрий день!", "Зачекайте, будь ласка", "Дякую за дзвінок!"
+- [x] Метрика: cache hit rate
 
 **Файлы:** `src/tts/google_tts.py`
-
-**Фразы для кэширования:**
-```python
-CACHED_PHRASES = [
-    "Добрий день! Інтернет-магазин шин. Чим можу допомогти?",
-    "Зачекайте, будь ласка, я шукаю інформацію.",
-    "Зараз з'єдную вас з оператором. Залишайтесь на лінії.",
-    "Дякую за дзвінок! До побачення!",
-    "Ви ще на лінії?",
-]
-```
-
-**Заметки:** -
+**Заметки:** 7 фраз предзагружаются. Короткие фразы (<100 символов) кэшируются автоматически. `cache_hit_rate` property для метрик.
 
 ---
 
 ### 4.4 Streaming по предложениям
 
-- [ ] Разбиение текста ответа на предложения
-- [ ] Синтез и отправка каждого предложения отдельно
-- [ ] Параллельная обработка: синтез следующего предложения во время воспроизведения текущего
+- [x] Разбиение текста ответа на предложения
+- [x] Синтез и отправка каждого предложения отдельно
+- [x] Параллельная обработка: синтез следующего предложения во время воспроизведения текущего
 
 **Файлы:** `src/tts/google_tts.py`
-**Заметки:** Позволяет начать воспроизведение быстрее (не ждать синтеза всего текста)
+**Заметки:** `synthesize_stream()` использует regex `(?<=[.!?])\s+` для разбиения. Каждое предложение синтезируется отдельно и кэшируется.
 
 ---
 
 ### 4.5 Mock-реализация для тестов
 
-- [ ] Создать mock-реализацию `TTSEngine` для unit-тестов
-- [ ] Возврат пустого аудио (тишина) нужной длительности
-- [ ] Имитация задержек и ошибок
+- [x] Создать mock-реализацию `TTSEngine` для unit-тестов
+- [x] Возврат пустого аудио (тишина) нужной длительности
+- [x] Имитация задержек и ошибок
 
 **Файлы:** `tests/unit/mocks/mock_tts.py`
-**Заметки:** -
+**Заметки:** `MockTTSEngine`: 640 байт тишины × кол-во слов × `frames_per_word`. `error` parameter для имитации ошибок.
 
 ---
 
