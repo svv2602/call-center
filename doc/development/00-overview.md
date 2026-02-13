@@ -117,3 +117,150 @@ call_center/
 | 4 | Аналитика и оптимизация | [phase-4-analytics.md](./phase-4-analytics.md) |
 
 Детальное описание API магазина: [api-specification.md](./api-specification.md)
+
+## Стратегия тестирования
+
+### Unit-тесты
+
+| Модуль | Что тестируем | Инструменты |
+|--------|--------------|-------------|
+| `core/audio_socket.py` | Парсинг протокола AudioSocket (UUID, audio, hangup пакеты) | pytest |
+| `agent/tools.py` | Валидация параметров tool calls (цена > 0, quantity > 0 и < 100) | pytest |
+| `agent/agent.py` | Формирование messages, обработка tool_use ответов | pytest + mock Claude |
+| `stt/google_stt.py` | Обработка interim/final transcripts, restart по таймауту | pytest + mock gRPC |
+| `tts/google_tts.py` | Конвертация формата, кэширование | pytest |
+| `store_client/client.py` | Маппинг ответов, retry, circuit breaker | pytest + aioresponses |
+
+**Покрытие:** минимум 80% для core-модулей.
+
+### Интеграционные тесты
+
+| Сценарий | Что тестируем | Инструменты |
+|----------|--------------|-------------|
+| Pipeline (STT→LLM→TTS) | Полный цикл с мокированными внешними API | pytest + testcontainers |
+| Call Processor → PostgreSQL | Запись логов, сессий, метрик | pytest + testcontainers (postgres) |
+| Call Processor → Redis | Хранение сессий, TTL, pub/sub | pytest + testcontainers (redis) |
+| Call Processor → Store API | Реальные HTTP-запросы к тестовому Store API | pytest + docker-compose test profile |
+
+### E2E тесты
+
+| Сценарий | Описание | Инструменты |
+|----------|----------|-------------|
+| Подбор шин | SIP-звонок → "Мені потрібні шини..." → бот отвечает вариантами | SIPp + WAV-файлы + assertions |
+| Проверка наличия | SIP-звонок → запрос наличия → ответ с ценой и количеством | SIPp |
+| Переключение на оператора | SIP-звонок → "З'єднайте з оператором" → transfer | SIPp + Asterisk AMI проверка |
+| Оформление заказа | Полный цикл от подбора до подтверждения | SIPp + Store API проверка |
+
+### Нагрузочные тесты
+
+| Профиль | Одновременных звонков | Длительность | Инструменты |
+|---------|----------------------|-------------|-------------|
+| Нормальная нагрузка | 20 | 30 мин | Locust + SIPp |
+| Пиковая нагрузка | 50 | 15 мин | Locust + SIPp |
+| Стресс-тест | 100+ | 10 мин | Locust + SIPp |
+
+**Метрики при нагрузочных тестах:**
+- p95 задержка ответа < 2 сек
+- 0% потерянных звонков при нормальной нагрузке
+- < 5% ошибок при пиковой нагрузке
+- Graceful degradation при стресс-тесте (новые звонки отклоняются, активные продолжают работать)
+
+## CI/CD Pipeline
+
+### Инструмент: GitHub Actions
+
+### Стадии
+
+```mermaid
+graph LR
+    A[Push / PR] --> B[Lint & Type Check]
+    B --> C[Unit Tests]
+    C --> D[Security Scan]
+    D --> E[Integration Tests]
+    E --> F[Build Docker Image]
+    F --> G{Branch?}
+    G -->|main| H[Deploy to Staging]
+    G -->|release/*| I[Deploy to Production]
+    H --> J[E2E Tests on Staging]
+```
+
+### Конфигурация
+
+```yaml
+# .github/workflows/ci.yml
+name: CI/CD
+
+on:
+  push:
+    branches: [main, release/*]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ruff mypy
+      - run: ruff check src/
+      - run: mypy src/ --strict
+
+  test:
+    needs: lint
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_DB: callcenter_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports: ["5432:5432"]
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install -e ".[test]"
+      - run: pytest tests/ --cov=src --cov-report=xml
+      - uses: codecov/codecov-action@v4
+
+  security:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pip install pip-audit safety
+      - run: pip-audit --strict --desc
+      - run: safety check --full-report
+
+  build:
+    needs: [test, security]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/build-push-action@v5
+        with:
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: call-center:${{ github.sha }}
+
+  deploy-staging:
+    needs: build
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "Deploy to staging via SSH / docker compose pull && up -d"
+```
+
+### Правила
+
+- PR в main требует: все checks passed + code review
+- main → автодеплой на staging
+- release/* → деплой на production (после ручного подтверждения)
+- Критические CVE в зависимостях блокируют merge

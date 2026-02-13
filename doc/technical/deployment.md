@@ -272,6 +272,41 @@ volumes:
 | Конфигурация | Git репозиторий | При изменении |
 | Секреты (API keys) | Encrypted vault | При изменении |
 
+## Отказоустойчивость Asterisk (SPOF)
+
+На MVP-этапе Asterisk — single point of failure. План резервирования:
+
+### Фаза 1–2 (MVP): мониторинг
+
+- Мониторинг доступности Asterisk через Prometheus + AMI exporter
+- Алерт при недоступности (Telegram, < 1 мин)
+- Документированная процедура ручного восстановления (RTO < 15 мин)
+
+### Фаза 3+ (продакшен): резервирование
+
+```mermaid
+graph TB
+    subgraph SIP["SIP Provider"]
+        TRUNK[SIP Trunk<br/>failover routing]
+    end
+
+    subgraph Primary["Primary"]
+        AST1[Asterisk #1<br/>Active]
+    end
+
+    subgraph Standby["Standby"]
+        AST2[Asterisk #2<br/>Hot Standby]
+    end
+
+    TRUNK -->|primary| AST1
+    TRUNK -.->|failover| AST2
+    AST1 & AST2 --> CP[Call Processor]
+```
+
+- **SIP-уровень:** failover на стороне SIP-провайдера (два endpoint-а)
+- **Конфигурация:** синхронизация через rsync / Ansible
+- **Переключение:** автоматическое на стороне SIP trunk (по таймауту SIP INVITE)
+
 ## Health Checks
 
 | Сервис | Endpoint | Проверка |

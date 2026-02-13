@@ -93,7 +93,7 @@ graph LR
 
 | Требование | Реализация |
 |------------|------------|
-| API-ключи | Хранятся в env variables, не в коде |
+| API-ключи | Env variables / docker secrets; ротация каждые 90 дней ([подробнее](../security/threat-model.md#управление-api-ключами-и-секретами)) |
 | Передача данных | HTTPS для всех внешних API |
 | AudioSocket | Только LAN (127.0.0.1 или private network) |
 | PII (персональные данные) | Номер телефона — хэширование в логах |
@@ -151,12 +151,27 @@ graph LR
 
 ### 6.3 Тестирование
 
-| Тип | Покрытие | Инструмент |
-|-----|----------|------------|
-| Unit-тесты | Агент, tools, парсинг AudioSocket | pytest |
-| Интеграционные | Pipeline (mock STT/TTS), Store API | pytest + testcontainers |
-| E2E | Полный звонок через тестовый SIP | SIPp + custom scripts |
-| Нагрузочные | 50/100/200 одновременных звонков | Locust + SIPp |
+| Тип | Покрытие | Инструмент | Детали |
+|-----|----------|------------|--------|
+| Unit-тесты | Агент, tools, парсинг AudioSocket | pytest | Min 80% покрытие core-модулей |
+| Интеграционные | Pipeline (mock STT/TTS), Store API | pytest + testcontainers | PostgreSQL, Redis в контейнерах |
+| E2E | Полный звонок через тестовый SIP | SIPp + custom scripts | Все ключевые сценарии |
+| Нагрузочные | 50/100/200 одновременных звонков | Locust + SIPp | p95 < 2 сек, 0% потерь при 50 звонках |
+
+Подробная стратегия тестирования: [development/00-overview.md](../development/00-overview.md#стратегия-тестирования)
+
+### 6.4 CI/CD
+
+Автоматический pipeline при каждом push/PR:
+
+1. **Lint & Type Check** — ruff, mypy (strict)
+2. **Unit Tests** — pytest с покрытием
+3. **Security Scan** — pip-audit, safety
+4. **Integration Tests** — с PostgreSQL и Redis в testcontainers
+5. **Build** — Docker image
+6. **Deploy** — staging (auto), production (manual approval)
+
+Подробная конфигурация: [development/00-overview.md](../development/00-overview.md#cicd-pipeline)
 
 ## 7. Совместимость
 

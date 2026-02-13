@@ -205,6 +205,8 @@ prompt_variants = {
 | Задержка ответа | p95 > 3 секунды | Prometheus alert |
 | Нет активных операторов | Очередь > 5 и нет доступных операторов | Telegram / SMS |
 | Аномальный расход API | >200% от среднедневного | Email |
+| Prompt injection подозрение | Аномальные параметры tool calls (price=0, qty>50) | Telegram / Slack |
+| Аномалия валидации | >3 отклонённых tool calls за 1 звонок | Telegram |
 
 ## Критерии приёмки
 

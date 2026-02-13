@@ -128,6 +128,20 @@ Type 0xFF = Error
 - Таймауты (тишина, максимальная длительность)
 - Graceful shutdown при hangup
 
+**Хранение сессий в Redis:**
+
+```python
+# Ключ сессии: call_session:{uuid}
+# TTL: 30 минут (максимальная длительность звонка + запас)
+await redis.setex(
+    f"call_session:{channel_uuid}",
+    ttl=1800,  # 30 мин
+    value=session.serialize(),
+)
+```
+
+TTL гарантирует автоматическую очистку сессий при аварийных обрывах (hangup не получен, процесс упал). Без TTL — утечка памяти Redis.
+
 **Состояния сессии:**
 
 ```mermaid
@@ -261,6 +275,27 @@ graph TD
 - Circuit breaker (если API недоступен → сообщить клиенту)
 - Маппинг ответов API в формат для LLM tools
 
+**Circuit Breaker (aiobreaker):**
+
+```python
+from aiobreaker import CircuitBreaker
+
+store_breaker = CircuitBreaker(
+    fail_max=5,           # 5 ошибок подряд → open
+    timeout_duration=30,  # через 30 сек → half-open (пробный запрос)
+)
+
+@store_breaker
+async def search_tires(params: dict) -> dict:
+    async with session.get(f"{STORE_URL}/tires/search", params=params) as resp:
+        resp.raise_for_status()
+        return await resp.json()
+```
+
+Состояния: **Closed** (работает) → **Open** (5+ ошибок, все запросы отклоняются) → **Half-Open** (пробный запрос через 30 сек) → Closed.
+
+При Open-состоянии агент получает tool result с ошибкой и сообщает клиенту о временных проблемах.
+
 ### 3.8 Call Logger
 
 **Ответственность:**
@@ -315,7 +350,7 @@ Auth: Basic (ari_user / ari_password)
 
 3. **Async everywhere** — все I/O операции асинхронные. Один процесс обрабатывает множество звонков.
 
-4. **Stateless Call Processor** — состояние сессии в Redis. Позволяет горизонтальное масштабирование.
+4. **Stateless Call Processor** — состояние сессии в Redis (с TTL). Позволяет горизонтальное масштабирование.
 
 5. **Observability** — каждый компонент экспортирует метрики в Prometheus. Каждый звонок логируется полностью.
 
@@ -335,6 +370,6 @@ Auth: Basic (ari_user / ari_password)
 | AudioSocket | ARI + ExternalMedia, AGI | Простейший способ получить raw audio. Нативная поддержка в Asterisk 20. |
 | Google STT | Azure, Whisper API, Deepgram | Лучшее качество украинского. Streaming API. Низкая задержка. |
 | Claude (Anthropic) | GPT-4o, Gemini | Лучший tool calling. Отличный украинский. Большой контекст. |
-| Google TTS | Azure TTS, ElevenLabs | Хорошие украинские голоса. Приемлемая стоимость. Один вендор с STT (упрощение). |
+| Google TTS | Azure TTS, ElevenLabs, Piper (open-source) | Хорошие украинские голоса. Приемлемая стоимость. Open-source альтернативы (Piper) пока не дают достаточного качества для UA — пересмотреть через 6–12 мес. |
 | PostgreSQL | MySQL, MongoDB | Стандарт. pgvector для RAG. JSONB для логов. |
 | Redis | Memcached | Pub/sub для событий. Хранение сессий. Celery broker. |
