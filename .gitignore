@@ -29,3 +29,7 @@ redisdata/
 
 # Logs
 *.log
+
+# Agent skills (installed via `npx skills add`)
+.agents/
+.claude/skills/
