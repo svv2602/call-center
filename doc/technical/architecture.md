@@ -306,7 +306,7 @@ graph TD
     E --> F[search_tires]
     E --> G[check_availability]
     E --> H[get_order_status]
-    E --> I[create_order]
+    E --> I[create_order_draft]
     E --> J[book_fitting]
     E --> K[transfer_to_operator]
     E --> L[search_knowledge_base]
@@ -401,6 +401,23 @@ Auth: Basic (ari_user / ari_password)
 4. **Stateless Call Processor** — состояние сессии в Redis (с TTL). Позволяет горизонтальное масштабирование.
 
 5. **Observability** — каждый компонент экспортирует метрики в Prometheus. Каждый звонок логируется полностью.
+
+6. **Корреляция логов (call_id / request_id)** — единый `call_id` (UUID канала Asterisk) проходит через все компоненты: AudioSocket → STT → LLM → TTS → Tool Calls → Store API → PostgreSQL. Для каждого HTTP-запроса к Store API генерируется уникальный `request_id`. Все лог-записи содержат `call_id` и `request_id` для сквозной трассировки.
+
+```python
+# Structured log entry (JSON)
+{
+    "timestamp": "2025-03-15T10:30:00.123Z",
+    "level": "INFO",
+    "call_id": "a1b2c3d4-...",       # UUID канала Asterisk
+    "request_id": "req-e5f6g7h8-...", # уникальный для каждого API-запроса
+    "component": "store_client",
+    "event": "tool_call_completed",
+    "tool": "search_tires",
+    "duration_ms": 145,
+    "success": true
+}
+```
 
 ## 7. Масштабирование
 

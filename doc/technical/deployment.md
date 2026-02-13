@@ -248,6 +248,36 @@ volumes:
   grafanadata:
 ```
 
+## Защита AudioSocket-канала
+
+AudioSocket между Asterisk и Call Processor передаёт аудио в открытом виде (PCM over TCP). Рекомендации по защите:
+
+| Сценарий | Рекомендация |
+|----------|-------------|
+| Asterisk и Call Processor на одном сервере | `127.0.0.1` — безопасно, трафик не покидает хост |
+| Asterisk и Call Processor в одной LAN | WireGuard-туннель между серверами (минимальная задержка, шифрование) |
+| Asterisk и Call Processor в разных сетях | **Обязательно:** VPN / WireGuard / SSH-туннель. TCP без шифрования по интернету недопустим |
+
+**Пример WireGuard-конфигурации (Asterisk → Call Processor):**
+
+```ini
+# /etc/wireguard/wg0.conf на сервере Asterisk
+[Interface]
+PrivateKey = <asterisk-private-key>
+Address = 10.0.0.1/24
+
+[Peer]
+PublicKey = <call-processor-public-key>
+Endpoint = <call-processor-ip>:51820
+AllowedIPs = 10.0.0.2/32
+```
+
+В dialplan Asterisk адрес AudioSocket меняется на WireGuard-адрес:
+
+```ini
+AudioSocket(${UNIQUE_ID},10.0.0.2:9092)
+```
+
 ## Сетевые требования
 
 | Соединение | Протокол | Порт | Направление | Требования |

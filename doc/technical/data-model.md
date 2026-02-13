@@ -262,6 +262,86 @@ CREATE INDEX idx_knowledge_embeddings_vector
 CREATE UNIQUE INDEX idx_customers_phone ON customers(phone);
 ```
 
+## Партиционирование
+
+Таблицы `calls`, `call_turns` и `call_tool_calls` растут линейно с количеством звонков. При 500 зв/день × 30 дней = 15,000 записей/мес в `calls`, и до 150,000/мес в `call_turns`. Для эффективной аналитики и очистки рекомендуется партиционирование по дате.
+
+### Стратегия
+
+```sql
+-- Партиционирование таблицы calls по месяцам
+CREATE TABLE calls (
+    id UUID NOT NULL,
+    caller_id VARCHAR(20),
+    customer_id UUID,
+    started_at TIMESTAMP NOT NULL,
+    ended_at TIMESTAMP,
+    duration_seconds INTEGER,
+    scenario VARCHAR(50),
+    transferred_to_operator BOOLEAN DEFAULT FALSE,
+    transfer_reason VARCHAR(50),
+    order_id UUID,
+    fitting_booking_id UUID,
+    prompt_version VARCHAR(50),
+    quality_score FLOAT,
+    cost_breakdown JSONB,
+    total_cost_usd FLOAT
+) PARTITION BY RANGE (started_at);
+
+-- Создание партиций (автоматизировать через pg_partman или cron)
+CREATE TABLE calls_2025_03 PARTITION OF calls
+    FOR VALUES FROM ('2025-03-01') TO ('2025-04-01');
+CREATE TABLE calls_2025_04 PARTITION OF calls
+    FOR VALUES FROM ('2025-04-01') TO ('2025-05-01');
+
+-- Аналогично для call_turns и call_tool_calls
+CREATE TABLE call_turns (
+    id UUID NOT NULL,
+    call_id UUID NOT NULL,
+    turn_number INTEGER,
+    speaker VARCHAR(10),
+    content TEXT,
+    stt_confidence FLOAT,
+    stt_latency_ms INTEGER,
+    llm_latency_ms INTEGER,
+    tts_latency_ms INTEGER,
+    created_at TIMESTAMP NOT NULL
+) PARTITION BY RANGE (created_at);
+
+CREATE TABLE call_tool_calls (
+    id UUID NOT NULL,
+    call_id UUID NOT NULL,
+    turn_number INTEGER,
+    tool_name VARCHAR(50),
+    tool_args JSONB,
+    tool_result JSONB,
+    duration_ms INTEGER,
+    success BOOLEAN,
+    created_at TIMESTAMP NOT NULL
+) PARTITION BY RANGE (created_at);
+```
+
+### Автоматическое создание партиций
+
+Рекомендуется использовать [pg_partman](https://github.com/pgpartman/pg_partman) для автоматического создания и удаления партиций:
+
+```sql
+SELECT partman.create_parent(
+    p_parent_table := 'public.calls',
+    p_control := 'started_at',
+    p_type := 'range',
+    p_interval := '1 month',
+    p_premake := 3  -- создавать партиции на 3 месяца вперёд
+);
+```
+
+### Преимущества
+
+- **Быстрое удаление старых данных:** `DROP TABLE calls_2025_01` вместо `DELETE` по миллионам строк
+- **Быстрая аналитика:** запросы за конкретный период сканируют только нужную партицию
+- **Эффективное индексирование:** индексы per-partition меньше и быстрее
+- **Совместимость с политикой хранения:** партиции удаляются по тому же расписанию (90 дней для транскрипций, 1 год для метаданных)
+
 ## Миграции
 
 Используем **Alembic** (Python) для управления миграциями БД.

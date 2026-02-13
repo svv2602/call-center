@@ -37,7 +37,7 @@
       │                   │  │ - search_tires()                │───┼─►│ - монтаж     │
 ┌─────┴─────┐             │  │ - check_availability()          │   │  └──────────────┘
 │ SIP       │             │  │ - get_order_status()            │   │
-│ Provider  │             │  │ - create_order()                │   │  ┌──────────────┐
+│ Provider  │             │  │ - create_order_draft()          │   │  ┌──────────────┐
 │ (trunk)   │             │  │ - book_fitting()                │───┼─►│ PostgreSQL   │
 └───────────┘             │  │ - transfer_to_operator()        │   │  │ (logs, calls │
                           │  └─────────────────────────────────┘   │  │  sessions)   │
@@ -117,6 +117,26 @@ call_center/
 | 4 | Аналитика и оптимизация | [phase-4-analytics.md](./phase-4-analytics.md) |
 
 Детальное описание API магазина: [api-specification.md](./api-specification.md)
+
+## Канонический список tools
+
+Единый реестр всех инструментов (tools), доступных LLM-агенту. Все остальные документы ссылаются на этот список.
+
+| Tool | Фаза | Описание | Store API endpoint |
+|------|------|----------|--------------------|
+| `search_tires` | 1 (MVP) | Поиск шин по параметрам (авто, размер, бренд, сезон) | `GET /tires/search` |
+| `check_availability` | 1 (MVP) | Проверка наличия конкретного товара | `GET /tires/{id}/availability` |
+| `transfer_to_operator` | 1 (MVP) | Переключение на живого оператора | Asterisk ARI |
+| `get_order_status` | 2 | Статус заказа по телефону / номеру заказа | `GET /orders/search`, `GET /orders/{id}` |
+| `create_order_draft` | 2 | Создание черновика заказа | `POST /orders` |
+| `update_order_delivery` | 2 | Указание способа и адреса доставки | `PATCH /orders/{id}/delivery` |
+| `confirm_order` | 2 | Подтверждение и финализация заказа | `POST /orders/{id}/confirm` |
+| `get_fitting_stations` | 3 | Список точек шиномонтажа | `GET /fitting/stations` |
+| `get_fitting_slots` | 3 | Доступные слоты для записи | `GET /fitting/stations/{id}/slots` |
+| `book_fitting` | 3 | Запись на шиномонтаж | `POST /fitting/bookings` |
+| `search_knowledge_base` | 3 | Поиск по базе знаний (RAG) | `GET /knowledge/search` |
+
+> **Правило:** при упоминании tools в документах используйте только имена из этой таблицы. При добавлении нового tool — сначала добавьте его сюда.
 
 ## Стратегия тестирования
 

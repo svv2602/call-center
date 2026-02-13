@@ -93,8 +93,8 @@ AUDIOSOCKET_PORT=9092
 ## Шаг 4: Запуск Call Processor
 
 ```bash
-# Загрузить переменные
-export $(cat .env.local | grep -v '^#' | xargs)
+# Загрузить переменные окружения (безопасный способ)
+set -a; . ./.env.local; set +a
 
 # Запустить
 python -m src.main
@@ -118,11 +118,22 @@ ss -tlnp | grep 9092
 
 ### Вариант A: SIP-клиент (рекомендуется)
 
-Установить любой SIP-клиент (Oración Oración Oración Oración): Oración Oración Oración
+Установить любой SIP-клиент:
 
-- **Oración LinphOne** (Desktop) или **Oración Oración Oración Oración Oración** **Oración Zoiper** (mobile/desktop)
-- Настроить SIP-аккаунт: сервер `localhost:5060`, логин `1001`, пароль `1001`
-- Позвонить на номер `100`
+- **Linphone** (Desktop, Linux/macOS/Windows) — [linphone.org](https://www.linphone.org/)
+- **Zoiper** (Desktop + Mobile) — [zoiper.com](https://www.zoiper.com/)
+- **MicroSIP** (Windows, лёгкий) — [microsip.org](https://www.microsip.org/)
+
+Настройка SIP-аккаунта:
+
+| Параметр | Значение |
+|----------|----------|
+| SIP Server | `localhost:5060` |
+| Username | `1001` |
+| Password | `1001` |
+| Transport | UDP |
+
+После регистрации — позвонить на номер `100`.
 
 ### Вариант B: SIPp (автоматический)
 
