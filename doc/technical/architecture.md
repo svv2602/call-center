@@ -201,6 +201,54 @@ graph LR
 - Обработка interim и final результатов
 - VAD (Voice Activity Detection) — определение конца фразы
 - Управление сессией распознавания (restart каждые ~5 мин — лимит Google)
+- **Мультиязычное распознавание** (украинский + русский)
+
+**Мультиязычная стратегия:**
+
+Клиенты в Украине говорят на украинском, русском и суржике (mix). Система должна понимать все варианты.
+
+```mermaid
+graph TD
+    A[Речь клиента] --> B{Google STT<br/>uk-UA + ru-RU}
+    B -->|"Мені потрібні шини"<br/>detected: uk-UA| C[Transcript + lang]
+    B -->|"Мне нужны шины"<br/>detected: ru-RU| C
+    B -->|"Мені нужні шини"<br/>detected: uk-UA or ru-RU| C
+    C --> D[LLM Agent<br/>понимает оба языка]
+    D --> E[Ответ ВСЕГДА<br/>на украинском]
+    E --> F[Google TTS<br/>uk-UA voice]
+```
+
+**Конфигурация Google STT:**
+
+```python
+config = cloud_speech.RecognitionConfig(
+    language_code="uk-UA",                    # основной язык
+    alternative_language_codes=["ru-RU"],     # альтернативный
+    # Google STT автоматически определяет язык каждой фразы
+    # и возвращает detected language_code в результате
+)
+```
+
+**Поведение при разных языках ввода:**
+
+| Клиент говорит | STT detected | LLM понимает | Бот отвечает |
+|----------------|-------------|-------------|-------------|
+| Чисто украинский | uk-UA | Да | Украинский |
+| Чисто русский | ru-RU | Да | Украинский |
+| Суржик | uk-UA или ru-RU | Да | Украинский |
+| Code-switching (mix в одном предложении) | uk-UA | Да (частично) | Украинский |
+
+**Важно:** бот ВСЕГДА отвечает по-украински. Это бизнес-решение (язык магазина) и техническое (TTS настроен на uk-UA голос).
+
+**Метрики языка:**
+- `detected_language` логируется для каждого transcript
+- Аналитика: % звонков на украинском / русском / суржике
+- Если доля русского > 40% — рассмотреть ru-RU TTS как опцию
+
+**Ограничения:**
+- `alternative_language_codes` немного увеличивает задержку STT (~50-100ms)
+- Суржик с сильным code-switching может распознаваться с пониженной accuracy
+- Whisper (future) лучше справляется с code-switching, чем Google STT
 
 **Интерфейс:**
 
@@ -216,7 +264,7 @@ class Transcript:
     text: str
     is_final: bool
     confidence: float
-    language: str
+    language: str       # "uk-UA" или "ru-RU" — detected language
 ```
 
 ### 3.5 TTS Module
