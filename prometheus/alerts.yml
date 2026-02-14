@@ -151,6 +151,18 @@ groups:
             High rate of 400 errors from Store API ({{ $value | humanize }}/s).
             May indicate prompt injection or anomalous tool call parameters.
 
+      # Celery worker down: no workers responding to ping
+      - alert: CeleryWorkerDown
+        expr: callcenter_celery_workers_online == 0
+        for: 5m
+        labels:
+          severity: high
+        annotations:
+          summary: "Celery worker is down"
+          description: >
+            No Celery workers responding to ping for >5 minutes.
+            Check: docker compose logs celery-worker
+
       # Store API circuit breaker open
       - alert: CircuitBreakerOpen
         expr: callcenter_store_api_circuit_breaker_state == 1

@@ -150,6 +150,31 @@ def restore(
             temp_file.unlink()
 
 
+@db_app.command("verify-backup")
+def verify_backup_cmd(
+    file: str = typer.Argument(..., help="Path to backup file (.sql or .sql.gz)"),
+) -> None:
+    """Verify integrity of a PostgreSQL backup file."""
+    from src.tasks.backup import verify_backup
+
+    typer.echo(f"Verifying backup: {file}...")
+    result = verify_backup(file)
+
+    if result["status"] == "ok":
+        size_mb = result["size_bytes"] / (1024 * 1024)
+        typer.echo(
+            typer.style(
+                f"\u2705 Backup OK: {result['file']} ({size_mb:.2f} MB)",
+                fg=typer.colors.GREEN,
+            )
+        )
+    else:
+        typer.echo(
+            typer.style(f"\u274c Verification failed: {result['error']}", fg=typer.colors.RED)
+        )
+        raise typer.Exit(code=1)
+
+
 @db_app.command("migrations-status")
 def migrations_status() -> None:
     """Show current Alembic migration revision."""

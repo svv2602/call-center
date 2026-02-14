@@ -118,7 +118,7 @@
             <a href="#" onclick="showPage('calls')" data-page="calls">Call Journal</a>
             <a href="#" onclick="showPage('prompts')" data-page="prompts">Prompts</a>
             <a href="#" onclick="showPage('knowledge')" data-page="knowledge">Knowledge Base</a>
-            <a href="#" onclick="showPage('settings')" data-page="settings">Settings</a>
+            <a href="#" onclick="showPage('settings')" data-page="settings">System</a>
             <a href="#" onclick="showPage('users')" data-page="users" class="admin-only">Users</a>
             <a href="#" onclick="showPage('audit')" data-page="audit" class="admin-only">Audit Log</a>
             <span class="logout" onclick="logout()">Logout</span>
@@ -216,26 +216,38 @@
                 <div class="card" id="articlesContainer"></div>
             </div>
 
-            <!-- Settings -->
+            <!-- System -->
             <div id="page-settings" style="display:none">
-                <div class="breadcrumbs"><a href="#" onclick="showPage('dashboard')">Home</a> / Settings</div>
-                <h1>System Settings</h1>
+                <div class="breadcrumbs"><a href="#" onclick="showPage('dashboard')">Home</a> / System</div>
+                <h1>System Status</h1>
                 <div class="card">
-                    <h3>System Health</h3>
+                    <h3>Health Check</h3>
                     <div id="systemInfo"><div class="loading-overlay"><div class="spinner"></div></div></div>
-                    <button class="btn btn-primary" onclick="loadSettings()" style="margin-top:.8rem">Check Connection</button>
+                    <button class="btn btn-primary" onclick="loadSettings()" style="margin-top:.8rem">Refresh</button>
+                </div>
+                <div class="card admin-only">
+                    <h3>Extended Status</h3>
+                    <div id="extendedStatus"><div class="empty-state">Click to load</div></div>
+                    <button class="btn btn-primary" onclick="loadSystemStatus()" style="margin-top:.8rem">Load Status</button>
+                </div>
+                <div class="card admin-only">
+                    <h3>Configuration</h3>
+                    <p style="margin:.5rem 0; font-size:.85rem">Reload safe config parameters (quality, feature flags, logging) without restart.</p>
+                    <button class="btn btn-primary" onclick="reloadConfig()">Reload Config</button>
+                </div>
+                <div class="card">
+                    <h3>External Tools</h3>
+                    <table>
+                        <tr><td>Grafana</td><td><a href="http://localhost:3000" target="_blank">Open Grafana</a></td></tr>
+                        <tr><td>Prometheus</td><td><a href="http://localhost:9090" target="_blank">Open Prometheus</a></td></tr>
+                        <tr><td>Flower (Celery)</td><td><a href="http://localhost:5555" target="_blank">Open Flower</a></td></tr>
+                    </table>
                 </div>
                 <div class="card">
                     <h3>Application Info</h3>
                     <table>
                         <tr><td>Version</td><td>v0.1.0</td></tr>
                     </table>
-                </div>
-                <div class="card">
-                    <h3>Grafana Dashboards</h3>
-                    <p style="margin:.5rem 0; font-size:.85rem">
-                        <a href="/grafana" target="_blank">Open Grafana</a> (default: admin/admin)
-                    </p>
                 </div>
             </div>
 
@@ -942,6 +954,46 @@
                 container.innerHTML = `<div class="empty-state">Failed to load system info: ${escapeHtml(e.message)}
                     <br><button class="btn btn-primary btn-sm" onclick="loadSettings()" style="margin-top:.5rem">Retry</button></div>`;
             }
+        }
+
+        async function loadSystemStatus() {
+            const container = document.getElementById('extendedStatus');
+            container.innerHTML = '<div class="loading-overlay"><div class="spinner"></div></div>';
+            try {
+                const data = await api('/admin/system-status');
+                const uptimeH = Math.floor(data.uptime_seconds / 3600);
+                const uptimeM = Math.floor((data.uptime_seconds % 3600) / 60);
+                let html = '<table>';
+                html += `<tr><td>Version</td><td>${escapeHtml(data.version || 'unknown')}</td></tr>`;
+                html += `<tr><td>Uptime</td><td>${uptimeH}h ${uptimeM}m</td></tr>`;
+                if (data.postgres_db_size_bytes) {
+                    const sizeMB = (data.postgres_db_size_bytes / 1048576).toFixed(1);
+                    html += `<tr><td>PostgreSQL DB size</td><td>${sizeMB} MB</td></tr>`;
+                }
+                if (data.postgres_connections !== undefined) html += `<tr><td>PostgreSQL connections</td><td>${data.postgres_connections}</td></tr>`;
+                if (data.redis_used_memory) html += `<tr><td>Redis memory</td><td>${escapeHtml(data.redis_used_memory)}</td></tr>`;
+                html += `<tr><td>Celery workers</td><td><span class="badge ${data.celery_workers_online > 0 ? 'badge-green' : 'badge-red'}">${data.celery_workers_online}</span></td></tr>`;
+                if (data.last_backup) {
+                    const sizeMB = (data.last_backup.size_bytes / 1048576).toFixed(1);
+                    html += `<tr><td>Last backup</td><td>${escapeHtml(data.last_backup.file)} (${sizeMB} MB, ${escapeHtml(data.last_backup.modified)})</td></tr>`;
+                }
+                html += '</table>';
+                container.innerHTML = html;
+            } catch (e) {
+                container.innerHTML = `<div class="empty-state">Failed: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        async function reloadConfig() {
+            if (!confirm('Reload configuration from environment?')) return;
+            try {
+                const data = await api('/admin/config/reload', { method: 'POST' });
+                let msg = 'Config reloaded:\n';
+                if (data.changes) {
+                    for (const [k, v] of Object.entries(data.changes)) msg += `${k}: ${v}\n`;
+                }
+                showToast(msg, 'success');
+            } catch (e) { showToast('Reload failed: ' + e.message, 'error'); }
         }
 
         // --- Users ---

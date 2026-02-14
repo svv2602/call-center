@@ -128,3 +128,90 @@ def backup_database() -> dict[str, Any]:
     except subprocess.CalledProcessError as e:
         logger.error("pg_dump failed: %s", e.stderr.strip() if e.stderr else str(e))
         return {"status": "error", "error": str(e)}
+
+
+def verify_backup(filepath: str | Path) -> dict[str, Any]:
+    """Verify backup integrity by decompressing and checking SQL content.
+
+    For .sql.gz files: gunzip to temp, then check content.
+    For .sql files: check content directly.
+    Returns dict with status and details.
+    """
+    path = Path(filepath)
+    if not path.is_file():
+        return {"status": "error", "error": f"File not found: {filepath}"}
+
+    try:
+        if path.suffix == ".gz":
+            # Verify gzip integrity and check first bytes
+            with gzip.open(path, "rb") as f:
+                header = f.read(1024)
+                # Count approximate lines by reading in chunks
+                size = len(header)
+                while True:
+                    chunk = f.read(65536)
+                    if not chunk:
+                        break
+                    size += len(chunk)
+        else:
+            with open(path, "rb") as f:
+                header = f.read(1024)
+                size = path.stat().st_size
+
+        # Basic SQL dump validation: should start with typical pg_dump output
+        header_text = header.decode("utf-8", errors="replace")
+        is_valid_sql = any(
+            marker in header_text
+            for marker in ("-- PostgreSQL", "SET statement_timeout", "CREATE", "pg_dump")
+        )
+
+        if not is_valid_sql:
+            return {
+                "status": "error",
+                "error": "File does not appear to be a valid PostgreSQL dump",
+                "file": str(path),
+            }
+
+        return {
+            "status": "ok",
+            "file": str(path),
+            "size_bytes": path.stat().st_size,
+            "uncompressed_bytes": size,
+            "compressed": path.suffix == ".gz",
+        }
+
+    except gzip.BadGzipFile:
+        return {"status": "error", "error": "Corrupt gzip file", "file": str(path)}
+    except Exception as e:
+        return {"status": "error", "error": str(e), "file": str(path)}
+
+
+@app.task(name="src.tasks.backup.verify_latest_backup")  # type: ignore[untyped-decorator]
+def verify_latest_backup() -> dict[str, Any]:
+    """Verify the most recent backup file.
+
+    Called after each backup to ensure integrity.
+    """
+    settings = get_settings()
+    backup_dir = Path(settings.backup.backup_dir)
+
+    if not backup_dir.exists():
+        return {"status": "error", "error": f"Backup directory not found: {backup_dir}"}
+
+    backups = sorted(
+        backup_dir.glob("callcenter_*.sql*"),
+        key=lambda f: f.stat().st_mtime,
+        reverse=True,
+    )
+    if not backups:
+        return {"status": "error", "error": "No backups found"}
+
+    latest = backups[0]
+    result = verify_backup(latest)
+
+    if result["status"] != "ok":
+        logger.error("Backup verification FAILED: %s", result)
+    else:
+        logger.info("Backup verified: %s (%d bytes)", latest.name, result["size_bytes"])
+
+    return result

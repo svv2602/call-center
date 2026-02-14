@@ -13,6 +13,7 @@ import typer
 from src.cli.analytics import calls_app, stats_app
 from src.cli.db import db_app
 from src.cli.export import export_app
+from src.cli.operations import ops_app
 from src.cli.prompts import prompts_app
 from src.config import Settings, get_settings
 
@@ -29,6 +30,7 @@ app.add_typer(stats_app, name="stats")
 app.add_typer(calls_app, name="calls")
 app.add_typer(prompts_app, name="prompts")
 app.add_typer(export_app, name="export")
+app.add_typer(ops_app, name="ops")
 
 _VERSION = "0.1.0"
 
