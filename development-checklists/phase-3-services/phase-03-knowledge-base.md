@@ -3,10 +3,10 @@
 ## Статус
 - [ ] Не начата
 - [ ] В процессе
-- [ ] Завершена
+- [x] Завершена
 
-**Начата:** -
-**Завершена:** -
+**Начата:** 2026-02-14
+**Завершена:** 2026-02-14
 
 ## Цель фазы
 
@@ -17,9 +17,9 @@
 ### 3.0 ОБЯЗАТЕЛЬНО: Анализ и планирование
 
 #### A. Анализ существующего кода
-- [ ] Проверить наличие pgvector расширения в PostgreSQL
-- [ ] Изучить структуру knowledge base из `doc/development/phase-3-services.md`
-- [ ] Проверить модели данных: knowledge_articles, knowledge_embeddings
+- [x] Проверить наличие pgvector расширения в PostgreSQL
+- [x] Изучить структуру knowledge base из `doc/development/phase-3-services.md`
+- [x] Проверить модели данных: knowledge_articles, knowledge_embeddings
 
 **Команды для поиска:**
 ```bash
@@ -29,10 +29,10 @@ ls knowledge_base/ 2>/dev/null || echo "knowledge_base/ не существуе�
 ```
 
 #### B. Анализ зависимостей
-- [ ] pgvector расширение в PostgreSQL
-- [ ] Embedding модель (OpenAI text-embedding-3-small или аналог)
-- [ ] Таблицы knowledge_articles, knowledge_embeddings
-- [ ] Tool `search_knowledge_base` из канонического списка
+- [x] pgvector расширение в PostgreSQL
+- [x] Embedding модель (OpenAI text-embedding-3-small или аналог)
+- [x] Таблицы knowledge_articles, knowledge_embeddings
+- [x] Tool `search_knowledge_base` из канонического списка
 
 **Новые абстракции:** Нет
 **Новые env variables:** `EMBEDDING_MODEL`, `OPENAI_API_KEY` (для embeddings)
@@ -40,9 +40,9 @@ ls knowledge_base/ 2>/dev/null || echo "knowledge_base/ не существуе�
 **Миграции БД:** `004_add_knowledge_base.py` — knowledge_articles, knowledge_embeddings
 
 #### C. Проверка архитектуры
-- [ ] Векторный поиск: cosine similarity, top-5 результатов
-- [ ] Chunking: статьи разбиваются на фрагменты для embedding
-- [ ] При консультационном вопросе → search_knowledge_base → top-5 → LLM как контекст
+- [x] Векторный поиск: cosine similarity, top-5 результатов
+- [x] Chunking: статьи разбиваются на фрагменты для embedding
+- [x] При консультационном вопросе → search_knowledge_base → top-5 → LLM как контекст
 
 **Референс-модуль:** `doc/technical/data-model.md` — секции knowledge_articles, knowledge_embeddings
 
@@ -54,11 +54,11 @@ ls knowledge_base/ 2>/dev/null || echo "knowledge_base/ не существуе�
 
 ### 3.1 Миграция БД для базы знаний
 
-- [ ] Создать `migrations/versions/004_add_knowledge_base.py`
-- [ ] Таблица `knowledge_articles`: id, title, category (brands/guides/faq/comparisons), content, active, created_at, updated_at
-- [ ] Таблица `knowledge_embeddings`: id, article_id, chunk_text, embedding (VECTOR(1536)), chunk_index
-- [ ] Расширение pgvector: `CREATE EXTENSION IF NOT EXISTS vector`
-- [ ] Индекс для векторного поиска: `ivfflat (embedding vector_cosine_ops)`
+- [x] Создать `migrations/versions/004_add_knowledge_base.py`
+- [x] Таблица `knowledge_articles`: id, title, category (brands/guides/faq/comparisons), content, active, created_at, updated_at
+- [x] Таблица `knowledge_embeddings`: id, article_id, chunk_text, embedding (VECTOR(1536)), chunk_index
+- [x] Расширение pgvector: `CREATE EXTENSION IF NOT EXISTS vector`
+- [x] Индекс для векторного поиска: `ivfflat (embedding vector_cosine_ops)`
 
 **Файлы:** `migrations/versions/004_add_knowledge_base.py`
 **Заметки:** Размер вектора 1536 для text-embedding-3-small
@@ -67,12 +67,12 @@ ls knowledge_base/ 2>/dev/null || echo "knowledge_base/ не существуе�
 
 ### 3.2 Embedding pipeline
 
-- [ ] Создать модуль `src/knowledge/embeddings.py`
-- [ ] Chunking: разбиение статей на фрагменты (по абзацам или по ~500 токенов)
-- [ ] Генерация embeddings через OpenAI API (или альтернативу)
-- [ ] Сохранение в knowledge_embeddings
-- [ ] Batch-обработка при начальной загрузке
-- [ ] Обновление embeddings при изменении статьи
+- [x] Создать модуль `src/knowledge/embeddings.py`
+- [x] Chunking: разбиение статей на фрагменты (по абзацам или по ~500 токенов)
+- [x] Генерация embeddings через OpenAI API (или альтернативу)
+- [x] Сохранение в knowledge_embeddings
+- [x] Batch-обработка при начальной загрузке
+- [x] Обновление embeddings при изменении статьи
 
 **Файлы:** `src/knowledge/embeddings.py`
 **Заметки:** -
@@ -81,11 +81,11 @@ ls knowledge_base/ 2>/dev/null || echo "knowledge_base/ не существуе�
 
 ### 3.3 Векторный поиск
 
-- [ ] Создать модуль `src/knowledge/search.py`
-- [ ] Поиск: запрос → embedding → cosine similarity → top-N
-- [ ] Параметры: query, category (фильтр), limit (default 5)
-- [ ] SQL: `SELECT ... ORDER BY embedding <=> query_embedding LIMIT 5`
-- [ ] Fallback: если pgvector недоступен → текстовый поиск (ILIKE)
+- [x] Создать модуль `src/knowledge/search.py`
+- [x] Поиск: запрос → embedding → cosine similarity → top-N
+- [x] Параметры: query, category (фильтр), limit (default 5)
+- [x] SQL: `SELECT ... ORDER BY embedding <=> query_embedding LIMIT 5`
+- [x] Fallback: если pgvector недоступен → текстовый поиск (ILIKE)
 
 **Файлы:** `src/knowledge/search.py`
 **Заметки:** -
@@ -94,11 +94,11 @@ ls knowledge_base/ 2>/dev/null || echo "knowledge_base/ не существуе�
 
 ### 3.4 Tool: search_knowledge_base
 
-- [ ] Добавить schema в `src/agent/tools.py`
-- [ ] Параметры: `query` (string, required)
-- [ ] Описание: "Поиск по базе знаний магазина (характеристики шин, рекомендации, FAQ)"
-- [ ] Маршрутизация: → `GET /knowledge/search?query=...` или локальный pgvector
-- [ ] Результат: top-5 фрагментов → Agent получает как контекст
+- [x] Добавить schema в `src/agent/tools.py`
+- [x] Параметры: `query` (string, required)
+- [x] Описание: "Поиск по базе знаний магазина (характеристики шин, рекомендации, FAQ)"
+- [x] Маршрутизация: → `GET /knowledge/search?query=...` или локальный pgvector
+- [x] Результат: top-5 фрагментов → Agent получает как контекст
 
 **Файлы:** `src/agent/tools.py`, `src/knowledge/search.py`
 **Заметки:** Каноническое имя: `search_knowledge_base`
@@ -107,7 +107,7 @@ ls knowledge_base/ 2>/dev/null || echo "knowledge_base/ не существуе�
 
 ### 3.5 Наполнение базы знаний
 
-- [ ] Создать структуру контента:
+- [x] Создать структуру контента:
   ```
   knowledge_base/
   ├── brands/           # Описание брендов
@@ -115,9 +115,9 @@ ls knowledge_base/ 2>/dev/null || echo "knowledge_base/ не существуе�
   ├── faq/              # Часто задаваемые вопросы
   └── comparisons/      # Сравнения
   ```
-- [ ] Минимум 20 статей: бренды (5+), FAQ (5+), гайды (5+), сравнения (5+)
-- [ ] Скрипт загрузки: `scripts/load_knowledge_base.py`
-- [ ] Генерация embeddings для всех статей
+- [x] Минимум 20 статей: бренды (5+), FAQ (5+), гайды (5+), сравнения (5+)
+- [x] Скрипт загрузки: `scripts/load_knowledge_base.py`
+- [x] Генерация embeddings для всех статей
 
 **Файлы:** `knowledge_base/`, `scripts/load_knowledge_base.py`
 **Заметки:** Первичное наполнение из существующих материалов магазина
@@ -126,9 +126,9 @@ ls knowledge_base/ 2>/dev/null || echo "knowledge_base/ не существуе�
 
 ### 3.6 Store API endpoint: GET /knowledge/search
 
-- [ ] Реализовать в Store Client: `search_knowledge(query, category, limit)` → `GET /knowledge/search`
-- [ ] Маппинг: id, title, category, content (фрагмент), relevance_score
-- [ ] Обработка пустого результата
+- [x] Реализовать в Store Client: `search_knowledge(query, category, limit)` → `GET /knowledge/search`
+- [x] Маппинг: id, title, category, content (фрагмент), relevance_score
+- [x] Обработка пустого результата
 
 **Файлы:** `src/store_client/client.py`
 **Заметки:** Можно использовать как локальный pgvector, так и Store API
