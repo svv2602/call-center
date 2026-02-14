@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
+from src.agent.agent import LLMAgent, ToolRouter
 from src.api.analytics import router as analytics_router
 from src.api.auth import router as auth_router
 from src.api.knowledge import router as knowledge_router
@@ -19,8 +20,13 @@ from src.api.prompts import router as prompts_router
 from src.config import Settings, get_settings
 from src.core.audio_socket import AudioSocketConnection, AudioSocketServer, PacketType
 from src.core.call_session import CallSession, CallState, SessionStore
+from src.core.pipeline import CallPipeline
 from src.logging.structured_logger import setup_logging
 from src.monitoring.metrics import active_calls, calls_total, get_metrics
+from src.stt.base import STTConfig
+from src.stt.google_stt import GoogleSTTEngine
+from src.store_client.client import StoreClient
+from src.tts.google_tts import GoogleTTSEngine
 
 logger = logging.getLogger(__name__)
 
@@ -40,9 +46,11 @@ async def admin_ui() -> FileResponse:
     """Serve the admin UI."""
     return FileResponse("admin-ui/index.html")
 
-# Module-level references for health checks
+# Module-level references for health checks and shared components
 _audio_server: AudioSocketServer | None = None
 _redis: Redis | None = None  # type: ignore[type-arg]
+_store_client: StoreClient | None = None
+_tts_engine: GoogleTTSEngine | None = None
 
 
 @app.get("/health")
@@ -72,12 +80,11 @@ async def metrics_endpoint() -> Response:
 async def handle_call(conn: AudioSocketConnection) -> None:
     """Handle a single AudioSocket call from Asterisk.
 
-    This is the main call loop: reads audio packets and manages the
-    session lifecycle. STT/LLM/TTS pipeline will be integrated in
-    later phases.
+    Creates per-call STT engine and LLM agent, then delegates to
+    CallPipeline which orchestrates the STT → LLM → TTS loop.
     """
+    settings = get_settings()
     session = CallSession(conn.channel_uuid)
-    session.transition_to(CallState.GREETING)
 
     if _redis is not None:
         store = SessionStore(_redis)
@@ -86,39 +93,34 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     active_calls.inc()
     logger.info("Call started: %s", conn.channel_uuid)
 
-    session.transition_to(CallState.LISTENING)
-
-    # TODO: Play greeting TTS (phase-04, phase-06)
-    # TODO: Initialize STT streaming (phase-03)
-
     try:
-        while not conn.is_closed:
-            packet = await conn.read_audio_packet()
-            if packet is None:
-                break
+        # Per-call STT engine (each call gets its own streaming session)
+        stt = GoogleSTTEngine()
+        stt_config = STTConfig(
+            language_code=settings.google_stt.language_code,
+            alternative_languages=settings.google_stt.alternative_language_list,
+        )
 
-            if packet.type == PacketType.HANGUP:
-                logger.info("Hangup received: %s", conn.channel_uuid)
-                break
+        # Per-call tool router and LLM agent
+        router = _build_tool_router(session)
+        agent = LLMAgent(
+            api_key=settings.anthropic.api_key,
+            model=settings.anthropic.model,
+            tool_router=router,
+        )
 
-            if packet.type == PacketType.AUDIO:
-                # TODO: Feed audio to STT streaming (phase-03)
-                # TODO: Process STT results → LLM → TTS (phase-06)
-                pass
-
-            if packet.type == PacketType.ERROR:
-                logger.warning(
-                    "Error packet from Asterisk: %s, payload=%s",
-                    conn.channel_uuid,
-                    packet.payload,
-                )
-                break
+        # Run the pipeline (greeting → listen → STT → LLM → TTS loop)
+        pipeline = CallPipeline(conn, stt, _tts_engine, agent, session, stt_config)
+        await pipeline.run()
 
     except asyncio.CancelledError:
         logger.info("Call cancelled (shutdown): %s", conn.channel_uuid)
+    except Exception:
+        logger.exception("Unhandled error in call: %s", conn.channel_uuid)
 
     # Cleanup
-    session.transition_to(CallState.ENDED)
+    if session.state != CallState.ENDED:
+        session.transition_to(CallState.ENDED)
     if _redis is not None:
         store = SessionStore(_redis)
         await store.delete(conn.channel_uuid)
@@ -136,6 +138,32 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     )
 
 
+def _build_tool_router(session: CallSession) -> ToolRouter:
+    """Build a ToolRouter with all canonical tools registered."""
+    router = ToolRouter()
+
+    assert _store_client is not None, "StoreClient must be initialized before handling calls"
+
+    router.register("search_tires", _store_client.search_tires)
+    router.register("check_availability", _store_client.check_availability)
+    router.register("get_order_status", _store_client.search_orders)
+    router.register("create_order_draft", _store_client.create_order)
+    router.register("update_order_delivery", _store_client.update_delivery)
+    router.register("confirm_order", _store_client.confirm_order)
+    router.register("get_fitting_stations", _store_client.get_fitting_stations)
+    router.register("get_fitting_slots", _store_client.get_fitting_slots)
+    router.register("book_fitting", _store_client.book_fitting)
+    router.register("search_knowledge_base", _store_client.search_knowledge_base)
+
+    async def transfer_to_operator(**_: object) -> dict[str, str]:
+        session.transferred = True
+        return {"status": "transferring", "message": "З'єдную з оператором"}
+
+    router.register("transfer_to_operator", transfer_to_operator)
+
+    return router
+
+
 async def start_api_server(settings: Settings) -> None:
     """Start the FastAPI server for health checks and metrics."""
     config = uvicorn.Config(
@@ -150,7 +178,7 @@ async def start_api_server(settings: Settings) -> None:
 
 async def main() -> None:
     """Main application entry point."""
-    global _audio_server, _redis
+    global _audio_server, _redis, _store_client, _tts_engine
 
     settings = get_settings()
 
@@ -188,10 +216,21 @@ async def main() -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _signal_handler)
 
+    # Initialize shared components (TTS is shared across calls, StoreClient too)
+    _store_client = StoreClient(
+        base_url=settings.store_api.url,
+        api_key=settings.store_api.key,
+        timeout=settings.store_api.timeout,
+    )
+    await _store_client.open()
+    logger.info("StoreClient initialized: %s", settings.store_api.url)
+
+    _tts_engine = GoogleTTSEngine()
+    await _tts_engine.initialize()
+    logger.info("TTS engine initialized")
+
     # Start API server (health checks, metrics)
     api_task = asyncio.create_task(start_api_server(settings))
-
-    # TODO: Initialize STT, TTS, Agent (phases 03-05)
 
     logger.info(
         "Call Center AI started — AudioSocket:%d, API:%d",
@@ -205,6 +244,10 @@ async def main() -> None:
     logger.info("Shutting down...")
     await _audio_server.stop()
     api_task.cancel()
+
+    if _store_client is not None:
+        await _store_client.close()
+        logger.info("StoreClient closed")
 
     if _redis is not None:
         await _redis.aclose()

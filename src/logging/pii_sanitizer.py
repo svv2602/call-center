@@ -29,7 +29,16 @@ def sanitize_phone(text: str) -> str:
     return _PHONE_RE.sub(_mask, text)
 
 
+def sanitize_name(text: str) -> str:
+    """Mask names: Іван Петренко → І*** П***."""
+    def _mask(m: re.Match[str]) -> str:
+        return f"{m.group(1)[0]}*** {m.group(2)[0]}***"
+
+    return _NAME_RE.sub(_mask, text)
+
+
 def sanitize_pii(text: str) -> str:
     """Sanitize all PII in text for logging."""
     text = sanitize_phone(text)
+    text = sanitize_name(text)
     return text
