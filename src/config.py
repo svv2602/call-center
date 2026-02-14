@@ -1,5 +1,12 @@
 """Application configuration loaded from environment variables."""
 
+from __future__ import annotations
+
+import os
+import re
+from dataclasses import dataclass, field
+from urllib.parse import urlparse
+
 from pydantic_settings import BaseSettings
 
 
@@ -118,6 +125,36 @@ class AdminSettings(BaseSettings):
     model_config = {"env_prefix": "ADMIN_"}
 
 
+class BackupSettings(BaseSettings):
+    backup_dir: str = "/var/backups/callcenter"
+    retention_days: int = 7
+
+    model_config = {"env_prefix": "BACKUP_"}
+
+
+@dataclass
+class ValidationError:
+    """A single config validation error."""
+
+    field: str
+    message: str
+    hint: str
+
+
+@dataclass
+class ValidationResult:
+    """Result of config validation."""
+
+    errors: list[ValidationError] = field(default_factory=list)
+
+    @property
+    def ok(self) -> bool:
+        return len(self.errors) == 0
+
+    def add(self, field_name: str, message: str, hint: str = "") -> None:
+        self.errors.append(ValidationError(field=field_name, message=message, hint=hint))
+
+
 class Settings(BaseSettings):
     """Root settings — aggregates all sub-settings."""
 
@@ -136,9 +173,74 @@ class Settings(BaseSettings):
     admin: AdminSettings = AdminSettings()
     whisper: WhisperSettings = WhisperSettings()
     feature_flags: FeatureFlagSettings = FeatureFlagSettings()
+    backup: BackupSettings = BackupSettings()
     prometheus_port: int = 8080
 
     model_config = {"env_prefix": ""}
+
+    def validate_required(self) -> ValidationResult:
+        """Validate semantic correctness of required configuration.
+
+        Pydantic already validates types; this checks that values
+        are meaningful (non-empty keys, valid URL schemes, files exist).
+        """
+        result = ValidationResult()
+
+        # ANTHROPIC_API_KEY — must be non-empty
+        if not self.anthropic.api_key:
+            result.add(
+                "ANTHROPIC_API_KEY",
+                "не задан",
+                "Установите: export ANTHROPIC_API_KEY=sk-ant-...",
+            )
+
+        # DATABASE_URL — must start with postgresql
+        db_url = self.database.url
+        if not re.match(r"^postgresql(\+\w+)?://", db_url):
+            result.add(
+                "DATABASE_URL",
+                f"неверный формат: {db_url!r}",
+                "Ожидается postgresql:// или postgresql+asyncpg://",
+            )
+
+        # REDIS_URL — must start with redis://
+        redis_url = self.redis.url
+        parsed_redis = urlparse(redis_url)
+        if parsed_redis.scheme not in ("redis", "rediss"):
+            result.add(
+                "REDIS_URL",
+                f"неверный формат: {redis_url!r}",
+                "Ожидается redis:// или rediss://",
+            )
+
+        # STORE_API_URL — must be a valid URL with scheme
+        store_url = self.store_api.url
+        parsed_store = urlparse(store_url)
+        if not parsed_store.scheme or not parsed_store.netloc:
+            result.add(
+                "STORE_API_URL",
+                f"невалидный URL: {store_url!r}",
+                "Ожидается http://host:port/path или https://...",
+            )
+
+        # GOOGLE_APPLICATION_CREDENTIALS — file must exist (if set)
+        creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+        if creds_path and not os.path.isfile(creds_path):
+            result.add(
+                "GOOGLE_APPLICATION_CREDENTIALS",
+                f"файл не найден: {creds_path!r}",
+                "Укажите путь к существующему JSON-файлу сервисного аккаунта",
+            )
+
+        # ADMIN_JWT_SECRET — must not be the default in production
+        if self.admin.jwt_secret == "change-me-in-production":
+            result.add(
+                "ADMIN_JWT_SECRET",
+                "используется значение по умолчанию",
+                "Установите: export ADMIN_JWT_SECRET=<random-secret>",
+            )
+
+        return result
 
 
 def get_settings() -> Settings:

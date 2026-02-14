@@ -32,6 +32,7 @@ app.conf.update(
         "src.tasks.daily_stats.*": {"queue": "stats"},
         "src.tasks.data_retention.*": {"queue": "stats"},
         "src.tasks.partition_manager.*": {"queue": "stats"},
+        "src.tasks.backup.*": {"queue": "stats"},
     },
 )
 
@@ -47,6 +48,10 @@ app.conf.beat_schedule = {
     "ensure-partitions": {
         "task": "src.tasks.partition_manager.ensure_partitions",
         "schedule": crontab(hour=2, minute=0, day_of_month="1"),  # 1st of each month at 02:00
+    },
+    "backup-database": {
+        "task": "src.tasks.backup.backup_database",
+        "schedule": crontab(hour=4, minute=0),  # Every day at 04:00 Kyiv time
     },
 }
 

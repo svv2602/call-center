@@ -254,6 +254,15 @@ async def main() -> None:
 
     settings = get_settings()
 
+    # Validate configuration before anything else
+    validation = settings.validate_required()
+    if not validation.ok:
+        for err in validation.errors:
+            hint = f" Hint: {err.hint}" if err.hint else ""
+            print(f"\u274c {err.field}: {err.message}.{hint}")
+        print(f"\n{len(validation.errors)} configuration error(s). Fix them and restart.")
+        sys.exit(1)
+
     # Configure structured logging
     setup_logging(level=settings.logging.level, format_type=settings.logging.format)
 
