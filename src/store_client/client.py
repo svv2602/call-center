@@ -1,7 +1,7 @@
 """Store API HTTP client with circuit breaker and retry.
 
 Integrates with the tire shop's REST API for product search,
-availability checks, and (in later phases) order management.
+availability checks, and order management.
 """
 
 from __future__ import annotations
@@ -135,6 +135,181 @@ class StoreClient:
         """
         return await self._get(f"/api/v1/tires/{tire_id}")
 
+    # --- Order Tool Handlers ---
+
+    async def search_orders(
+        self,
+        phone: str = "",
+        order_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Search orders by phone or get a specific order.
+
+        Maps to:
+          - GET /api/v1/orders/search?phone=...
+          - GET /api/v1/orders/{id}
+        """
+        if order_id:
+            try:
+                data = await self._get(f"/api/v1/orders/{order_id}")
+            except StoreAPIError as exc:
+                if exc.status == 404:
+                    return {"found": False, "message": "Замовлення не знайдено"}
+                raise
+            return {"found": True, "orders": [self._format_order(data)]}
+
+        if phone:
+            data = await self._get(
+                "/api/v1/orders/search", params={"phone": phone}
+            )
+            items = data.get("items", [])
+            if not items:
+                return {"found": False, "message": "Замовлень не знайдено"}
+            return {
+                "found": True,
+                "total": data.get("total", len(items)),
+                "orders": [self._format_order(o) for o in items[:5]],
+            }
+
+        return {"found": False, "message": "Потрібен номер телефону або номер замовлення"}
+
+    async def create_order(
+        self,
+        items: list[dict[str, Any]],
+        customer_phone: str,
+        customer_name: str = "",
+        call_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Create an order draft.
+
+        Maps to: POST /api/v1/orders (with Idempotency-Key)
+        """
+        idempotency_key = str(uuid.uuid4())
+        body: dict[str, Any] = {
+            "items": items,
+            "customer_phone": customer_phone,
+            "source": "ai_agent",
+        }
+        if customer_name:
+            body["customer_name"] = customer_name
+        if call_id:
+            body["call_id"] = call_id
+
+        data = await self._post(
+            "/api/v1/orders",
+            json_data=body,
+            idempotency_key=idempotency_key,
+        )
+        return {
+            "order_id": data.get("id"),
+            "order_number": data.get("order_number"),
+            "status": data.get("status"),
+            "items": data.get("items", []),
+            "subtotal": data.get("subtotal"),
+            "total": data.get("total"),
+        }
+
+    async def update_delivery(
+        self,
+        order_id: str,
+        delivery_type: str,
+        city: str = "",
+        address: str = "",
+        pickup_point_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Update delivery info for an order.
+
+        Maps to: PATCH /api/v1/orders/{id}/delivery
+        """
+        body: dict[str, Any] = {"delivery_type": delivery_type}
+        if city:
+            body["city"] = city
+        if address:
+            body["address"] = address
+        if pickup_point_id:
+            body["pickup_point_id"] = pickup_point_id
+
+        data = await self._patch(
+            f"/api/v1/orders/{order_id}/delivery", json_data=body
+        )
+        return {
+            "order_id": data.get("id", order_id),
+            "delivery_type": data.get("delivery_type"),
+            "delivery_cost": data.get("delivery_cost"),
+            "estimated_days": data.get("estimated_days"),
+            "total": data.get("total"),
+        }
+
+    async def confirm_order(
+        self,
+        order_id: str,
+        payment_method: str,
+        customer_name: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Confirm and finalize an order.
+
+        Maps to: POST /api/v1/orders/{id}/confirm (with Idempotency-Key)
+        """
+        idempotency_key = str(uuid.uuid4())
+        body: dict[str, Any] = {
+            "payment_method": payment_method,
+            "send_sms_confirmation": True,
+        }
+        if customer_name:
+            body["customer_name"] = customer_name
+
+        data = await self._post(
+            f"/api/v1/orders/{order_id}/confirm",
+            json_data=body,
+            idempotency_key=idempotency_key,
+        )
+        return {
+            "order_id": data.get("id", order_id),
+            "order_number": data.get("order_number"),
+            "status": data.get("status"),
+            "estimated_delivery": data.get("estimated_delivery"),
+            "sms_sent": data.get("sms_sent", False),
+            "total": data.get("total"),
+        }
+
+    async def get_pickup_points(self, city: str = "") -> dict[str, Any]:
+        """Get available pickup points.
+
+        Maps to: GET /api/v1/pickup-points
+        """
+        params = {}
+        if city:
+            params["city"] = city
+        data = await self._get("/api/v1/pickup-points", params=params)
+        points = data.get("items", [])
+        return {
+            "total": data.get("total", len(points)),
+            "points": [
+                {
+                    "id": p.get("id"),
+                    "name": p.get("name", ""),
+                    "address": p.get("address", ""),
+                    "city": p.get("city", ""),
+                }
+                for p in points[:10]
+            ],
+        }
+
+    async def calculate_delivery(
+        self, city: str, order_id: str = ""
+    ) -> dict[str, Any]:
+        """Calculate delivery cost.
+
+        Maps to: GET /api/v1/delivery/calculate
+        """
+        params: dict[str, Any] = {"city": city}
+        if order_id:
+            params["order_id"] = order_id
+        return await self._get("/api/v1/delivery/calculate", params=params)
+
     # --- HTTP helpers ---
 
     async def _get(
@@ -143,12 +318,32 @@ class StoreClient:
         """Make a GET request with circuit breaker and retry."""
         return await self._request("GET", path, params=params)
 
+    async def _post(
+        self,
+        path: str,
+        json_data: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
+    ) -> dict[str, Any]:
+        """Make a POST request with circuit breaker and retry."""
+        return await self._request(
+            "POST", path, json_data=json_data, idempotency_key=idempotency_key
+        )
+
+    async def _patch(
+        self,
+        path: str,
+        json_data: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Make a PATCH request with circuit breaker and retry."""
+        return await self._request("PATCH", path, json_data=json_data)
+
     async def _request(
         self,
         method: str,
         path: str,
         params: dict[str, Any] | None = None,
         json_data: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Make an HTTP request with circuit breaker, retry, and error handling."""
         if self._session is None:
@@ -165,6 +360,7 @@ class StoreClient:
                 request_id,
                 params=params,
                 json_data=json_data,
+                idempotency_key=idempotency_key,
             )
         except CircuitBreakerError:
             logger.error("Circuit breaker OPEN for Store API")
@@ -179,6 +375,7 @@ class StoreClient:
         request_id: str,
         params: dict[str, Any] | None = None,
         json_data: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Execute request with retry for 429/503."""
         last_exc: Exception | None = None
@@ -186,7 +383,10 @@ class StoreClient:
         for attempt in range(_MAX_RETRIES + 1):
             try:
                 return await self._do_request(
-                    method, url, request_id, params=params, json_data=json_data
+                    method, url, request_id,
+                    params=params,
+                    json_data=json_data,
+                    idempotency_key=idempotency_key,
                 )
             except StoreAPIError as exc:
                 last_exc = exc
@@ -213,11 +413,14 @@ class StoreClient:
         request_id: str,
         params: dict[str, Any] | None = None,
         json_data: dict[str, Any] | None = None,
+        idempotency_key: str | None = None,
     ) -> dict[str, Any]:
         """Execute a single HTTP request."""
         assert self._session is not None
 
-        headers = {"X-Request-Id": request_id}
+        headers: dict[str, str] = {"X-Request-Id": request_id}
+        if idempotency_key:
+            headers["Idempotency-Key"] = idempotency_key
 
         async with self._session.request(
             method, url, params=params, json=json_data, headers=headers
@@ -254,4 +457,17 @@ class StoreClient:
         return {
             "total": data.get("total", len(formatted)),
             "items": formatted,
+        }
+
+    @staticmethod
+    def _format_order(data: dict[str, Any]) -> dict[str, Any]:
+        """Format order data for LLM consumption."""
+        return {
+            "id": data.get("id"),
+            "order_number": data.get("order_number"),
+            "status": data.get("status"),
+            "status_label": data.get("status_label", ""),
+            "items_summary": data.get("items_summary", ""),
+            "total": data.get("total"),
+            "estimated_delivery": data.get("estimated_delivery"),
         }
