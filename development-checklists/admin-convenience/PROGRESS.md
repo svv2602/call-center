@@ -2,16 +2,9 @@
 
 ## Текущий статус
 - **Последнее обновление:** 2026-02-14
-- **Текущая фаза:** 6 из 6
-- **Статус фазы:** не начата
-- **Общий прогресс:** 47/54 задач (87%)
-
-## Как продолжить работу
-1. Открой файл текущей фазы: `phase-06-operator-management.md`
-2. Найди первую незавершённую задачу (без [x])
-3. Выполни задачу
-4. Отметь [x] в чекбоксе
-5. Обнови этот файл (PROGRESS.md)
+- **Текущая фаза:** завершено
+- **Статус фазы:** все фазы завершены
+- **Общий прогресс:** 54/54 задач (100%)
 
 ## Сводка по фазам
 
@@ -22,7 +15,7 @@
 | 3. Экспорт и отчётность | `phase-03-export-and-reports.md` | 9 | завершена |
 | 4. RBAC и безопасность | `phase-04-rbac-and-security.md` | 10 | завершена |
 | 5. Операционный инструментарий | `phase-05-operational-tooling.md` | 9 | завершена |
-| 6. Управление операторами | `phase-06-operator-management.md` | 7 | не начата |
+| 6. Управление операторами | `phase-06-operator-management.md` | 7 | завершена |
 
 ## История выполнения
 | Дата | Событие |
@@ -33,3 +26,5 @@
 | 2026-02-14 | Фаза 3 завершена: CSV-экспорт звонков и статистики (streaming, фильтры, PII masking), PDF-отчёт (Jinja2+WeasyPrint, A4 шаблон), кнопки экспорта в Admin UI, email-отчёт по расписанию (Celery+aiosmtplib, понедельник 09:00), CLI export calls/report, SMTPSettings в config |
 | 2026-02-14 | Фаза 4 завершена: RBAC (require_role с admin/analyst/operator), миграция admin_users+admin_audit_log, auth через БД с fallback на env, bcrypt хэширование, защита эндпоинтов по ролям (analytics/prompts/knowledge/export), аудит-лог middleware, API управления пользователями (CRUD+reset-password), Admin UI страницы пользователей и аудит-лога, JWT TTL конфиг, rate limiting на login, логирование неудачных входов |
 | 2026-02-14 | Фаза 5 завершена: Flower в docker-compose (порт 5555), Celery health-check эндпоинт (/health/celery), CeleryWorkerDown алерт, верификация бэкапов (verify_backup + Celery task + CLI verify-backup), 6 runbooks (circuit-breaker, transfer-rate, latency, celery, queue, backup), hot-reload конфига (POST /admin/config/reload), расширенный статус системы (/admin/system-status), Admin UI System страница (статус, reload, ссылки), CLI ops команды (celery-status, celery-purge, config-reload, system-status) |
+| 2026-02-14 | Фаза 6 завершена: Миграция operators+operator_status_log, API операторов (CRUD, смена статуса, мониторинг очереди, история переводов, статистика), Admin UI страница операторов (список с цветовыми статусами, создание/редактирование, виджет очереди, автообновление 10с), Grafana дашборд операторов (очередь, переводы, статусы) |
+| 2026-02-14 | Все фазы завершены. Чеклист admin-convenience выполнен на 100% |

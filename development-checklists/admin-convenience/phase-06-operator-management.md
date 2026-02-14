@@ -1,12 +1,12 @@
 # Фаза 6: Управление операторами
 
 ## Статус
-- [ ] Не начата
-- [ ] В процессе
-- [ ] Завершена
+- [x] Не начата
+- [x] В процессе
+- [x] Завершена
 
-**Начата:** -
-**Завершена:** -
+**Начата:** 2026-02-14
+**Завершена:** 2026-02-14
 
 ## Цель фазы
 Дать администратору инструменты для управления операторами:
@@ -18,11 +18,11 @@
 ### 6.0 ОБЯЗАТЕЛЬНО: Анализ и планирование
 
 #### A. Анализ существующего кода
-- [ ] Изучить `src/agent/tools.py` — tool `transfer_to_operator` (как происходит перевод)
-- [ ] Изучить Asterisk интеграцию — как бот передаёт звонок оператору (ARI)
-- [ ] Изучить `src/config.py` → `ARISettings` — подключение к Asterisk
-- [ ] Изучить `prometheus/alerts.yml` → `OperatorQueueOverflow` — алерт переполнения очереди
-- [ ] Изучить `src/monitoring/metrics.py` → `operator_queue_length`, `transfers_to_operator_total`
+- [x] Изучить `src/agent/tools.py` — tool `transfer_to_operator` (как происходит перевод)
+- [x] Изучить Asterisk интеграцию — как бот передаёт звонок оператору (ARI)
+- [x] Изучить `src/config.py` → `ARISettings` — подключение к Asterisk
+- [x] Изучить `prometheus/alerts.yml` → `OperatorQueueOverflow` — алерт переполнения очереди
+- [x] Изучить `src/monitoring/metrics.py` → `operator_queue_length`, `transfers_to_operator_total`
 
 **Команды для поиска:**
 ```bash
@@ -37,33 +37,33 @@ grep -rn "ARISettings\|ari_url" src/config.py
 ```
 
 #### B. Анализ зависимостей
-- [ ] Нужны ли миграции БД? (ДА — таблица operators)
-- [ ] Нужен ли прямой доступ к Asterisk ARI для статусов операторов?
-- [ ] Нужна ли интеграция с внешней системой управления сменами?
+- [x] Нужны ли миграции БД? (ДА — таблица operators)
+- [x] Нужен ли прямой доступ к Asterisk ARI для статусов операторов?
+- [x] Нужна ли интеграция с внешней системой управления сменами?
 
 **Новые пакеты:** нет (ARI-клиент уже есть)
 **Новые env variables:** нет
 **Миграции БД:** `008_add_operators.py`
 
 #### C. Проверка архитектуры
-- [ ] Статус оператора: из Asterisk AMI/ARI (реальное состояние) или из БД (ручное управление)?
-- [ ] Очередь: данные из Asterisk Queue или из Redis?
-- [ ] Интеграция: REST API → Asterisk ARI для управления очередью
+- [x] Статус оператора: из Asterisk AMI/ARI (реальное состояние) или из БД (ручное управление)?
+- [x] Очередь: данные из Asterisk Queue или из Redis?
+- [x] Интеграция: REST API → Asterisk ARI для управления очередью
 
 **Референс-модуль:** `src/store_client/client.py` (паттерн HTTP-клиента для внешнего сервиса)
 
 **Цель:** Определить источник данных о статусах операторов и очереди.
 
-**Заметки для переиспользования:** -
+**Заметки для переиспользования:** Статусы операторов хранятся в БД (operator_status_log) — ручное управление через API. Очередь переводов рассчитывается из таблицы calls.
 
 ---
 
 ### 6.1 Миграция БД: таблица operators
-- [ ] Создать миграцию `migrations/versions/008_add_operators.py`
-- [ ] Таблица `operators`: id, name, extension (SIP-номер, unique), is_active, skills (jsonb), shift_start (time), shift_end (time), created_at, updated_at
-- [ ] Таблица `operator_status_log`: id, operator_id (FK), status (enum: online/offline/busy/break), changed_at
-- [ ] Индексы: `operators(extension)`, `operator_status_log(operator_id, changed_at)`
-- [ ] Написать тесты миграции
+- [x] Создать миграцию `migrations/versions/008_add_operators.py`
+- [x] Таблица `operators`: id, name, extension (SIP-номер, unique), is_active, skills (jsonb), shift_start (time), shift_end (time), created_at, updated_at
+- [x] Таблица `operator_status_log`: id, operator_id (FK), status (enum: online/offline/busy/break), changed_at
+- [x] Индексы: `operators(extension)`, `operator_status_log(operator_id, changed_at)`
+- [x] Написать тесты миграции
 
 **Файлы:** `migrations/versions/008_add_operators.py`
 **Заметки:** `skills` — массив тегов, например `["tires", "fitting", "orders"]` для skill-based routing в будущем.
@@ -71,65 +71,65 @@ grep -rn "ARISettings\|ari_url" src/config.py
 ---
 
 ### 6.2 API: управление операторами
-- [ ] Создать `src/api/operators.py` — CRUD роутер
-- [ ] `GET /operators` — список операторов с текущим статусом
-- [ ] `POST /operators` — создание оператора (name, extension, skills, shift)
-- [ ] `PATCH /operators/{id}` — обновление данных оператора
-- [ ] `DELETE /operators/{id}` — деактивация оператора (soft delete)
-- [ ] `PATCH /operators/{id}/status` — ручная смена статуса (online/offline/break)
-- [ ] Только роль `admin` и `operator` (для смены своего статуса)
-- [ ] Написать тесты: `tests/unit/test_operators_api.py`
+- [x] Создать `src/api/operators.py` — CRUD роутер
+- [x] `GET /operators` — список операторов с текущим статусом
+- [x] `POST /operators` — создание оператора (name, extension, skills, shift)
+- [x] `PATCH /operators/{id}` — обновление данных оператора
+- [x] `DELETE /operators/{id}` — деактивация оператора (soft delete)
+- [x] `PATCH /operators/{id}/status` — ручная смена статуса (online/offline/break)
+- [x] Только роль `admin` и `operator` (для смены своего статуса)
+- [x] Написать тесты: `tests/unit/test_operators_api.py`
 
 **Файлы:** `src/api/operators.py`, `tests/unit/test_operators_api.py`
-**Заметки:** Паттерн — аналогично `src/api/knowledge.py` (CRUD + фильтры).
+**Заметки:** Паттерн — аналогично `src/api/knowledge.py` (CRUD + фильтры). Роль `admin` для CRUD, `admin` + `operator` для смены статуса.
 
 ---
 
 ### 6.3 API: мониторинг очереди
-- [ ] Добавить `GET /operators/queue` — текущее состояние очереди переводов
-- [ ] Данные: количество ожидающих, среднее время ожидания, операторы на линии
-- [ ] Источник: Asterisk ARI `GET /ari/queues` или Redis (метрика `operator_queue_length`)
-- [ ] Добавить `GET /operators/transfers` — история переводов за период
-- [ ] Фильтры: date_from, date_to, operator_id, reason
-- [ ] Написать тесты
+- [x] Добавить `GET /operators/queue` — текущее состояние очереди переводов
+- [x] Данные: количество ожидающих, среднее время ожидания, операторы на линии
+- [x] Источник: Asterisk ARI `GET /ari/queues` или Redis (метрика `operator_queue_length`)
+- [x] Добавить `GET /operators/transfers` — история переводов за период
+- [x] Фильтры: date_from, date_to, operator_id, reason
+- [x] Написать тесты
 
-**Файлы:** `src/api/operators.py`, `tests/unit/test_operators_queue.py`
-**Заметки:** Если ARI недоступен — fallback на данные из Prometheus/Redis метрик.
+**Файлы:** `src/api/operators.py`, `tests/unit/test_operators_api.py`
+**Заметки:** Данные из PostgreSQL (таблицы calls, operator_status_log). Фильтры: date_from, date_to, reason, limit, offset.
 
 ---
 
 ### 6.4 API: статистика по операторам
-- [ ] Добавить `GET /operators/{id}/stats` — статистика оператора за период
-- [ ] Метрики: принятые звонки, среднее время обработки, количество переводов от бота
-- [ ] Агрегация из таблицы `calls` по полю `transferred_to_operator_id`
-- [ ] Написать тесты
+- [x] Добавить `GET /operators/{id}/stats` — статистика оператора за период
+- [x] Метрики: принятые звонки, среднее время обработки, количество переводов от бота
+- [x] Агрегация из таблицы `calls` по полю `transferred_to_operator_id`
+- [x] Написать тесты
 
-**Файлы:** `src/api/operators.py`, `tests/unit/test_operators_stats.py`
-**Заметки:** Добавить `transferred_to_operator_id` в таблицу `calls` если отсутствует.
+**Файлы:** `src/api/operators.py`, `tests/unit/test_operators_api.py`
+**Заметки:** Статистика включает историю статусов оператора (последние 20 записей).
 
 ---
 
 ### 6.5 Admin UI: страница операторов
-- [ ] Добавить страницу «Операторы» в навигацию
-- [ ] Список операторов с цветовой индикацией статуса: зелёный (online), серый (offline), жёлтый (busy), синий (break)
-- [ ] Кнопки управления: добавить, редактировать, деактивировать
-- [ ] Форма создания/редактирования оператора
-- [ ] Виджет текущей очереди: количество ожидающих, среднее время
-- [ ] Автообновление статусов каждые 10 секунд
+- [x] Добавить страницу «Операторы» в навигацию
+- [x] Список операторов с цветовой индикацией статуса: зелёный (online), серый (offline), жёлтый (busy), синий (break)
+- [x] Кнопки управления: добавить, редактировать, деактивировать
+- [x] Форма создания/редактирования оператора
+- [x] Виджет текущей очереди: количество ожидающих, среднее время
+- [x] Автообновление статусов каждые 10 секунд
 
 **Файлы:** `admin-ui/index.html`
-**Заметки:** Статус операторов обновлять через `setInterval` + `GET /operators`.
+**Заметки:** Статус операторов обновлять через `setInterval` + `GET /operators`. Модал для создания/редактирования оператора с полями: name, extension, skills, shift_start, shift_end.
 
 ---
 
 ### 6.6 Grafana: дашборд операторов
-- [ ] Создать `grafana/dashboards/operators.json` — дашборд для операторов
-- [ ] Панели: длина очереди (graph), количество переводов по причинам (pie), среднее время ожидания (stat), операторы online/offline (table)
-- [ ] Временной диапазон: последние 24 часа по умолчанию
-- [ ] Добавить в Grafana provisioning
+- [x] Создать `grafana/dashboards/operators.json` — дашборд для операторов
+- [x] Панели: длина очереди (graph), количество переводов по причинам (pie), среднее время ожидания (stat), операторы online/offline (table)
+- [x] Временной диапазон: последние 24 часа по умолчанию
+- [x] Добавить в Grafana provisioning
 
 **Файлы:** `grafana/dashboards/operators.json`, `grafana/provisioning/dashboards/dashboards.yml`
-**Заметки:** Данные из Prometheus метрик: `operator_queue_length`, `transfers_to_operator_total`.
+**Заметки:** Данные из Prometheus метрик: `operator_queue_length`, `transfers_to_operator_total`. Provisioning уже подхватывает все файлы из /var/lib/grafana/dashboards.
 
 ---
 
