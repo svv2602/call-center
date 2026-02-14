@@ -1,12 +1,12 @@
 # Фаза 8: Логирование и мониторинг
 
 ## Статус
-- [ ] Не начата
-- [ ] В процессе
-- [ ] Завершена
+- [x] Не начата
+- [x] В процессе
+- [x] Завершена
 
-**Начата:** -
-**Завершена:** -
+**Начата:** 2026-02-13
+**Завершена:** 2026-02-13
 
 ## Цель фазы
 
@@ -17,138 +17,106 @@
 ### 8.0 ОБЯЗАТЕЛЬНО: Анализ и планирование
 
 #### A. Анализ существующего кода
-- [ ] Проверить наличие миграций БД (из phase-01)
-- [ ] Изучить схему данных: `doc/technical/data-model.md`
-- [ ] Проверить существующие модели SQLAlchemy
-
-**Команды для поиска:**
-```bash
-ls migrations/versions/
-grep -rn "SQLAlchemy\|Base\|Column\|Table" src/
-grep -rn "prometheus\|Counter\|Histogram\|Gauge" src/
-```
+- [x] Проверить наличие миграций БД (из phase-01)
+- [x] Изучить схему данных: `doc/technical/data-model.md`
+- [x] Проверить существующие модели SQLAlchemy
 
 #### B. Анализ зависимостей
-- [ ] PostgreSQL: таблицы `calls`, `call_turns`, `call_tool_calls`, `customers`
-- [ ] Redis: сессии с TTL
-- [ ] Prometheus: метрики для всех компонентов
-- [ ] Structured JSON logging: `call_id` + `request_id` для трассировки
-
-**Новые абстракции:** Нет
-**Новые env variables:** `DATABASE_URL`, `REDIS_URL` (уже в config)
-**Новые tools:** Нет
-**Миграции БД:** Начальная схема (если не создана в phase-01)
+- [x] PostgreSQL: таблицы `calls`, `call_turns`, `call_tool_calls`, `customers`
+- [x] Redis: сессии с TTL
+- [x] Prometheus: метрики для всех компонентов
+- [x] Structured JSON logging: `call_id` + `request_id` для трассировки
 
 #### C. Проверка архитектуры
-- [ ] Асинхронная запись логов (не блокирует основной поток)
-- [ ] PII санитизация (маскировка телефонов, имён)
-- [ ] Корреляция: `call_id` проходит через все компоненты
-- [ ] Партиционирование таблиц по месяцам
+- [x] Асинхронная запись логов (не блокирует основной поток)
+- [x] PII санитизация (маскировка телефонов, имён)
+- [x] Корреляция: `call_id` проходит через все компоненты
+- [x] Партиционирование таблиц по месяцам
 
-**Референс-модуль:** `doc/technical/data-model.md`, `doc/technical/architecture.md` — секция 3.8
-
-**Цель:** Определить структуру логирования и метрик.
-
-**Заметки для переиспользования:** -
+**Заметки для переиспользования:** `CallLogger` использует raw SQL через `text()` — подходит для партиционированных таблиц. PII санитизация только в stdout, не в PostgreSQL.
 
 ---
 
 ### 8.1 Call Logger (PostgreSQL)
 
-- [ ] Создать модуль логирования `src/logging/call_logger.py`
-- [ ] Запись в таблицу `calls`: начало/конец звонка, сценарий, результат, стоимость
-- [ ] Запись в таблицу `call_turns`: каждая реплика (speaker, content, latency)
-- [ ] Запись в таблицу `call_tool_calls`: каждый tool call (name, args, result, duration)
-- [ ] Асинхронная запись (не блокирует обработку звонка)
-- [ ] Batch-запись turns (накопить несколько → записать одним INSERT)
+- [x] Создать модуль логирования `src/logging/call_logger.py`
+- [x] Запись в таблицу `calls`: начало/конец звонка, сценарий, результат, стоимость
+- [x] Запись в таблицу `call_turns`: каждая реплика (speaker, content, latency)
+- [x] Запись в таблицу `call_tool_calls`: каждый tool call (name, args, result, duration)
+- [x] Асинхронная запись (не блокирует обработку звонка)
+- [x] Batch-запись turns (накопить несколько → записать одним INSERT)
 
 **Файлы:** `src/logging/call_logger.py`
-**Заметки:** -
+**Заметки:** Методы: `log_call_start()`, `log_call_end()`, `log_turn()`, `log_tool_call()`. Async через `async_sessionmaker`.
 
 ---
 
 ### 8.2 Customer tracking
 
-- [ ] Создание/обновление записи в таблице `customers` при звонке
-- [ ] Идентификация по CallerID (phone)
-- [ ] Обновление `total_calls`, `last_call_at`
-- [ ] Связь `calls.customer_id` → `customers.id`
+- [x] Создание/обновление записи в таблице `customers` при звонке
+- [x] Идентификация по CallerID (phone)
+- [x] Обновление `total_calls`, `last_call_at`
+- [x] Связь `calls.customer_id` → `customers.id`
 
 **Файлы:** `src/logging/call_logger.py`
-**Заметки:** -
+**Заметки:** `upsert_customer(phone, name)` — SELECT + INSERT/UPDATE. Возвращает customer_id.
 
 ---
 
 ### 8.3 PII санитизация
 
-- [ ] Создать `PIISanitizer` — маскировка персональных данных в логах
-- [ ] Маскировка телефонов: `+380XXXXXXXXX` → `+380***XXX`
-- [ ] Маскировка имён в тексте логов
-- [ ] Применение ко всем structured logs
-- [ ] НЕ маскировать в PostgreSQL (нужно для поиска), ТОЛЬКО в stdout/файловых логах
+- [x] Создать `PIISanitizer` — маскировка персональных данных в логах
+- [x] Маскировка телефонов: `+380XXXXXXXXX` → `+380***XXX`
+- [x] Маскировка имён в тексте логов
+- [x] Применение ко всем structured logs
+- [x] НЕ маскировать в PostgreSQL (нужно для поиска), ТОЛЬКО в stdout/файловых логах
 
 **Файлы:** `src/logging/pii_sanitizer.py`
-**Заметки:** -
+**Заметки:** Regex для украинских номеров. `sanitize_pii()` вызывается в `JSONFormatter.format()`.
 
 ---
 
 ### 8.4 Structured JSON logging
 
-- [ ] Настроить Python logging в формате structured JSON
-- [ ] Обязательные поля: `timestamp`, `level`, `call_id`, `component`, `event`
-- [ ] Дополнительные поля: `request_id`, `tool`, `duration_ms`, `success`
-- [ ] Уровни: INFO (начало/конец звонка), DEBUG (каждый turn), WARNING (retry, timeout), ERROR (ошибки API)
-- [ ] Настройка через `LOG_LEVEL` и `LOG_FORMAT` env variables
+- [x] Настроить Python logging в формате structured JSON
+- [x] Обязательные поля: `timestamp`, `level`, `call_id`, `component`, `event`
+- [x] Дополнительные поля: `request_id`, `tool`, `duration_ms`, `success`
+- [x] Уровни: INFO (начало/конец звонка), DEBUG (каждый turn), WARNING (retry, timeout), ERROR (ошибки API)
+- [x] Настройка через `LOG_LEVEL` и `LOG_FORMAT` env variables
 
 **Файлы:** `src/logging/structured_logger.py`
-
-**Пример:**
-```json
-{
-    "timestamp": "2025-03-15T10:30:00.123Z",
-    "level": "INFO",
-    "call_id": "a1b2c3d4-...",
-    "request_id": "req-e5f6g7h8-...",
-    "component": "store_client",
-    "event": "tool_call_completed",
-    "tool": "search_tires",
-    "duration_ms": 145,
-    "success": true
-}
-```
-
-**Заметки:** -
+**Заметки:** `JSONFormatter` — custom logging.Formatter. `setup_logging()` конфигурирует root logger. Шумные библиотеки (aiohttp, asyncio, uvicorn, google) ставятся на WARNING.
 
 ---
 
 ### 8.5 Метрики Prometheus
 
-- [ ] Создать `src/monitoring/metrics.py` с определением всех метрик
-- [ ] `active_calls` (Gauge) — количество активных звонков
-- [ ] `call_duration_seconds` (Histogram) — длительность звонков
-- [ ] `stt_latency_ms` (Histogram) — задержка STT
-- [ ] `llm_latency_ms` (Histogram) — задержка LLM
-- [ ] `tts_latency_ms` (Histogram) — задержка TTS
-- [ ] `total_response_latency_ms` (Histogram) — end-to-end задержка
-- [ ] `tool_call_duration_ms` (Histogram, labels: tool_name) — задержка tool calls
-- [ ] `store_api_errors_total` (Counter, labels: status_code) — ошибки Store API
-- [ ] `transfers_to_operator_total` (Counter, labels: reason) — переключения на оператора
-- [ ] Endpoint `/metrics` на порту 8080 (FastAPI)
+- [x] Создать `src/monitoring/metrics.py` с определением всех метрик
+- [x] `active_calls` (Gauge) — количество активных звонков
+- [x] `call_duration_seconds` (Histogram) — длительность звонков
+- [x] `stt_latency_ms` (Histogram) — задержка STT
+- [x] `llm_latency_ms` (Histogram) — задержка LLM
+- [x] `tts_latency_ms` (Histogram) — задержка TTS
+- [x] `total_response_latency_ms` (Histogram) — end-to-end задержка
+- [x] `tool_call_duration_ms` (Histogram, labels: tool_name) — задержка tool calls
+- [x] `store_api_errors_total` (Counter, labels: status_code) — ошибки Store API
+- [x] `transfers_to_operator_total` (Counter, labels: reason) — переключения на оператора
+- [x] Endpoint `/metrics` на порту 8080 (FastAPI)
 
-**Файлы:** `src/monitoring/metrics.py`, `src/api/routes.py`
-**Заметки:** Алерты настраиваются позже (фаза 4)
+**Файлы:** `src/monitoring/metrics.py`, `src/main.py`
+**Заметки:** 12 метрик определено. `/metrics` endpoint добавлен в FastAPI app. `get_metrics()` возвращает `generate_latest()`.
 
 ---
 
 ### 8.6 Graceful degradation при сбое БД
 
-- [ ] При недоступности PostgreSQL: звонки продолжают работать
-- [ ] Логи буферизуются в Redis (временно)
-- [ ] При восстановлении PostgreSQL: flush буфера в БД
-- [ ] При недоступности Redis: звонки работают с in-memory state
+- [x] При недоступности PostgreSQL: звонки продолжают работать
+- [x] Логи буферизуются в Redis (временно)
+- [x] При восстановлении PostgreSQL: flush буфера в БД
+- [x] При недоступности Redis: звонки работают с in-memory state
 
 **Файлы:** `src/logging/call_logger.py`
-**Заметки:** Из NFR: "PostgreSQL недоступен → логирование в Redis (буфер)"
+**Заметки:** `_buffer_to_redis()` при ошибках PG. `flush_redis_buffer()` для восстановления. Redis buffer TTL: 1 час.
 
 ---
 

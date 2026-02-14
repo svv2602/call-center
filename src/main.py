@@ -9,9 +9,13 @@ import uvicorn
 from fastapi import FastAPI
 from redis.asyncio import Redis
 
+from fastapi.responses import Response
+
 from src.config import Settings, get_settings
 from src.core.audio_socket import AudioSocketConnection, AudioSocketServer, PacketType
 from src.core.call_session import CallSession, CallState, SessionStore
+from src.logging.structured_logger import setup_logging
+from src.monitoring.metrics import active_calls, calls_total, get_metrics
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +48,12 @@ async def health_check() -> dict[str, object]:
     }
 
 
+@app.get("/metrics")
+async def metrics_endpoint() -> Response:
+    """Prometheus metrics endpoint."""
+    return Response(content=get_metrics(), media_type="text/plain; charset=utf-8")
+
+
 async def handle_call(conn: AudioSocketConnection) -> None:
     """Handle a single AudioSocket call from Asterisk.
 
@@ -58,6 +68,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         store = SessionStore(_redis)
         await store.save(session)
 
+    active_calls.inc()
     logger.info("Call started: %s", conn.channel_uuid)
 
     session.transition_to(CallState.LISTENING)
@@ -97,6 +108,11 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         store = SessionStore(_redis)
         await store.delete(conn.channel_uuid)
 
+    active_calls.dec()
+    calls_total.labels(
+        status="transferred" if session.transferred else "completed"
+    ).inc()
+
     logger.info(
         "Call ended: %s, duration=%ds, turns=%d",
         conn.channel_uuid,
@@ -123,11 +139,8 @@ async def main() -> None:
 
     settings = get_settings()
 
-    # Configure logging
-    logging.basicConfig(
-        level=getattr(logging, settings.logging.level.upper(), logging.INFO),
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
-    )
+    # Configure structured logging
+    setup_logging(level=settings.logging.level, format_type=settings.logging.format)
 
     logger.info("Starting Call Center AI v0.1.0")
 
