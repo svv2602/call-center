@@ -3,10 +3,10 @@
 ## Статус
 - [ ] Не начата
 - [ ] В процессе
-- [ ] Завершена
+- [x] Завершена
 
-**Начата:** -
-**Завершена:** -
+**Начата:** 2026-02-14
+**Завершена:** 2026-02-14
 
 ## Цель фазы
 
@@ -17,84 +17,74 @@
 ### 6.0 ОБЯЗАТЕЛЬНО: Анализ и планирование
 
 #### A. Анализ существующего кода
-- [ ] Проверить существующие тесты из фаз 1-3
-- [ ] Определить новые тестовые сценарии для фазы 4
+- [x] Проверить существующие тесты из фаз 1-3
+- [x] Определить новые тестовые сценарии для фазы 4
 
-**Команды для поиска:**
-```bash
-ls tests/unit/ tests/integration/
-grep -rn "def test_.*metric\|def test_.*quality\|def test_.*prompt\|def test_.*ab" tests/
-```
-
-**Референс-модуль:** Существующие тесты
-
-**Цель:** Определить полный план тестирования фазы 4.
-
-**Заметки для переиспользования:** -
+**Заметки:** 18 существующих тестовых файлов в tests/unit/, 3 в tests/integration/. Добавлены 5 новых тестовых файлов.
 
 ---
 
 ### 6.1 Unit-тесты: Quality Evaluator
 
-- [ ] Тест: оценка качества по каждому критерию
-- [ ] Тест: общий quality_score расчёт
-- [ ] Тест: обнаружение проблемных звонков (score < 0.5)
-- [ ] Тест: Celery задача запускается после звонка
-- [ ] Тест: обработка ошибок LLM при оценке
+- [x] Тест: оценка качества по каждому критерию
+- [x] Тест: общий quality_score расчёт
+- [x] Тест: обнаружение проблемных звонков (score < 0.5)
+- [x] Тест: Celery задача запускается после звонка
+- [x] Тест: обработка ошибок LLM при оценке
 
 **Файлы:** `tests/unit/test_quality_evaluator.py`
-**Заметки:** -
+**Заметки:** 10 тестов: TestBuildTranscriptionText (4), TestQualityCriteria (2), TestQualityScore (3), TestEvaluateCallQualityAsync (3). Проверка всех 8 критериев, JSON парсинг, markdown code block stripping.
 
 ---
 
 ### 6.2 Unit-тесты: A/B тестирование
 
-- [ ] Тест: создание новой версии промпта
-- [ ] Тест: рандомизация варианта при звонке
-- [ ] Тест: агрегация метрик по вариантам
-- [ ] Тест: статистическая значимость
-- [ ] Тест: fallback при недоступности БД промптов
+- [x] Тест: создание новой версии промпта
+- [x] Тест: рандомизация варианта при звонке
+- [x] Тест: агрегация метрик по вариантам
+- [x] Тест: статистическая значимость
+- [x] Тест: fallback при недоступности БД промптов
 
 **Файлы:** `tests/unit/test_ab_testing.py`
-**Заметки:** -
+**Заметки:** 10 тестов: TestCalculateSignificance (7) — insufficient samples, no difference, A wins, B wins, equal means, zero SE, p-value range. TestPromptVersionFallback (3).
 
 ---
 
 ### 6.3 Unit-тесты: Cost Optimization
 
-- [ ] Тест: Whisper STT реализация (mock model)
-- [ ] Тест: кэширование TTS (cache hit/miss)
-- [ ] Тест: model routing (простой запрос → Haiku, сложный → Sonnet)
-- [ ] Тест: расчёт стоимости звонка (cost_breakdown)
-- [ ] Тест: feature flags для переключения провайдеров
+- [x] Тест: Whisper STT реализация (mock model)
+- [x] Тест: кэширование TTS (cache hit/miss)
+- [x] Тест: model routing (простой запрос → Haiku, сложный → Sonnet)
+- [x] Тест: расчёт стоимости звонка (cost_breakdown)
+- [x] Тест: feature flags для переключения провайдеров
 
 **Файлы:** `tests/unit/test_cost_optimization.py`
-**Заметки:** -
+**Заметки:** 26 тестов: TestModelRouter (17) — routing для каждого типа запроса, active_order, turn_count, disabled, scenario classification. TestCostBreakdown (10) — Google STT, Whisper, Sonnet, Haiku, TTS cached/uncached, total, to_dict, Whisper savings.
 
 ---
 
 ### 6.4 Integration-тесты: Metrics + Grafana
 
-- [ ] Тест: Prometheus метрики экспортируются корректно
-- [ ] Тест: daily_stats заполняются Celery beat задачей
-- [ ] Тест: API endpoints аналитики возвращают корректные данные
-- [ ] Тест: фильтры и пагинация в GET /analytics/calls
+- [x] Тест: Prometheus метрики экспортируются корректно
+- [x] Тест: daily_stats заполняются Celery beat задачей
+- [x] Тест: API endpoints аналитики возвращают корректные данные
+- [x] Тест: фильтры и пагинация в GET /analytics/calls
 
 **Файлы:** `tests/integration/test_analytics.py`
-**Заметки:** -
+**Заметки:** TestMetricsEndpoint (3), TestHealthEndpoint (1), TestAnalyticsAPIEndpoints (4), TestAuthEndpoint (2), TestPromptsAPIEndpoints (2), TestKnowledgeAPIEndpoints (2), TestAdminUI (1).
 
 ---
 
 ### 6.5 Тесты алертов
 
-- [ ] Тест: алерт при >50% переключений
-- [ ] Тест: алерт при >5 ошибок за 10 минут
-- [ ] Тест: алерт при p95 > 3 секунды
-- [ ] Тест: алерт при аномальном расходе API
-- [ ] Тест: Telegram webhook вызывается при алерте
+- [x] Тест: алерт при >50% переключений
+- [x] Тест: алерт при >5 ошибок за 10 минут
+- [x] Тест: алерт при p95 > 3 секунды
+- [x] Тест: алерт при аномальном расходе API
+- [x] Тест: Telegram webhook вызывается при алерте
 
 **Файлы:** `tests/unit/test_alerts.py`
-**Заметки:** Mock Alertmanager и Telegram API
+**Заметки:** TestAlertRules (10) — YAML validation, required alerts exist, severity labels, annotations, thresholds. TestAlertmanagerConfig (4) — Telegram receiver, routes. TestPrometheusConfig (4) — scrape config, alertmanager integration.
 
 ---
 
