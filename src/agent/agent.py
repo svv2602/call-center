@@ -12,7 +12,7 @@ from typing import Any
 import anthropic
 
 from src.agent.prompts import PROMPT_VERSION, SYSTEM_PROMPT
-from src.agent.tools import MVP_TOOLS
+from src.agent.tools import ALL_TOOLS
 
 logger = logging.getLogger(__name__)
 
@@ -114,7 +114,7 @@ class LLMAgent:
                     model=self._model,
                     max_tokens=300,
                     system=SYSTEM_PROMPT,
-                    tools=MVP_TOOLS,
+                    tools=ALL_TOOLS,
                     messages=conversation_history,
                 )
             except anthropic.APIStatusError as exc:
