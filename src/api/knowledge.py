@@ -7,8 +7,7 @@ Triggers embedding regeneration on content changes.
 from __future__ import annotations
 
 import logging
-from typing import Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel
@@ -16,6 +15,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.config import get_settings
+
+if TYPE_CHECKING:
+    from uuid import UUID
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -131,7 +133,11 @@ async def create_article(request: ArticleCreateRequest) -> dict[str, Any]:
                 "content": request.content,
             },
         )
-        article = dict(result.first()._mapping)
+        row = result.first()
+        if row is None:
+            msg = "Expected row from INSERT RETURNING"
+            raise RuntimeError(msg)
+        article = dict(row._mapping)
 
     logger.info("Knowledge article created: %s (%s)", article["title"], article["id"])
     return {"article": article, "message": "Article created. Run embedding generation to index."}

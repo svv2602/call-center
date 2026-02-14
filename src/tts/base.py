@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,7 +31,7 @@ class TTSEngine(Protocol):
         """Synthesize text into raw PCM audio bytes."""
         ...
 
-    async def synthesize_stream(self, text: str) -> AsyncIterator[bytes]:
+    def synthesize_stream(self, text: str) -> AsyncIterator[bytes]:
         """Synthesize text, yielding audio sentence by sentence.
 
         Splits the text into sentences and synthesizes each one

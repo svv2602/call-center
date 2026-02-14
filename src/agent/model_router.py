@@ -10,9 +10,6 @@ from __future__ import annotations
 
 import logging
 import re
-from typing import Any
-
-from src.monitoring.metrics import call_scenario_total
 
 logger = logging.getLogger(__name__)
 

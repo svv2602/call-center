@@ -7,10 +7,12 @@ instance is per-call — counters and mappings are scoped to a single session.
 
 from __future__ import annotations
 
-import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.logging.pii_sanitizer import _NAME_RE, _PHONE_RE
+
+if TYPE_CHECKING:
+    import re
 
 
 class PIIVault:

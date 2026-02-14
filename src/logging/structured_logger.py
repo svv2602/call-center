@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 import logging
 import sys
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from src.logging.pii_sanitizer import sanitize_pii
@@ -20,7 +20,7 @@ class JSONFormatter(logging.Formatter):
 
     def format(self, record: logging.LogRecord) -> str:
         log_entry: dict[str, Any] = {
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "level": record.levelname,
             "component": record.name,
             "event": sanitize_pii(record.getMessage()),
@@ -28,15 +28,15 @@ class JSONFormatter(logging.Formatter):
 
         # Add call_id if present in extras
         if hasattr(record, "call_id"):
-            log_entry["call_id"] = record.call_id  # type: ignore[attr-defined]
+            log_entry["call_id"] = record.call_id
         if hasattr(record, "request_id"):
-            log_entry["request_id"] = record.request_id  # type: ignore[attr-defined]
+            log_entry["request_id"] = record.request_id
         if hasattr(record, "duration_ms"):
-            log_entry["duration_ms"] = record.duration_ms  # type: ignore[attr-defined]
+            log_entry["duration_ms"] = record.duration_ms
         if hasattr(record, "tool"):
-            log_entry["tool"] = record.tool  # type: ignore[attr-defined]
+            log_entry["tool"] = record.tool
         if hasattr(record, "success"):
-            log_entry["success"] = record.success  # type: ignore[attr-defined]
+            log_entry["success"] = record.success
 
         if record.exc_info and record.exc_info[1]:
             log_entry["exception"] = str(record.exc_info[1])
@@ -62,9 +62,7 @@ def setup_logging(level: str = "INFO", format_type: str = "json") -> None:
     if format_type == "json":
         handler.setFormatter(JSONFormatter())
     else:
-        handler.setFormatter(
-            logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s")
-        )
+        handler.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(name)s: %(message)s"))
 
     root.addHandler(handler)
 

@@ -7,10 +7,11 @@ Supports barge-in (interrupting TTS when the caller speaks).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
+from typing import TYPE_CHECKING
 
-from src.agent.agent import LLMAgent
 from src.agent.prompts import (
     ERROR_TEXT,
     FAREWELL_TEXT,
@@ -20,10 +21,13 @@ from src.agent.prompts import (
     WAIT_TEXT,
 )
 from src.core.audio_socket import AudioSocketConnection, PacketType
-from src.core.call_session import CallSession, CallState, SILENCE_TIMEOUT_SEC
+from src.core.call_session import SILENCE_TIMEOUT_SEC, CallSession, CallState
 from src.monitoring.metrics import audiosocket_to_stt_ms, tts_delivery_ms
 from src.stt.base import STTConfig, STTEngine, Transcript
-from src.tts.base import TTSEngine
+
+if TYPE_CHECKING:
+    from src.agent.agent import LLMAgent
+    from src.tts.base import TTSEngine
 
 logger = logging.getLogger(__name__)
 
@@ -74,7 +78,7 @@ class CallPipeline:
             audio_task = asyncio.create_task(self._audio_reader_loop())
             transcript_task = asyncio.create_task(self._transcript_processor_loop())
 
-            done, pending = await asyncio.wait(
+            _done, pending = await asyncio.wait(
                 [audio_task, transcript_task],
                 return_when=asyncio.FIRST_COMPLETED,
             )
@@ -82,10 +86,8 @@ class CallPipeline:
             # Cancel remaining tasks
             for task in pending:
                 task.cancel()
-                try:
+                with contextlib.suppress(asyncio.CancelledError):
                     await task
-                except asyncio.CancelledError:
-                    pass
 
         except asyncio.CancelledError:
             logger.info("Pipeline cancelled: %s", self._session.channel_uuid)
@@ -116,9 +118,7 @@ class CallPipeline:
             if packet.type == PacketType.AUDIO:
                 t0 = time.monotonic()
                 await self._stt.feed_audio(packet.payload)
-                audiosocket_to_stt_ms.observe(
-                    (time.monotonic() - t0) * 1000
-                )
+                audiosocket_to_stt_ms.observe((time.monotonic() - t0) * 1000)
 
                 # Detect barge-in: if we're speaking and STT gets audio
                 if self._speaking:
@@ -191,7 +191,7 @@ class CallPipeline:
             async for transcript in self._stt.get_transcripts():
                 if transcript.is_final and transcript.text.strip():
                     return transcript
-        except asyncio.TimeoutError:
+        except TimeoutError:
             pass
 
         # If we get here without a final transcript, it's a silence timeout
@@ -200,7 +200,7 @@ class CallPipeline:
                 self._wait_any_final_transcript(),
                 timeout=SILENCE_TIMEOUT_SEC,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             return None
 
         return None

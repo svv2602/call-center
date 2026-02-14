@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import enum
-from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
-from typing import Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 
-class STTEvent(str, enum.Enum):
+class STTEvent(enum.StrEnum):
     """Events emitted by the STT engine."""
 
     TRANSCRIPT = "transcript"
@@ -54,7 +56,7 @@ class STTEngine(Protocol):
         """Feed an audio chunk to the recognition stream."""
         ...
 
-    async def get_transcripts(self) -> AsyncIterator[Transcript]:
+    def get_transcripts(self) -> AsyncIterator[Transcript]:
         """Yield transcripts as they become available.
 
         Yields both interim and final results depending on config.

@@ -66,7 +66,7 @@ class TestBuildSystemPromptSecurity:
         assert prompt == SYSTEM_PROMPT
 
     def test_prompt_version_updated(self) -> None:
-        assert PROMPT_VERSION == "v2.0-orders"
+        assert PROMPT_VERSION == "v3.0-services"
 
 
 class TestToolSchemaValidation:

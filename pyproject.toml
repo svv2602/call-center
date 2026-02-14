@@ -72,7 +72,12 @@ select = [
     "TCH",  # flake8-type-checking
     "RUF",  # ruff-specific
 ]
-ignore = ["E501"]
+ignore = [
+    "E501",    # line too long
+    "RUF001",  # ambiguous unicode (Cyrillic in Ukrainian text)
+    "RUF002",  # ambiguous unicode in docstrings
+    "RUF003",  # ambiguous unicode in comments
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["src"]

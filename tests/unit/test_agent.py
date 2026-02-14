@@ -88,10 +88,10 @@ class TestSystemPrompt:
         assert "гривнях" in SYSTEM_PROMPT or "грн" in SYSTEM_PROMPT
 
     def test_prompt_version(self) -> None:
-        assert PROMPT_VERSION == "v2.0-orders"
+        assert PROMPT_VERSION == "v3.0-services"
 
     def test_prompt_has_order_capabilities(self) -> None:
         assert "замовлення" in SYSTEM_PROMPT.lower()
 
     def test_all_tools_count(self) -> None:
-        assert len(ALL_TOOLS) == 7
+        assert len(ALL_TOOLS) == 13

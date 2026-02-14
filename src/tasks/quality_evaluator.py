@@ -85,7 +85,7 @@ def _build_transcription_text(turns: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-@app.task(name="src.tasks.quality_evaluator.evaluate_call_quality", bind=True, max_retries=3)
+@app.task(name="src.tasks.quality_evaluator.evaluate_call_quality", bind=True, max_retries=3)  # type: ignore[untyped-decorator]
 def evaluate_call_quality(self: Any, call_id: str) -> dict[str, Any]:
     """Evaluate call quality using Claude Haiku.
 
@@ -97,9 +97,7 @@ def evaluate_call_quality(self: Any, call_id: str) -> dict[str, Any]:
     """
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(
-        _evaluate_call_quality_async(self, call_id)
-    )
+    return asyncio.get_event_loop().run_until_complete(_evaluate_call_quality_async(self, call_id))
 
 
 async def _evaluate_call_quality_async(task: Any, call_id: str) -> dict[str, Any]:
@@ -177,7 +175,8 @@ async def _evaluate_call_quality_async(task: Any, call_id: str) -> dict[str, Any
             ],
         )
 
-        response_text = response.content[0].text.strip()
+        content_block = response.content[0]
+        response_text = content_block.text.strip() if hasattr(content_block, "text") else ""
 
         # Parse JSON response
         # Handle markdown code blocks if present
@@ -187,9 +186,7 @@ async def _evaluate_call_quality_async(task: Any, call_id: str) -> dict[str, Any
         quality_details = json.loads(response_text)
 
         # Calculate overall score
-        scores = [
-            quality_details.get(criterion, 0.0) for criterion in QUALITY_CRITERIA
-        ]
+        scores = [quality_details.get(criterion, 0.0) for criterion in QUALITY_CRITERIA]
         overall_score = sum(scores) / len(scores) if scores else 0.0
 
         # Check if call needs manual review
@@ -233,11 +230,11 @@ async def _evaluate_call_quality_async(task: Any, call_id: str) -> dict[str, Any
             "needs_review": needs_review,
         }
 
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as err:
         logger.exception("Failed to parse quality evaluation response for call %s", call_id)
-        raise task.retry(countdown=60)
-    except anthropic.APIError:
+        raise task.retry(countdown=60) from err
+    except anthropic.APIError as err:
         logger.exception("Anthropic API error during quality evaluation for call %s", call_id)
-        raise task.retry(countdown=30)
+        raise task.retry(countdown=30) from err
     finally:
         await engine.dispose()

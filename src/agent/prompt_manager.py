@@ -7,13 +7,16 @@ Falls back to hardcoded prompt if database is unavailable.
 from __future__ import annotations
 
 import logging
-from typing import Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.agent.prompts import PROMPT_VERSION, SYSTEM_PROMPT
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from sqlalchemy.ext.asyncio import AsyncEngine
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +86,9 @@ class PromptManager:
                 },
             )
             row = result.first()
+            if row is None:
+                msg = "Expected row from INSERT RETURNING"
+                raise RuntimeError(msg)
             return dict(row._mapping)
 
     async def activate_version(self, version_id: UUID) -> dict[str, Any]:

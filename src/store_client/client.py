@@ -103,9 +103,7 @@ class StoreClient:
         """
         if not product_id and query:
             # Search by name first
-            search_result = await self._get(
-                "/api/v1/tires/search", params={"q": query}
-            )
+            search_result = await self._get("/api/v1/tires/search", params={"q": query})
             items = search_result.get("items", [])
             if not items:
                 return {"available": False, "message": "Товар не знайдено"}
@@ -159,9 +157,7 @@ class StoreClient:
             return {"found": True, "orders": [self._format_order(data)]}
 
         if phone:
-            data = await self._get(
-                "/api/v1/orders/search", params={"phone": phone}
-            )
+            data = await self._get("/api/v1/orders/search", params={"phone": phone})
             items = data.get("items", [])
             if not items:
                 return {"found": False, "message": "Замовлень не знайдено"}
@@ -231,9 +227,7 @@ class StoreClient:
         if pickup_point_id:
             body["pickup_point_id"] = pickup_point_id
 
-        data = await self._patch(
-            f"/api/v1/orders/{order_id}/delivery", json_data=body
-        )
+        data = await self._patch(f"/api/v1/orders/{order_id}/delivery", json_data=body)
         return {
             "order_id": data.get("id", order_id),
             "delivery_type": data.get("delivery_type"),
@@ -298,9 +292,7 @@ class StoreClient:
             ],
         }
 
-    async def calculate_delivery(
-        self, city: str, order_id: str = ""
-    ) -> dict[str, Any]:
+    async def calculate_delivery(self, city: str, order_id: str = "") -> dict[str, Any]:
         """Calculate delivery cost.
 
         Maps to: GET /api/v1/delivery/calculate
@@ -312,16 +304,12 @@ class StoreClient:
 
     # --- Fitting Tool Handlers ---
 
-    async def get_fitting_stations(
-        self, city: str, **_: Any
-    ) -> dict[str, Any]:
+    async def get_fitting_stations(self, city: str, **_: Any) -> dict[str, Any]:
         """Get fitting stations in a city.
 
         Maps to: GET /api/v1/fitting/stations?city=...
         """
-        data = await self._get(
-            "/api/v1/fitting/stations", params={"city": city}
-        )
+        data = await self._get("/api/v1/fitting/stations", params={"city": city})
         stations = data.get("data", data.get("items", []))
         return {
             "total": len(stations),
@@ -358,9 +346,7 @@ class StoreClient:
         if service_type:
             params["service_type"] = service_type
 
-        data = await self._get(
-            f"/api/v1/fitting/stations/{station_id}/slots", params=params
-        )
+        data = await self._get(f"/api/v1/fitting/stations/{station_id}/slots", params=params)
         return {
             "station_id": station_id,
             "slots": data.get("data", {}).get("slots", data.get("slots", [])),
@@ -437,9 +423,7 @@ class StoreClient:
                 body["date"] = new_date
             if new_time:
                 body["time"] = new_time
-            data = await self._patch(
-                f"/api/v1/fitting/bookings/{booking_id}", json_data=body
-            )
+            data = await self._patch(f"/api/v1/fitting/bookings/{booking_id}", json_data=body)
             booking = data.get("data", data)
             return {
                 "booking_id": booking_id,
@@ -508,9 +492,7 @@ class StoreClient:
 
     # --- HTTP helpers ---
 
-    async def _get(
-        self, path: str, params: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Make a GET request with circuit breaker and retry."""
         return await self._request("GET", path, params=params)
 
@@ -553,7 +535,7 @@ class StoreClient:
         request_id = str(uuid.uuid4())
 
         try:
-            return await _store_breaker.call_async(
+            result: dict[str, Any] = await _store_breaker.call_async(
                 self._request_with_retry,
                 method,
                 url,
@@ -562,11 +544,10 @@ class StoreClient:
                 json_data=json_data,
                 idempotency_key=idempotency_key,
             )
-        except CircuitBreakerError:
+            return result
+        except CircuitBreakerError as err:
             logger.error("Circuit breaker OPEN for Store API")
-            raise StoreAPIError(
-                503, "Сервіс тимчасово недоступний. Спробуйте пізніше."
-            )
+            raise StoreAPIError(503, "Сервіс тимчасово недоступний. Спробуйте пізніше.") from err
 
     async def _request_with_retry(
         self,
@@ -583,7 +564,9 @@ class StoreClient:
         for attempt in range(_MAX_RETRIES + 1):
             try:
                 return await self._do_request(
-                    method, url, request_id,
+                    method,
+                    url,
+                    request_id,
                     params=params,
                     json_data=json_data,
                     idempotency_key=idempotency_key,
@@ -635,7 +618,8 @@ class StoreClient:
             if resp.status == 204:
                 return {}
 
-            return await resp.json()
+            data: dict[str, Any] = await resp.json()
+            return data
 
     @staticmethod
     def _format_tire_results(data: dict[str, Any]) -> dict[str, Any]:

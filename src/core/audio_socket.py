@@ -18,6 +18,10 @@ import logging
 import struct
 import uuid
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Coroutine
 
 logger = logging.getLogger(__name__)
 
@@ -151,7 +155,7 @@ class AudioSocketServer:
         self,
         host: str = "0.0.0.0",
         port: int = 9092,
-        on_connection: "asyncio.coroutines.CoroFunction | None" = None,
+        on_connection: Callable[..., Coroutine[Any, Any, None]] | None = None,
     ) -> None:
         self.host = host
         self.port = port
@@ -202,7 +206,7 @@ class AudioSocketServer:
         try:
             # First packet must be UUID (type 0x01)
             packet = await asyncio.wait_for(read_packet(reader), timeout=5.0)
-        except (asyncio.TimeoutError, asyncio.IncompleteReadError, OSError) as exc:
+        except (TimeoutError, asyncio.IncompleteReadError, OSError) as exc:
             logger.warning("Failed to read UUID from %s: %s", peer, exc)
             writer.close()
             return

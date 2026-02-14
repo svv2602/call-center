@@ -10,13 +10,14 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
-from typing import Any
+from datetime import UTC, datetime
+from typing import TYPE_CHECKING, Any
 
-from redis.asyncio import Redis
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.ext.asyncio import async_sessionmaker
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +31,7 @@ class CallLogger:
     Falls back to Redis buffer when PostgreSQL is unavailable.
     """
 
-    def __init__(self, database_url: str, redis: Redis | None = None) -> None:  # type: ignore[type-arg]
+    def __init__(self, database_url: str, redis: Redis | None = None) -> None:
         self._engine = create_async_engine(database_url, pool_size=5, max_overflow=5)
         self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
         self._redis = redis
@@ -126,7 +127,7 @@ class CallLogger:
                 "stt_latency_ms": stt_latency_ms,
                 "llm_latency_ms": llm_latency_ms,
                 "tts_latency_ms": tts_latency_ms,
-                "created_at": datetime.now(timezone.utc),
+                "created_at": datetime.now(UTC),
             },
         )
 
@@ -159,7 +160,7 @@ class CallLogger:
                 "tool_result": json.dumps(tool_result, ensure_ascii=False),
                 "duration_ms": duration_ms,
                 "success": success,
-                "created_at": datetime.now(timezone.utc),
+                "created_at": datetime.now(UTC),
             },
         )
 
@@ -185,12 +186,12 @@ class CallLogger:
                     last_call_at = :now
                 WHERE id = :id
                 """,
-                {"id": customer_id, "now": datetime.now(timezone.utc)},
+                {"id": customer_id, "now": datetime.now(UTC)},
             )
             return str(customer_id)
 
         customer_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         await self._execute(
             """
             INSERT INTO customers (id, phone, name, total_calls, first_call_at, last_call_at)
@@ -210,18 +211,15 @@ class CallLogger:
     async def _execute(self, query: str, params: dict[str, Any]) -> None:
         """Execute a write query with PG fallback to Redis buffer."""
         try:
-            async with self._session_factory() as session:
-                async with session.begin():
-                    await session.execute(text(query), params)
+            async with self._session_factory() as session, session.begin():
+                await session.execute(text(query), params)
             self._db_available = True
         except Exception:
             self._db_available = False
             logger.warning("PostgreSQL unavailable, buffering log to Redis")
             await self._buffer_to_redis(query, params)
 
-    async def _fetch_one(
-        self, query: str, params: dict[str, Any]
-    ) -> dict[str, Any] | None:
+    async def _fetch_one(self, query: str, params: dict[str, Any]) -> dict[str, Any] | None:
         """Execute a read query and return one row."""
         try:
             async with self._session_factory() as session:
@@ -232,16 +230,14 @@ class CallLogger:
             logger.warning("PostgreSQL read failed")
             return None
 
-    async def _buffer_to_redis(
-        self, query: str, params: dict[str, Any]
-    ) -> None:
+    async def _buffer_to_redis(self, query: str, params: dict[str, Any]) -> None:
         """Buffer a log entry in Redis when PostgreSQL is unavailable."""
         if self._redis is None:
             return
 
         entry = json.dumps({"query": query, "params": params}, default=str)
         try:
-            await self._redis.rpush(_REDIS_LOG_BUFFER_KEY, entry)
+            await self._redis.rpush(_REDIS_LOG_BUFFER_KEY, entry)  # type: ignore[misc]
             await self._redis.expire(_REDIS_LOG_BUFFER_KEY, _REDIS_LOG_BUFFER_TTL)
         except Exception:
             logger.error("Redis buffer also unavailable — log entry lost")
@@ -256,21 +252,18 @@ class CallLogger:
 
         count = 0
         while True:
-            entry_raw = await self._redis.lpop(_REDIS_LOG_BUFFER_KEY)
+            entry_raw = await self._redis.lpop(_REDIS_LOG_BUFFER_KEY)  # type: ignore[misc]
             if entry_raw is None:
                 break
 
             entry = json.loads(entry_raw)
             try:
-                async with self._session_factory() as session:
-                    async with session.begin():
-                        await session.execute(
-                            text(entry["query"]), entry["params"]
-                        )
+                async with self._session_factory() as session, session.begin():
+                    await session.execute(text(entry["query"]), entry["params"])
                 count += 1
             except Exception:
                 # Put it back
-                await self._redis.lpush(_REDIS_LOG_BUFFER_KEY, entry_raw)
+                await self._redis.lpush(_REDIS_LOG_BUFFER_KEY, entry_raw)  # type: ignore[misc]
                 break
 
         if count > 0:

@@ -5,8 +5,8 @@ Uses Redis as broker for background tasks (quality evaluation, daily stats).
 
 from __future__ import annotations
 
-from celery import Celery
-from celery.schedules import crontab
+from celery import Celery  # type: ignore[import-untyped]
+from celery.schedules import crontab  # type: ignore[import-untyped]
 
 from src.config import get_settings
 

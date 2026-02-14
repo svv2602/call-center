@@ -9,11 +9,14 @@ from __future__ import annotations
 import logging
 import math
 import random
-from typing import Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
+
+if TYPE_CHECKING:
+    from uuid import UUID
+
+    from sqlalchemy.ext.asyncio import AsyncEngine
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +61,7 @@ class ABTestManager:
             return None
 
         # Random assignment based on traffic split
-        is_variant_a = random.random() < test["traffic_split"]  # noqa: S311
+        is_variant_a = random.random() < test["traffic_split"]
 
         variant_id = test["variant_a_id"] if is_variant_a else test["variant_b_id"]
         variant_name = test["variant_a_name"] if is_variant_a else test["variant_b_name"]
@@ -78,7 +81,10 @@ class ABTestManager:
 
         logger.info(
             "A/B test assignment: call=%s, test=%s, variant=%s (%s)",
-            call_id, test["test_name"], variant_label, variant_name,
+            call_id,
+            test["test_name"],
+            variant_label,
+            variant_name,
         )
 
         return {
@@ -105,7 +111,7 @@ class ABTestManager:
                 raise ValueError(msg)
 
             # Calculate average quality for each variant
-            for variant_field, quality_field, vid in [
+            for _variant_field, quality_field, vid in [
                 ("variant_a_id", "quality_a", test.variant_a_id),
                 ("variant_b_id", "quality_b", test.variant_b_id),
             ]:
@@ -137,7 +143,11 @@ class ABTestManager:
                 text("SELECT * FROM prompt_ab_tests WHERE id = :test_id"),
                 {"test_id": str(test_id)},
             )
-            return dict(updated.first()._mapping)
+            row = updated.first()
+            if row is None:
+                msg = f"A/B test {test_id} not found after update"
+                raise RuntimeError(msg)
+            return dict(row._mapping)
 
     async def create_test(
         self,
@@ -172,7 +182,11 @@ class ABTestManager:
                     "traffic_split": traffic_split,
                 },
             )
-            return dict(result.first()._mapping)
+            row = result.first()
+            if row is None:
+                msg = "Expected row from INSERT RETURNING"
+                raise RuntimeError(msg)
+            return dict(row._mapping)
 
     async def stop_test(self, test_id: UUID) -> dict[str, Any]:
         """Stop an A/B test and record the end time."""
@@ -223,7 +237,10 @@ class ABTestManager:
 
 
 def calculate_significance(
-    n_a: int, n_b: int, mean_a: float, mean_b: float,
+    n_a: int,
+    n_b: int,
+    mean_a: float,
+    mean_b: float,
     std_dev: float = 0.2,
 ) -> dict[str, Any]:
     """Calculate statistical significance using a Z-test approximation.

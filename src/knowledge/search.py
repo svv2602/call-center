@@ -7,7 +7,6 @@ with text fallback when pgvector is unavailable.
 from __future__ import annotations
 
 import logging
-import uuid
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -52,9 +51,7 @@ class KnowledgeSearch:
         try:
             return await self._vector_search(query, category, limit)
         except Exception as exc:
-            logger.warning(
-                "Vector search failed, falling back to text search: %s", exc
-            )
+            logger.warning("Vector search failed, falling back to text search: %s", exc)
             return await self._text_search(query, category, limit)
 
     async def _vector_search(

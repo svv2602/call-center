@@ -7,14 +7,16 @@ for the admin interface.
 from __future__ import annotations
 
 import logging
-from typing import Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.config import get_settings
+
+if TYPE_CHECKING:
+    from uuid import UUID
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/analytics", tags=["analytics"])
@@ -68,7 +70,11 @@ async def get_quality_report(
             """),
             params,
         )
-        summary = dict(result.first()._mapping)
+        summary_row = result.first()
+        if summary_row is None:
+            msg = "Expected row from aggregate query"
+            raise RuntimeError(msg)
+        summary = dict(summary_row._mapping)
 
         # Per-scenario breakdown
         scenario_result = await conn.execute(
@@ -127,9 +133,7 @@ async def get_calls_list(
         conditions.append("started_at < :date_to::date + interval '1 day'")
         params["date_to"] = date_to
     if search:
-        conditions.append(
-            "id IN (SELECT call_id FROM call_turns WHERE text ILIKE :search)"
-        )
+        conditions.append("id IN (SELECT call_id FROM call_turns WHERE text ILIKE :search)")
         params["search"] = f"%{search}%"
 
     where_clause = " AND ".join(conditions)

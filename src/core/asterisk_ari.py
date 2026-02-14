@@ -51,9 +51,7 @@ class AsteriskARIClient:
             return None
 
         try:
-            async with self._session.get(
-                f"{self._url}/channels/{channel_uuid}"
-            ) as resp:
+            async with self._session.get(f"{self._url}/channels/{channel_uuid}") as resp:
                 if resp.status != 200:
                     logger.warning(
                         "ARI channel lookup failed: status=%d, channel=%s",
@@ -71,7 +69,7 @@ class AsteriskARIClient:
                     return None
 
                 logger.info("CallerID=%s for channel %s", number, channel_uuid)
-                return number
+                return str(number)
 
         except (aiohttp.ClientError, OSError) as exc:
             logger.warning("ARI unavailable: %s", exc)

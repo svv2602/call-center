@@ -24,7 +24,7 @@ _RETENTION_TRANSCRIPTS_DAYS = 90
 _RETENTION_METADATA_DAYS = 365
 
 
-@app.task(name="src.tasks.data_retention.cleanup_expired_data")
+@app.task(name="src.tasks.data_retention.cleanup_expired_data")  # type: ignore[untyped-decorator]
 def cleanup_expired_data() -> dict[str, Any]:
     """Delete expired transcriptions and anonymize old caller data.
 
@@ -44,24 +44,30 @@ async def _cleanup_async() -> dict[str, Any]:
     try:
         async with engine.begin() as conn:
             # Delete transcriptions older than 90 days
-            r1 = await conn.execute(text(
-                f"DELETE FROM call_turns "
-                f"WHERE created_at < NOW() - INTERVAL '{_RETENTION_TRANSCRIPTS_DAYS} days'"
-            ))
+            r1 = await conn.execute(
+                text(
+                    f"DELETE FROM call_turns "
+                    f"WHERE created_at < NOW() - INTERVAL '{_RETENTION_TRANSCRIPTS_DAYS} days'"
+                )
+            )
             results["call_turns_deleted"] = r1.rowcount
 
-            r2 = await conn.execute(text(
-                f"DELETE FROM call_tool_calls "
-                f"WHERE created_at < NOW() - INTERVAL '{_RETENTION_TRANSCRIPTS_DAYS} days'"
-            ))
+            r2 = await conn.execute(
+                text(
+                    f"DELETE FROM call_tool_calls "
+                    f"WHERE created_at < NOW() - INTERVAL '{_RETENTION_TRANSCRIPTS_DAYS} days'"
+                )
+            )
             results["call_tool_calls_deleted"] = r2.rowcount
 
             # Anonymize caller_id older than 1 year
-            r3 = await conn.execute(text(
-                f"UPDATE calls SET caller_id = 'DELETED' "
-                f"WHERE started_at < NOW() - INTERVAL '{_RETENTION_METADATA_DAYS} days' "
-                f"AND caller_id IS NOT NULL AND caller_id != 'DELETED'"
-            ))
+            r3 = await conn.execute(
+                text(
+                    f"UPDATE calls SET caller_id = 'DELETED' "
+                    f"WHERE started_at < NOW() - INTERVAL '{_RETENTION_METADATA_DAYS} days' "
+                    f"AND caller_id IS NOT NULL AND caller_id != 'DELETED'"
+                )
+            )
             results["calls_anonymized"] = r3.rowcount
 
         logger.info(

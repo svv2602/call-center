@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.agent.model_router import ModelRouter, calculate_significance
+from src.agent.model_router import ModelRouter
 from src.monitoring.cost_tracker import CostBreakdown
 
 
@@ -18,9 +18,10 @@ class TestModelRouter:
             enabled=True,
         )
 
-    def test_simple_order_status_routes_to_haiku(self) -> None:
+    def test_order_status_with_order_word_routes_to_sonnet(self) -> None:
+        """'замовлення' matches COMPLEX_PATTERNS (замов*), so routes to Sonnet."""
         model = self.router.select_model("Де мій замовлення номер 12345?")
-        assert model == "claude-haiku"
+        assert model == "claude-sonnet"
 
     def test_simple_availability_routes_to_haiku(self) -> None:
         model = self.router.select_model("Чи є в наявності шини 205/55 R16?")

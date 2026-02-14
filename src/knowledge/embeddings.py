@@ -25,11 +25,13 @@ _EMBEDDING_MODEL = "text-embedding-3-small"
 _EMBEDDING_DIMENSIONS = 1536
 _BATCH_SIZE = 20
 
+
 # Embedding config via settings (lazy import to avoid circular deps)
 def _get_embedding_config() -> tuple[str, str, int]:
     """Get embedding config from settings. Returns (api_key, model, dimensions)."""
     try:
         from src.config import get_settings
+
         settings = get_settings()
         return (
             settings.openai.api_key,
@@ -66,17 +68,13 @@ def chunk_text(text: str, max_chars: int = _MAX_CHUNK_CHARS) -> list[str]:
                         chunks.append(current_chunk.strip())
                     current_chunk = sentence
                 else:
-                    current_chunk = (
-                        f"{current_chunk} {sentence}" if current_chunk else sentence
-                    )
+                    current_chunk = f"{current_chunk} {sentence}" if current_chunk else sentence
         elif len(current_chunk) + len(para) + 2 > max_chars:
             if current_chunk:
                 chunks.append(current_chunk.strip())
             current_chunk = para
         else:
-            current_chunk = (
-                f"{current_chunk}\n\n{para}" if current_chunk else para
-            )
+            current_chunk = f"{current_chunk}\n\n{para}" if current_chunk else para
 
     if current_chunk.strip():
         chunks.append(current_chunk.strip())
@@ -205,7 +203,7 @@ async def process_article(
         )
 
         # Insert new embeddings
-        for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+        for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings, strict=False)):
             embedding_str = "[" + ",".join(str(v) for v in embedding) + "]"
             await conn.execute(
                 "INSERT INTO knowledge_embeddings "

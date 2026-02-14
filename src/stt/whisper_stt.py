@@ -13,10 +13,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import AsyncIterator
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from src.stt.base import STTConfig, Transcript
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +61,7 @@ class WhisperSTTEngine:
             return
 
         try:
-            from faster_whisper import WhisperModel
+            from faster_whisper import WhisperModel  # type: ignore[import-not-found]
 
             logger.info(
                 "Loading Whisper model: %s on %s (%s)",
@@ -66,7 +69,7 @@ class WhisperSTTEngine:
                 self._config.device,
                 self._config.compute_type,
             )
-            self._model = await asyncio.to_thread(
+            self._model = await asyncio.to_thread(  # type: ignore[func-returns-value]
                 WhisperModel,
                 self._config.model_size,
                 device=self._config.device,
@@ -74,10 +77,7 @@ class WhisperSTTEngine:
             )
             logger.info("Whisper model loaded successfully")
         except ImportError:
-            logger.error(
-                "faster-whisper not installed. "
-                "Install with: pip install faster-whisper"
-            )
+            logger.error("faster-whisper not installed. Install with: pip install faster-whisper")
             raise
 
     async def start_stream(self, config: STTConfig) -> None:
@@ -104,7 +104,6 @@ class WhisperSTTEngine:
             return
 
         import io
-        import struct
         import wave
 
         # Convert raw PCM to WAV in memory
@@ -166,11 +165,9 @@ class WhisperSTTEngine:
         """Yield transcripts as they become available."""
         while self._is_streaming or not self._transcripts.empty():
             try:
-                transcript = await asyncio.wait_for(
-                    self._transcripts.get(), timeout=0.1
-                )
+                transcript = await asyncio.wait_for(self._transcripts.get(), timeout=0.1)
                 yield transcript
-            except asyncio.TimeoutError:
+            except TimeoutError:
                 if not self._is_streaming:
                     break
 

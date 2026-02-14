@@ -20,7 +20,7 @@ from src.tasks.celery_app import app
 logger = logging.getLogger(__name__)
 
 
-@app.task(name="src.tasks.daily_stats.calculate_daily_stats")
+@app.task(name="src.tasks.daily_stats.calculate_daily_stats")  # type: ignore[untyped-decorator]
 def calculate_daily_stats(target_date: str | None = None) -> dict[str, Any]:
     """Calculate and store daily aggregated statistics.
 
@@ -30,9 +30,7 @@ def calculate_daily_stats(target_date: str | None = None) -> dict[str, Any]:
     """
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(
-        _calculate_daily_stats_async(target_date)
-    )
+    return asyncio.get_event_loop().run_until_complete(_calculate_daily_stats_async(target_date))
 
 
 async def _calculate_daily_stats_async(target_date: str | None = None) -> dict[str, Any]:
@@ -40,9 +38,7 @@ async def _calculate_daily_stats_async(target_date: str | None = None) -> dict[s
     settings = get_settings()
     engine = create_async_engine(settings.database.url)
 
-    stat_date = (
-        date.fromisoformat(target_date) if target_date else date.today() - timedelta(days=1)
-    )
+    stat_date = date.fromisoformat(target_date) if target_date else date.today() - timedelta(days=1)
 
     try:
         async with engine.begin() as conn:
@@ -61,7 +57,11 @@ async def _calculate_daily_stats_async(target_date: str | None = None) -> dict[s
                 """),
                 {"stat_date": stat_date.isoformat()},
             )
-            stats = dict(result.first()._mapping)
+            stats_row = result.first()
+            if stats_row is None:
+                msg = "Expected row from aggregate query"
+                raise RuntimeError(msg)
+            stats = dict(stats_row._mapping)
 
             # Scenario breakdown
             scenario_result = await conn.execute(
@@ -74,9 +74,7 @@ async def _calculate_daily_stats_async(target_date: str | None = None) -> dict[s
                 """),
                 {"stat_date": stat_date.isoformat()},
             )
-            scenario_breakdown = {
-                row.scenario: row.count for row in scenario_result
-            }
+            scenario_breakdown = {row.scenario: row.count for row in scenario_result}
 
             # Transfer reasons breakdown
             transfer_result = await conn.execute(
@@ -90,9 +88,7 @@ async def _calculate_daily_stats_async(target_date: str | None = None) -> dict[s
                 """),
                 {"stat_date": stat_date.isoformat()},
             )
-            transfer_reasons = {
-                row.transfer_reason: row.count for row in transfer_result
-            }
+            transfer_reasons = {row.transfer_reason: row.count for row in transfer_result}
 
             # Hourly distribution
             hourly_result = await conn.execute(
@@ -105,9 +101,7 @@ async def _calculate_daily_stats_async(target_date: str | None = None) -> dict[s
                 """),
                 {"stat_date": stat_date.isoformat()},
             )
-            hourly_distribution = {
-                str(int(row.hour)): row.count for row in hourly_result
-            }
+            hourly_distribution = {str(int(row.hour)): row.count for row in hourly_result}
 
             # Upsert into daily_stats
             await conn.execute(

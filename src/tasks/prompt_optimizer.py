@@ -50,7 +50,7 @@ FAILED CALL TRANSCRIPTIONS:
 """
 
 
-@app.task(name="src.tasks.prompt_optimizer.analyze_failed_calls")
+@app.task(name="src.tasks.prompt_optimizer.analyze_failed_calls")  # type: ignore[untyped-decorator]
 def analyze_failed_calls(days: int = 7, max_calls: int = 20) -> dict[str, Any]:
     """Analyze recent low-quality calls and suggest prompt improvements.
 
@@ -60,9 +60,7 @@ def analyze_failed_calls(days: int = 7, max_calls: int = 20) -> dict[str, Any]:
     """
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(
-        _analyze_failed_calls_async(days, max_calls)
-    )
+    return asyncio.get_event_loop().run_until_complete(_analyze_failed_calls_async(days, max_calls))
 
 
 async def _analyze_failed_calls_async(days: int, max_calls: int) -> dict[str, Any]:
@@ -131,7 +129,8 @@ async def _analyze_failed_calls_async(days: int, max_calls: int) -> dict[str, An
             ],
         )
 
-        response_text = response.content[0].text.strip()
+        content_block = response.content[0]
+        response_text = content_block.text.strip() if hasattr(content_block, "text") else ""
         if response_text.startswith("```"):
             response_text = response_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
 
@@ -143,7 +142,8 @@ async def _analyze_failed_calls_async(days: int, max_calls: int) -> dict[str, An
             len(analysis.get("patterns", [])),
         )
 
-        return analysis
+        analysis_result: dict[str, Any] = analysis
+        return analysis_result
 
     except json.JSONDecodeError:
         logger.exception("Failed to parse optimization analysis response")

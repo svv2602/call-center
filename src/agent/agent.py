@@ -7,13 +7,15 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import anthropic
 
 from src.agent.prompts import PROMPT_VERSION, SYSTEM_PROMPT
 from src.agent.tools import ALL_TOOLS
-from src.logging.pii_vault import PIIVault
+
+if TYPE_CHECKING:
+    from src.logging.pii_vault import PIIVault
 
 logger = logging.getLogger(__name__)
 
@@ -110,8 +112,7 @@ class LLMAgent:
         if len(conversation_history) > MAX_HISTORY_MESSAGES:
             # Keep first message (context) + recent messages
             conversation_history[:] = (
-                conversation_history[:1]
-                + conversation_history[-(MAX_HISTORY_MESSAGES - 1) :]
+                conversation_history[:1] + conversation_history[-(MAX_HISTORY_MESSAGES - 1) :]
             )
 
         # Build system prompt with caller context (mask caller phone)
@@ -131,8 +132,8 @@ class LLMAgent:
                     model=self._model,
                     max_tokens=300,
                     system=system,
-                    tools=ALL_TOOLS,
-                    messages=conversation_history,
+                    tools=ALL_TOOLS,  # type: ignore[arg-type]
+                    messages=conversation_history,  # type: ignore[arg-type]
                 )
             except anthropic.APIStatusError as exc:
                 logger.error("Claude API error: %s", exc)
@@ -154,9 +155,7 @@ class LLMAgent:
             for block in response.content:
                 if block.type == "text":
                     response_text += block.text
-                    assistant_content.append(
-                        {"type": "text", "text": block.text}
-                    )
+                    assistant_content.append({"type": "text", "text": block.text})
                 elif block.type == "tool_use":
                     tool_uses.append(
                         {
@@ -175,9 +174,7 @@ class LLMAgent:
                     )
 
             # Add assistant response to history
-            conversation_history.append(
-                {"role": "assistant", "content": assistant_content}
-            )
+            conversation_history.append({"role": "assistant", "content": assistant_content})
 
             # If no tool calls, we're done
             if not tool_uses:
@@ -191,9 +188,7 @@ class LLMAgent:
                 if self._pii_vault is not None:
                     args = self._pii_vault.restore_in_args(args)
 
-                result = await self._tool_router.execute(
-                    tool_use["name"], args
-                )
+                result = await self._tool_router.execute(tool_use["name"], args)
 
                 # Mask PII in tool results before adding to LLM history
                 content = str(result)
@@ -209,9 +204,7 @@ class LLMAgent:
                 )
                 tool_call_count += 1
 
-            conversation_history.append(
-                {"role": "user", "content": tool_results}
-            )
+            conversation_history.append({"role": "user", "content": tool_results})
 
             # If we hit the tool call limit, break
             if tool_call_count >= MAX_TOOL_CALLS_PER_TURN:

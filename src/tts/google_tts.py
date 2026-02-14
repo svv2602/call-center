@@ -5,11 +5,14 @@ from __future__ import annotations
 import hashlib
 import logging
 import re
-from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 from google.cloud import texttospeech_v1 as texttospeech
 
 from src.tts.base import TTSConfig
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
 

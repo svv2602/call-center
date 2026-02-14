@@ -8,26 +8,24 @@ import sys
 import aiohttp
 import uvicorn
 from fastapi import FastAPI
+from fastapi.responses import FileResponse, Response
 from redis.asyncio import Redis
 
-from fastapi.responses import FileResponse, Response
-from fastapi.staticfiles import StaticFiles
-
 from src.agent.agent import LLMAgent, ToolRouter
-from src.logging.pii_vault import PIIVault
 from src.api.analytics import router as analytics_router
 from src.api.auth import router as auth_router
 from src.api.knowledge import router as knowledge_router
 from src.api.prompts import router as prompts_router
 from src.config import Settings, get_settings
-from src.core.audio_socket import AudioSocketConnection, AudioSocketServer, PacketType
+from src.core.audio_socket import AudioSocketConnection, AudioSocketServer
 from src.core.call_session import CallSession, CallState, SessionStore
 from src.core.pipeline import CallPipeline
+from src.logging.pii_vault import PIIVault
 from src.logging.structured_logger import setup_logging
 from src.monitoring.metrics import active_calls, calls_total, get_metrics
+from src.store_client.client import StoreClient
 from src.stt.base import STTConfig
 from src.stt.google_stt import GoogleSTTEngine
-from src.store_client.client import StoreClient
 from src.tts.google_tts import GoogleTTSEngine
 
 logger = logging.getLogger(__name__)
@@ -48,9 +46,10 @@ async def admin_ui() -> FileResponse:
     """Serve the admin UI."""
     return FileResponse("admin-ui/index.html")
 
+
 # Module-level references for health checks and shared components
 _audio_server: AudioSocketServer | None = None
-_redis: Redis | None = None  # type: ignore[type-arg]
+_redis: Redis | None = None
 _store_client: StoreClient | None = None
 _tts_engine: GoogleTTSEngine | None = None
 
@@ -113,6 +112,7 @@ async def readiness_check() -> dict[str, object]:
     if settings.anthropic.api_key:
         try:
             import anthropic
+
             client = anthropic.AsyncAnthropic(api_key=settings.anthropic.api_key)
             await asyncio.wait_for(client.models.list(limit=1), timeout=3.0)
             checks["claude_api"] = "reachable"
@@ -123,10 +123,16 @@ async def readiness_check() -> dict[str, object]:
 
     # Google STT — check credentials file exists
     import os
-    creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
-    checks["google_stt"] = "credentials_present" if (creds_path and os.path.isfile(creds_path)) else "no_credentials"
 
-    all_ok = all(v in ("connected", "reachable", "initialized", "credentials_present") for v in checks.values())
+    creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+    checks["google_stt"] = (
+        "credentials_present" if (creds_path and os.path.isfile(creds_path)) else "no_credentials"
+    )
+
+    all_ok = all(
+        v in ("connected", "reachable", "initialized", "credentials_present")
+        for v in checks.values()
+    )
 
     return {
         "status": "ready" if all_ok else "not_ready",
@@ -175,6 +181,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         )
 
         # Run the pipeline (greeting → listen → STT → LLM → TTS loop)
+        assert _tts_engine is not None, "TTS engine must be initialized before handling calls"
         pipeline = CallPipeline(conn, stt, _tts_engine, agent, session, stt_config)
         await pipeline.run()
 
@@ -191,9 +198,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         await store.delete(conn.channel_uuid)
 
     active_calls.dec()
-    calls_total.labels(
-        status="transferred" if session.transferred else "completed"
-    ).inc()
+    calls_total.labels(status="transferred" if session.transferred else "completed").inc()
 
     logger.info(
         "Call ended: %s, duration=%ds, turns=%d",

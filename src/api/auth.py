@@ -13,7 +13,7 @@ import time
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from src.config import get_settings
@@ -71,7 +71,8 @@ def verify_jwt(token: str, secret: str) -> dict[str, Any]:
         msg = "Token expired"
         raise ValueError(msg)
 
-    return payload
+    result: dict[str, Any] = payload
+    return result
 
 
 async def require_admin(request: Request) -> dict[str, Any]:
@@ -96,10 +97,7 @@ async def login(request: LoginRequest) -> dict[str, Any]:
     """Authenticate admin user and return JWT token."""
     settings = get_settings()
 
-    if (
-        request.username != settings.admin.username
-        or request.password != settings.admin.password
-    ):
+    if request.username != settings.admin.username or request.password != settings.admin.password:
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = create_jwt(

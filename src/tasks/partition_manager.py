@@ -41,16 +41,13 @@ def _months_range(start: date, count: int) -> list[tuple[date, date]]:
     for _ in range(count):
         year = current.year
         month = current.month
-        if month == 12:
-            next_month = date(year + 1, 1, 1)
-        else:
-            next_month = date(year, month + 1, 1)
+        next_month = date(year + 1, 1, 1) if month == 12 else date(year, month + 1, 1)
         result.append((current, next_month))
         current = next_month
     return result
 
 
-@app.task(name="src.tasks.partition_manager.ensure_partitions")
+@app.task(name="src.tasks.partition_manager.ensure_partitions")  # type: ignore[untyped-decorator]
 def ensure_partitions() -> dict[str, Any]:
     """Create future partitions and drop expired ones.
 

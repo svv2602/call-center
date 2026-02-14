@@ -6,8 +6,7 @@ CRUD for prompt versions and A/B test management.
 from __future__ import annotations
 
 import logging
-from typing import Any
-from uuid import UUID
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -16,6 +15,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from src.agent.ab_testing import ABTestManager
 from src.agent.prompt_manager import PromptManager
 from src.config import get_settings
+
+if TYPE_CHECKING:
+    from uuid import UUID
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/prompts", tags=["prompts"])

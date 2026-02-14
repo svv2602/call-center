@@ -3,14 +3,18 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 import time
-from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
 from google.cloud.speech_v2 import SpeechAsyncClient
 from google.cloud.speech_v2.types import cloud_speech
 
 from src.stt.base import STTConfig, Transcript
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 logger = logging.getLogger(__name__)
 
@@ -67,10 +71,8 @@ class GoogleSTTEngine:
         """Yield transcripts as they become available."""
         while self._running or not self._transcript_queue.empty():
             try:
-                transcript = await asyncio.wait_for(
-                    self._transcript_queue.get(), timeout=0.1
-                )
-            except asyncio.TimeoutError:
+                transcript = await asyncio.wait_for(self._transcript_queue.get(), timeout=0.1)
+            except TimeoutError:
                 continue
 
             if transcript is None:
@@ -88,10 +90,8 @@ class GoogleSTTEngine:
 
         if self._stream_task is not None:
             self._stream_task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await self._stream_task
-            except asyncio.CancelledError:
-                pass
             self._stream_task = None
 
         if self._client is not None:
@@ -108,7 +108,7 @@ class GoogleSTTEngine:
         if self._stream_task is not None:
             try:
                 await asyncio.wait_for(self._stream_task, timeout=2.0)
-            except (asyncio.TimeoutError, asyncio.CancelledError):
+            except (TimeoutError, asyncio.CancelledError):
                 self._stream_task.cancel()
 
         # Start new stream
@@ -123,8 +123,7 @@ class GoogleSTTEngine:
 
         recognition_config = cloud_speech.RecognitionConfig(
             auto_decoding_config=cloud_speech.AutoDetectDecodingConfig(),
-            language_codes=[self._config.language_code]
-            + self._config.alternative_languages,
+            language_codes=[self._config.language_code, *self._config.alternative_languages],
             model=self._config.model,
             features=cloud_speech.RecognitionFeatures(
                 enable_automatic_punctuation=self._config.enable_punctuation,
@@ -140,9 +139,7 @@ class GoogleSTTEngine:
 
         try:
             # Build request generator
-            async def request_generator() -> AsyncIterator[
-                cloud_speech.StreamingRecognizeRequest
-            ]:
+            async def request_generator() -> AsyncIterator[cloud_speech.StreamingRecognizeRequest]:
                 # First request: config only
                 yield cloud_speech.StreamingRecognizeRequest(
                     streaming_config=streaming_config,
@@ -171,9 +168,7 @@ class GoogleSTTEngine:
 
                     best = result.alternatives[0]
                     language = (
-                        result.language_code
-                        if result.language_code
-                        else self._config.language_code
+                        result.language_code if result.language_code else self._config.language_code
                     )
 
                     transcript = Transcript(

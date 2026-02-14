@@ -14,8 +14,10 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
 
-from redis.asyncio import Redis
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,7 @@ SILENCE_TIMEOUT_SEC = 10
 MAX_TIMEOUTS_BEFORE_HANGUP = 2
 
 
-class CallState(str, enum.Enum):
+class CallState(enum.StrEnum):
     """States of a call session."""
 
     CONNECTED = "connected"
@@ -87,9 +89,7 @@ class CallSession:
             return
         old = self.state
         self.state = new_state
-        logger.debug(
-            "Call %s: %s → %s", self.channel_uuid, old.value, new_state.value
-        )
+        logger.debug("Call %s: %s → %s", self.channel_uuid, old.value, new_state.value)
 
     def add_user_turn(
         self,
@@ -112,9 +112,7 @@ class CallSession:
 
     def add_assistant_turn(self, content: str) -> None:
         """Record an assistant (bot) response."""
-        self.dialog_history.append(
-            DialogTurn(speaker="assistant", content=content)
-        )
+        self.dialog_history.append(DialogTurn(speaker="assistant", content=content))
 
     def record_timeout(self) -> bool:
         """Record a silence timeout. Returns True if call should be ended."""
@@ -130,10 +128,7 @@ class CallSession:
     @property
     def messages_for_llm(self) -> list[dict[str, str]]:
         """Return dialog history formatted for the Claude API."""
-        return [
-            {"role": turn.speaker, "content": turn.content}
-            for turn in self.dialog_history
-        ]
+        return [{"role": turn.speaker, "content": turn.content} for turn in self.dialog_history]
 
     @property
     def duration_seconds(self) -> int:
@@ -205,7 +200,12 @@ class CallSession:
 _VALID_TRANSITIONS: dict[CallState, set[CallState]] = {
     CallState.CONNECTED: {CallState.GREETING, CallState.ENDED},
     CallState.GREETING: {CallState.LISTENING, CallState.ENDED},
-    CallState.LISTENING: {CallState.PROCESSING, CallState.SPEAKING, CallState.TRANSFERRING, CallState.ENDED},
+    CallState.LISTENING: {
+        CallState.PROCESSING,
+        CallState.SPEAKING,
+        CallState.TRANSFERRING,
+        CallState.ENDED,
+    },
     CallState.PROCESSING: {CallState.SPEAKING, CallState.TRANSFERRING, CallState.ENDED},
     CallState.SPEAKING: {CallState.LISTENING, CallState.PROCESSING, CallState.ENDED},
     CallState.TRANSFERRING: {CallState.ENDED},
@@ -219,7 +219,7 @@ class SessionStore:
     TTL: 1800 seconds (renewed on each save).
     """
 
-    def __init__(self, redis: Redis) -> None:  # type: ignore[type-arg]
+    def __init__(self, redis: Redis) -> None:
         self._redis = redis
 
     async def save(self, session: CallSession) -> None:
