@@ -36,6 +36,10 @@ redisdata/
 # Logs
 *.log
 
+# Admin UI (Vite)
+admin-ui/node_modules/
+admin-ui/dist/
+
 # Agent skills (installed via `npx skills add`)
 .agents/
 .claude/skills/

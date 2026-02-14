@@ -1,3 +1,12 @@
+# ---- Admin UI build stage ----
+FROM node:20-slim AS ui-builder
+
+WORKDIR /ui
+COPY admin-ui/package.json admin-ui/package-lock.json* ./
+RUN npm ci --ignore-scripts
+COPY admin-ui/ ./
+RUN npm run build
+
 # ---- Builder stage ----
 FROM python:3.12-slim AS builder
 
@@ -38,7 +47,7 @@ COPY migrations/ ./migrations/
 COPY alembic.ini ./
 COPY asterisk/ ./asterisk/
 COPY knowledge_base/ ./knowledge_base/
-COPY admin-ui/ ./admin-ui/
+COPY --from=ui-builder /ui/dist/ ./admin-ui/dist/
 
 # Install the package itself (src/) — metadata only, deps already in venv
 COPY pyproject.toml ./

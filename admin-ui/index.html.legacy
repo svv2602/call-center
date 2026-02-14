@@ -1,0 +1,1479 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Call Center AI — Admin</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
+        .login-container { display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .login-form { background: #fff; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.1); width: 320px; }
+        .login-form h1 { font-size: 1.2rem; margin-bottom: 1.5rem; text-align: center; }
+        .login-form input { width: 100%; padding: .6rem; margin-bottom: .8rem; border: 1px solid #ddd; border-radius: 4px; font-size: .9rem; }
+        .login-form button { width: 100%; padding: .6rem; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: .9rem; }
+        .login-form button:hover { background: #1d4ed8; }
+        .login-form .error { color: #dc2626; font-size: .8rem; margin-bottom: .5rem; display: none; }
+
+        .app { display: none; }
+        .sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 220px; background: #1e293b; color: #e2e8f0; padding: 1rem 0; }
+        .sidebar h2 { font-size: 1rem; padding: .5rem 1rem; margin-bottom: 1rem; border-bottom: 1px solid #334155; }
+        .sidebar a { display: block; padding: .5rem 1rem; color: #94a3b8; text-decoration: none; font-size: .85rem; }
+        .sidebar a:hover, .sidebar a.active { color: #fff; background: #334155; }
+        .sidebar .logout { position: absolute; bottom: 1rem; left: 1rem; color: #ef4444; cursor: pointer; font-size: .8rem; }
+
+        .main { margin-left: 220px; padding: 1.5rem; }
+        .main h1 { font-size: 1.3rem; margin-bottom: 1rem; }
+
+        .card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.1); padding: 1.2rem; margin-bottom: 1rem; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+        .stat-card { text-align: center; }
+        .stat-card .value { font-size: 1.8rem; font-weight: 700; color: #2563eb; }
+        .stat-card .label { font-size: .75rem; color: #64748b; margin-top: .3rem; }
+
+        table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+        th, td { padding: .5rem .8rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
+        th { background: #f8fafc; font-weight: 600; color: #475569; }
+        tr:hover { background: #f8fafc; }
+
+        .badge { display: inline-block; padding: .15rem .5rem; border-radius: 12px; font-size: .75rem; font-weight: 500; }
+        .badge-green { background: #dcfce7; color: #166534; }
+        .badge-yellow { background: #fef9c3; color: #854d0e; }
+        .badge-red { background: #fecaca; color: #991b1b; }
+        .badge-blue { background: #dbeafe; color: #1e40af; }
+        .badge-gray { background: #e5e7eb; color: #374151; }
+
+        .filters { display: flex; gap: .8rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
+        .filters input, .filters select { padding: .4rem .6rem; border: 1px solid #d1d5db; border-radius: 4px; font-size: .85rem; }
+        .filters button { padding: .4rem 1rem; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: .85rem; }
+
+        .pagination { display: flex; gap: .5rem; margin-top: 1rem; justify-content: center; }
+        .pagination button { padding: .3rem .8rem; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; cursor: pointer; }
+        .pagination button.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 100; justify-content: center; align-items: center; }
+        .modal-overlay.show { display: flex; }
+        .modal { background: #fff; border-radius: 8px; padding: 1.5rem; max-width: 700px; width: 90%; max-height: 80vh; overflow-y: auto; }
+        .modal h2 { margin-bottom: 1rem; font-size: 1.1rem; }
+        .modal .close { float: right; cursor: pointer; font-size: 1.2rem; color: #64748b; }
+
+        .turn { padding: .4rem 0; border-bottom: 1px solid #f1f5f9; }
+        .turn .speaker { font-weight: 600; font-size: .8rem; }
+        .turn .speaker.customer { color: #2563eb; }
+        .turn .speaker.bot { color: #059669; }
+        .turn .text { font-size: .85rem; margin-top: .2rem; }
+
+        .grafana-frame { width: 100%; height: 600px; border: none; border-radius: 8px; }
+
+        .tab-bar { display: flex; gap: 0; margin-bottom: 1rem; border-bottom: 2px solid #e5e7eb; }
+        .tab-bar button { padding: .5rem 1rem; border: none; background: none; cursor: pointer; font-size: .85rem; color: #64748b; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+        .tab-bar button.active { color: #2563eb; border-bottom-color: #2563eb; }
+
+        .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid #e5e7eb; border-top-color: #2563eb; border-radius: 50%; animation: spin .6s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-overlay { text-align: center; padding: 2rem; color: #64748b; }
+
+        .toast-container { position: fixed; top: 1rem; right: 1rem; z-index: 200; display: flex; flex-direction: column; gap: .5rem; }
+        .toast { padding: .6rem 1rem; border-radius: 6px; font-size: .85rem; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.2); animation: slideIn .3s ease; }
+        .toast-success { background: #059669; }
+        .toast-error { background: #dc2626; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+        .btn { padding: .4rem 1rem; border: none; border-radius: 4px; cursor: pointer; font-size: .85rem; }
+        .btn-primary { background: #2563eb; color: #fff; }
+        .btn-primary:hover { background: #1d4ed8; }
+        .btn-danger { background: #dc2626; color: #fff; }
+        .btn-danger:hover { background: #b91c1c; }
+        .btn-sm { padding: .2rem .5rem; font-size: .75rem; }
+
+        .form-group { margin-bottom: .8rem; }
+        .form-group label { display: block; font-size: .8rem; font-weight: 600; color: #475569; margin-bottom: .3rem; }
+        .form-group input, .form-group textarea, .form-group select { width: 100%; padding: .5rem; border: 1px solid #d1d5db; border-radius: 4px; font-size: .85rem; }
+        .form-group textarea { min-height: 120px; font-family: monospace; resize: vertical; }
+
+        .empty-state { text-align: center; padding: 2rem; color: #94a3b8; }
+
+        .breadcrumbs { font-size: .8rem; color: #64748b; margin-bottom: .8rem; }
+        .breadcrumbs a { color: #2563eb; text-decoration: none; }
+
+        /* WebSocket status indicator */
+        .ws-status { display: flex; align-items: center; gap: .4rem; padding: .4rem 1rem; font-size: .75rem; color: #94a3b8; }
+        .ws-dot { width: 8px; height: 8px; border-radius: 50%; }
+        .ws-dot.connected { background: #22c55e; }
+        .ws-dot.reconnecting { background: #eab308; }
+        .ws-dot.disconnected { background: #ef4444; }
+
+        /* Hamburger menu button (hidden on desktop) */
+        .hamburger { display: none; position: fixed; top: .8rem; left: .8rem; z-index: 50; background: #1e293b; color: #fff; border: none; border-radius: 4px; padding: .4rem .6rem; cursor: pointer; font-size: 1.2rem; }
+
+        /* --- Mobile responsiveness --- */
+        @media (max-width: 768px) {
+            .hamburger { display: block; }
+            .sidebar { transform: translateX(-100%); transition: transform .3s ease; z-index: 40; }
+            .sidebar.open { transform: translateX(0); }
+            .main { margin-left: 0; padding: 1rem; }
+            .stats-grid { grid-template-columns: repeat(2, 1fr); }
+            .filters { flex-direction: column; }
+            .filters input, .filters select, .filters button { width: 100%; }
+            .modal { max-width: 95%; width: 95%; }
+            table { display: block; overflow-x: auto; white-space: nowrap; }
+            .grafana-frame { height: 350px; }
+            .btn, .btn-primary, .btn-danger { min-height: 44px; min-width: 44px; }
+            .pagination button { min-height: 44px; min-width: 44px; }
+        }
+
+        @media (max-width: 480px) {
+            .stats-grid { grid-template-columns: 1fr; }
+            .stat-card .value { font-size: 1.4rem; }
+            .main h1 { font-size: 1.1rem; }
+            .sidebar { width: 260px; }
+            th, td { padding: .4rem .5rem; font-size: .8rem; }
+        }
+    </style>
+</head>
+<body>
+    <div class="toast-container" id="toastContainer"></div>
+
+    <!-- Login -->
+    <div class="login-container" id="loginContainer">
+        <div class="login-form">
+            <h1>Call Center AI</h1>
+            <div class="error" id="loginError">Invalid credentials</div>
+            <input type="text" id="loginUsername" placeholder="Username">
+            <input type="password" id="loginPassword" placeholder="Password">
+            <button onclick="login()">Login</button>
+        </div>
+    </div>
+
+    <!-- App -->
+    <div class="app" id="app">
+        <button class="hamburger" id="hamburgerBtn" onclick="toggleSidebar()">&#9776;</button>
+        <nav class="sidebar" id="sidebar">
+            <h2>Call Center AI</h2>
+            <a href="#" onclick="showPage('dashboard')" class="active" data-page="dashboard">Dashboard</a>
+            <a href="#" onclick="showPage('calls')" data-page="calls">Call Journal</a>
+            <a href="#" onclick="showPage('prompts')" data-page="prompts">Prompts</a>
+            <a href="#" onclick="showPage('knowledge')" data-page="knowledge">Knowledge Base</a>
+            <a href="#" onclick="showPage('operators')" data-page="operators">Operators</a>
+            <a href="#" onclick="showPage('settings')" data-page="settings">System</a>
+            <a href="#" onclick="showPage('users')" data-page="users" class="admin-only">Users</a>
+            <a href="#" onclick="showPage('audit')" data-page="audit" class="admin-only">Audit Log</a>
+            <div class="ws-status" id="wsStatus">
+                <span class="ws-dot disconnected" id="wsDot"></span>
+                <span id="wsLabel">Offline</span>
+            </div>
+            <span class="logout" onclick="logout()">Logout</span>
+        </nav>
+
+        <div class="main">
+            <!-- Dashboard -->
+            <div id="page-dashboard">
+                <div class="breadcrumbs"><a href="#" onclick="showPage('dashboard')">Home</a> / Dashboard</div>
+                <h1>Dashboard</h1>
+                <div class="stats-grid" id="dashboardStats"><div class="loading-overlay"><div class="spinner"></div></div></div>
+                <div style="margin-bottom:1rem">
+                    <button class="btn" style="background:#059669;color:#fff" onclick="exportStatsCSV()">Export Stats CSV</button>
+                    <button class="btn" style="background:#7c3aed;color:#fff;margin-left:.5rem" onclick="downloadPdfReport()">Download PDF</button>
+                </div>
+                <div class="card">
+                    <h3>Grafana Real-time</h3>
+                    <iframe class="grafana-frame" id="grafanaFrame" src=""></iframe>
+                </div>
+            </div>
+
+            <!-- Calls -->
+            <div id="page-calls" style="display:none">
+                <div class="breadcrumbs"><a href="#" onclick="showPage('dashboard')">Home</a> / Call Journal</div>
+                <h1>Call Journal</h1>
+                <div class="filters">
+                    <input type="date" id="filterDateFrom" placeholder="From">
+                    <input type="date" id="filterDateTo" placeholder="To">
+                    <select id="filterScenario">
+                        <option value="">All scenarios</option>
+                        <option value="tire_search">Tire search</option>
+                        <option value="availability">Availability</option>
+                        <option value="order">Order</option>
+                        <option value="fitting">Fitting</option>
+                        <option value="consultation">Consultation</option>
+                    </select>
+                    <select id="filterTransferred">
+                        <option value="">All</option>
+                        <option value="true">Transferred</option>
+                        <option value="false">Resolved by bot</option>
+                    </select>
+                    <input type="text" id="filterSearch" placeholder="Search transcription...">
+                    <input type="number" id="filterQualityBelow" placeholder="Quality below" step="0.1" min="0" max="1">
+                    <button onclick="loadCalls()">Filter</button>
+                    <button class="btn" style="background:#059669;color:#fff" onclick="exportCallsCSV()">Export CSV</button>
+                </div>
+                <div class="card">
+                    <div id="callsLoading" class="loading-overlay" style="display:none"><div class="spinner"></div></div>
+                    <table id="callsTable">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Caller</th>
+                                <th>Scenario</th>
+                                <th>Duration</th>
+                                <th>Quality</th>
+                                <th>Cost</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="pagination" id="callsPagination"></div>
+                </div>
+            </div>
+
+            <!-- Prompts -->
+            <div id="page-prompts" style="display:none">
+                <div class="breadcrumbs"><a href="#" onclick="showPage('dashboard')">Home</a> / Prompts</div>
+                <h1>Prompt Management</h1>
+                <div class="tab-bar">
+                    <button class="active" onclick="showPromptTab('versions', this)">Versions</button>
+                    <button onclick="showPromptTab('abtests', this)">A/B Tests</button>
+                </div>
+                <div id="promptVersions" class="card"></div>
+                <div id="promptABTests" class="card" style="display:none"></div>
+            </div>
+
+            <!-- Knowledge -->
+            <div id="page-knowledge" style="display:none">
+                <div class="breadcrumbs"><a href="#" onclick="showPage('dashboard')">Home</a> / Knowledge Base</div>
+                <h1>Knowledge Base</h1>
+                <div class="filters">
+                    <select id="kbCategory">
+                        <option value="">All categories</option>
+                        <option value="brands">Brands</option>
+                        <option value="guides">Guides</option>
+                        <option value="faq">FAQ</option>
+                        <option value="comparisons">Comparisons</option>
+                    </select>
+                    <input type="text" id="kbSearch" placeholder="Search...">
+                    <button onclick="loadArticles()">Filter</button>
+                    <button class="btn btn-primary" onclick="showCreateArticle()">+ New Article</button>
+                </div>
+                <div class="card" id="articlesContainer"></div>
+            </div>
+
+            <!-- Operators -->
+            <div id="page-operators" style="display:none">
+                <div class="breadcrumbs"><a href="#" onclick="showPage('dashboard')">Home</a> / Operators</div>
+                <h1>Operators</h1>
+                <div class="stats-grid" id="operatorQueueStats"></div>
+                <div class="filters">
+                    <button class="btn btn-primary" onclick="showCreateOperator()">+ New Operator</button>
+                </div>
+                <div class="card">
+                    <div id="operatorsLoading" class="loading-overlay" style="display:none"><div class="spinner"></div></div>
+                    <table id="operatorsTable">
+                        <thead>
+                            <tr>
+                                <th>Name</th>
+                                <th>Extension</th>
+                                <th>Status</th>
+                                <th>Skills</th>
+                                <th>Shift</th>
+                                <th>Active</th>
+                                <th>Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- System -->
+            <div id="page-settings" style="display:none">
+                <div class="breadcrumbs"><a href="#" onclick="showPage('dashboard')">Home</a> / System</div>
+                <h1>System Status</h1>
+                <div class="card">
+                    <h3>Health Check</h3>
+                    <div id="systemInfo"><div class="loading-overlay"><div class="spinner"></div></div></div>
+                    <button class="btn btn-primary" onclick="loadSettings()" style="margin-top:.8rem">Refresh</button>
+                </div>
+                <div class="card admin-only">
+                    <h3>Extended Status</h3>
+                    <div id="extendedStatus"><div class="empty-state">Click to load</div></div>
+                    <button class="btn btn-primary" onclick="loadSystemStatus()" style="margin-top:.8rem">Load Status</button>
+                </div>
+                <div class="card admin-only">
+                    <h3>Configuration</h3>
+                    <p style="margin:.5rem 0; font-size:.85rem">Reload safe config parameters (quality, feature flags, logging) without restart.</p>
+                    <button class="btn btn-primary" onclick="reloadConfig()">Reload Config</button>
+                </div>
+                <div class="card">
+                    <h3>External Tools</h3>
+                    <table>
+                        <tr><td>Grafana</td><td><a href="http://localhost:3000" target="_blank">Open Grafana</a></td></tr>
+                        <tr><td>Prometheus</td><td><a href="http://localhost:9090" target="_blank">Open Prometheus</a></td></tr>
+                        <tr><td>Flower (Celery)</td><td><a href="http://localhost:5555" target="_blank">Open Flower</a></td></tr>
+                    </table>
+                </div>
+                <div class="card">
+                    <h3>Application Info</h3>
+                    <table>
+                        <tr><td>Version</td><td>v0.1.0</td></tr>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Users -->
+            <div id="page-users" style="display:none">
+                <div class="breadcrumbs"><a href="#" onclick="showPage('dashboard')">Home</a> / Users</div>
+                <h1>User Management</h1>
+                <div class="filters">
+                    <button class="btn btn-primary" onclick="showCreateUser()">+ New User</button>
+                </div>
+                <div class="card" id="usersContainer"><div class="loading-overlay"><div class="spinner"></div></div></div>
+            </div>
+
+            <!-- Audit Log -->
+            <div id="page-audit" style="display:none">
+                <div class="breadcrumbs"><a href="#" onclick="showPage('dashboard')">Home</a> / Audit Log</div>
+                <h1>Audit Log</h1>
+                <div class="filters">
+                    <input type="date" id="auditDateFrom" placeholder="From">
+                    <input type="date" id="auditDateTo" placeholder="To">
+                    <select id="auditAction">
+                        <option value="">All actions</option>
+                        <option value="POST">POST</option>
+                        <option value="PATCH">PATCH</option>
+                        <option value="DELETE">DELETE</option>
+                    </select>
+                    <button onclick="loadAuditLog()">Filter</button>
+                </div>
+                <div class="card" id="auditContainer"><div class="loading-overlay"><div class="spinner"></div></div></div>
+                <div class="pagination" id="auditPagination"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Create User Modal -->
+    <div class="modal-overlay" id="createUserModal">
+        <div class="modal">
+            <span class="close" onclick="closeModal('createUserModal')">&times;</span>
+            <h2>Create New User</h2>
+            <div class="form-group">
+                <label>Username</label>
+                <input type="text" id="newUsername" placeholder="username">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="newPassword" placeholder="password">
+            </div>
+            <div class="form-group">
+                <label>Role</label>
+                <select id="newRole">
+                    <option value="operator">Operator</option>
+                    <option value="analyst">Analyst</option>
+                    <option value="admin">Admin</option>
+                </select>
+            </div>
+            <button class="btn btn-primary" onclick="createUser()">Create</button>
+        </div>
+    </div>
+
+    <!-- Call Detail Modal -->
+    <div class="modal-overlay" id="callModal">
+        <div class="modal">
+            <span class="close" onclick="closeCallModal()">&times;</span>
+            <h2>Call Details</h2>
+            <div id="callDetailContent"></div>
+        </div>
+    </div>
+
+    <!-- Create Prompt Modal -->
+    <div class="modal-overlay" id="createPromptModal">
+        <div class="modal">
+            <span class="close" onclick="closeModal('createPromptModal')">&times;</span>
+            <h2>Create New Prompt Version</h2>
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" id="promptName" placeholder="e.g. v2.0-improved-search">
+            </div>
+            <div class="form-group">
+                <label>System Prompt</label>
+                <textarea id="promptSystemPrompt" placeholder="Enter system prompt text..."></textarea>
+            </div>
+            <button class="btn btn-primary" onclick="createPrompt()">Create</button>
+        </div>
+    </div>
+
+    <!-- Create/Edit Article Modal -->
+    <div class="modal-overlay" id="createArticleModal">
+        <div class="modal">
+            <span class="close" onclick="closeModal('createArticleModal')">&times;</span>
+            <h2 id="articleModalTitle">New Article</h2>
+            <input type="hidden" id="editArticleId">
+            <div class="form-group">
+                <label>Title</label>
+                <input type="text" id="articleTitle" placeholder="Article title">
+            </div>
+            <div class="form-group">
+                <label>Category</label>
+                <select id="articleCategory">
+                    <option value="brands">Brands</option>
+                    <option value="guides">Guides</option>
+                    <option value="faq">FAQ</option>
+                    <option value="comparisons">Comparisons</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Content (Markdown)</label>
+                <textarea id="articleContent" placeholder="Article content in Markdown..."></textarea>
+            </div>
+            <button class="btn btn-primary" onclick="saveArticle()">Save</button>
+        </div>
+    </div>
+
+    <!-- Create/Edit Operator Modal -->
+    <div class="modal-overlay" id="operatorModal">
+        <div class="modal">
+            <span class="close" onclick="closeModal('operatorModal')">&times;</span>
+            <h2 id="operatorModalTitle">New Operator</h2>
+            <input type="hidden" id="editOperatorId">
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" id="operatorName" placeholder="Full name">
+            </div>
+            <div class="form-group">
+                <label>Extension (SIP)</label>
+                <input type="text" id="operatorExtension" placeholder="e.g. 101">
+            </div>
+            <div class="form-group">
+                <label>Skills (comma-separated)</label>
+                <input type="text" id="operatorSkills" placeholder="tires, orders, fitting">
+            </div>
+            <div class="form-group">
+                <label>Shift Start</label>
+                <input type="time" id="operatorShiftStart" value="09:00">
+            </div>
+            <div class="form-group">
+                <label>Shift End</label>
+                <input type="time" id="operatorShiftEnd" value="18:00">
+            </div>
+            <button class="btn btn-primary" onclick="saveOperator()">Save</button>
+        </div>
+    </div>
+
+    <script>
+        const API = '';
+        let token = localStorage.getItem('admin_token');
+        let dashboardRefreshTimer = null;
+
+        // --- Toast notifications ---
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 4000);
+        }
+
+        // --- API helper ---
+        async function api(path, opts = {}) {
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+            const res = await fetch(`${API}${path}`, { ...opts, headers });
+            if (res.status === 401) {
+                showToast('Session expired. Please login again.', 'error');
+                logout();
+                throw new Error('Unauthorized');
+            }
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.detail || `HTTP ${res.status}`);
+            }
+            return res.json();
+        }
+
+        // --- JWT expiry check ---
+        function checkTokenExpiry() {
+            if (!token) return;
+            try {
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                if (payload.exp && payload.exp < Date.now() / 1000) {
+                    showToast('Session expired. Please login again.', 'error');
+                    logout();
+                }
+            } catch { /* ignore parse errors */ }
+        }
+
+        // --- Auth ---
+        async function login() {
+            const u = document.getElementById('loginUsername').value;
+            const p = document.getElementById('loginPassword').value;
+            if (!u || !p) {
+                document.getElementById('loginError').textContent = 'Please enter username and password';
+                document.getElementById('loginError').style.display = 'block';
+                return;
+            }
+            try {
+                const data = await api('/auth/login', {
+                    method: 'POST',
+                    body: JSON.stringify({ username: u, password: p })
+                });
+                token = data.token;
+                localStorage.setItem('admin_token', token);
+                document.getElementById('loginContainer').style.display = 'none';
+                document.getElementById('app').style.display = 'block';
+                document.getElementById('loginError').style.display = 'none';
+                applyRoleVisibility();
+                connectWebSocket();
+                const savedPage = localStorage.getItem('admin_active_page') || 'dashboard';
+                showPage(savedPage);
+            } catch (e) {
+                document.getElementById('loginError').textContent = 'Invalid credentials';
+                document.getElementById('loginError').style.display = 'block';
+            }
+        }
+
+        function logout() {
+            token = null;
+            localStorage.removeItem('admin_token');
+            if (dashboardRefreshTimer) clearInterval(dashboardRefreshTimer);
+            if (ws) { ws.close(); ws = null; }
+            document.getElementById('app').style.display = 'none';
+            document.getElementById('loginContainer').style.display = 'flex';
+        }
+
+        // --- Navigation ---
+        function showPage(page) {
+            document.querySelectorAll('[id^="page-"]').forEach(el => el.style.display = 'none');
+            document.getElementById(`page-${page}`).style.display = 'block';
+            document.querySelectorAll('.sidebar a').forEach(a => a.classList.remove('active'));
+            const pageLink = document.querySelector(`[data-page="${page}"]`);
+            if (pageLink) pageLink.classList.add('active');
+
+            localStorage.setItem('admin_active_page', page);
+
+            if (dashboardRefreshTimer) { clearInterval(dashboardRefreshTimer); dashboardRefreshTimer = null; }
+
+            if (page === 'dashboard') { loadDashboard(); dashboardRefreshTimer = setInterval(loadDashboard, 30000); }
+            if (page === 'calls') loadCalls();
+            if (page === 'prompts') loadPromptVersions();
+            if (page === 'knowledge') loadArticles();
+            if (page === 'operators') { loadOperators(); loadQueueStatus(); dashboardRefreshTimer = setInterval(() => { loadOperators(); loadQueueStatus(); }, 10000); }
+            if (page === 'settings') loadSettings();
+            if (page === 'users') loadUsers();
+            if (page === 'audit') loadAuditLog();
+        }
+
+        function getUserRole() {
+            if (!token) return '';
+            try {
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                return payload.role || '';
+            } catch { return ''; }
+        }
+
+        function applyRoleVisibility() {
+            const role = getUserRole();
+            document.querySelectorAll('.admin-only').forEach(el => {
+                el.style.display = role === 'admin' ? '' : 'none';
+            });
+            // Analysts can't manage prompts or knowledge (write)
+            if (role === 'analyst') {
+                document.querySelectorAll('[data-page="prompts"]').forEach(el => el.style.display = 'none');
+            }
+        }
+
+        // --- Helpers ---
+        function qualityBadge(score) {
+            if (score == null) return '<span class="badge">N/A</span>';
+            const s = parseFloat(score).toFixed(2);
+            if (score >= 0.8) return `<span class="badge badge-green">${s}</span>`;
+            if (score >= 0.5) return `<span class="badge badge-yellow">${s}</span>`;
+            return `<span class="badge badge-red">${s}</span>`;
+        }
+
+        function formatDate(d) {
+            if (!d) return '-';
+            return new Date(d).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' });
+        }
+
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('show');
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
+        // --- Dashboard ---
+        async function loadDashboard() {
+            try {
+                const data = await api('/analytics/summary');
+                const stats = data.daily_stats || [];
+                const latest = stats[0] || {};
+                const total = latest.total_calls || 0;
+                const resolved = latest.resolved_by_bot || 0;
+                const resolvedPct = total > 0 ? (resolved / total * 100).toFixed(1) : '0.0';
+                document.getElementById('dashboardStats').innerHTML = `
+                    <div class="card stat-card"><div class="value">${total}</div><div class="label">Calls today</div></div>
+                    <div class="card stat-card"><div class="value">${resolved}<small style="font-size:.7rem;color:#64748b"> (${resolvedPct}%)</small></div><div class="label">Resolved by bot</div></div>
+                    <div class="card stat-card"><div class="value">${latest.transferred || 0}</div><div class="label">Transferred</div></div>
+                    <div class="card stat-card"><div class="value">${(latest.avg_quality_score || 0).toFixed(2)}</div><div class="label">Avg quality</div></div>
+                    <div class="card stat-card"><div class="value">$${(latest.total_cost_usd || 0).toFixed(2)}</div><div class="label">Cost today</div></div>
+                `;
+            } catch (e) {
+                document.getElementById('dashboardStats').innerHTML = `
+                    <div class="empty-state">Failed to load dashboard: ${escapeHtml(e.message)}
+                    <br><button class="btn btn-primary" onclick="loadDashboard()" style="margin-top:.5rem">Retry</button></div>
+                `;
+            }
+        }
+
+        // --- Calls ---
+        let callsOffset = 0;
+        async function loadCalls(offset = 0) {
+            callsOffset = offset;
+            const loading = document.getElementById('callsLoading');
+            const tbody = document.querySelector('#callsTable tbody');
+            loading.style.display = 'block';
+
+            const params = new URLSearchParams({ limit: 20, offset });
+            const df = document.getElementById('filterDateFrom').value;
+            const dt = document.getElementById('filterDateTo').value;
+            const sc = document.getElementById('filterScenario').value;
+            const tr = document.getElementById('filterTransferred').value;
+            const qb = document.getElementById('filterQualityBelow').value;
+            const search = document.getElementById('filterSearch').value;
+            if (df) params.set('date_from', df);
+            if (dt) params.set('date_to', dt);
+            if (sc) params.set('scenario', sc);
+            if (tr) params.set('transferred', tr);
+            if (qb) params.set('quality_below', qb);
+            if (search) params.set('search', search);
+
+            try {
+                const data = await api(`/analytics/calls?${params}`);
+                loading.style.display = 'none';
+
+                if (!data.calls || data.calls.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No calls found</td></tr>';
+                    document.getElementById('callsPagination').innerHTML = '';
+                    return;
+                }
+
+                tbody.innerHTML = data.calls.map(c => `
+                    <tr style="cursor:pointer" onclick="showCallDetail('${c.id}')">
+                        <td>${formatDate(c.started_at)}</td>
+                        <td>${escapeHtml(c.caller_id) || '-'}</td>
+                        <td>${escapeHtml(c.scenario) || '-'}</td>
+                        <td>${c.duration_seconds || 0}s</td>
+                        <td>${qualityBadge(c.quality_score)}</td>
+                        <td>$${(c.total_cost_usd || 0).toFixed(3)}</td>
+                        <td>${c.transferred_to_operator ? '<span class="badge badge-yellow">Transferred</span>' : '<span class="badge badge-green">Resolved</span>'}</td>
+                    </tr>
+                `).join('');
+
+                const pages = Math.ceil(data.total / 20);
+                const current = Math.floor(offset / 20);
+                document.getElementById('callsPagination').innerHTML = Array.from({length: Math.min(pages, 10)}, (_, i) =>
+                    `<button class="${i === current ? 'active' : ''}" onclick="loadCalls(${i * 20})">${i + 1}</button>`
+                ).join('');
+            } catch (e) {
+                loading.style.display = 'none';
+                tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Failed to load calls: ${escapeHtml(e.message)}
+                    <br><button class="btn btn-primary btn-sm" onclick="loadCalls(${offset})" style="margin-top:.5rem">Retry</button></td></tr>`;
+            }
+        }
+
+        function downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        async function exportCallsCSV() {
+            const params = new URLSearchParams();
+            const df = document.getElementById('filterDateFrom').value;
+            const dt = document.getElementById('filterDateTo').value;
+            const sc = document.getElementById('filterScenario').value;
+            const tr = document.getElementById('filterTransferred').value;
+            const qb = document.getElementById('filterQualityBelow').value;
+            if (df) params.set('date_from', df);
+            if (dt) params.set('date_to', dt);
+            if (sc) params.set('scenario', sc);
+            if (tr) params.set('transferred', tr);
+            if (qb) params.set('min_quality', qb);
+
+            try {
+                const headers = {};
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+                const res = await fetch(`${API}/analytics/calls/export?${params}`, { headers });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const blob = await res.blob();
+                const disposition = res.headers.get('Content-Disposition') || '';
+                const match = disposition.match(/filename="(.+)"/);
+                const filename = match ? match[1] : 'calls_export.csv';
+                downloadBlob(blob, filename);
+                showToast('CSV exported');
+            } catch (e) {
+                showToast('Export failed: ' + e.message, 'error');
+            }
+        }
+
+        async function exportStatsCSV() {
+            try {
+                const headers = {};
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+                const res = await fetch(`${API}/analytics/summary/export`, { headers });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const blob = await res.blob();
+                const disposition = res.headers.get('Content-Disposition') || '';
+                const match = disposition.match(/filename="(.+)"/);
+                const filename = match ? match[1] : 'daily_stats_export.csv';
+                downloadBlob(blob, filename);
+                showToast('CSV exported');
+            } catch (e) {
+                showToast('Export failed: ' + e.message, 'error');
+            }
+        }
+
+        async function downloadPdfReport() {
+            const today = new Date();
+            const weekAgo = new Date(today);
+            weekAgo.setDate(weekAgo.getDate() - 7);
+            const df = weekAgo.toISOString().split('T')[0];
+            const dt = today.toISOString().split('T')[0];
+
+            try {
+                const headers = {};
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+                const res = await fetch(`${API}/analytics/report/pdf?date_from=${df}&date_to=${dt}`, { headers });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const blob = await res.blob();
+                const disposition = res.headers.get('Content-Disposition') || '';
+                const match = disposition.match(/filename="(.+)"/);
+                const filename = match ? match[1] : `report_${df}_${dt}.pdf`;
+                downloadBlob(blob, filename);
+                showToast('PDF report downloaded');
+            } catch (e) {
+                showToast('PDF download failed: ' + e.message, 'error');
+            }
+        }
+
+        async function showCallDetail(callId) {
+            try {
+                const data = await api(`/analytics/calls/${callId}`);
+                const c = data.call;
+                const turns = data.turns || [];
+                const tools = data.tool_calls || [];
+
+                let html = `
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-bottom:1rem">
+                        <div><strong>Caller:</strong> ${escapeHtml(c.caller_id) || '-'}</div>
+                        <div><strong>Scenario:</strong> ${escapeHtml(c.scenario) || '-'}</div>
+                        <div><strong>Duration:</strong> ${c.duration_seconds || 0}s</div>
+                        <div><strong>Quality:</strong> ${qualityBadge(c.quality_score)}</div>
+                        <div><strong>Cost:</strong> $${(c.total_cost_usd || 0).toFixed(3)}</div>
+                        <div><strong>Prompt:</strong> ${escapeHtml(c.prompt_version) || '-'}</div>
+                    </div>
+                `;
+
+                if (c.quality_details) {
+                    html += '<h3 style="margin:.8rem 0 .5rem">Quality Breakdown</h3><table>';
+                    for (const [k, v] of Object.entries(c.quality_details)) {
+                        if (k === 'comment') continue;
+                        html += `<tr><td>${escapeHtml(k)}</td><td>${qualityBadge(v)}</td></tr>`;
+                    }
+                    if (c.quality_details.comment) {
+                        html += `<tr><td colspan="2" style="font-style:italic">${escapeHtml(c.quality_details.comment)}</td></tr>`;
+                    }
+                    html += '</table>';
+                }
+
+                html += '<h3 style="margin:.8rem 0 .5rem">Transcription</h3>';
+                if (turns.length === 0) {
+                    html += '<div class="empty-state">No transcription available</div>';
+                } else {
+                    turns.forEach(t => {
+                        html += `<div class="turn"><span class="speaker ${t.speaker}">${t.speaker === 'customer' ? 'Customer' : 'Bot'}</span>`;
+                        html += `<div class="text">${escapeHtml(t.text)}</div></div>`;
+                    });
+                }
+
+                if (tools.length) {
+                    html += '<h3 style="margin:.8rem 0 .5rem">Tool Calls</h3><table><tr><th>Tool</th><th>Success</th><th>Duration</th></tr>';
+                    tools.forEach(t => {
+                        html += `<tr><td>${escapeHtml(t.tool_name)}</td><td>${t.success ? 'Yes' : 'No'}</td><td>${t.duration_ms || 0}ms</td></tr>`;
+                    });
+                    html += '</table>';
+                }
+
+                document.getElementById('callDetailContent').innerHTML = html;
+                document.getElementById('callModal').classList.add('show');
+            } catch (e) {
+                showToast('Failed to load call details: ' + e.message, 'error');
+            }
+        }
+
+        function closeCallModal() {
+            document.getElementById('callModal').classList.remove('show');
+        }
+
+        // --- Prompts ---
+        function showPromptTab(tab, btn) {
+            document.querySelectorAll('#page-prompts .tab-bar button').forEach(b => b.classList.remove('active'));
+            if (btn) btn.classList.add('active');
+            document.getElementById('promptVersions').style.display = tab === 'versions' ? 'block' : 'none';
+            document.getElementById('promptABTests').style.display = tab === 'abtests' ? 'block' : 'none';
+            if (tab === 'versions') loadPromptVersions();
+            else loadABTests();
+        }
+
+        async function loadPromptVersions() {
+            try {
+                const data = await api('/prompts');
+                const versions = data.versions || [];
+                if (versions.length === 0) {
+                    document.getElementById('promptVersions').innerHTML = `
+                        <div style="margin-bottom:1rem"><button class="btn btn-primary" onclick="showCreatePrompt()">+ New Version</button></div>
+                        <div class="empty-state">No prompt versions found</div>`;
+                    return;
+                }
+                document.getElementById('promptVersions').innerHTML = `
+                    <div style="margin-bottom:1rem"><button class="btn btn-primary" onclick="showCreatePrompt()">+ New Version</button></div>
+                    <table><thead><tr><th>Name</th><th>Active</th><th>Created</th><th>Action</th></tr></thead><tbody>
+                    ${versions.map(v => `
+                        <tr>
+                            <td>${escapeHtml(v.name)}</td>
+                            <td>${v.is_active ? '<span class="badge badge-green">Active</span>' : ''}</td>
+                            <td>${formatDate(v.created_at)}</td>
+                            <td>${!v.is_active ? `<button class="btn btn-primary btn-sm" onclick="activatePrompt('${v.id}')">Activate</button>` : ''}</td>
+                        </tr>
+                    `).join('')}
+                    </tbody></table>
+                `;
+            } catch (e) {
+                document.getElementById('promptVersions').innerHTML = `<div class="empty-state">Failed to load prompts: ${escapeHtml(e.message)}
+                    <br><button class="btn btn-primary btn-sm" onclick="loadPromptVersions()" style="margin-top:.5rem">Retry</button></div>`;
+            }
+        }
+
+        function showCreatePrompt() {
+            document.getElementById('promptName').value = '';
+            document.getElementById('promptSystemPrompt').value = '';
+            document.getElementById('createPromptModal').classList.add('show');
+        }
+
+        async function createPrompt() {
+            const name = document.getElementById('promptName').value.trim();
+            const systemPrompt = document.getElementById('promptSystemPrompt').value.trim();
+            if (!name || !systemPrompt) { showToast('Name and system prompt are required', 'error'); return; }
+            try {
+                await api('/prompts', { method: 'POST', body: JSON.stringify({ name, system_prompt: systemPrompt }) });
+                closeModal('createPromptModal');
+                showToast('Prompt version created');
+                loadPromptVersions();
+            } catch (e) { showToast('Failed to create prompt: ' + e.message, 'error'); }
+        }
+
+        async function activatePrompt(id) {
+            if (!confirm('Activate this prompt version? All calls will use it.')) return;
+            try {
+                await api(`/prompts/${id}/activate`, { method: 'PATCH' });
+                showToast('Prompt version activated');
+                loadPromptVersions();
+            } catch (e) { showToast('Failed to activate prompt: ' + e.message, 'error'); }
+        }
+
+        async function loadABTests() {
+            try {
+                const data = await api('/prompts/ab-tests');
+                const tests = data.tests || [];
+                if (tests.length === 0) {
+                    document.getElementById('promptABTests').innerHTML = '<div class="empty-state">No A/B tests found</div>';
+                    return;
+                }
+                document.getElementById('promptABTests').innerHTML = `
+                    <table><thead><tr><th>Test</th><th>Variant A</th><th>Variant B</th><th>Calls A/B</th><th>Quality A/B</th><th>Status</th><th>Action</th></tr></thead><tbody>
+                    ${tests.map(t => `
+                        <tr>
+                            <td>${escapeHtml(t.test_name)}</td>
+                            <td>${escapeHtml(t.variant_a_name)}</td>
+                            <td>${escapeHtml(t.variant_b_name)}</td>
+                            <td>${t.calls_a}/${t.calls_b}</td>
+                            <td>${(t.quality_a || 0).toFixed(2)}/${(t.quality_b || 0).toFixed(2)}</td>
+                            <td><span class="badge ${t.status === 'active' ? 'badge-blue' : 'badge-green'}">${escapeHtml(t.status)}</span></td>
+                            <td>${t.status === 'active' ? `<button class="btn btn-danger btn-sm" onclick="stopABTest('${t.id}')">Stop</button>` : ''}</td>
+                        </tr>
+                    `).join('')}
+                    </tbody></table>
+                `;
+            } catch (e) {
+                document.getElementById('promptABTests').innerHTML = `<div class="empty-state">Failed to load A/B tests: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        async function stopABTest(id) {
+            if (!confirm('Stop this A/B test?')) return;
+            try {
+                await api(`/prompts/ab-tests/${id}/stop`, { method: 'PATCH' });
+                showToast('A/B test stopped');
+                loadABTests();
+            } catch (e) { showToast('Failed to stop test: ' + e.message, 'error'); }
+        }
+
+        // --- Knowledge Base ---
+        async function loadArticles() {
+            const container = document.getElementById('articlesContainer');
+            container.innerHTML = '<div class="loading-overlay"><div class="spinner"></div></div>';
+
+            const params = new URLSearchParams();
+            const cat = document.getElementById('kbCategory').value;
+            const search = document.getElementById('kbSearch').value;
+            if (cat) params.set('category', cat);
+            if (search) params.set('search', search);
+
+            try {
+                const data = await api(`/knowledge/articles?${params}`);
+                const articles = data.articles || [];
+                if (articles.length === 0) {
+                    container.innerHTML = '<div class="empty-state">No articles found</div>';
+                    return;
+                }
+                container.innerHTML = `
+                    <table><thead><tr><th>Title</th><th>Category</th><th>Active</th><th>Updated</th><th>Actions</th></tr></thead><tbody>
+                    ${articles.map(a => `
+                        <tr>
+                            <td>${escapeHtml(a.title)}</td>
+                            <td><span class="badge badge-blue">${escapeHtml(a.category)}</span></td>
+                            <td>${a.active !== false ? '<span class="badge badge-green">Yes</span>' : '<span class="badge badge-red">No</span>'}</td>
+                            <td>${formatDate(a.updated_at || a.created_at)}</td>
+                            <td>
+                                <button class="btn btn-primary btn-sm" onclick="editArticle('${a.id}')">Edit</button>
+                                <button class="btn btn-sm" style="background:#64748b;color:#fff" onclick="toggleArticle('${a.id}', ${a.active !== false})">${a.active !== false ? 'Deactivate' : 'Activate'}</button>
+                                <button class="btn btn-danger btn-sm" onclick="deleteArticle('${a.id}', '${escapeHtml(a.title).replace(/'/g, "\\'")}')">Delete</button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                    </tbody></table>
+                    <p style="margin-top:.5rem;font-size:.8rem;color:#64748b">Total: ${data.total} articles</p>
+                `;
+            } catch (e) {
+                container.innerHTML = `<div class="empty-state">Failed to load articles: ${escapeHtml(e.message)}
+                    <br><button class="btn btn-primary btn-sm" onclick="loadArticles()" style="margin-top:.5rem">Retry</button></div>`;
+            }
+        }
+
+        function showCreateArticle() {
+            document.getElementById('articleModalTitle').textContent = 'New Article';
+            document.getElementById('editArticleId').value = '';
+            document.getElementById('articleTitle').value = '';
+            document.getElementById('articleCategory').value = 'faq';
+            document.getElementById('articleContent').value = '';
+            document.getElementById('createArticleModal').classList.add('show');
+        }
+
+        async function editArticle(id) {
+            try {
+                const data = await api(`/knowledge/articles/${id}`);
+                const a = data.article;
+                document.getElementById('articleModalTitle').textContent = 'Edit Article';
+                document.getElementById('editArticleId').value = id;
+                document.getElementById('articleTitle').value = a.title || '';
+                document.getElementById('articleCategory').value = a.category || 'faq';
+                document.getElementById('articleContent').value = a.content || '';
+                document.getElementById('createArticleModal').classList.add('show');
+            } catch (e) { showToast('Failed to load article: ' + e.message, 'error'); }
+        }
+
+        async function saveArticle() {
+            const id = document.getElementById('editArticleId').value;
+            const title = document.getElementById('articleTitle').value.trim();
+            const category = document.getElementById('articleCategory').value;
+            const content = document.getElementById('articleContent').value.trim();
+            if (!title || !content) { showToast('Title and content are required', 'error'); return; }
+
+            try {
+                if (id) {
+                    await api(`/knowledge/articles/${id}`, { method: 'PATCH', body: JSON.stringify({ title, category, content }) });
+                    showToast('Article updated');
+                } else {
+                    await api('/knowledge/articles', { method: 'POST', body: JSON.stringify({ title, category, content }) });
+                    showToast('Article created');
+                }
+                closeModal('createArticleModal');
+                loadArticles();
+            } catch (e) { showToast('Failed to save article: ' + e.message, 'error'); }
+        }
+
+        async function toggleArticle(id, currentlyActive) {
+            try {
+                await api(`/knowledge/articles/${id}`, { method: 'PATCH', body: JSON.stringify({ active: !currentlyActive }) });
+                showToast(currentlyActive ? 'Article deactivated' : 'Article activated');
+                loadArticles();
+            } catch (e) { showToast('Failed to update article: ' + e.message, 'error'); }
+        }
+
+        async function deleteArticle(id, title) {
+            if (!confirm(`Delete article "${title}"?`)) return;
+            try {
+                await api(`/knowledge/articles/${id}`, { method: 'DELETE' });
+                showToast('Article deleted');
+                loadArticles();
+            } catch (e) { showToast('Failed to delete article: ' + e.message, 'error'); }
+        }
+
+        // --- Operators ---
+        let operatorsRefreshTimer = null;
+
+        function statusBadge(status) {
+            if (!status) return '<span class="badge badge-gray">unknown</span>';
+            const map = { online: 'badge-green', offline: 'badge-gray', busy: 'badge-yellow', break: 'badge-blue' };
+            return `<span class="badge ${map[status] || 'badge-gray'}">${escapeHtml(status)}</span>`;
+        }
+
+        async function loadOperators() {
+            const loading = document.getElementById('operatorsLoading');
+            const tbody = document.querySelector('#operatorsTable tbody');
+            loading.style.display = 'block';
+
+            try {
+                const data = await api('/operators');
+                loading.style.display = 'none';
+                const ops = data.operators || [];
+                if (ops.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No operators found</td></tr>';
+                    return;
+                }
+                tbody.innerHTML = ops.map(o => `
+                    <tr>
+                        <td>${escapeHtml(o.name)}</td>
+                        <td>${escapeHtml(o.extension)}</td>
+                        <td>${statusBadge(o.current_status)}</td>
+                        <td>${(o.skills || []).map(s => `<span class="badge badge-blue">${escapeHtml(s)}</span>`).join(' ')}</td>
+                        <td>${o.shift_start || '09:00'} - ${o.shift_end || '18:00'}</td>
+                        <td>${o.is_active ? '<span class="badge badge-green">Yes</span>' : '<span class="badge badge-red">No</span>'}</td>
+                        <td>
+                            <select onchange="changeOperatorStatus('${o.id}', this.value); this.selectedIndex=0" style="font-size:.75rem;padding:.2rem">
+                                <option value="">Status...</option>
+                                <option value="online">Online</option>
+                                <option value="offline">Offline</option>
+                                <option value="busy">Busy</option>
+                                <option value="break">Break</option>
+                            </select>
+                            <button class="btn btn-primary btn-sm" onclick="editOperator('${o.id}')">Edit</button>
+                            ${o.is_active ? `<button class="btn btn-danger btn-sm" onclick="deactivateOperator('${o.id}', '${escapeHtml(o.name).replace(/'/g, "\\'")}')">Deactivate</button>` : ''}
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (e) {
+                loading.style.display = 'none';
+                tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Failed to load operators: ${escapeHtml(e.message)}
+                    <br><button class="btn btn-primary btn-sm" onclick="loadOperators()" style="margin-top:.5rem">Retry</button></td></tr>`;
+            }
+        }
+
+        async function loadQueueStatus() {
+            try {
+                const data = await api('/operators/queue');
+                document.getElementById('operatorQueueStats').innerHTML = `
+                    <div class="card stat-card"><div class="value">${data.operators_online || 0}</div><div class="label">Operators Online</div></div>
+                    <div class="card stat-card"><div class="value">${data.transfers_last_hour || 0}</div><div class="label">Transfers (1h)</div></div>
+                `;
+            } catch (e) {
+                document.getElementById('operatorQueueStats').innerHTML = `<div class="empty-state">Queue status unavailable</div>`;
+            }
+        }
+
+        function showCreateOperator() {
+            document.getElementById('operatorModalTitle').textContent = 'New Operator';
+            document.getElementById('editOperatorId').value = '';
+            document.getElementById('operatorName').value = '';
+            document.getElementById('operatorExtension').value = '';
+            document.getElementById('operatorSkills').value = '';
+            document.getElementById('operatorShiftStart').value = '09:00';
+            document.getElementById('operatorShiftEnd').value = '18:00';
+            document.getElementById('operatorModal').classList.add('show');
+        }
+
+        async function editOperator(id) {
+            try {
+                const data = await api('/operators');
+                const op = (data.operators || []).find(o => o.id === id);
+                if (!op) { showToast('Operator not found', 'error'); return; }
+                document.getElementById('operatorModalTitle').textContent = 'Edit Operator';
+                document.getElementById('editOperatorId').value = id;
+                document.getElementById('operatorName').value = op.name || '';
+                document.getElementById('operatorExtension').value = op.extension || '';
+                document.getElementById('operatorSkills').value = (op.skills || []).join(', ');
+                document.getElementById('operatorShiftStart').value = op.shift_start || '09:00';
+                document.getElementById('operatorShiftEnd').value = op.shift_end || '18:00';
+                document.getElementById('operatorModal').classList.add('show');
+            } catch (e) { showToast('Failed to load operator: ' + e.message, 'error'); }
+        }
+
+        async function saveOperator() {
+            const id = document.getElementById('editOperatorId').value;
+            const name = document.getElementById('operatorName').value.trim();
+            const extension = document.getElementById('operatorExtension').value.trim();
+            const skillsStr = document.getElementById('operatorSkills').value.trim();
+            const skills = skillsStr ? skillsStr.split(',').map(s => s.trim()).filter(Boolean) : [];
+            const shift_start = document.getElementById('operatorShiftStart').value;
+            const shift_end = document.getElementById('operatorShiftEnd').value;
+
+            if (!name || !extension) { showToast('Name and extension are required', 'error'); return; }
+
+            try {
+                if (id) {
+                    await api(`/operators/${id}`, { method: 'PATCH', body: JSON.stringify({ name, extension, skills, shift_start, shift_end }) });
+                    showToast('Operator updated');
+                } else {
+                    await api('/operators', { method: 'POST', body: JSON.stringify({ name, extension, skills, shift_start, shift_end }) });
+                    showToast('Operator created');
+                }
+                closeModal('operatorModal');
+                loadOperators();
+            } catch (e) { showToast('Failed to save operator: ' + e.message, 'error'); }
+        }
+
+        async function changeOperatorStatus(id, status) {
+            if (!status) return;
+            try {
+                await api(`/operators/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
+                showToast(`Status changed to ${status}`);
+                loadOperators();
+            } catch (e) { showToast('Failed to change status: ' + e.message, 'error'); }
+        }
+
+        async function deactivateOperator(id, name) {
+            if (!confirm(`Deactivate operator "${name}"?`)) return;
+            try {
+                await api(`/operators/${id}`, { method: 'DELETE' });
+                showToast('Operator deactivated');
+                loadOperators();
+            } catch (e) { showToast('Failed to deactivate: ' + e.message, 'error'); }
+        }
+
+        // --- Settings ---
+        async function loadSettings() {
+            const container = document.getElementById('systemInfo');
+            container.innerHTML = '<div class="loading-overlay"><div class="spinner"></div></div>';
+            try {
+                const [health, ready] = await Promise.all([
+                    fetch('/health').then(r => r.json()),
+                    fetch('/health/ready').then(r => r.json()).catch(() => null),
+                ]);
+                let html = `<table>
+                    <tr><td>Status</td><td><span class="badge badge-green">${health.status}</span></td></tr>
+                    <tr><td>Active calls</td><td>${health.active_calls}</td></tr>
+                    <tr><td>Redis</td><td><span class="badge ${health.redis === 'connected' ? 'badge-green' : 'badge-red'}">${health.redis}</span></td></tr>
+                `;
+                if (ready) {
+                    if (ready.store_api) html += `<tr><td>Store API</td><td><span class="badge ${ready.store_api === 'reachable' ? 'badge-green' : 'badge-red'}">${ready.store_api}</span></td></tr>`;
+                    if (ready.claude_api) html += `<tr><td>Claude API</td><td><span class="badge ${ready.claude_api === 'reachable' ? 'badge-green' : 'badge-red'}">${ready.claude_api}</span></td></tr>`;
+                    if (ready.google_stt) html += `<tr><td>Google STT</td><td><span class="badge ${ready.google_stt === 'credentials_present' ? 'badge-green' : 'badge-yellow'}">${ready.google_stt}</span></td></tr>`;
+                    if (ready.tts_engine) html += `<tr><td>TTS Engine</td><td><span class="badge ${ready.tts_engine === 'initialized' ? 'badge-green' : 'badge-yellow'}">${ready.tts_engine}</span></td></tr>`;
+                }
+                html += '</table>';
+                container.innerHTML = html;
+            } catch (e) {
+                container.innerHTML = `<div class="empty-state">Failed to load system info: ${escapeHtml(e.message)}
+                    <br><button class="btn btn-primary btn-sm" onclick="loadSettings()" style="margin-top:.5rem">Retry</button></div>`;
+            }
+        }
+
+        async function loadSystemStatus() {
+            const container = document.getElementById('extendedStatus');
+            container.innerHTML = '<div class="loading-overlay"><div class="spinner"></div></div>';
+            try {
+                const data = await api('/admin/system-status');
+                const uptimeH = Math.floor(data.uptime_seconds / 3600);
+                const uptimeM = Math.floor((data.uptime_seconds % 3600) / 60);
+                let html = '<table>';
+                html += `<tr><td>Version</td><td>${escapeHtml(data.version || 'unknown')}</td></tr>`;
+                html += `<tr><td>Uptime</td><td>${uptimeH}h ${uptimeM}m</td></tr>`;
+                if (data.postgres_db_size_bytes) {
+                    const sizeMB = (data.postgres_db_size_bytes / 1048576).toFixed(1);
+                    html += `<tr><td>PostgreSQL DB size</td><td>${sizeMB} MB</td></tr>`;
+                }
+                if (data.postgres_connections !== undefined) html += `<tr><td>PostgreSQL connections</td><td>${data.postgres_connections}</td></tr>`;
+                if (data.redis_used_memory) html += `<tr><td>Redis memory</td><td>${escapeHtml(data.redis_used_memory)}</td></tr>`;
+                html += `<tr><td>Celery workers</td><td><span class="badge ${data.celery_workers_online > 0 ? 'badge-green' : 'badge-red'}">${data.celery_workers_online}</span></td></tr>`;
+                if (data.last_backup) {
+                    const sizeMB = (data.last_backup.size_bytes / 1048576).toFixed(1);
+                    html += `<tr><td>Last backup</td><td>${escapeHtml(data.last_backup.file)} (${sizeMB} MB, ${escapeHtml(data.last_backup.modified)})</td></tr>`;
+                }
+                html += '</table>';
+                container.innerHTML = html;
+            } catch (e) {
+                container.innerHTML = `<div class="empty-state">Failed: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        async function reloadConfig() {
+            if (!confirm('Reload configuration from environment?')) return;
+            try {
+                const data = await api('/admin/config/reload', { method: 'POST' });
+                let msg = 'Config reloaded:\n';
+                if (data.changes) {
+                    for (const [k, v] of Object.entries(data.changes)) msg += `${k}: ${v}\n`;
+                }
+                showToast(msg, 'success');
+            } catch (e) { showToast('Reload failed: ' + e.message, 'error'); }
+        }
+
+        // --- Users ---
+        async function loadUsers() {
+            const container = document.getElementById('usersContainer');
+            container.innerHTML = '<div class="loading-overlay"><div class="spinner"></div></div>';
+            try {
+                const data = await api('/admin/users');
+                const users = data.users || [];
+                if (users.length === 0) {
+                    container.innerHTML = '<div class="empty-state">No users found</div>';
+                    return;
+                }
+                container.innerHTML = `
+                    <table><thead><tr><th>Username</th><th>Role</th><th>Active</th><th>Last Login</th><th>Actions</th></tr></thead><tbody>
+                    ${users.map(u => `
+                        <tr>
+                            <td>${escapeHtml(u.username)}</td>
+                            <td><span class="badge badge-blue">${escapeHtml(u.role)}</span></td>
+                            <td>${u.is_active ? '<span class="badge badge-green">Yes</span>' : '<span class="badge badge-red">No</span>'}</td>
+                            <td>${formatDate(u.last_login_at)}</td>
+                            <td>
+                                <select onchange="changeRole('${u.id}', this.value)" style="font-size:.75rem;padding:.2rem">
+                                    <option value="">Change role...</option>
+                                    <option value="admin">Admin</option>
+                                    <option value="analyst">Analyst</option>
+                                    <option value="operator">Operator</option>
+                                </select>
+                                <button class="btn btn-sm" style="background:#64748b;color:#fff" onclick="toggleUser('${u.id}', ${u.is_active})">${u.is_active ? 'Deactivate' : 'Activate'}</button>
+                                <button class="btn btn-sm" style="background:#7c3aed;color:#fff" onclick="resetUserPassword('${u.id}', '${escapeHtml(u.username)}')">Reset pwd</button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                    </tbody></table>
+                `;
+            } catch (e) {
+                container.innerHTML = `<div class="empty-state">Failed to load users: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        function showCreateUser() {
+            document.getElementById('newUsername').value = '';
+            document.getElementById('newPassword').value = '';
+            document.getElementById('newRole').value = 'operator';
+            document.getElementById('createUserModal').classList.add('show');
+        }
+
+        async function createUser() {
+            const username = document.getElementById('newUsername').value.trim();
+            const password = document.getElementById('newPassword').value;
+            const role = document.getElementById('newRole').value;
+            if (!username || !password) { showToast('Username and password are required', 'error'); return; }
+            try {
+                await api('/admin/users', { method: 'POST', body: JSON.stringify({ username, password, role }) });
+                closeModal('createUserModal');
+                showToast('User created');
+                loadUsers();
+            } catch (e) { showToast('Failed to create user: ' + e.message, 'error'); }
+        }
+
+        async function changeRole(userId, role) {
+            if (!role) return;
+            try {
+                await api(`/admin/users/${userId}`, { method: 'PATCH', body: JSON.stringify({ role }) });
+                showToast('Role updated');
+                loadUsers();
+            } catch (e) { showToast('Failed to update role: ' + e.message, 'error'); }
+        }
+
+        async function toggleUser(userId, currentlyActive) {
+            try {
+                await api(`/admin/users/${userId}`, { method: 'PATCH', body: JSON.stringify({ is_active: !currentlyActive }) });
+                showToast(currentlyActive ? 'User deactivated' : 'User activated');
+                loadUsers();
+            } catch (e) { showToast('Failed to update user: ' + e.message, 'error'); }
+        }
+
+        async function resetUserPassword(userId, username) {
+            const newPwd = prompt(`New password for ${username}:`);
+            if (!newPwd) return;
+            try {
+                await api(`/admin/users/${userId}/reset-password`, { method: 'POST', body: JSON.stringify({ new_password: newPwd }) });
+                showToast('Password reset');
+            } catch (e) { showToast('Failed to reset password: ' + e.message, 'error'); }
+        }
+
+        // --- Audit Log ---
+        let auditOffset = 0;
+        async function loadAuditLog(offset = 0) {
+            auditOffset = offset;
+            const container = document.getElementById('auditContainer');
+            container.innerHTML = '<div class="loading-overlay"><div class="spinner"></div></div>';
+
+            const params = new URLSearchParams({ limit: 50, offset });
+            const df = document.getElementById('auditDateFrom').value;
+            const dt = document.getElementById('auditDateTo').value;
+            const action = document.getElementById('auditAction').value;
+            if (df) params.set('date_from', df);
+            if (dt) params.set('date_to', dt);
+            if (action) params.set('action', action);
+
+            try {
+                const data = await api(`/admin/audit-log?${params}`);
+                const entries = data.entries || [];
+                if (entries.length === 0) {
+                    container.innerHTML = '<div class="empty-state">No audit entries found</div>';
+                    document.getElementById('auditPagination').innerHTML = '';
+                    return;
+                }
+                container.innerHTML = `
+                    <table><thead><tr><th>Date</th><th>User</th><th>Action</th><th>Resource</th><th>IP</th></tr></thead><tbody>
+                    ${entries.map(e => `
+                        <tr>
+                            <td>${formatDate(e.created_at)}</td>
+                            <td>${escapeHtml(e.username) || '-'}</td>
+                            <td><span class="badge badge-blue">${escapeHtml(e.action)}</span></td>
+                            <td>${escapeHtml(e.resource_type || '')}${e.resource_id ? '/' + escapeHtml(e.resource_id) : ''}</td>
+                            <td>${escapeHtml(e.ip_address) || '-'}</td>
+                        </tr>
+                    `).join('')}
+                    </tbody></table>
+                `;
+
+                const pages = Math.ceil(data.total / 50);
+                const current = Math.floor(offset / 50);
+                document.getElementById('auditPagination').innerHTML = Array.from({length: Math.min(pages, 10)}, (_, i) =>
+                    `<button class="${i === current ? 'active' : ''}" onclick="loadAuditLog(${i * 50})">${i + 1}</button>`
+                ).join('');
+            } catch (e) {
+                container.innerHTML = `<div class="empty-state">Failed to load audit log: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        // --- Hamburger menu (mobile) ---
+        function toggleSidebar() {
+            document.getElementById('sidebar').classList.toggle('open');
+        }
+        // Close sidebar when clicking a nav link on mobile
+        document.querySelectorAll('.sidebar a').forEach(a => {
+            a.addEventListener('click', () => {
+                if (window.innerWidth <= 768) {
+                    document.getElementById('sidebar').classList.remove('open');
+                }
+            });
+        });
+
+        // --- WebSocket real-time updates ---
+        let ws = null;
+        let wsReconnectDelay = 1000;
+        const WS_MAX_RECONNECT_DELAY = 30000;
+
+        function connectWebSocket() {
+            if (!token) return;
+            const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${proto}//${location.host}/ws?token=${token}`;
+
+            try { ws = new WebSocket(wsUrl); } catch { return; }
+
+            ws.onopen = () => {
+                wsReconnectDelay = 1000;
+                updateWsStatus('connected');
+            };
+
+            ws.onclose = () => {
+                updateWsStatus('disconnected');
+                scheduleReconnect();
+            };
+
+            ws.onerror = () => {
+                updateWsStatus('disconnected');
+            };
+
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    handleWsEvent(msg);
+                } catch { /* ignore parse errors */ }
+            };
+        }
+
+        function scheduleReconnect() {
+            if (!token) return;
+            updateWsStatus('reconnecting');
+            setTimeout(() => {
+                if (token) connectWebSocket();
+            }, wsReconnectDelay);
+            wsReconnectDelay = Math.min(wsReconnectDelay * 2, WS_MAX_RECONNECT_DELAY);
+        }
+
+        function updateWsStatus(state) {
+            const dot = document.getElementById('wsDot');
+            const label = document.getElementById('wsLabel');
+            dot.className = 'ws-dot ' + state;
+            const labels = { connected: 'Live', reconnecting: 'Reconnecting...', disconnected: 'Offline' };
+            label.textContent = labels[state] || 'Offline';
+        }
+
+        function handleWsEvent(msg) {
+            if (msg.type === 'ping') {
+                if (ws && ws.readyState === WebSocket.OPEN) ws.send('pong');
+                return;
+            }
+            if (msg.type === 'pong') return;
+
+            const activePage = localStorage.getItem('admin_active_page') || 'dashboard';
+
+            // Real-time updates based on event type
+            if (msg.type === 'call:started' || msg.type === 'call:ended' || msg.type === 'call:transferred') {
+                if (activePage === 'dashboard') loadDashboard();
+                if (activePage === 'calls') loadCalls(callsOffset);
+            }
+            if (msg.type === 'operator:status_changed') {
+                if (activePage === 'operators') { loadOperators(); loadQueueStatus(); }
+            }
+            if (msg.type === 'dashboard:metrics_updated') {
+                if (activePage === 'dashboard') loadDashboard();
+            }
+        }
+
+        // Send periodic pings to keep connection alive
+        setInterval(() => {
+            if (ws && ws.readyState === WebSocket.OPEN) ws.send('ping');
+        }, 25000);
+
+        // --- Init ---
+        setInterval(checkTokenExpiry, 60000);
+
+        if (token) {
+            checkTokenExpiry();
+            if (token) {
+                document.getElementById('loginContainer').style.display = 'none';
+                document.getElementById('app').style.display = 'block';
+                applyRoleVisibility();
+                connectWebSocket();
+                const savedPage = localStorage.getItem('admin_active_page') || 'dashboard';
+                showPage(savedPage);
+            }
+        }
+
+        document.getElementById('loginPassword').addEventListener('keypress', e => {
+            if (e.key === 'Enter') login();
+        });
+
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
+            }
+        });
+    </script>
+</body>
+</html>

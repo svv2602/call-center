@@ -9,9 +9,12 @@ import aiohttp
 import uvicorn
 import os
 
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 from redis.asyncio import Redis
 
 from src.agent.agent import LLMAgent, ToolRouter
@@ -69,10 +72,19 @@ app.add_middleware(RateLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 
+# Admin UI: serve from dist/ (production build) or root (dev with Vite proxy)
+_admin_dist = Path("admin-ui/dist")
+_admin_root = Path("admin-ui")
+_admin_dir = _admin_dist if _admin_dist.is_dir() else _admin_root
+
+if (_admin_dir / "assets").is_dir():
+    app.mount("/assets", StaticFiles(directory=_admin_dir / "assets"), name="admin-assets")
+
+
 @app.get("/admin")
 async def admin_ui() -> FileResponse:
     """Serve the admin UI."""
-    return FileResponse("admin-ui/index.html")
+    return FileResponse(str(_admin_dir / "index.html"))
 
 
 # Module-level references for health checks and shared components
