@@ -3,10 +3,10 @@
 ## Статус
 - [ ] Не начата
 - [ ] В процессе
-- [ ] Завершена
+- [x] Завершена
 
-**Начата:** -
-**Завершена:** -
+**Начата:** 2026-02-14
+**Завершена:** 2026-02-14
 
 ## Цель фазы
 
@@ -17,8 +17,8 @@
 ### 2.0 ОБЯЗАТЕЛЬНО: Анализ и планирование
 
 #### A. Анализ существующего кода
-- [ ] Изучить существующий Store Client (MVP + заказы)
-- [ ] Изучить спецификацию Store API фазы 3: `doc/development/api-specification.md`
+- [x] Изучить существующий Store Client (MVP + заказы)
+- [x] Изучить спецификацию Store API фазы 3: `doc/development/api-specification.md`
 
 **Команды для поиска:**
 ```bash
@@ -26,8 +26,8 @@ grep -rn "def.*fitting\|def.*station\|def.*booking" src/store_client/
 ```
 
 #### B. Анализ зависимостей
-- [ ] Store Client с circuit breaker и retry уже реализован
-- [ ] Нужны POST, DELETE, PATCH для bookings
+- [x] Store Client с circuit breaker и retry уже реализован
+- [x] Нужны POST, DELETE, PATCH для bookings
 
 **Новые абстракции:** Нет
 **Новые env variables:** Нет
@@ -44,56 +44,56 @@ grep -rn "def.*fitting\|def.*station\|def.*booking" src/store_client/
 
 ### 2.1 Endpoint: GET /fitting/stations
 
-- [ ] Реализовать `get_fitting_stations(city)` → `GET /fitting/stations?city=...`
-- [ ] Маппинг: id, name, city, district, address, working_hours, services
-- [ ] Форматирование для озвучивания (краткое описание каждой станции)
+- [x] Реализовать `get_fitting_stations(city)` → `GET /fitting/stations?city=...`
+- [x] Маппинг: id, name, city, district, address, working_hours, services
+- [x] Форматирование для озвучивания (краткое описание каждой станции)
 
 **Файлы:** `src/store_client/client.py`
-**Заметки:** -
+**Заметки:** Реализовано в phase-01 при добавлении handlers
 
 ---
 
 ### 2.2 Endpoint: GET /fitting/stations/{id}/slots
 
-- [ ] Реализовать `get_fitting_slots(station_id, date_from, date_to, service_type)` → `GET /fitting/stations/{id}/slots`
-- [ ] Маппинг: date, times (only available=true), форматирование для озвучивания
-- [ ] Фильтрация только доступных слотов
+- [x] Реализовать `get_fitting_slots(station_id, date_from, date_to, service_type)` → `GET /fitting/stations/{id}/slots`
+- [x] Маппинг: date, times (only available=true), форматирование для озвучивания
+- [x] Фильтрация только доступных слотов
 
 **Файлы:** `src/store_client/client.py`
-**Заметки:** -
+**Заметки:** Реализовано в phase-01 при добавлении handlers
 
 ---
 
 ### 2.3 Endpoint: POST /fitting/bookings
 
-- [ ] Реализовать `create_booking(station_id, date, time, customer_phone, vehicle_info, service_type, tire_diameter, linked_order_id, call_id)` → `POST /fitting/bookings`
-- [ ] Передача `source: "ai_agent"` и `call_id`
-- [ ] Обработка ответа: booking id, station info, date, time, price, sms_sent
+- [x] Реализовать `create_booking(station_id, date, time, customer_phone, vehicle_info, service_type, tire_diameter, linked_order_id, call_id)` → `POST /fitting/bookings`
+- [x] Передача `source: "ai_agent"` и `call_id`
+- [x] Обработка ответа: booking id, station info, date, time, price, sms_sent
 
 **Файлы:** `src/store_client/client.py`
-**Заметки:** -
+**Заметки:** Реализовано как `book_fitting()` с Idempotency-Key
 
 ---
 
 ### 2.4 Endpoints: DELETE и PATCH /fitting/bookings/{id}
 
-- [ ] Реализовать `cancel_booking(booking_id)` → `DELETE /fitting/bookings/{id}`
-- [ ] Реализовать `reschedule_booking(booking_id, new_date, new_time)` → `PATCH /fitting/bookings/{id}`
-- [ ] Обработка ошибок: booking не найден, уже отменён
+- [x] Реализовать `cancel_booking(booking_id)` → `DELETE /fitting/bookings/{id}`
+- [x] Реализовать `reschedule_booking(booking_id, new_date, new_time)` → `PATCH /fitting/bookings/{id}`
+- [x] Обработка ошибок: booking не найден, уже отменён
 
 **Файлы:** `src/store_client/client.py`
-**Заметки:** -
+**Заметки:** Реализовано в `cancel_fitting()` с action=cancel/reschedule. Добавлен `_delete()` helper и обработка 204 No Content.
 
 ---
 
 ### 2.5 Endpoint: GET /fitting/prices
 
-- [ ] Реализовать `get_fitting_prices(station_id, tire_diameter)` → `GET /fitting/prices`
-- [ ] Маппинг: service → label, price by diameter
-- [ ] Форматирование для озвучивания (цена в гривнях)
+- [x] Реализовать `get_fitting_prices(station_id, tire_diameter)` → `GET /fitting/prices`
+- [x] Маппинг: service → label, price by diameter
+- [x] Форматирование для озвучивания (цена в гривнях)
 
 **Файлы:** `src/store_client/client.py`
-**Заметки:** -
+**Заметки:** Реализовано как `get_fitting_price()`
 
 ---
 
