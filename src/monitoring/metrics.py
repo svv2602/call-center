@@ -83,6 +83,44 @@ transfers_to_operator_total = Counter(
     ["reason"],
 )
 
+# --- Business metrics ---
+
+calls_resolved_by_bot_total = Counter(
+    "callcenter_calls_resolved_by_bot_total",
+    "Calls resolved by bot without operator transfer",
+)
+
+orders_created_total = Counter(
+    "callcenter_orders_created_total",
+    "Orders created through bot",
+)
+
+fittings_booked_total = Counter(
+    "callcenter_fittings_booked_total",
+    "Fitting appointments booked through bot",
+)
+
+call_cost_usd = Histogram(
+    "callcenter_call_cost_usd",
+    "Cost of a single call in USD (STT + LLM + TTS)",
+    buckets=[0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1.0, 2.0],
+)
+
+# --- Scenario metrics ---
+
+call_scenario_total = Counter(
+    "callcenter_call_scenario_total",
+    "Calls by scenario type",
+    ["scenario"],  # tire_search, availability, order, fitting, consultation
+)
+
+# --- Operator queue metrics ---
+
+operator_queue_length = Gauge(
+    "callcenter_operator_queue_length",
+    "Number of calls waiting in operator transfer queue",
+)
+
 # --- TTS cache metrics ---
 
 tts_cache_hits_total = Counter(

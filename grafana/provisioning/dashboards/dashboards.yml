@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: "Call Center AI"
+    orgId: 1
+    folder: "Call Center"
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    options:
+      path: /var/lib/grafana/dashboards
+      foldersFromFilesStructure: false
