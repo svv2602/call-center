@@ -8,7 +8,7 @@ import pytest
 
 from src.agent.agent import ToolRouter
 from src.agent.prompts import PROMPT_VERSION, SYSTEM_PROMPT
-from src.agent.tools import MVP_TOOLS
+from src.agent.tools import ALL_TOOLS, MVP_TOOLS
 
 
 class TestToolRouter:
@@ -88,4 +88,10 @@ class TestSystemPrompt:
         assert "гривнях" in SYSTEM_PROMPT or "грн" in SYSTEM_PROMPT
 
     def test_prompt_version(self) -> None:
-        assert PROMPT_VERSION == "v1.0-mvp"
+        assert PROMPT_VERSION == "v2.0-orders"
+
+    def test_prompt_has_order_capabilities(self) -> None:
+        assert "замовлення" in SYSTEM_PROMPT.lower()
+
+    def test_all_tools_count(self) -> None:
+        assert len(ALL_TOOLS) == 7
