@@ -58,7 +58,7 @@ ls knowledge_base/ 2>/dev/null || echo "knowledge_base/ не существуе�
 - [x] Таблица `knowledge_articles`: id, title, category (brands/guides/faq/comparisons), content, active, created_at, updated_at
 - [x] Таблица `knowledge_embeddings`: id, article_id, chunk_text, embedding (VECTOR(1536)), chunk_index
 - [x] Расширение pgvector: `CREATE EXTENSION IF NOT EXISTS vector`
-- [x] Индекс для векторного поиска: `ivfflat (embedding vector_cosine_ops)`
+- [x] Индекс для векторного поиска: `hnsw (embedding vector_cosine_ops)`
 
 **Файлы:** `migrations/versions/004_add_knowledge_base.py`
 **Заметки:** Размер вектора 1536 для text-embedding-3-small

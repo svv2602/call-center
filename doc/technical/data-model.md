@@ -257,7 +257,7 @@ CREATE INDEX idx_call_turns_call_id ON call_turns(call_id);
 
 -- Векторный поиск
 CREATE INDEX idx_knowledge_embeddings_vector
-    ON knowledge_embeddings USING ivfflat (embedding vector_cosine_ops);
+    ON knowledge_embeddings USING hnsw (embedding vector_cosine_ops);
 
 -- Поиск клиента по телефону
 CREATE UNIQUE INDEX idx_customers_phone ON customers(phone);

@@ -86,12 +86,11 @@ def upgrade() -> None:
         ["article_id"],
     )
 
-    # IVFFlat index for cosine similarity search
+    # HNSW index for cosine similarity search
     op.execute(
         "CREATE INDEX idx_knowledge_embeddings_vector "
         "ON knowledge_embeddings "
-        "USING ivfflat (embedding vector_cosine_ops) "
-        "WITH (lists = 10)"
+        "USING hnsw (embedding vector_cosine_ops)"
     )
 
 
