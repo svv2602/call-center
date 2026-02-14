@@ -85,6 +85,32 @@ groups:
           summary: "High TTS latency (p95)"
           description: "p95 TTS latency is {{ $value | humanize }}ms. Threshold: 600ms."
 
+      # AudioSocket → STT latency p95 > 100ms
+      - alert: HighAudioSocketToSTTLatency
+        expr: >
+          histogram_quantile(0.95,
+            sum(rate(callcenter_audiosocket_to_stt_ms_bucket[5m])) by (le)
+          ) > 100
+        for: 5m
+        labels:
+          severity: medium
+        annotations:
+          summary: "High AudioSocket-to-STT latency (p95)"
+          description: "p95 AudioSocket→STT latency is {{ $value | humanize }}ms. Threshold: 100ms."
+
+      # TTS → AudioSocket delivery latency p95 > 100ms
+      - alert: HighTTSDeliveryLatency
+        expr: >
+          histogram_quantile(0.95,
+            sum(rate(callcenter_tts_delivery_ms_bucket[5m])) by (le)
+          ) > 100
+        for: 5m
+        labels:
+          severity: medium
+        annotations:
+          summary: "High TTS delivery latency (p95)"
+          description: "p95 TTS→AudioSocket delivery latency is {{ $value | humanize }}ms. Threshold: 100ms."
+
       # Operator queue > 5 — no available operators
       - alert: OperatorQueueOverflow
         expr: callcenter_operator_queue_length > 5

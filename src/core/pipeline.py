@@ -21,6 +21,7 @@ from src.agent.prompts import (
 )
 from src.core.audio_socket import AudioSocketConnection, PacketType
 from src.core.call_session import CallSession, CallState, SILENCE_TIMEOUT_SEC
+from src.monitoring.metrics import audiosocket_to_stt_ms, tts_delivery_ms
 from src.stt.base import STTConfig, STTEngine, Transcript
 from src.tts.base import TTSEngine
 
@@ -113,7 +114,11 @@ class CallPipeline:
                 break
 
             if packet.type == PacketType.AUDIO:
+                t0 = time.monotonic()
                 await self._stt.feed_audio(packet.payload)
+                audiosocket_to_stt_ms.observe(
+                    (time.monotonic() - t0) * 1000
+                )
 
                 # Detect barge-in: if we're speaking and STT gets audio
                 if self._speaking:
@@ -218,7 +223,9 @@ class CallPipeline:
 
         try:
             audio = await self._tts.synthesize(text)
+            t0 = time.monotonic()
             await self._conn.send_audio(audio)
+            tts_delivery_ms.observe((time.monotonic() - t0) * 1000)
         except Exception:
             logger.exception("TTS/send error: %s", self._session.channel_uuid)
         finally:
@@ -244,7 +251,9 @@ class CallPipeline:
                     self._barge_in_event.clear()
                     break
 
+                t0 = time.monotonic()
                 await self._conn.send_audio(audio_chunk)
+                tts_delivery_ms.observe((time.monotonic() - t0) * 1000)
         except Exception:
             logger.exception("TTS streaming error: %s", self._session.channel_uuid)
         finally:

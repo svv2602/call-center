@@ -53,6 +53,18 @@ total_response_latency_ms = Histogram(
     buckets=[500, 1000, 1500, 2000, 2500, 3000, 5000],
 )
 
+audiosocket_to_stt_ms = Histogram(
+    "callcenter_audiosocket_to_stt_ms",
+    "Latency from AudioSocket packet receipt to STT feed in milliseconds",
+    buckets=[5, 10, 20, 30, 50, 75, 100, 200],
+)
+
+tts_delivery_ms = Histogram(
+    "callcenter_tts_delivery_ms",
+    "Latency from TTS synthesis completion to AudioSocket send in milliseconds",
+    buckets=[5, 10, 20, 30, 50, 75, 100, 200],
+)
+
 # --- Tool call metrics ---
 
 tool_call_duration_ms = Histogram(
