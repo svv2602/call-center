@@ -31,6 +31,7 @@ app.conf.update(
         "src.tasks.quality_evaluator.*": {"queue": "quality"},
         "src.tasks.daily_stats.*": {"queue": "stats"},
         "src.tasks.data_retention.*": {"queue": "stats"},
+        "src.tasks.partition_manager.*": {"queue": "stats"},
     },
 )
 
@@ -42,6 +43,10 @@ app.conf.beat_schedule = {
     "cleanup-expired-data": {
         "task": "src.tasks.data_retention.cleanup_expired_data",
         "schedule": crontab(hour=3, minute=0, day_of_week="sunday"),  # Weekly at 03:00 Sunday
+    },
+    "ensure-partitions": {
+        "task": "src.tasks.partition_manager.ensure_partitions",
+        "schedule": crontab(hour=2, minute=0, day_of_month="1"),  # 1st of each month at 02:00
     },
 }
 
