@@ -71,6 +71,25 @@ async def health_check() -> dict[str, object]:
     }
 
 
+@app.get("/health/ready")
+async def readiness_check() -> dict[str, object]:
+    """Readiness probe — checks external dependencies (STT, LLM, TTS)."""
+    redis_ok = False
+    if _redis is not None:
+        try:
+            await _redis.ping()
+            redis_ok = True
+        except Exception:
+            pass
+
+    return {
+        "status": "ready" if (_store_client is not None and _tts_engine is not None) else "not_ready",
+        "redis": "connected" if redis_ok else "disconnected",
+        "store_client": "initialized" if _store_client is not None else "not_initialized",
+        "tts_engine": "initialized" if _tts_engine is not None else "not_initialized",
+    }
+
+
 @app.get("/metrics")
 async def metrics_endpoint() -> Response:
     """Prometheus metrics endpoint."""

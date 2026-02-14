@@ -203,6 +203,7 @@ erDiagram
 | `fitting_booking_id` | UUID | Созданная запись на монтаж |
 | `prompt_version` | VARCHAR(50) | Версия промпта (для A/B тестов) |
 | `quality_score` | FLOAT | Оценка качества (0–1) |
+| `quality_details` | JSONB | Детализация оценки по 8 критериям |
 | `cost_breakdown` | JSONB | Детализация расходов {stt, llm, tts} |
 | `total_cost_usd` | FLOAT | Общая стоимость в USD |
 

@@ -158,27 +158,22 @@ graph TB
 ## Docker Compose (Вариант A)
 
 ```yaml
-version: "3.9"
-
 services:
   call-processor:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    build: .
     ports:
       - "9092:9092"   # AudioSocket
       - "8080:8080"   # REST API / health
     environment:
-      - DATABASE_URL=postgresql://app:secret@postgres:5432/callcenter
-      - REDIS_URL=redis://redis:6379/0
-      - GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-service-account.json
+      - GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-key.json
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - STORE_API_URL=http://store-api:3000/api/v1
-      - ASTERISK_ARI_URL=http://asterisk-host:8088/ari
-      - ASTERISK_ARI_USER=ari_user
-      - ASTERISK_ARI_PASSWORD=${ARI_PASSWORD}
-    volumes:
-      - ./secrets:/secrets:ro
+      - STORE_API_KEY=${STORE_API_KEY}
+      - DATABASE_URL=postgresql+asyncpg://callcenter:${POSTGRES_PASSWORD}@postgres:5432/callcenter
+      - REDIS_URL=redis://redis:6379/0
+      - ARI_URL=http://asterisk:8088/ari
+      - ARI_USER=${ARI_USER}
+      - ARI_PASSWORD=${ARI_PASSWORD}
     depends_on:
       postgres:
         condition: service_healthy
@@ -195,58 +190,103 @@ services:
     image: pgvector/pgvector:pg16
     environment:
       POSTGRES_DB: callcenter
-      POSTGRES_USER: app
+      POSTGRES_USER: callcenter
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
-    ports:
-      - "127.0.0.1:5432:5432"
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U app -d callcenter"]
-      interval: 5s
-      timeout: 3s
+      test: ["CMD-SHELL", "pg_isready -U callcenter -d callcenter"]
+      interval: 10s
+      timeout: 5s
       retries: 5
     restart: unless-stopped
 
   redis:
     image: redis:7-alpine
-    ports:
-      - "127.0.0.1:6379:6379"
     volumes:
       - redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
+      interval: 10s
+      timeout: 5s
       retries: 5
     restart: unless-stopped
 
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.53.0
     volumes:
-      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - promdata:/prometheus
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
+      - prometheus_data:/prometheus
     ports:
-      - "127.0.0.1:9090:9090"
+      - "9090:9090"
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.retention.time=30d"
     restart: unless-stopped
 
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:11.1.0
     volumes:
-      - grafanadata:/var/lib/grafana
-      - ./monitoring/grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
     ports:
       - "3000:3000"
     environment:
-      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    restart: unless-stopped
+
+  celery-worker:
+    build: .
+    command: celery -A src.tasks.celery_app worker -l info -Q quality,stats -c 2
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DATABASE_URL=postgresql+asyncpg://callcenter:${POSTGRES_PASSWORD}@postgres:5432/callcenter
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - QUALITY_LLM_MODEL=claude-haiku-4-5-20251001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  celery-beat:
+    build: .
+    command: celery -A src.tasks.celery_app beat -l info
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - DATABASE_URL=postgresql+asyncpg://callcenter:${POSTGRES_PASSWORD}@postgres:5432/callcenter
+    depends_on:
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    ports:
+      - "9093:9093"
+    volumes:
+      - ./alertmanager/config.yml:/etc/alertmanager/alertmanager.yml:ro
+    environment:
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
     restart: unless-stopped
 
 volumes:
   pgdata:
   redisdata:
-  promdata:
-  grafanadata:
+  prometheus_data:
+  grafana_data:
 ```
+
+> **Примечание:** Admin UI реализован как минимальная HTML-оболочка (`admin-ui/index.html`). Полноценный SPA (React/Vue) — задача для следующего этапа. Все функции доступны через REST API.
 
 ## Защита AudioSocket-канала
 

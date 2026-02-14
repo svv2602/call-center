@@ -69,3 +69,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - run: echo "Deploy to staging via SSH / docker compose pull && up -d"
+
+  deploy-production:
+    needs: build
+    if: startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - run: echo "Deploy to production via SSH / docker compose pull && up -d"

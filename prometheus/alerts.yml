@@ -31,12 +31,12 @@ groups:
             {{ $value }} errors in the last 10 minutes.
             Threshold: 5 errors per 10 minutes.
 
-      # Response latency p95 > 3 seconds
+      # Response latency p95 > 2.5 seconds (per NFR spec)
       - alert: HighResponseLatency
         expr: >
           histogram_quantile(0.95,
             sum(rate(callcenter_total_response_latency_ms_bucket[5m])) by (le)
-          ) > 3000
+          ) > 2500
         for: 5m
         labels:
           severity: medium
@@ -44,7 +44,7 @@ groups:
           summary: "High response latency (p95)"
           description: >
             p95 response latency is {{ $value | humanize }}ms.
-            Threshold: 3000ms.
+            Threshold: 2500ms.
 
       # STT latency p95 > 700ms
       - alert: HighSTTLatency

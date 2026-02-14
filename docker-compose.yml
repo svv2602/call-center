@@ -19,6 +19,12 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
 
   postgres:
     image: pgvector/pgvector:pg16
@@ -33,14 +39,18 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
+    volumes:
+      - redisdata:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
+    restart: unless-stopped
 
   prometheus:
     image: prom/prometheus:v2.53.0
@@ -55,6 +65,7 @@ services:
       - "--storage.tsdb.retention.time=30d"
     depends_on:
       - call-processor
+    restart: unless-stopped
 
   grafana:
     image: grafana/grafana:11.1.0
@@ -72,6 +83,7 @@ services:
     depends_on:
       - prometheus
       - postgres
+    restart: unless-stopped
 
   celery-worker:
     build: .
@@ -87,6 +99,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: unless-stopped
 
   celery-beat:
     build: .
@@ -98,6 +111,7 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    restart: unless-stopped
 
   alertmanager:
     image: prom/alertmanager:v0.27.0
@@ -110,8 +124,10 @@ services:
       TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
     command:
       - "--config.file=/etc/alertmanager/alertmanager.yml"
+    restart: unless-stopped
 
 volumes:
   pgdata:
+  redisdata:
   prometheus_data:
   grafana_data:

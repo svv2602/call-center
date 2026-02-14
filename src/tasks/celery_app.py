@@ -30,6 +30,7 @@ app.conf.update(
     task_routes={
         "src.tasks.quality_evaluator.*": {"queue": "quality"},
         "src.tasks.daily_stats.*": {"queue": "stats"},
+        "src.tasks.data_retention.*": {"queue": "stats"},
     },
 )
 
@@ -37,6 +38,10 @@ app.conf.beat_schedule = {
     "calculate-daily-stats": {
         "task": "src.tasks.daily_stats.calculate_daily_stats",
         "schedule": crontab(hour=1, minute=0),  # Every day at 01:00 Kyiv time
+    },
+    "cleanup-expired-data": {
+        "task": "src.tasks.data_retention.cleanup_expired_data",
+        "schedule": crontab(hour=3, minute=0, day_of_week="sunday"),  # Weekly at 03:00 Sunday
     },
 }
 
