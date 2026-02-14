@@ -82,12 +82,16 @@ class LLMAgent:
         self,
         user_text: str,
         conversation_history: list[dict[str, Any]],
+        caller_phone: str | None = None,
+        order_id: str | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         """Process a user message and return the agent's text response.
 
         Args:
             user_text: The user's transcribed speech.
             conversation_history: List of previous messages (mutated in place).
+            caller_phone: CallerID phone number (if available).
+            order_id: Current order draft ID (if in progress).
 
         Returns:
             Tuple of (response_text, updated_conversation_history).
@@ -103,6 +107,9 @@ class LLMAgent:
                 + conversation_history[-(MAX_HISTORY_MESSAGES - 1) :]
             )
 
+        # Build system prompt with caller context
+        system = self._build_system_prompt(caller_phone, order_id)
+
         response_text = ""
         tool_call_count = 0
 
@@ -113,7 +120,7 @@ class LLMAgent:
                 response = await self._client.messages.create(
                     model=self._model,
                     max_tokens=300,
-                    system=SYSTEM_PROMPT,
+                    system=system,
                     tools=ALL_TOOLS,
                     messages=conversation_history,
                 )
@@ -191,6 +198,23 @@ class LLMAgent:
                 break
 
         return response_text, conversation_history
+
+    @staticmethod
+    def _build_system_prompt(
+        caller_phone: str | None = None,
+        order_id: str | None = None,
+    ) -> str:
+        """Build system prompt with caller context appended."""
+        parts = [SYSTEM_PROMPT]
+
+        if caller_phone or order_id:
+            parts.append("\n## Контекст дзвінка")
+            if caller_phone:
+                parts.append(f"- CallerID клієнта: {caller_phone}")
+            if order_id:
+                parts.append(f"- Поточне замовлення (чорновик): {order_id}")
+
+        return "\n".join(parts)
 
     @staticmethod
     def prompt_version() -> str:
