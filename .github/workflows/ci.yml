@@ -78,12 +78,23 @@ jobs:
           push: false
           tags: call-center:${{ github.sha }}
 
-  deploy-staging:
+  staging-smoke:
     needs: build
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - run: echo "Deploy to staging via SSH / docker compose pull && up -d"
+      - uses: actions/checkout@v4
+      - name: Start staging environment
+        run: docker compose -f docker-compose.staging.yml --env-file .env.staging up -d --build --wait
+        timeout-minutes: 5
+      - name: Wait for services to be healthy
+        run: sleep 15
+      - name: Run smoke tests
+        run: ./scripts/smoke_test_staging.sh http://localhost:18080 http://localhost:13002 localhost 16379 http://localhost:19090
+      - name: Teardown staging
+        if: always()
+        run: docker compose -f docker-compose.staging.yml down -v
 
   deploy-production:
     needs: build
