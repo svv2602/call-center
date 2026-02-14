@@ -2,20 +2,16 @@
 
 Tests graceful handling of connection drops, timeouts, and error conditions.
 
-Run against staging: pytest tests/e2e/test_error_scenarios.py -m e2e
+Runs against a self-contained AudioSocket server started by the e2e_server fixture.
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 
 import pytest
 
 from tests.helpers.audiosocket_client import AudioSocketTestClient
-
-AUDIOSOCKET_HOST = os.environ.get("E2E_AUDIOSOCKET_HOST", "127.0.0.1")
-AUDIOSOCKET_PORT = int(os.environ.get("E2E_AUDIOSOCKET_PORT", "9092"))
 
 
 @pytest.mark.e2e
@@ -23,11 +19,13 @@ class TestConnectionErrors:
     """Test error handling for connection issues."""
 
     @pytest.mark.asyncio
-    async def test_immediate_disconnect(self) -> None:
+    async def test_immediate_disconnect(
+        self, audiosocket_host: str, audiosocket_port: int
+    ) -> None:
         """Client connects and immediately disconnects — server should handle gracefully."""
         client = AudioSocketTestClient()
         try:
-            await client.connect(AUDIOSOCKET_HOST, AUDIOSOCKET_PORT)
+            await client.connect(audiosocket_host, audiosocket_port)
             # Close without hangup (simulates network failure)
         finally:
             await client.close()
@@ -35,7 +33,7 @@ class TestConnectionErrors:
         # Server should not crash — verify by connecting again
         client2 = AudioSocketTestClient()
         try:
-            await client2.connect(AUDIOSOCKET_HOST, AUDIOSOCKET_PORT)
+            await client2.connect(audiosocket_host, audiosocket_port)
             pkt = await client2.read_packet(timeout=3.0)
             # Server is still alive if we got any response or timeout
             await client2.hangup()
@@ -50,11 +48,13 @@ class TestConnectionErrors:
             await client.connect("127.0.0.1", 59999)  # unlikely to be in use
 
     @pytest.mark.asyncio
-    async def test_large_audio_burst(self) -> None:
+    async def test_large_audio_burst(
+        self, audiosocket_host: str, audiosocket_port: int
+    ) -> None:
         """Send a burst of audio frames rapidly — server should not crash."""
         client = AudioSocketTestClient()
         try:
-            await client.connect(AUDIOSOCKET_HOST, AUDIOSOCKET_PORT)
+            await client.connect(audiosocket_host, audiosocket_port)
 
             # Send 500 frames (10 seconds) without delay
             for _ in range(500):

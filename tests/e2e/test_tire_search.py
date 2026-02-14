@@ -3,22 +3,16 @@
 Uses AudioSocket test client to simulate a caller connecting to the Call Processor.
 Tests verify the full pipeline: connect → greeting → user speech → LLM response → TTS audio.
 
-Run against staging: pytest tests/e2e/test_tire_search.py -m e2e
-Requires: Call Processor running with AudioSocket on port 9092 (or staging on 19092).
+Runs against a self-contained AudioSocket server started by the e2e_server fixture.
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 
 import pytest
 
 from tests.helpers.audiosocket_client import AudioSocketTestClient
-
-# AudioSocket server address (configurable via env for staging)
-AUDIOSOCKET_HOST = os.environ.get("E2E_AUDIOSOCKET_HOST", "127.0.0.1")
-AUDIOSOCKET_PORT = int(os.environ.get("E2E_AUDIOSOCKET_PORT", "9092"))
 
 
 @pytest.mark.e2e
@@ -30,11 +24,13 @@ class TestTireSearchE2E:
     """
 
     @pytest.mark.asyncio
-    async def test_connect_and_receive_greeting(self) -> None:
+    async def test_connect_and_receive_greeting(
+        self, audiosocket_host: str, audiosocket_port: int
+    ) -> None:
         """Connect via AudioSocket → server sends greeting audio."""
         client = AudioSocketTestClient()
         try:
-            await client.connect(AUDIOSOCKET_HOST, AUDIOSOCKET_PORT)
+            await client.connect(audiosocket_host, audiosocket_port)
 
             # After connecting, server should send greeting audio
             audio = await client.read_audio_response(timeout=5.0)
@@ -49,11 +45,13 @@ class TestTireSearchE2E:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_send_audio_and_receive_response(self) -> None:
+    async def test_send_audio_and_receive_response(
+        self, audiosocket_host: str, audiosocket_port: int
+    ) -> None:
         """Send audio frames → server processes through pipeline → returns audio."""
         client = AudioSocketTestClient()
         try:
-            await client.connect(AUDIOSOCKET_HOST, AUDIOSOCKET_PORT)
+            await client.connect(audiosocket_host, audiosocket_port)
 
             # Read greeting first
             await client.read_audio_response(timeout=5.0)
@@ -76,31 +74,39 @@ class TestTireSearchE2E:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_hangup_closes_connection(self) -> None:
+    async def test_hangup_closes_connection(
+        self, audiosocket_host: str, audiosocket_port: int
+    ) -> None:
         """Verify that sending hangup cleanly closes the connection."""
         client = AudioSocketTestClient()
         try:
-            await client.connect(AUDIOSOCKET_HOST, AUDIOSOCKET_PORT)
+            await client.connect(audiosocket_host, audiosocket_port)
 
             # Send hangup immediately
             await client.hangup()
             await asyncio.sleep(0.5)
 
-            # Connection should be closed by server
-            pkt = await client.read_packet(timeout=2.0)
-            # After hangup, either None (EOF) or hangup packet back
-            assert pkt is None or pkt.type == 0x00
+            # Server may have already buffered greeting audio before processing
+            # the hangup, so drain any audio packets first.
+            while True:
+                pkt = await client.read_packet(timeout=2.0)
+                if pkt is None or pkt.type == 0x00:
+                    break  # EOF or hangup — server closed properly
+                # Audio packets (0x10) are acceptable: greeting was buffered
+                assert pkt.type == 0x10, f"Unexpected packet type: {pkt.type}"
         finally:
             await client.close()
 
     @pytest.mark.asyncio
-    async def test_multiple_concurrent_connections(self) -> None:
+    async def test_multiple_concurrent_connections(
+        self, audiosocket_host: str, audiosocket_port: int
+    ) -> None:
         """Verify server handles multiple simultaneous AudioSocket connections."""
 
         async def single_call() -> bool:
             client = AudioSocketTestClient()
             try:
-                await client.connect(AUDIOSOCKET_HOST, AUDIOSOCKET_PORT)
+                await client.connect(audiosocket_host, audiosocket_port)
                 await client.send_silence(duration_ms=500)
                 await asyncio.sleep(1.0)
                 await client.hangup()
