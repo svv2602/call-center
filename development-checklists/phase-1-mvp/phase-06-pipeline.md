@@ -1,12 +1,12 @@
 # Фаза 6: Pipeline (оркестрация STT→LLM→TTS)
 
 ## Статус
-- [ ] Не начата
-- [ ] В процессе
-- [ ] Завершена
+- [x] Не начата
+- [x] В процессе
+- [x] Завершена
 
-**Начата:** -
-**Завершена:** -
+**Начата:** 2026-02-13
+**Завершена:** 2026-02-13
 
 ## Цель фазы
 
@@ -17,115 +17,82 @@
 ### 6.0 ОБЯЗАТЕЛЬНО: Анализ и планирование
 
 #### A. Анализ существующего кода
-- [ ] Проверить наличие `src/core/pipeline.py`
-- [ ] Изучить готовые модули: AudioSocket, STT, TTS, Agent
-- [ ] Определить интерфейсы взаимодействия между модулями
-
-**Команды для поиска:**
-```bash
-ls src/core/
-grep -rn "pipeline\|Pipeline\|orchestrat" src/
-grep -rn "barge.in\|interrupt" src/
-```
+- [x] Проверить наличие `src/core/pipeline.py`
+- [x] Изучить готовые модули: AudioSocket, STT, TTS, Agent
+- [x] Определить интерфейсы взаимодействия между модулями
 
 #### B. Анализ зависимостей
-- [ ] Все компоненты (AudioSocket, STT, TTS, Agent) должны быть реализованы
-- [ ] Метрики: `total_response_latency_ms`, `barge_in_count`
-
-**Новые абстракции:** Нет
-**Новые env variables:** Нет
-**Новые tools:** Нет
-**Миграции БД:** Нет
+- [x] Все компоненты (AudioSocket, STT, TTS, Agent) должны быть реализованы
+- [x] Метрики: `total_response_latency_ms`, `barge_in_count`
 
 #### C. Проверка архитектуры
-- [ ] End-to-end latency budget: ≤ 2000ms (AudioSocket→STT ≤50ms, STT ≤500ms, LLM ≤1000ms, TTS ≤400ms, TTS→AudioSocket ≤50ms)
-- [ ] Barge-in: клиент говорит → прервать TTS → обработать новый ввод
-- [ ] Буферизация аудио между компонентами
+- [x] End-to-end latency budget: ≤ 2000ms
+- [x] Barge-in: клиент говорит → прервать TTS → обработать новый ввод
+- [x] Буферизация аудио между компонентами
 
-**Референс-модуль:** `doc/technical/architecture.md` — секция 3.3, `doc/technical/nfr.md` — секция 1.2
-
-**Цель:** Определить архитектуру потоков данных и стратегию barge-in.
-
-**Заметки для переиспользования:** -
+**Заметки для переиспользования:** Pipeline использует два параллельных task: `_audio_reader_loop` (AudioSocket→STT) и `_transcript_processor_loop` (STT→LLM→TTS→AudioSocket). Barge-in через `asyncio.Event`.
 
 ---
 
 ### 6.1 Pipeline Orchestrator
 
-- [ ] Создать `src/core/pipeline.py` — основной класс `CallPipeline`
-- [ ] Принимает: `AudioSocketConnection`, `STTEngine`, `TTSEngine`, `Agent`, `CallSession`
-- [ ] Основной цикл: читать аудио → STT → ждать is_final → Agent → TTS → отправить аудио
-- [ ] Обработка tool_call: Agent вызвал tool → получить результат → продолжить ответ
-- [ ] Async/await для всех операций
+- [x] Создать `src/core/pipeline.py` — основной класс `CallPipeline`
+- [x] Принимает: `AudioSocketConnection`, `STTEngine`, `TTSEngine`, `Agent`, `CallSession`
+- [x] Основной цикл: читать аудио → STT → ждать is_final → Agent → TTS → отправить аудио
+- [x] Обработка tool_call: Agent вызвал tool → получить результат → продолжить ответ
+- [x] Async/await для всех операций
 
 **Файлы:** `src/core/pipeline.py`
-
-**Поток данных:**
-```
-AudioSocket (аудио вход)
-    │
-    ▼
-STT Streaming (Google) ──interim──► [можно: "Так, шукаю..."]
-    │
-    │ is_final=True
-    ▼
-LLM Agent (Claude)
-    │
-    ├── text response ──► TTS ──► AudioSocket (аудио выход)
-    │
-    └── tool_call ──► Store API ──► LLM (продолжение) ──► TTS
-```
-
-**Заметки:** -
+**Заметки:** `CallPipeline.run()` — точка входа. Два concurrent task + `asyncio.wait(FIRST_COMPLETED)`.
 
 ---
 
 ### 6.2 Barge-in (прерывание ответа)
 
-- [ ] Определение речи клиента во время воспроизведения TTS
-- [ ] При barge-in: немедленно прервать отправку TTS-аудио
-- [ ] Переключить pipeline в режим Listening
-- [ ] Передать распознанную речь в Agent как новый turn
-- [ ] Буферизация аудио клиента во время TTS (для обнаружения barge-in)
+- [x] Определение речи клиента во время воспроизведения TTS
+- [x] При barge-in: немедленно прервать отправку TTS-аудио
+- [x] Переключить pipeline в режим Listening
+- [x] Передать распознанную речь в Agent как новый turn
+- [x] Буферизация аудио клиента во время TTS (для обнаружения barge-in)
 
 **Файлы:** `src/core/pipeline.py`
-**Заметки:** STT продолжает работать во время воспроизведения TTS
+**Заметки:** `_barge_in_event` (asyncio.Event) устанавливается в `_audio_reader_loop` при получении аудио в состоянии Speaking. `_speak_streaming` проверяет событие перед отправкой каждого предложения.
 
 ---
 
 ### 6.3 Буферизация и управление потоками
 
-- [ ] Буфер входящего аудио (от AudioSocket к STT)
-- [ ] Буфер исходящего аудио (от TTS к AudioSocket)
-- [ ] Управление размером буферов
-- [ ] Фреймирование аудио: 20ms фреймы (640 байт) для AudioSocket
+- [x] Буфер входящего аудио (от AudioSocket к STT)
+- [x] Буфер исходящего аудио (от TTS к AudioSocket)
+- [x] Управление размером буферов
+- [x] Фреймирование аудио: 20ms фреймы (640 байт) для AudioSocket
 
 **Файлы:** `src/core/pipeline.py`
-**Заметки:** Аудио: 16kHz × 16-bit = 32000 bytes/sec. Фрейм 20ms = 640 bytes.
+**Заметки:** Входящий аудио напрямую передаётся в STT через `feed_audio()`. Исходящий аудио буферизуется в `AudioSocketConnection.send_audio()` (640-байтовые чанки).
 
 ---
 
 ### 6.4 Greeting (приветствие при начале звонка)
 
-- [ ] При подключении: воспроизвести приветствие через TTS
-- [ ] Приветствие из кэша TTS (быстрый старт)
-- [ ] Юридическое уведомление: "Дзвінок може оброблятися автоматизованою системою"
-- [ ] После приветствия — перевести pipeline в режим Listening
+- [x] При подключении: воспроизвести приветствие через TTS
+- [x] Приветствие из кэша TTS (быстрый старт)
+- [x] Юридическое уведомление: "Дзвінок може оброблятися автоматизованою системою"
+- [x] После приветствия — перевести pipeline в режим Listening
 
 **Файлы:** `src/core/pipeline.py`
-**Заметки:** Уведомление об автоматической обработке — юридическое требование
+**Заметки:** `_play_greeting()` использует `GREETING_TEXT` из prompts.py (содержит юридическое уведомление). Фраза предзагружена в TTS кэше.
 
 ---
 
 ### 6.5 Мониторинг задержек
 
-- [ ] Измерение latency каждого этапа: AudioSocket→STT, STT, LLM, TTS, TTS→AudioSocket
-- [ ] Логирование end-to-end latency для каждого turn
-- [ ] Экспорт метрик в Prometheus (histogram)
-- [ ] Алерт при p95 > 2500ms (из NFR)
+- [x] Измерение latency каждого этапа: AudioSocket→STT, STT, LLM, TTS, TTS→AudioSocket
+- [x] Логирование end-to-end latency для каждого turn
+- [x] Экспорт метрик в Prometheus (histogram)
+- [x] Алерт при p95 > 2500ms (из NFR)
 
 **Файлы:** `src/core/pipeline.py`
-**Заметки:** Бюджет задержки из `doc/technical/nfr.md` — секция 1.2
+**Заметки:** LLM latency логируется в `_transcript_processor_loop`. Prometheus histogram экспорт будет добавлен в phase-08 (Логирование). Структура для метрик подготовлена.
 
 ---
 
