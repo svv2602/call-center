@@ -153,6 +153,8 @@ def _build_tool_router(session: CallSession) -> ToolRouter:
     router.register("get_fitting_stations", _store_client.get_fitting_stations)
     router.register("get_fitting_slots", _store_client.get_fitting_slots)
     router.register("book_fitting", _store_client.book_fitting)
+    router.register("cancel_fitting", _store_client.cancel_fitting)
+    router.register("get_fitting_price", _store_client.get_fitting_price)
     router.register("search_knowledge_base", _store_client.search_knowledge_base)
 
     async def transfer_to_operator(**_: object) -> dict[str, str]:

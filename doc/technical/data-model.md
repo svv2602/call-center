@@ -353,6 +353,7 @@ migrations/
 │   ├── 002_add_orders.py
 │   ├── 003_add_fitting.py
 │   ├── 004_add_knowledge_base.py
-│   └── 005_add_analytics.py
+│   ├── 005_add_analytics.py
+│   └── 006_add_prompt_ab_tests.py
 └── env.py
 ```
