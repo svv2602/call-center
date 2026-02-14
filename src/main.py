@@ -12,6 +12,7 @@ from redis.asyncio import Redis
 from fastapi.responses import Response
 
 from src.api.analytics import router as analytics_router
+from src.api.prompts import router as prompts_router
 from src.config import Settings, get_settings
 from src.core.audio_socket import AudioSocketConnection, AudioSocketServer, PacketType
 from src.core.call_session import CallSession, CallState, SessionStore
@@ -26,6 +27,7 @@ app = FastAPI(
     version="0.1.0",
 )
 app.include_router(analytics_router)
+app.include_router(prompts_router)
 
 # Module-level references for health checks
 _audio_server: AudioSocketServer | None = None
