@@ -119,6 +119,7 @@ class FeatureFlagSettings(BaseSettings):
 
 class AdminSettings(BaseSettings):
     jwt_secret: str = "change-me-in-production"
+    jwt_ttl_hours: int = 24
     username: str = "admin"
     password: str = "admin"
 

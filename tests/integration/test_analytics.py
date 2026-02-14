@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -107,7 +109,9 @@ class TestAuthEndpoint:
     def setup_method(self) -> None:
         self.client = TestClient(app)
 
-    def test_login_with_valid_credentials(self) -> None:
+    @patch("src.api.auth._log_failed_login", new_callable=AsyncMock)
+    @patch("src.api.auth._check_rate_limit", new_callable=AsyncMock, return_value=False)
+    def test_login_with_valid_credentials(self, _rl: AsyncMock, _log: AsyncMock) -> None:
         response = self.client.post(
             "/auth/login",
             json={"username": "admin", "password": "admin"},
@@ -117,7 +121,9 @@ class TestAuthEndpoint:
         assert "token" in data
         assert data["token_type"] == "bearer"
 
-    def test_login_with_invalid_credentials(self) -> None:
+    @patch("src.api.auth._log_failed_login", new_callable=AsyncMock)
+    @patch("src.api.auth._check_rate_limit", new_callable=AsyncMock, return_value=False)
+    def test_login_with_invalid_credentials(self, _rl: AsyncMock, _log: AsyncMock) -> None:
         response = self.client.post(
             "/auth/login",
             json={"username": "admin", "password": "wrong"},

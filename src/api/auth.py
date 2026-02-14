@@ -1,6 +1,7 @@
-"""JWT authentication for admin API.
+"""JWT authentication for admin API with RBAC.
 
-Simple username/password auth with JWT tokens.
+Supports multiple user roles: admin, analyst, operator.
+Auth via DB (admin_users) with fallback to env credentials.
 """
 
 from __future__ import annotations
@@ -10,16 +11,80 @@ import hmac
 import json
 import logging
 import time
+import uuid
 from base64 import urlsafe_b64decode, urlsafe_b64encode
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+_engine: AsyncEngine | None = None
+_redis: Any = None
+
+_LOGIN_MAX_ATTEMPTS = 5
+_LOGIN_WINDOW_SECONDS = 900  # 15 minutes
+
+
+async def _get_engine() -> AsyncEngine:
+    global _engine
+    if _engine is None:
+        settings = get_settings()
+        _engine = create_async_engine(settings.database.url)
+    return _engine
+
+
+async def _get_redis() -> Any:
+    """Lazily create and cache Redis connection for rate limiting."""
+    global _redis
+    if _redis is None:
+        from redis.asyncio import Redis
+
+        settings = get_settings()
+        _redis = Redis.from_url(settings.redis.url, decode_responses=True)
+    return _redis
+
+
+async def _check_rate_limit(ip: str, username: str) -> bool:
+    """Check login rate limit. Returns True if request should be BLOCKED."""
+    try:
+        r = await _get_redis()
+        key = f"login_rl:{ip}:{username}"
+        count = await r.incr(key)
+        if count == 1:
+            await r.expire(key, _LOGIN_WINDOW_SECONDS)
+        return int(count) > _LOGIN_MAX_ATTEMPTS
+    except Exception:
+        logger.debug("Rate limit check failed, allowing request", exc_info=True)
+        return False
+
+
+async def _log_failed_login(username: str, ip: str) -> None:
+    """Log a failed login attempt to the audit log."""
+    try:
+        engine = await _get_engine()
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("""
+                    INSERT INTO admin_audit_log
+                        (user_id, username, action, resource_type, details, ip_address)
+                    VALUES
+                        (NULL, :username, 'login_failed', 'auth', :details, :ip)
+                """),
+                {
+                    "username": username,
+                    "details": f"Failed login attempt for user '{username}'",
+                    "ip": ip,
+                },
+            )
+    except Exception:
+        logger.debug("Failed to log login attempt", exc_info=True)
 
 
 class LoginRequest(BaseModel):
@@ -39,7 +104,12 @@ def _b64_decode(s: str) -> bytes:
 def create_jwt(payload: dict[str, Any], secret: str, expires_in: int = 86400) -> str:
     """Create a simple JWT token (HS256)."""
     header = {"alg": "HS256", "typ": "JWT"}
-    payload = {**payload, "exp": int(time.time()) + expires_in, "iat": int(time.time())}
+    payload = {
+        **payload,
+        "exp": int(time.time()) + expires_in,
+        "iat": int(time.time()),
+        "jti": str(uuid.uuid4()),
+    }
 
     header_b64 = _b64_encode(json.dumps(header).encode())
     payload_b64 = _b64_encode(json.dumps(payload).encode())
@@ -92,17 +162,123 @@ async def require_admin(request: Request) -> dict[str, Any]:
     return payload
 
 
+def require_role(*roles: str) -> Any:
+    """Create a FastAPI dependency that checks for specific roles.
+
+    Usage:
+        @router.get("/...", dependencies=[Depends(require_role("admin"))])
+        or
+        async def endpoint(_: dict = Depends(require_role("admin", "analyst"))):
+    """
+
+    async def _check_role(request: Request) -> dict[str, Any]:
+        payload = await require_admin(request)
+        user_role = payload.get("role", "")
+        if user_role not in roles:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Insufficient permissions. Required: {', '.join(roles)}",
+            )
+        return payload
+
+    return _check_role
+
+
+async def _authenticate_via_db(username: str, password: str) -> dict[str, Any] | None:
+    """Try to authenticate via admin_users table."""
+    import bcrypt
+
+    try:
+        engine = await _get_engine()
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                text("""
+                    SELECT id, username, password_hash, role, is_active
+                    FROM admin_users
+                    WHERE username = :username
+                """),
+                {"username": username},
+            )
+            user = result.first()
+
+            if not user:
+                return None
+
+            user_data = dict(user._mapping)
+
+            if not user_data["is_active"]:
+                return None
+
+            if not bcrypt.checkpw(password.encode(), user_data["password_hash"].encode()):
+                return None
+
+            # Update last_login_at
+            await conn.execute(
+                text("UPDATE admin_users SET last_login_at = now() WHERE id = :id"),
+                {"id": str(user_data["id"])},
+            )
+
+            return {
+                "user_id": str(user_data["id"]),
+                "username": user_data["username"],
+                "role": user_data["role"],
+            }
+    except Exception:
+        logger.debug("DB auth failed, will try env fallback", exc_info=True)
+        return None
+
+
 @router.post("/login")
-async def login(request: LoginRequest) -> dict[str, Any]:
-    """Authenticate admin user and return JWT token."""
+async def login(login_data: LoginRequest, request: Request) -> dict[str, Any]:
+    """Authenticate admin user and return JWT token.
+
+    Tries DB auth first, falls back to env credentials.
+    Rate-limited: max 5 attempts per 15 minutes per IP+username.
+    """
     settings = get_settings()
+    client_ip = request.client.host if request.client else "unknown"
+    ttl_seconds = settings.admin.jwt_ttl_hours * 3600
 
-    if request.username != settings.admin.username or request.password != settings.admin.password:
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+    # Rate limit check
+    if await _check_rate_limit(client_ip, login_data.username):
+        await _log_failed_login(login_data.username, client_ip)
+        raise HTTPException(status_code=429, detail="Too many login attempts. Try again later.")
 
-    token = create_jwt(
-        {"sub": request.username, "role": "admin"},
-        settings.admin.jwt_secret,
-    )
+    # Try DB authentication first
+    db_user = await _authenticate_via_db(login_data.username, login_data.password)
+    if db_user:
+        token = create_jwt(
+            {
+                "sub": db_user["username"],
+                "role": db_user["role"],
+                "user_id": db_user["user_id"],
+            },
+            settings.admin.jwt_secret,
+            expires_in=ttl_seconds,
+        )
+        return {"token": token, "token_type": "bearer", "expires_in": ttl_seconds}
 
-    return {"token": token, "token_type": "bearer", "expires_in": 86400}
+    # Fallback to env credentials
+    if login_data.username == settings.admin.username and login_data.password == settings.admin.password:
+        token = create_jwt(
+            {"sub": login_data.username, "role": "admin"},
+            settings.admin.jwt_secret,
+            expires_in=ttl_seconds,
+        )
+        return {"token": token, "token_type": "bearer", "expires_in": ttl_seconds}
+
+    # Failed login — log and reject
+    await _log_failed_login(login_data.username, client_ip)
+    raise HTTPException(status_code=401, detail="Invalid credentials")
+
+
+@router.post("/logout")
+async def logout(request: Request) -> dict[str, str]:
+    """Logout — invalidate current JWT token.
+
+    Note: Full JWT blacklisting requires Redis (not implemented in MVP).
+    This endpoint serves as a contract for the frontend.
+    """
+    # Verify the token is valid
+    await require_admin(request)
+    return {"status": "logged_out"}

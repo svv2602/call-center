@@ -11,11 +11,12 @@ import io
 import logging
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from src.api.auth import require_role
 from src.config import get_settings
 from src.logging.pii_sanitizer import sanitize_phone
 
@@ -25,6 +26,9 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 _engine: AsyncEngine | None = None
 
 _MAX_EXPORT_ROWS = 10000
+
+# Module-level dependency to satisfy B008 lint rule
+_analyst_dep = Depends(require_role("admin", "analyst"))
 
 
 async def _get_engine() -> AsyncEngine:
@@ -70,6 +74,7 @@ async def export_calls_csv(
     scenario: str | None = Query(None, description="Filter by scenario"),
     transferred: bool | None = Query(None, description="Filter transferred calls"),
     min_quality: float | None = Query(None, description="Minimum quality score"),
+    _: dict[str, Any] = _analyst_dep,
 ) -> StreamingResponse:
     """Export calls as CSV with masked PII."""
     engine = await _get_engine()
@@ -144,6 +149,7 @@ async def export_calls_csv(
 async def export_summary_csv(
     date_from: str | None = Query(None, description="Start date (YYYY-MM-DD)"),
     date_to: str | None = Query(None, description="End date (YYYY-MM-DD)"),
+    _: dict[str, Any] = _analyst_dep,
 ) -> StreamingResponse:
     """Export daily statistics as CSV."""
     engine = await _get_engine()
@@ -216,6 +222,7 @@ async def export_summary_csv(
 async def download_report_pdf(
     date_from: str = Query(..., description="Start date (YYYY-MM-DD)"),
     date_to: str = Query(..., description="End date (YYYY-MM-DD)"),
+    _: dict[str, Any] = _analyst_dep,
 ) -> Response:
     """Generate and download a PDF report for the given date range."""
     from src.reports.generator import generate_weekly_report

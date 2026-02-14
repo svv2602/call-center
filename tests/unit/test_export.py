@@ -17,12 +17,15 @@ from fastapi.testclient import TestClient
 
 from src.api.export import router
 
+_ADMIN_PAYLOAD = {"sub": "test", "role": "admin"}
+
 
 @pytest.fixture()
 def client() -> TestClient:
-    app = FastAPI()
-    app.include_router(router)
-    return TestClient(app)
+    with patch("src.api.auth.require_admin", new_callable=AsyncMock, return_value=_ADMIN_PAYLOAD):
+        app = FastAPI()
+        app.include_router(router)
+        yield TestClient(app)
 
 
 def _make_mock_row(data: dict[str, Any]) -> MagicMock:

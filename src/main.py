@@ -12,10 +12,12 @@ from fastapi.responses import FileResponse, Response
 from redis.asyncio import Redis
 
 from src.agent.agent import LLMAgent, ToolRouter
+from src.api.admin_users import router as admin_users_router
 from src.api.analytics import router as analytics_router
 from src.api.auth import router as auth_router
 from src.api.export import router as export_router
 from src.api.knowledge import router as knowledge_router
+from src.api.middleware.audit import AuditMiddleware
 from src.api.prompts import router as prompts_router
 from src.config import Settings, get_settings
 from src.core.audio_socket import AudioSocketConnection, AudioSocketServer
@@ -36,11 +38,13 @@ app = FastAPI(
     description="AI-powered call center for tire shop",
     version="0.1.0",
 )
+app.include_router(admin_users_router)
 app.include_router(analytics_router)
 app.include_router(auth_router)
 app.include_router(export_router)
 app.include_router(knowledge_router)
 app.include_router(prompts_router)
+app.add_middleware(AuditMiddleware)
 
 
 @app.get("/admin")

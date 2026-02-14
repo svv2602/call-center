@@ -9,11 +9,12 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from src.api.auth import require_role
 from src.config import get_settings
 
 if TYPE_CHECKING:
@@ -23,6 +24,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 
 _engine: AsyncEngine | None = None
+
+# Module-level dependencies to satisfy B008 lint rule
+_admin_dep = Depends(require_role("admin"))
+_analyst_dep = Depends(require_role("admin", "analyst"))
 
 
 async def _get_engine() -> AsyncEngine:
@@ -53,6 +58,7 @@ async def list_articles(
     search: str | None = Query(None, description="Full-text search in title and content"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    _: dict[str, Any] = _analyst_dep,
 ) -> dict[str, Any]:
     """List knowledge articles with filters."""
     engine = await _get_engine()
@@ -95,7 +101,7 @@ async def list_articles(
 
 
 @router.get("/articles/{article_id}")
-async def get_article(article_id: UUID) -> dict[str, Any]:
+async def get_article(article_id: UUID, _: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
     """Get a specific article with full content."""
     engine = await _get_engine()
 
@@ -116,7 +122,7 @@ async def get_article(article_id: UUID) -> dict[str, Any]:
 
 
 @router.post("/articles")
-async def create_article(request: ArticleCreateRequest) -> dict[str, Any]:
+async def create_article(request: ArticleCreateRequest, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Create a new knowledge article."""
     engine = await _get_engine()
 
@@ -144,7 +150,7 @@ async def create_article(request: ArticleCreateRequest) -> dict[str, Any]:
 
 
 @router.patch("/articles/{article_id}")
-async def update_article(article_id: UUID, request: ArticleUpdateRequest) -> dict[str, Any]:
+async def update_article(article_id: UUID, request: ArticleUpdateRequest, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Update a knowledge article."""
     engine = await _get_engine()
 
@@ -191,7 +197,7 @@ async def update_article(article_id: UUID, request: ArticleUpdateRequest) -> dic
 
 
 @router.delete("/articles/{article_id}")
-async def delete_article(article_id: UUID) -> dict[str, Any]:
+async def delete_article(article_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Delete (deactivate) a knowledge article."""
     engine = await _get_engine()
 
@@ -213,7 +219,7 @@ async def delete_article(article_id: UUID) -> dict[str, Any]:
 
 
 @router.get("/categories")
-async def list_categories() -> dict[str, Any]:
+async def list_categories(_: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
     """List all knowledge base categories with article counts."""
     engine = await _get_engine()
 

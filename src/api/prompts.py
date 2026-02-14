@@ -8,12 +8,13 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.agent.ab_testing import ABTestManager
 from src.agent.prompt_manager import PromptManager
+from src.api.auth import require_role
 from src.config import get_settings
 
 if TYPE_CHECKING:
@@ -23,6 +24,10 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/prompts", tags=["prompts"])
 
 _engine: AsyncEngine | None = None
+
+# Module-level dependencies to satisfy B008 lint rule
+_admin_dep = Depends(require_role("admin"))
+_analyst_dep = Depends(require_role("admin", "analyst"))
 
 
 async def _get_engine() -> AsyncEngine:
@@ -54,7 +59,7 @@ class CreateABTestRequest(BaseModel):
 
 
 @router.get("")
-async def list_prompts() -> dict[str, Any]:
+async def list_prompts(_: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
     """List all prompt versions."""
     engine = await _get_engine()
     manager = PromptManager(engine)
@@ -63,7 +68,7 @@ async def list_prompts() -> dict[str, Any]:
 
 
 @router.post("")
-async def create_prompt(request: CreatePromptRequest) -> dict[str, Any]:
+async def create_prompt(request: CreatePromptRequest, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Create a new prompt version."""
     engine = await _get_engine()
     manager = PromptManager(engine)
@@ -77,7 +82,7 @@ async def create_prompt(request: CreatePromptRequest) -> dict[str, Any]:
 
 
 @router.get("/{version_id}")
-async def get_prompt(version_id: UUID) -> dict[str, Any]:
+async def get_prompt(version_id: UUID, _: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
     """Get a specific prompt version."""
     engine = await _get_engine()
     manager = PromptManager(engine)
@@ -88,7 +93,7 @@ async def get_prompt(version_id: UUID) -> dict[str, Any]:
 
 
 @router.patch("/{version_id}/activate")
-async def activate_prompt(version_id: UUID) -> dict[str, Any]:
+async def activate_prompt(version_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Activate a prompt version (deactivates all others)."""
     engine = await _get_engine()
     manager = PromptManager(engine)
@@ -103,7 +108,7 @@ async def activate_prompt(version_id: UUID) -> dict[str, Any]:
 
 
 @router.get("/ab-tests")
-async def list_ab_tests() -> dict[str, Any]:
+async def list_ab_tests(_: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
     """List all A/B tests."""
     engine = await _get_engine()
     ab_manager = ABTestManager(engine)
@@ -112,7 +117,7 @@ async def list_ab_tests() -> dict[str, Any]:
 
 
 @router.post("/ab-tests")
-async def create_ab_test(request: CreateABTestRequest) -> dict[str, Any]:
+async def create_ab_test(request: CreateABTestRequest, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Create a new A/B test (stops any existing active test)."""
     engine = await _get_engine()
     ab_manager = ABTestManager(engine)
@@ -126,7 +131,7 @@ async def create_ab_test(request: CreateABTestRequest) -> dict[str, Any]:
 
 
 @router.patch("/ab-tests/{test_id}/stop")
-async def stop_ab_test(test_id: UUID) -> dict[str, Any]:
+async def stop_ab_test(test_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Stop an A/B test and calculate final results."""
     engine = await _get_engine()
     ab_manager = ABTestManager(engine)

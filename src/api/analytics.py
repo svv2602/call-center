@@ -9,10 +9,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from src.api.auth import require_role
 from src.config import get_settings
 
 if TYPE_CHECKING:
@@ -22,6 +23,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
 _engine: AsyncEngine | None = None
+
+# Module-level dependencies to satisfy B008 lint rule
+_analyst_dep = Depends(require_role("admin", "analyst"))
 
 
 async def _get_engine() -> AsyncEngine:
@@ -38,6 +42,7 @@ async def get_quality_report(
     date_from: str | None = Query(None, description="Start date (YYYY-MM-DD)"),
     date_to: str | None = Query(None, description="End date (YYYY-MM-DD)"),
     scenario: str | None = Query(None, description="Filter by scenario"),
+    _: dict[str, Any] = _analyst_dep,
 ) -> dict[str, Any]:
     """Aggregated quality report with averages by criteria."""
     engine = await _get_engine()
@@ -110,6 +115,7 @@ async def get_calls_list(
     sort_by: str | None = Query(None, description="Sort by: date, quality, cost"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    _: dict[str, Any] = _analyst_dep,
 ) -> dict[str, Any]:
     """List calls with filters for quality, scenario, transfer status."""
     engine = await _get_engine()
@@ -178,7 +184,7 @@ async def get_calls_list(
 
 
 @router.get("/calls/{call_id}")
-async def get_call_details(call_id: UUID) -> dict[str, Any]:
+async def get_call_details(call_id: UUID, _: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
     """Full call details with transcription, tool calls, and quality breakdown."""
     engine = await _get_engine()
 
@@ -243,6 +249,7 @@ async def get_call_details(call_id: UUID) -> dict[str, Any]:
 async def get_summary(
     date_from: str | None = Query(None, description="Start date (YYYY-MM-DD)"),
     date_to: str | None = Query(None, description="End date (YYYY-MM-DD)"),
+    _: dict[str, Any] = _analyst_dep,
 ) -> dict[str, Any]:
     """Aggregated daily statistics from daily_stats table."""
     engine = await _get_engine()
