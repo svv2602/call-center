@@ -92,14 +92,20 @@ doc/              # Документация (архитектура, API, бе�
 ## Тестирование
 
 ```bash
-pytest tests/unit/                        # Unit-тесты
-pytest tests/integration/                 # Integration (нужен Docker)
-pytest tests/ --cov=src --cov-report=html # С покрытием
+make test                 # Unit-тесты
+make test-integration     # Integration (нужен Docker)
+make test-all             # Все тесты с покрытием
+make lint                 # ruff check + format check
+make typecheck            # mypy --strict
+make check                # lint + typecheck + test (полная проверка)
+make format               # Автоформатирование
+make clean                # Очистка кешей
 ```
 
-## Линтинг
-
+Или напрямую:
 ```bash
+pytest tests/unit/ -v
+pytest tests/integration/ -v -m integration
 ruff check src/ && ruff format src/
 mypy src/ --strict
 ```
