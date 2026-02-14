@@ -60,7 +60,9 @@ class CallSession:
         self.channel_uuid = channel_uuid
         self.state = CallState.CONNECTED
         self.caller_id: str | None = None
+        self.caller_phone: str | None = None
         self.customer_id: str | None = None
+        self.needs_phone_verification: bool = False
         self.started_at: float = time.time()
         self.dialog_history: list[DialogTurn] = []
         self.timeout_count: int = 0
@@ -68,6 +70,7 @@ class CallSession:
         self.scenario: str | None = None
         self.transferred: bool = False
         self.transfer_reason: str | None = None
+        self.order_id: str | None = None
 
     # --- State transitions ---
 
@@ -145,13 +148,16 @@ class CallSession:
             "channel_uuid": str(self.channel_uuid),
             "state": self.state.value,
             "caller_id": self.caller_id,
+            "caller_phone": self.caller_phone,
             "customer_id": self.customer_id,
+            "needs_phone_verification": self.needs_phone_verification,
             "started_at": self.started_at,
             "timeout_count": self.timeout_count,
             "detected_language": self.detected_language,
             "scenario": self.scenario,
             "transferred": self.transferred,
             "transfer_reason": self.transfer_reason,
+            "order_id": self.order_id,
             "dialog_history": [
                 {
                     "speaker": t.speaker,
@@ -172,13 +178,16 @@ class CallSession:
         session = cls(uuid.UUID(data["channel_uuid"]))
         session.state = CallState(data["state"])
         session.caller_id = data.get("caller_id")
+        session.caller_phone = data.get("caller_phone")
         session.customer_id = data.get("customer_id")
+        session.needs_phone_verification = data.get("needs_phone_verification", False)
         session.started_at = data["started_at"]
         session.timeout_count = data.get("timeout_count", 0)
         session.detected_language = data.get("detected_language", "uk-UA")
         session.scenario = data.get("scenario")
         session.transferred = data.get("transferred", False)
         session.transfer_reason = data.get("transfer_reason")
+        session.order_id = data.get("order_id")
         session.dialog_history = [
             DialogTurn(
                 speaker=t["speaker"],
