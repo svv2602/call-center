@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.agent.tools import ALL_TOOLS, MVP_TOOLS, ORDER_TOOLS
+from src.agent.tools import ALL_TOOLS, FITTING_TOOLS, MVP_TOOLS, ORDER_TOOLS
 
 
 class TestOrderToolsList:
@@ -20,13 +20,13 @@ class TestOrderToolsList:
         }
 
     def test_all_tools_is_combined(self) -> None:
-        assert ALL_TOOLS == MVP_TOOLS + ORDER_TOOLS
-        assert len(ALL_TOOLS) == 7
+        assert ALL_TOOLS == MVP_TOOLS + ORDER_TOOLS + FITTING_TOOLS
+        assert len(ALL_TOOLS) == 13
 
     def test_canonical_tool_names(self) -> None:
         """Tool names must match canonical list from 00-overview.md."""
         all_names = {t["name"] for t in ALL_TOOLS}
-        # Phase 1 + Phase 2 canonical names
+        # Phase 1 + Phase 2 + Phase 3 canonical names
         expected = {
             "search_tires",
             "check_availability",
@@ -35,6 +35,12 @@ class TestOrderToolsList:
             "create_order_draft",  # NOT create_order
             "update_order_delivery",
             "confirm_order",
+            "get_fitting_stations",
+            "get_fitting_slots",
+            "book_fitting",
+            "cancel_fitting",
+            "get_fitting_price",
+            "search_knowledge_base",
         }
         assert all_names == expected
 
