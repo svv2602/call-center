@@ -1,0 +1,413 @@
+# =============================================================================
+# Prometheus — metrics collection and alerting
+# =============================================================================
+# Includes: ConfigMap (prometheus.yml), ConfigMap (alerts.yml),
+#           Deployment, Service, PVC
+# =============================================================================
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: call-center
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/part-of: call-center
+    app.kubernetes.io/component: monitoring
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    rule_files:
+      - "alerts.yml"
+
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ["alertmanager:9093"]
+
+    scrape_configs:
+      - job_name: "call-processor"
+        static_configs:
+          - targets: ["call-processor-api:8080"]
+        metrics_path: /metrics
+        scrape_interval: 10s
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-alerts
+  namespace: call-center
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/part-of: call-center
+    app.kubernetes.io/component: monitoring
+data:
+  alerts.yml: |
+    groups:
+      - name: call_center_alerts
+        rules:
+          # High transfer rate: >50% in last hour
+          - alert: HighTransferRate
+            expr: >
+              (
+                sum(increase(callcenter_transfers_to_operator_total[1h]))
+                /
+                sum(increase(callcenter_calls_total[1h]))
+              ) > 0.5
+            for: 5m
+            labels:
+              severity: high
+            annotations:
+              summary: "High operator transfer rate"
+              description: >
+                Transfer rate is {{ $value | humanizePercentage }} over the last hour.
+                Threshold: 50%.
+
+          # STT/TTS/LLM errors: >5 in 10 minutes
+          - alert: PipelineErrorsHigh
+            expr: >
+              sum(increase(callcenter_calls_total{status="error"}[10m])) > 5
+            for: 1m
+            labels:
+              severity: high
+            annotations:
+              summary: "High pipeline error rate"
+              description: >
+                {{ $value }} errors in the last 10 minutes.
+                Threshold: 5 errors per 10 minutes.
+
+          # Response latency p95 > 2.5 seconds (per NFR spec)
+          - alert: HighResponseLatency
+            expr: >
+              histogram_quantile(0.95,
+                sum(rate(callcenter_total_response_latency_ms_bucket[5m])) by (le)
+              ) > 2500
+            for: 5m
+            labels:
+              severity: medium
+            annotations:
+              summary: "High response latency (p95)"
+              description: >
+                p95 response latency is {{ $value | humanize }}ms.
+                Threshold: 2500ms.
+
+          # STT latency p95 > 700ms
+          - alert: HighSTTLatency
+            expr: >
+              histogram_quantile(0.95,
+                sum(rate(callcenter_stt_latency_ms_bucket[5m])) by (le)
+              ) > 700
+            for: 5m
+            labels:
+              severity: medium
+            annotations:
+              summary: "High STT latency (p95)"
+              description: "p95 STT latency is {{ $value | humanize }}ms. Threshold: 700ms."
+
+          # LLM latency p95 > 1500ms
+          - alert: HighLLMLatency
+            expr: >
+              histogram_quantile(0.95,
+                sum(rate(callcenter_llm_latency_ms_bucket[5m])) by (le)
+              ) > 1500
+            for: 5m
+            labels:
+              severity: medium
+            annotations:
+              summary: "High LLM latency (p95)"
+              description: "p95 LLM latency is {{ $value | humanize }}ms. Threshold: 1500ms."
+
+          # TTS latency p95 > 600ms
+          - alert: HighTTSLatency
+            expr: >
+              histogram_quantile(0.95,
+                sum(rate(callcenter_tts_latency_ms_bucket[5m])) by (le)
+              ) > 600
+            for: 5m
+            labels:
+              severity: medium
+            annotations:
+              summary: "High TTS latency (p95)"
+              description: "p95 TTS latency is {{ $value | humanize }}ms. Threshold: 600ms."
+
+          # AudioSocket -> STT latency p95 > 100ms
+          - alert: HighAudioSocketToSTTLatency
+            expr: >
+              histogram_quantile(0.95,
+                sum(rate(callcenter_audiosocket_to_stt_ms_bucket[5m])) by (le)
+              ) > 100
+            for: 5m
+            labels:
+              severity: medium
+            annotations:
+              summary: "High AudioSocket-to-STT latency (p95)"
+              description: "p95 AudioSocket->STT latency is {{ $value | humanize }}ms. Threshold: 100ms."
+
+          # TTS -> AudioSocket delivery latency p95 > 100ms
+          - alert: HighTTSDeliveryLatency
+            expr: >
+              histogram_quantile(0.95,
+                sum(rate(callcenter_tts_delivery_ms_bucket[5m])) by (le)
+              ) > 100
+            for: 5m
+            labels:
+              severity: medium
+            annotations:
+              summary: "High TTS delivery latency (p95)"
+              description: "p95 TTS->AudioSocket delivery latency is {{ $value | humanize }}ms. Threshold: 100ms."
+
+          # Operator queue > 5
+          - alert: OperatorQueueOverflow
+            expr: callcenter_operator_queue_length > 5
+            for: 2m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Operator queue overflow"
+              description: >
+                {{ $value }} calls waiting in operator queue.
+                Threshold: 5. Check operator availability.
+
+          # Abnormal API spend: >200% of daily average
+          - alert: AbnormalAPISpend
+            expr: >
+              sum(increase(callcenter_call_cost_usd_sum[1h]))
+              >
+              2 * avg_over_time(sum(increase(callcenter_call_cost_usd_sum[1h]))[24h:1h])
+            for: 15m
+            labels:
+              severity: high
+            annotations:
+              summary: "Abnormal API spend detected"
+              description: >
+                Hourly API spend is more than 200% of the 24h average.
+                Current: ${{ $value | humanize }}/hour.
+
+          # Suspicious tool calls
+          - alert: SuspiciousToolCalls
+            expr: >
+              sum(rate(callcenter_store_api_errors_total{status_code="400"}[10m])) > 0.5
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Suspicious tool call pattern detected"
+              description: >
+                High rate of 400 errors from Store API ({{ $value | humanize }}/s).
+                May indicate prompt injection or anomalous tool call parameters.
+
+          # Celery worker down
+          - alert: CeleryWorkerDown
+            expr: callcenter_celery_workers_online == 0
+            for: 5m
+            labels:
+              severity: high
+            annotations:
+              summary: "Celery worker is down"
+              description: >
+                No Celery workers responding to ping for >5 minutes.
+
+          # Store API circuit breaker open
+          - alert: CircuitBreakerOpen
+            expr: callcenter_store_api_circuit_breaker_state == 1
+            for: 1m
+            labels:
+              severity: high
+            annotations:
+              summary: "Store API circuit breaker is OPEN"
+              description: >
+                Circuit breaker has tripped. Store API calls are being blocked.
+                Will auto-recover after timeout period.
+
+      - name: backup_partition_alerts
+        rules:
+          # PostgreSQL backup stale: no successful backup in 26 hours
+          - alert: PostgresBackupStale
+            expr: >
+              (time() - callcenter_backup_last_success_timestamp{component="postgres"}) > 93600
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "PostgreSQL backup is stale"
+              description: >
+                Last successful PostgreSQL backup was {{ $value | humanizeDuration }} ago.
+                Expected: daily at 04:00.
+
+          # Redis backup stale
+          - alert: RedisBackupStale
+            expr: >
+              (time() - callcenter_backup_last_success_timestamp{component="redis"}) > 93600
+            for: 5m
+            labels:
+              severity: high
+            annotations:
+              summary: "Redis backup is stale"
+              description: >
+                Last successful Redis backup was {{ $value | humanizeDuration }} ago.
+                Expected: daily at 04:15.
+
+          # Knowledge base backup stale
+          - alert: KnowledgeBackupStale
+            expr: >
+              (time() - callcenter_backup_last_success_timestamp{component="knowledge"}) > 691200
+            for: 5m
+            labels:
+              severity: high
+            annotations:
+              summary: "Knowledge base backup is stale"
+              description: >
+                Last successful knowledge base backup was {{ $value | humanizeDuration }} ago.
+                Expected: weekly on Sunday at 01:00.
+
+          # Backup errors
+          - alert: BackupFailed
+            expr: increase(callcenter_backup_errors_total[1h]) > 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Backup failed for {{ $labels.component }}"
+              description: >
+                Backup task for {{ $labels.component }} failed.
+
+          # Partition management stale
+          - alert: PartitionCreationStale
+            expr: >
+              (time() - callcenter_partition_last_success_timestamp) > 3024000
+            for: 5m
+            labels:
+              severity: high
+            annotations:
+              summary: "Partition management has not run recently"
+              description: >
+                Last successful partition management was {{ $value | humanizeDuration }} ago.
+                Expected: monthly on the 1st at 02:00.
+
+          # Partition errors
+          - alert: PartitionManagementFailed
+            expr: increase(callcenter_partition_errors_total[1h]) > 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Partition management failed"
+              description: >
+                Partition creation/cleanup task failed.
+
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: call-center
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/part-of: call-center
+    app.kubernetes.io/component: monitoring
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: prometheus
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: prometheus
+        app.kubernetes.io/part-of: call-center
+        app.kubernetes.io/component: monitoring
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.53.0
+          args:
+            - "--config.file=/etc/prometheus/prometheus.yml"
+            - "--storage.tsdb.retention.time=30d"
+          ports:
+            - name: http
+              containerPort: 9090
+              protocol: TCP
+          resources:
+            requests:
+              memory: "256Mi"
+              cpu: "250m"
+            limits:
+              memory: "1Gi"
+              cpu: "1000m"
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: 9090
+            initialDelaySeconds: 30
+            periodSeconds: 15
+            failureThreshold: 3
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: 9090
+            initialDelaySeconds: 10
+            periodSeconds: 5
+            failureThreshold: 3
+          volumeMounts:
+            - name: prometheus-config
+              mountPath: /etc/prometheus/prometheus.yml
+              subPath: prometheus.yml
+              readOnly: true
+            - name: prometheus-alerts
+              mountPath: /etc/prometheus/alerts.yml
+              subPath: alerts.yml
+              readOnly: true
+            - name: prometheus-data
+              mountPath: /prometheus
+      volumes:
+        - name: prometheus-config
+          configMap:
+            name: prometheus-config
+        - name: prometheus-alerts
+          configMap:
+            name: prometheus-alerts
+        - name: prometheus-data
+          persistentVolumeClaim:
+            claimName: prometheus-data
+
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+  namespace: call-center
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/part-of: call-center
+    app.kubernetes.io/component: monitoring
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 10Gi
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: call-center
+  labels:
+    app.kubernetes.io/name: prometheus
+    app.kubernetes.io/part-of: call-center
+    app.kubernetes.io/component: monitoring
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: prometheus
+  ports:
+    - name: http
+      port: 9090
+      targetPort: 9090
+      protocol: TCP

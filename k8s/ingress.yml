@@ -1,0 +1,100 @@
+# =============================================================================
+# Ingress — NGINX-based path routing for call-center services
+# =============================================================================
+# Prerequisites:
+#   - NGINX Ingress Controller installed in the cluster
+#   - TLS secret "call-center-tls" created (or use cert-manager)
+#
+# Create TLS secret manually:
+#   kubectl create secret tls call-center-tls \
+#     --namespace=call-center \
+#     --cert=/path/to/tls.crt \
+#     --key=/path/to/tls.key
+# =============================================================================
+
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: call-center-ingress
+  namespace: call-center
+  labels:
+    app.kubernetes.io/name: call-center-ingress
+    app.kubernetes.io/part-of: call-center
+    app.kubernetes.io/component: ingress
+  annotations:
+    # NGINX Ingress Controller class
+    kubernetes.io/ingress.class: nginx
+    # WebSocket support — long-lived connections for /ws
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/websocket-services: "call-processor-api"
+    # Force HTTPS redirect
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    # Proxy body size (for potential file uploads in admin)
+    nginx.ingress.kubernetes.io/proxy-body-size: "10m"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - callcenter.example.com
+      secretName: call-center-tls
+  rules:
+    - host: callcenter.example.com
+      http:
+        paths:
+          # API endpoints
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: call-processor-api
+                port:
+                  number: 8080
+          # Admin panel — exact match
+          - path: /admin
+            pathType: Exact
+            backend:
+              service:
+                name: call-processor-api
+                port:
+                  number: 8080
+          # Admin panel — sub-paths
+          - path: /admin
+            pathType: Prefix
+            backend:
+              service:
+                name: call-processor-api
+                port:
+                  number: 8080
+          # WebSocket endpoint
+          - path: /ws
+            pathType: Exact
+            backend:
+              service:
+                name: call-processor-api
+                port:
+                  number: 8080
+          # Health check
+          - path: /health
+            pathType: Exact
+            backend:
+              service:
+                name: call-processor-api
+                port:
+                  number: 8080
+          # Prometheus metrics endpoint
+          - path: /metrics
+            pathType: Exact
+            backend:
+              service:
+                name: call-processor-api
+                port:
+                  number: 8080
+          # Grafana dashboards
+          - path: /grafana
+            pathType: Prefix
+            backend:
+              service:
+                name: grafana
+                port:
+                  number: 3000

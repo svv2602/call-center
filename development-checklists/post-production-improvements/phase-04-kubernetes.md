@@ -1,12 +1,12 @@
 # Фаза 4: Kubernetes
 
 ## Статус
-- [ ] Не начата
-- [ ] В процессе
-- [ ] Завершена
+- [x] Не начата
+- [x] В процессе
+- [x] Завершена
 
-**Начата:** -
-**Завершена:** -
+**Начата:** 2026-02-14
+**Завершена:** 2026-02-14
 
 ## Цель фазы
 Создать Kubernetes manifests для развёртывания приложения с auto-scaling, health checks и resilience. После этой фазы приложение можно развернуть в K8s кластере одной командой.
@@ -16,11 +16,11 @@
 ### 4.0 ОБЯЗАТЕЛЬНО: Анализ и планирование
 
 #### A. Анализ существующего кода
-- [ ] Изучить `docker-compose.yml` — все сервисы, порты, volumes, env variables
-- [ ] Изучить `docker-compose.staging.yml` — staging конфигурация
-- [ ] Изучить `Dockerfile` — как собирается приложение
-- [ ] Изучить health check endpoints: `/health`, `/health/ready`
-- [ ] Изучить `src/config.py` — все env variables для конфигурации
+- [x] Изучить `docker-compose.yml` — все сервисы, порты, volumes, env variables
+- [x] Изучить `docker-compose.staging.yml` — staging конфигурация
+- [x] Изучить `Dockerfile` — как собирается приложение
+- [x] Изучить health check endpoints: `/health`, `/health/ready`
+- [x] Изучить `src/config.py` — все env variables для конфигурации
 
 **Команды для поиска:**
 ```bash
@@ -36,78 +36,78 @@ grep -n "port\|PORT" docker-compose.yml
 ```
 
 #### B. Анализ зависимостей
-- [ ] Какие сервисы нужны: app, PostgreSQL, Redis, Prometheus, Grafana
-- [ ] Какие volumes/PV нужны: PostgreSQL data, Redis data, Grafana dashboards
-- [ ] Какие secrets нужны: DB credentials, API keys, JWT secret
-- [ ] Какие ConfigMaps нужны: app config, Prometheus config, Grafana provisioning
+- [x] Какие сервисы нужны: app, PostgreSQL, Redis, Prometheus, Grafana
+- [x] Какие volumes/PV нужны: PostgreSQL data, Redis data, Grafana dashboards
+- [x] Какие secrets нужны: DB credentials, API keys, JWT secret
+- [x] Какие ConfigMaps нужны: app config, Prometheus config, Grafana provisioning
 
 **Компоненты K8s:**
-- Deployments: call-processor, admin-api
+- Deployments: call-processor, admin-api, celery-worker, celery-beat
 - StatefulSets: PostgreSQL, Redis
-- Services: ClusterIP для внутренних, LoadBalancer/Ingress для внешних
-- Ingress: admin UI, API
+- Services: ClusterIP для внутренних, NodePort для AudioSocket
+- Ingress: admin UI, API, Grafana
 - HPA: call-processor (по CPU/memory)
-- Secrets: db-credentials, api-keys, jwt-secret
-- ConfigMaps: app-config, prometheus-config
+- Secrets: call-center-secrets, google-credentials
+- ConfigMaps: call-center-config, prometheus-config, prometheus-alerts, grafana-provisioning-*
 
 #### C. Проверка архитектуры
-- [ ] Namespace: `call-center`
-- [ ] Resource limits для каждого pod
-- [ ] Readiness/liveness probes на basis health endpoints
-- [ ] Anti-affinity для HA
-- [ ] PDB (PodDisruptionBudget) для zero-downtime updates
+- [x] Namespace: `call-center`
+- [x] Resource limits для каждого pod
+- [x] Readiness/liveness probes на basis health endpoints
+- [x] Anti-affinity для HA
+- [x] PDB (PodDisruptionBudget) для zero-downtime updates
 
 **Референс-модуль:** `docker-compose.yml` (все сервисы и их конфигурация)
 
 **Цель:** Понять существующие паттерны проекта ПЕРЕД написанием кода.
 
-**Заметки для переиспользования:** -
+**Заметки для переиспользования:** Ports: 8080 (API/metrics), 9092 (AudioSocket). Health endpoints: /health (liveness), /health/ready (readiness). 10 docker-compose services mapped to K8s resources.
 
 ---
 
 ### 4.1 Namespace и базовые ресурсы
 
-- [ ] Создать `k8s/namespace.yml` — namespace `call-center`
-- [ ] Создать `k8s/secrets.yml` — шаблон для secrets (с placeholder-ами, не реальные значения)
-- [ ] Создать `k8s/configmap.yml` — ConfigMap с app конфигурацией
-- [ ] Создать `k8s/README.md` — инструкции по развёртыванию
+- [x] Создать `k8s/namespace.yml` — namespace `call-center`
+- [x] Создать `k8s/secrets.yml` — шаблон для secrets (с placeholder-ами, не реальные значения)
+- [x] Создать `k8s/configmap.yml` — ConfigMap с app конфигурацией
+- [x] Создать `k8s/README.md` — инструкции по развёртыванию
 
 **Файлы:** `k8s/`
-**Заметки:** Secrets шаблон — placeholder values, реальные через `kubectl create secret` или sealed-secrets
+**Заметки:** Secrets шаблон — placeholder values (base64 "change-me"), реальные через `kubectl create secret`. README содержит пошаговую инструкцию деплоя, Kustomize usage, рекомендации по production (managed DB/Redis).
 
 ---
 
 ### 4.2 Application Deployments
 
-- [ ] `k8s/call-processor/deployment.yml` — Call Processor (AudioSocket + API):
+- [x] `k8s/call-processor/deployment.yml` — Call Processor (AudioSocket + API):
   - Replicas: 2 (min)
   - Resources: requests 256Mi/250m, limits 512Mi/500m
   - Liveness: `/health` (HTTP, period 30s)
   - Readiness: `/health/ready` (HTTP, period 10s)
   - Env from ConfigMap + Secrets
   - Port: 8080 (API), 9092 (AudioSocket)
-- [ ] `k8s/call-processor/service.yml` — ClusterIP для API, NodePort/LoadBalancer для AudioSocket
-- [ ] `k8s/call-processor/hpa.yml` — HPA: min 2, max 10, target CPU 70%
-- [ ] `k8s/call-processor/pdb.yml` — PDB: minAvailable 1
+- [x] `k8s/call-processor/service.yml` — ClusterIP для API, NodePort для AudioSocket
+- [x] `k8s/call-processor/hpa.yml` — HPA: min 2, max 10, target CPU 70%
+- [x] `k8s/call-processor/pdb.yml` — PDB: minAvailable 1
 
 **Файлы:** `k8s/call-processor/`
-**Заметки:** AudioSocket требует TCP pass-through, не HTTP routing
+**Заметки:** Также созданы celery-worker-deployment.yml (1 replica, 2Gi limit) и celery-beat-deployment.yml (1 replica, 512Mi limit). Pod anti-affinity для HA. GCP credentials mounted as volume.
 
 ---
 
 ### 4.3 Infrastructure StatefulSets
 
-- [ ] `k8s/postgresql/statefulset.yml` — PostgreSQL 16:
+- [x] `k8s/postgresql/statefulset.yml` — PostgreSQL 16:
   - PVC: 10Gi
   - Resources: requests 256Mi/250m, limits 1Gi/1000m
   - Liveness: `pg_isready`
   - InitDB scripts
-- [ ] `k8s/postgresql/service.yml` — ClusterIP
-- [ ] `k8s/redis/statefulset.yml` — Redis 7:
+- [x] `k8s/postgresql/service.yml` — ClusterIP
+- [x] `k8s/redis/statefulset.yml` — Redis 7:
   - PVC: 1Gi
   - Resources: requests 128Mi/100m, limits 256Mi/250m
   - Liveness: `redis-cli ping`
-- [ ] `k8s/redis/service.yml` — ClusterIP
+- [x] `k8s/redis/service.yml` — ClusterIP
 
 **Файлы:** `k8s/postgresql/`, `k8s/redis/`
 **Заметки:** Для production рекомендуется managed services (RDS, ElastiCache). StatefulSets — fallback.
@@ -116,16 +116,16 @@ grep -n "port\|PORT" docker-compose.yml
 
 ### 4.4 Ingress и Monitoring
 
-- [ ] `k8s/ingress.yml` — Ingress для admin UI и API:
+- [x] `k8s/ingress.yml` — Ingress для admin UI и API:
   - TLS termination
   - Path-based routing: `/api/*`, `/admin/*`, `/ws`
-  - Annotations для nginx/traefik
-- [ ] `k8s/monitoring/prometheus-deployment.yml` — Prometheus с ServiceMonitor
-- [ ] `k8s/monitoring/grafana-deployment.yml` — Grafana с provisioned dashboards
-- [ ] `k8s/kustomization.yml` — Kustomize для управления всеми ресурсами
+  - Annotations для nginx (WebSocket support, timeouts)
+- [x] `k8s/monitoring/prometheus-deployment.yml` — Prometheus с ConfigMaps (prometheus.yml + alerts.yml), PVC 10Gi, Service
+- [x] `k8s/monitoring/grafana-deployment.yml` — Grafana с provisioning ConfigMaps (dashboards + datasources), PVC 5Gi, Service
+- [x] `k8s/kustomization.yml` — Kustomize для управления всеми ресурсами
 
 **Файлы:** `k8s/`, `k8s/monitoring/`
-**Заметки:** -
+**Заметки:** Prometheus включает полный набор alert rules (13 alerts). Grafana provisioning для dashboards и datasources (Prometheus + PostgreSQL). Kustomize объединяет все 17 ресурсов.
 
 ---
 

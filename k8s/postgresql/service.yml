@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgresql
+  namespace: call-center
+  labels:
+    app.kubernetes.io/name: postgresql
+    app.kubernetes.io/part-of: call-center
+spec:
+  type: ClusterIP
+  ports:
+    - port: 5432
+      targetPort: 5432
+      protocol: TCP
+      name: postgresql
+  selector:
+    app.kubernetes.io/name: postgresql

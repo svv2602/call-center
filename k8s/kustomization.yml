@@ -1,0 +1,34 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: call-center
+
+commonLabels:
+  app.kubernetes.io/part-of: call-center
+
+resources:
+  # --- Cluster-level ---
+  - namespace.yml
+  - secrets.yml
+  - configmap.yml
+
+  # --- Data stores ---
+  - postgresql/statefulset.yml
+  - postgresql/service.yml
+  - redis/statefulset.yml
+  - redis/service.yml
+
+  # --- Application ---
+  - call-processor/deployment.yml
+  - call-processor/service.yml
+  - call-processor/hpa.yml
+  - call-processor/pdb.yml
+  - call-processor/celery-worker-deployment.yml
+  - call-processor/celery-beat-deployment.yml
+
+  # --- Monitoring ---
+  - monitoring/prometheus-deployment.yml
+  - monitoring/grafana-deployment.yml
+
+  # --- Networking ---
+  - ingress.yml

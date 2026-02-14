@@ -1,0 +1,13 @@
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: call-processor
+  namespace: call-center
+  labels:
+    app.kubernetes.io/name: call-processor
+    app.kubernetes.io/part-of: call-center
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: call-processor
