@@ -4,13 +4,13 @@
 Привести проект Call Center AI в состояние, когда `git clone && docker compose up` даёт работающую систему. Исправить все инфраструктурные проблемы, выявленные при внешнем аудите.
 
 ## Критерии успеха
-- [ ] `docker build .` собирает образ без ошибок
-- [ ] `docker compose up` поднимает все сервисы (call-processor, postgres, redis, prometheus, grafana, celery)
-- [ ] CI (GitHub Actions) запускается на push и PR
-- [ ] `pytest tests/unit/` проходит из venv одной командой
-- [ ] README.md содержит quickstart для разработчика
-- [ ] Партиции PostgreSQL создаются автоматически
-- [ ] Embeddings работают без несогласованных зависимостей
+- [x] `docker build .` собирает образ без ошибок (308MB, multi-stage)
+- [x] `docker compose up` поднимает все сервисы (call-processor, postgres, redis, prometheus, grafana, celery, store-api)
+- [x] CI (GitHub Actions) запускается на push и PR к `main`
+- [x] `pytest tests/unit/` проходит из venv одной командой (244 passed)
+- [x] README.md содержит quickstart для разработчика
+- [x] Партиции PostgreSQL создаются автоматически (Celery Beat, 1-го числа)
+- [x] Embeddings работают без несогласованных зависимостей (OpenAISettings в config)
 
 ## Фазы работы
 1. [Dockerfile и сборка образа](phase-01-dockerfile.md) — создать multi-stage Dockerfile, проверить docker build

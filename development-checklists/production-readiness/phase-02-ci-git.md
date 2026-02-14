@@ -47,12 +47,12 @@ cat .github/workflows/ci.yml
 
 ### 2.1 Переименовать ветку master → main
 - [x] Выполнить `git branch -m master main`
-- [ ] Обновить remote: `git push -u origin main` — **отложено (нет push без подтверждения)**
-- [ ] Удалить старую ветку на remote: `git push origin --delete master` — **отложено**
-- [ ] Установить default branch на GitHub — **отложено**
+- [x] Обновить remote: `git push -u origin main` — выполнено
+- [ ] Удалить старую ветку на remote: `git push origin --delete master` — **требует ручного действия на GitHub**
+- [ ] Установить default branch на GitHub — **требует ручного действия: Settings → Default branch → main**
 
 **Файлы:** Git configuration
-**Заметки:** Локально переименовано. Push и удаление remote master отложены до пользовательского подтверждения.
+**Заметки:** Ветка `main` запушена на remote. Удаление `master` и смена default branch требуют ручных действий на GitHub.
 
 ---
 
