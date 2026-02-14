@@ -104,6 +104,17 @@ ruff check src/ && ruff format src/
 mypy src/ --strict
 ```
 
+## Внешние API
+
+| Сервис | Назначение | Обязательный |
+|--------|-----------|-------------|
+| **Anthropic** (Claude) | LLM-агент, tool calling | Да |
+| **Google Cloud** STT | Распознавание речи (streaming gRPC) | Да |
+| **Google Cloud** TTS | Синтез речи (uk-UA) | Да |
+| **OpenAI** | Embeddings для базы знаний (text-embedding-3-small) | Нет |
+
+OpenAI используется только для RAG-поиска по базе знаний. Система работает без OPENAI_API_KEY — поиск по знаниям будет недоступен, остальные функции работают.
+
 ## Документация
 
 - [Навигация по документации](doc/README.md)

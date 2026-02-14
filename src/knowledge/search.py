@@ -45,6 +45,10 @@ class KnowledgeSearch:
         Returns:
             List of matching articles with relevance scores.
         """
+        if self._generator is None:
+            logger.warning("Knowledge search unavailable: embedding generator not configured")
+            return []
+
         try:
             return await self._vector_search(query, category, limit)
         except Exception as exc:

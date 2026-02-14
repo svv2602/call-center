@@ -35,6 +35,14 @@ class AnthropicSettings(BaseSettings):
     model_config = {"env_prefix": "ANTHROPIC_"}
 
 
+class OpenAISettings(BaseSettings):
+    api_key: str = ""
+    embedding_model: str = "text-embedding-3-small"
+    embedding_dimensions: int = 1536
+
+    model_config = {"env_prefix": "OPENAI_"}
+
+
 class StoreAPISettings(BaseSettings):
     url: str = "http://localhost:3000/api/v1"
     key: str = ""
@@ -117,6 +125,7 @@ class Settings(BaseSettings):
     google_stt: GoogleSTTSettings = GoogleSTTSettings()
     google_tts: GoogleTTSSettings = GoogleTTSSettings()
     anthropic: AnthropicSettings = AnthropicSettings()
+    openai: OpenAISettings = OpenAISettings()
     store_api: StoreAPISettings = StoreAPISettings()
     database: DatabaseSettings = DatabaseSettings()
     redis: RedisSettings = RedisSettings()

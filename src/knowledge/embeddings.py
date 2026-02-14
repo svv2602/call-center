@@ -20,10 +20,24 @@ _MAX_CHUNK_TOKENS = 500
 _APPROX_CHARS_PER_TOKEN = 4
 _MAX_CHUNK_CHARS = _MAX_CHUNK_TOKENS * _APPROX_CHARS_PER_TOKEN
 
-# Embedding config
+# Embedding defaults (overridden by config when available)
 _EMBEDDING_MODEL = "text-embedding-3-small"
 _EMBEDDING_DIMENSIONS = 1536
 _BATCH_SIZE = 20
+
+# Embedding config via settings (lazy import to avoid circular deps)
+def _get_embedding_config() -> tuple[str, str, int]:
+    """Get embedding config from settings. Returns (api_key, model, dimensions)."""
+    try:
+        from src.config import get_settings
+        settings = get_settings()
+        return (
+            settings.openai.api_key,
+            settings.openai.embedding_model,
+            settings.openai.embedding_dimensions,
+        )
+    except Exception:
+        return ("", _EMBEDDING_MODEL, _EMBEDDING_DIMENSIONS)
 
 
 def chunk_text(text: str, max_chars: int = _MAX_CHUNK_CHARS) -> list[str]:
