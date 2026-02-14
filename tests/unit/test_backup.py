@@ -68,7 +68,7 @@ class TestRotateBackups:
         new_file = tmp_path / "callcenter_2026-02-13_040000.sql.gz"
         new_file.write_text("new")
 
-        deleted = _rotate_backups(tmp_path, retention_days=7)
+        deleted = _rotate_backups(tmp_path, "callcenter_*.sql*", retention_days=7)
 
         assert deleted == 1
         assert not old_file.exists()
@@ -78,9 +78,27 @@ class TestRotateBackups:
         f = tmp_path / "callcenter_2026-02-14_040000.sql.gz"
         f.write_text("recent")
 
-        deleted = _rotate_backups(tmp_path, retention_days=7)
+        deleted = _rotate_backups(tmp_path, "callcenter_*.sql*", retention_days=7)
         assert deleted == 0
         assert f.exists()
+
+    def test_pattern_filtering(self, tmp_path: Path) -> None:
+        """Rotate only matches the given glob pattern."""
+        import os
+
+        old_time = time.time() - (10 * 86400)
+        # Redis backup (should not be matched by callcenter pattern)
+        redis_file = tmp_path / "redis_2026-02-01.rdb.gz"
+        redis_file.write_text("redis")
+        os.utime(redis_file, (old_time, old_time))
+
+        pg_file = tmp_path / "callcenter_2026-02-01_040000.sql.gz"
+        pg_file.write_text("pg")
+        os.utime(pg_file, (old_time, old_time))
+
+        deleted = _rotate_backups(tmp_path, "callcenter_*.sql*", retention_days=7)
+        assert deleted == 1
+        assert redis_file.exists()  # Not matched by pattern
 
 
 class TestRunPgDump:
@@ -149,3 +167,69 @@ class TestBackupTask:
 
         assert result["status"] == "error"
         assert "pg_dump" in result["error"]
+
+
+class TestBackupKnowledgeBase:
+    """Test the knowledge base backup task."""
+
+    def test_successful_backup(self, tmp_path: Path) -> None:
+        from src.config import BackupSettings, Settings
+
+        # Create a fake knowledge_base directory
+        kb_dir = tmp_path / "knowledge_base"
+        kb_dir.mkdir()
+        (kb_dir / "article.md").write_text("# Test Article")
+
+        settings = Settings(
+            backup=BackupSettings(backup_dir=str(tmp_path / "backups"), retention_days=7)
+        )
+
+        with (
+            patch("src.tasks.backup.get_settings", return_value=settings),
+            patch("src.tasks.backup.Path") as mock_path_cls,
+        ):
+            # We need knowledge_base dir to exist when checked
+            import os
+
+            old_cwd = os.getcwd()
+            os.chdir(tmp_path)
+            try:
+                # Re-import to use real Path
+                from importlib import reload
+
+                import src.tasks.backup as backup_mod
+
+                reload(backup_mod)
+
+                with patch.object(backup_mod, "get_settings", return_value=settings):
+                    result = backup_mod.backup_knowledge_base()
+            finally:
+                os.chdir(old_cwd)
+
+        assert result["status"] == "success"
+        assert result["size_bytes"] > 0
+
+    def test_missing_knowledge_dir(self, tmp_path: Path) -> None:
+        from src.config import BackupSettings, Settings
+
+        settings = Settings(
+            backup=BackupSettings(backup_dir=str(tmp_path / "backups"), retention_days=7)
+        )
+
+        import os
+
+        old_cwd = os.getcwd()
+        os.chdir(tmp_path)  # No knowledge_base dir here
+        try:
+            from importlib import reload
+
+            import src.tasks.backup as backup_mod
+
+            reload(backup_mod)
+
+            with patch.object(backup_mod, "get_settings", return_value=settings):
+                result = backup_mod.backup_knowledge_base()
+        finally:
+            os.chdir(old_cwd)
+
+        assert result["status"] == "skipped"

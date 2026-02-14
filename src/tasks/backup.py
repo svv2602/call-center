@@ -1,7 +1,9 @@
-"""Automated PostgreSQL backup task.
+"""Automated backup tasks for all system components.
 
-Runs daily via Celery Beat to create compressed pg_dump backups
-with automatic rotation of old backups.
+Runs via Celery Beat:
+- PostgreSQL: daily at 04:00 (pg_dump + gzip + rotation)
+- Redis: daily at 04:15 (RDB snapshot copy + gzip)
+- Knowledge base: weekly Sunday at 01:00 (tar.gz archive)
 """
 
 from __future__ import annotations
@@ -17,6 +19,12 @@ from typing import Any
 from urllib.parse import urlparse
 
 from src.config import get_settings
+from src.monitoring.metrics import (
+    backup_duration_seconds,
+    backup_errors_total,
+    backup_last_size_bytes,
+    backup_last_success_timestamp,
+)
 from src.tasks.celery_app import app
 
 logger = logging.getLogger(__name__)
@@ -66,11 +74,11 @@ def _compress_file(source: Path) -> Path:
     return gz_path
 
 
-def _rotate_backups(backup_dir: Path, retention_days: int) -> int:
+def _rotate_backups(backup_dir: Path, pattern: str, retention_days: int) -> int:
     """Delete backups older than retention_days. Returns count of deleted files."""
     now = datetime.now(UTC)
     deleted = 0
-    for f in backup_dir.glob("callcenter_*.sql*"):
+    for f in backup_dir.glob(pattern):
         age_days = (now.timestamp() - f.stat().st_mtime) / 86400
         if age_days > retention_days:
             f.unlink()
@@ -111,8 +119,13 @@ def backup_database() -> dict[str, Any]:
             },
         )
 
+        # Update Prometheus metrics
+        backup_last_success_timestamp.labels(component="postgres").set(time.time())
+        backup_last_size_bytes.labels(component="postgres").set(size_bytes)
+        backup_duration_seconds.labels(component="postgres").observe(duration_s)
+
         # Rotate old backups
-        deleted = _rotate_backups(backup_dir, settings.backup.retention_days)
+        deleted = _rotate_backups(backup_dir, "callcenter_*.sql*", settings.backup.retention_days)
 
         return {
             "status": "success",
@@ -124,9 +137,11 @@ def backup_database() -> dict[str, Any]:
 
     except FileNotFoundError:
         logger.error("pg_dump not found — install PostgreSQL client tools")
+        backup_errors_total.labels(component="postgres").inc()
         return {"status": "error", "error": "pg_dump not found"}
     except subprocess.CalledProcessError as e:
         logger.error("pg_dump failed: %s", e.stderr.strip() if e.stderr else str(e))
+        backup_errors_total.labels(component="postgres").inc()
         return {"status": "error", "error": str(e)}
 
 
@@ -215,3 +230,127 @@ def verify_latest_backup() -> dict[str, Any]:
         logger.info("Backup verified: %s (%d bytes)", latest.name, result["size_bytes"])
 
     return result
+
+
+@app.task(name="src.tasks.backup.backup_redis")  # type: ignore[untyped-decorator]
+def backup_redis() -> dict[str, Any]:
+    """Create a Redis RDB snapshot backup with rotation.
+
+    Called by Celery Beat daily at 04:15 Kyiv time.
+    Uses redis-cli to trigger BGSAVE and copies the dump.rdb file.
+    """
+    start = time.monotonic()
+    settings = get_settings()
+    redis_url = settings.redis.url
+
+    backup_dir = Path(settings.backup.backup_dir) / "redis"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d_%H%M%S")
+
+    try:
+        # Parse Redis URL for host/port
+        from urllib.parse import urlparse as _urlparse
+
+        parsed = _urlparse(redis_url)
+        redis_host = parsed.hostname or "localhost"
+        redis_port = str(parsed.port or 6379)
+
+        # Trigger BGSAVE
+        subprocess.run(
+            ["redis-cli", "-h", redis_host, "-p", redis_port, "BGSAVE"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+
+        # Wait briefly for BGSAVE to complete
+        import time as _time
+
+        _time.sleep(2)
+
+        # Get Redis data directory and copy dump.rdb
+        result_info = subprocess.run(
+            ["redis-cli", "-h", redis_host, "-p", redis_port, "CONFIG", "GET", "dir"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        redis_dir_lines = result_info.stdout.strip().split("\n")
+        redis_dir = redis_dir_lines[1] if len(redis_dir_lines) > 1 else "/data"
+
+        rdb_source = Path(redis_dir) / "dump.rdb"
+        rdb_dest = backup_dir / f"redis_{timestamp}.rdb"
+
+        if rdb_source.exists():
+            shutil.copy2(rdb_source, rdb_dest)
+        else:
+            # Fallback: try docker-accessible path
+            rdb_dest_path = backup_dir / f"redis_{timestamp}.rdb"
+            subprocess.run(
+                ["cp", str(rdb_source), str(rdb_dest_path)],
+                check=True,
+                capture_output=True,
+            )
+
+        gz_path = _compress_file(rdb_dest)
+        size_bytes = gz_path.stat().st_size
+        duration_s = time.monotonic() - start
+
+        backup_last_success_timestamp.labels(component="redis").set(time.time())
+        backup_last_size_bytes.labels(component="redis").set(size_bytes)
+        backup_duration_seconds.labels(component="redis").observe(duration_s)
+
+        _rotate_backups(backup_dir, "redis_*.rdb*", 7)
+
+        logger.info("Redis backup created: %s (%d bytes)", gz_path, size_bytes)
+        return {"status": "success", "file": str(gz_path), "size_bytes": size_bytes}
+
+    except Exception as e:
+        backup_errors_total.labels(component="redis").inc()
+        logger.error("Redis backup failed: %s", e)
+        return {"status": "error", "error": str(e)}
+
+
+@app.task(name="src.tasks.backup.backup_knowledge_base")  # type: ignore[untyped-decorator]
+def backup_knowledge_base() -> dict[str, Any]:
+    """Create a tar.gz archive of the knowledge_base directory.
+
+    Called by Celery Beat weekly on Sunday at 01:00 Kyiv time.
+    """
+    start = time.monotonic()
+    settings = get_settings()
+
+    backup_dir = Path(settings.backup.backup_dir) / "knowledge"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+
+    knowledge_dir = Path("knowledge_base")
+    if not knowledge_dir.exists():
+        logger.warning("Knowledge base directory not found, skipping backup")
+        return {"status": "skipped", "reason": "knowledge_base directory not found"}
+
+    timestamp = datetime.now(UTC).strftime("%Y-%m-%d_%H%M%S")
+    archive_path = backup_dir / f"knowledge_{timestamp}.tar.gz"
+
+    try:
+        import tarfile
+
+        with tarfile.open(archive_path, "w:gz") as tar:
+            tar.add(knowledge_dir, arcname="knowledge_base")
+
+        size_bytes = archive_path.stat().st_size
+        duration_s = time.monotonic() - start
+
+        backup_last_success_timestamp.labels(component="knowledge").set(time.time())
+        backup_last_size_bytes.labels(component="knowledge").set(size_bytes)
+        backup_duration_seconds.labels(component="knowledge").observe(duration_s)
+
+        _rotate_backups(backup_dir, "knowledge_*.tar.gz", 30)
+
+        logger.info("Knowledge base backup created: %s (%d bytes)", archive_path, size_bytes)
+        return {"status": "success", "file": str(archive_path), "size_bytes": size_bytes}
+
+    except Exception as e:
+        backup_errors_total.labels(component="knowledge").inc()
+        logger.error("Knowledge base backup failed: %s", e)
+        return {"status": "error", "error": str(e)}

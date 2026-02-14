@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from datetime import date, timedelta
 from typing import Any
 
@@ -18,6 +19,12 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.config import get_settings
+from src.monitoring.metrics import (
+    partition_created_total,
+    partition_dropped_total,
+    partition_errors_total,
+    partition_last_success_timestamp,
+)
 from src.tasks.celery_app import app
 
 logger = logging.getLogger(__name__)
@@ -53,7 +60,15 @@ def ensure_partitions() -> dict[str, Any]:
 
     Idempotent: uses IF NOT EXISTS / IF EXISTS.
     """
-    return asyncio.get_event_loop().run_until_complete(_ensure_partitions_async())
+    try:
+        result = asyncio.get_event_loop().run_until_complete(_ensure_partitions_async())
+        partition_last_success_timestamp.set(time.time())
+        partition_created_total.inc(len(result["created"]))
+        partition_dropped_total.inc(len(result["dropped"]))
+        return result
+    except Exception:
+        partition_errors_total.inc()
+        raise
 
 
 async def _ensure_partitions_async() -> dict[str, Any]:

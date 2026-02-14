@@ -58,6 +58,14 @@ app.conf.beat_schedule = {
         "task": "src.tasks.backup.verify_latest_backup",
         "schedule": crontab(hour=4, minute=30),  # 30 min after backup
     },
+    "backup-redis": {
+        "task": "src.tasks.backup.backup_redis",
+        "schedule": crontab(hour=4, minute=15),  # Every day at 04:15 Kyiv time
+    },
+    "backup-knowledge-base": {
+        "task": "src.tasks.backup.backup_knowledge_base",
+        "schedule": crontab(hour=1, minute=0, day_of_week="sunday"),  # Weekly Sunday 01:00
+    },
     "send-weekly-report": {
         "task": "src.tasks.email_report.send_weekly_report",
         "schedule": crontab(hour=9, minute=0, day_of_week="monday"),  # Monday at 09:00 Kyiv time

@@ -174,3 +174,81 @@ groups:
           description: >
             Circuit breaker has tripped. Store API calls are being blocked.
             Will auto-recover after timeout period.
+
+  - name: backup_partition_alerts
+    rules:
+      # PostgreSQL backup stale: no successful backup in 26 hours
+      - alert: PostgresBackupStale
+        expr: >
+          (time() - callcenter_backup_last_success_timestamp{component="postgres"}) > 93600
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "PostgreSQL backup is stale"
+          description: >
+            Last successful PostgreSQL backup was {{ $value | humanizeDuration }} ago.
+            Expected: daily at 04:00. Check Celery Beat and worker logs.
+
+      # Redis backup stale: no successful backup in 26 hours
+      - alert: RedisBackupStale
+        expr: >
+          (time() - callcenter_backup_last_success_timestamp{component="redis"}) > 93600
+        for: 5m
+        labels:
+          severity: high
+        annotations:
+          summary: "Redis backup is stale"
+          description: >
+            Last successful Redis backup was {{ $value | humanizeDuration }} ago.
+            Expected: daily at 04:15.
+
+      # Knowledge base backup stale: no successful backup in 8 days
+      - alert: KnowledgeBackupStale
+        expr: >
+          (time() - callcenter_backup_last_success_timestamp{component="knowledge"}) > 691200
+        for: 5m
+        labels:
+          severity: high
+        annotations:
+          summary: "Knowledge base backup is stale"
+          description: >
+            Last successful knowledge base backup was {{ $value | humanizeDuration }} ago.
+            Expected: weekly on Sunday at 01:00.
+
+      # Backup errors: any backup failure
+      - alert: BackupFailed
+        expr: increase(callcenter_backup_errors_total[1h]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Backup failed for {{ $labels.component }}"
+          description: >
+            Backup task for {{ $labels.component }} failed.
+            Check Celery worker logs: docker compose logs celery-worker.
+
+      # Partition management stale: no run in 35 days
+      - alert: PartitionCreationStale
+        expr: >
+          (time() - callcenter_partition_last_success_timestamp) > 3024000
+        for: 5m
+        labels:
+          severity: high
+        annotations:
+          summary: "Partition management has not run recently"
+          description: >
+            Last successful partition management was {{ $value | humanizeDuration }} ago.
+            Expected: monthly on the 1st at 02:00.
+
+      # Partition errors
+      - alert: PartitionManagementFailed
+        expr: increase(callcenter_partition_errors_total[1h]) > 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Partition management failed"
+          description: >
+            Partition creation/cleanup task failed.
+            Check: docker compose logs celery-worker.

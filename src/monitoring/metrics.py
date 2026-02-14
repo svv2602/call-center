@@ -145,6 +145,60 @@ tts_cache_misses_total = Counter(
     "TTS cache miss count",
 )
 
+# --- Celery workers metrics ---
+
+celery_workers_online = Gauge(
+    "callcenter_celery_workers_online",
+    "Number of Celery workers currently responding to ping",
+)
+
+# --- Operational metrics (backup / partition management) ---
+
+backup_last_success_timestamp = Gauge(
+    "callcenter_backup_last_success_timestamp",
+    "Unix timestamp of last successful backup",
+    ["component"],  # postgres, redis, knowledge
+)
+
+backup_last_size_bytes = Gauge(
+    "callcenter_backup_last_size_bytes",
+    "Size in bytes of the last successful backup",
+    ["component"],
+)
+
+backup_duration_seconds = Histogram(
+    "callcenter_backup_duration_seconds",
+    "Backup task duration in seconds",
+    ["component"],
+    buckets=[1, 5, 10, 30, 60, 120, 300],
+)
+
+backup_errors_total = Counter(
+    "callcenter_backup_errors_total",
+    "Total backup failures",
+    ["component"],
+)
+
+partition_last_success_timestamp = Gauge(
+    "callcenter_partition_last_success_timestamp",
+    "Unix timestamp of last successful partition maintenance",
+)
+
+partition_created_total = Counter(
+    "callcenter_partition_created_total",
+    "Total partitions created",
+)
+
+partition_dropped_total = Counter(
+    "callcenter_partition_dropped_total",
+    "Total partitions dropped",
+)
+
+partition_errors_total = Counter(
+    "callcenter_partition_errors_total",
+    "Total partition management failures",
+)
+
 
 def get_metrics() -> bytes:
     """Generate Prometheus metrics output."""
