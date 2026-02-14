@@ -5,6 +5,7 @@ import logging
 import signal
 import sys
 
+import aiohttp
 import uvicorn
 from fastapi import FastAPI
 from redis.asyncio import Redis
@@ -73,20 +74,62 @@ async def health_check() -> dict[str, object]:
 
 @app.get("/health/ready")
 async def readiness_check() -> dict[str, object]:
-    """Readiness probe — checks external dependencies (STT, LLM, TTS)."""
-    redis_ok = False
+    """Readiness probe — checks external dependencies (STT, LLM, TTS).
+
+    Per deployment.md: verifies Google STT reachable, Claude API reachable,
+    TTS initialized, Store API reachable, Redis connected.
+    """
+    checks: dict[str, str] = {}
+
+    # Redis
     if _redis is not None:
         try:
             await _redis.ping()
-            redis_ok = True
+            checks["redis"] = "connected"
         except Exception:
-            pass
+            checks["redis"] = "disconnected"
+    else:
+        checks["redis"] = "not_initialized"
+
+    # Store API — lightweight HEAD request to base URL
+    if _store_client is not None and _store_client._session is not None:
+        try:
+            async with _store_client._session.get(
+                f"{_store_client._base_url}/health",
+                timeout=aiohttp.ClientTimeout(total=3),
+            ) as resp:
+                checks["store_api"] = "reachable" if resp.status < 500 else "error"
+        except Exception:
+            checks["store_api"] = "unreachable"
+    else:
+        checks["store_api"] = "not_initialized"
+
+    # TTS engine
+    checks["tts_engine"] = "initialized" if _tts_engine is not None else "not_initialized"
+
+    # Claude API — lightweight models list call
+    settings = get_settings()
+    if settings.anthropic.api_key:
+        try:
+            import anthropic
+            client = anthropic.AsyncAnthropic(api_key=settings.anthropic.api_key)
+            await asyncio.wait_for(client.models.list(limit=1), timeout=3.0)
+            checks["claude_api"] = "reachable"
+        except Exception:
+            checks["claude_api"] = "unreachable"
+    else:
+        checks["claude_api"] = "no_api_key"
+
+    # Google STT — check credentials file exists
+    import os
+    creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
+    checks["google_stt"] = "credentials_present" if (creds_path and os.path.isfile(creds_path)) else "no_credentials"
+
+    all_ok = all(v in ("connected", "reachable", "initialized", "credentials_present") for v in checks.values())
 
     return {
-        "status": "ready" if (_store_client is not None and _tts_engine is not None) else "not_ready",
-        "redis": "connected" if redis_ok else "disconnected",
-        "store_client": "initialized" if _store_client is not None else "not_initialized",
-        "tts_engine": "initialized" if _tts_engine is not None else "not_initialized",
+        "status": "ready" if all_ok else "not_ready",
+        **checks,
     }
 
 

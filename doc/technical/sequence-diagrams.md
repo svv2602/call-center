@@ -238,3 +238,70 @@ sequenceDiagram
     LLM-->>SM: "Записав вас на завтра, 14:00, Здолбунівська 7а"
     SM->>C: [TTS] Подтверждение записи
 ```
+
+## 7. Проверка статуса заказа
+
+```mermaid
+sequenceDiagram
+    participant C as Клиент
+    participant SM as Session Manager
+    participant LLM as Claude Agent
+    participant API as Store API
+
+    C->>SM: "Хочу дізнатися статус замовлення"
+    SM->>LLM: user message
+    LLM-->>SM: "Назвіть, будь ласка, номер замовлення або ваш номер телефону"
+
+    SM->>C: [TTS] Запрос номера
+    C->>SM: "Замовлення 12346"
+    SM->>LLM: user message
+    LLM-->>SM: tool_use: get_order_status(order_number="12346")
+    SM->>API: GET /orders?number=12346
+    API-->>SM: {order_number: "12346", status: "shipped", tracking: "NP20450012345"}
+    SM->>LLM: tool_result
+    LLM-->>SM: "Замовлення 12346 відправлено. Трекінг Нова Пошта: NP20450012345"
+
+    SM->>C: [TTS] Статус заказа
+
+    Note over C,SM: Клиент может задать доп. вопрос
+
+    C->>SM: "А коли приїде?"
+    SM->>LLM: user message
+    LLM-->>SM: "За інформацією перевізника — орієнтовно завтра до 18:00."
+    SM->>C: [TTS] Ответ
+```
+
+## 8. RAG-консультація (база знань)
+
+```mermaid
+sequenceDiagram
+    participant C as Клиент
+    participant SM as Session Manager
+    participant STT as Google STT
+    participant LLM as Claude Agent
+    participant DB as PostgreSQL<br/>(pgvector)
+
+    C->>SM: "Чим відрізняються шини M+S від зимових?"
+    SM->>LLM: user message
+
+    Note over LLM: Агент визначає, що це<br/>консультаційне питання
+
+    LLM-->>SM: tool_use: search_knowledge_base(query="різниця M+S зимові шини")
+    SM->>DB: SELECT chunk_text FROM knowledge_embeddings<br/>ORDER BY embedding <=> $query_vector<br/>LIMIT 3
+    DB-->>SM: [chunk1, chunk2, chunk3]
+    SM->>LLM: tool_result: [{text: "M+S (Mud+Snow)..."}, ...]
+
+    Note over LLM: Агент формирует ответ на основе<br/>найденных фрагментов статей
+
+    LLM-->>SM: "Шини з маркуванням M+S розраховані на бруд і легкий сніг,<br/>але не проходили зимову сертифікацію. Справжні зимові шини<br/>мають позначку сніжинки (3PMSF) і забезпечують кращє<br/>зчеплення при температурі нижче +7°C..."
+
+    SM->>C: [TTS] Розгорнута консультація
+
+    C->>SM: "А які зимові шини порадите на Камрі?"
+    SM->>LLM: user message
+
+    Note over LLM: Агент переключається<br/>на пошук товарів
+
+    LLM-->>SM: tool_use: search_tires(vehicle_model="Camry", season="winter")
+    SM->>SM: → далі стандартный поток подбора (диаграмма 1)
+```
