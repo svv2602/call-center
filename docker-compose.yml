@@ -73,6 +73,32 @@ services:
       - prometheus
       - postgres
 
+  celery-worker:
+    build: .
+    command: celery -A src.tasks.celery_app worker -l info -Q quality,stats -c 2
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - DATABASE_URL=postgresql+asyncpg://callcenter:${POSTGRES_PASSWORD}@postgres:5432/callcenter
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - QUALITY_LLM_MODEL=claude-haiku-4-5-20251001
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  celery-beat:
+    build: .
+    command: celery -A src.tasks.celery_app beat -l info
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - DATABASE_URL=postgresql+asyncpg://callcenter:${POSTGRES_PASSWORD}@postgres:5432/callcenter
+    depends_on:
+      redis:
+        condition: service_healthy
+
   alertmanager:
     image: prom/alertmanager:v0.27.0
     ports:

@@ -32,6 +32,8 @@ dependencies = [
     "prometheus-client>=0.21.0",
     # Config
     "pydantic-settings>=2.7.0",
+    # Task queue
+    "celery[redis]>=5.4.0",
 ]
 
 [project.optional-dependencies]

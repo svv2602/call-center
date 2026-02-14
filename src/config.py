@@ -71,6 +71,20 @@ class LoggingSettings(BaseSettings):
     model_config = {"env_prefix": "LOG_"}
 
 
+class CelerySettings(BaseSettings):
+    broker_url: str = "redis://localhost:6379/1"
+    result_backend: str = "redis://localhost:6379/1"
+
+    model_config = {"env_prefix": "CELERY_"}
+
+
+class QualitySettings(BaseSettings):
+    llm_model: str = "claude-haiku-4-5-20251001"
+    score_threshold: float = 0.5
+
+    model_config = {"env_prefix": "QUALITY_"}
+
+
 class Settings(BaseSettings):
     """Root settings — aggregates all sub-settings."""
 
@@ -83,6 +97,8 @@ class Settings(BaseSettings):
     redis: RedisSettings = RedisSettings()
     ari: ARISettings = ARISettings()
     logging: LoggingSettings = LoggingSettings()
+    celery: CelerySettings = CelerySettings()
+    quality: QualitySettings = QualitySettings()
     prometheus_port: int = 8080
 
     model_config = {"env_prefix": ""}

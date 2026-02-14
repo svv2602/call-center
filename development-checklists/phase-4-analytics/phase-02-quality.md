@@ -3,10 +3,10 @@
 ## Статус
 - [ ] Не начата
 - [ ] В процессе
-- [ ] Завершена
+- [x] Завершена
 
-**Начата:** -
-**Завершена:** -
+**Начата:** 2026-02-14
+**Завершена:** 2026-02-14
 
 ## Цель фазы
 
@@ -17,9 +17,9 @@
 ### 2.0 ОБЯЗАТЕЛЬНО: Анализ и планирование
 
 #### A. Анализ существующего кода
-- [ ] Проверить таблицу calls (поле quality_score)
-- [ ] Изучить требования к качеству из `doc/development/phase-4-analytics.md`
-- [ ] Проверить наличие Celery в зависимостях
+- [x] Проверить таблицу calls (поле quality_score)
+- [x] Изучить требования к качеству из `doc/development/phase-4-analytics.md`
+- [x] Проверить наличие Celery в зависимостях
 
 **Команды для поиска:**
 ```bash
@@ -28,9 +28,9 @@ grep -rn "quality_score" migrations/
 ```
 
 #### B. Анализ зависимостей
-- [ ] Celery + Redis (broker) для фоновых задач
-- [ ] Claude Haiku для экономичной оценки
-- [ ] Таблица calls.quality_score уже есть
+- [x] Celery + Redis (broker) для фоновых задач
+- [x] Claude Haiku для экономичной оценки
+- [x] Таблица calls.quality_score уже есть
 
 **Новые абстракции:** Нет
 **Новые env variables:** `CELERY_BROKER_URL`, `QUALITY_LLM_MODEL`
@@ -41,27 +41,27 @@ grep -rn "quality_score" migrations/
 
 **Цель:** Определить критерии качества и pipeline оценки.
 
-**Заметки для переиспользования:** -
+**Заметки для переиспользования:** calls.quality_score FLOAT уже существует в migration 001.
 
 ---
 
 ### 2.1 Celery setup
 
-- [ ] Добавить Celery в зависимости проекта
-- [ ] Настроить Celery с Redis как broker
-- [ ] Создать `src/tasks/celery_app.py` — конфигурация Celery
-- [ ] Добавить Celery worker в docker-compose.yml
-- [ ] Задача запускается автоматически после завершения звонка
+- [x] Добавить Celery в зависимости проекта
+- [x] Настроить Celery с Redis как broker
+- [x] Создать `src/tasks/celery_app.py` — конфигурация Celery
+- [x] Добавить Celery worker в docker-compose.yml
+- [x] Задача запускается автоматически после завершения звонка
 
 **Файлы:** `src/tasks/celery_app.py`, `docker-compose.yml`
-**Заметки:** -
+**Заметки:** celery[redis]>=5.4.0 добавлен в pyproject.toml. Celery worker и beat в docker-compose. Redis db=1 для broker (db=0 для sessions).
 
 ---
 
 ### 2.2 Quality Evaluator
 
-- [ ] Создать `src/tasks/quality_evaluator.py`
-- [ ] Критерии оценки:
+- [x] Создать `src/tasks/quality_evaluator.py`
+- [x] Критерии оценки:
   - `bot_greeted_properly` — бот поздоровался
   - `bot_understood_intent` — бот правильно понял намерение
   - `bot_used_correct_tool` — бот вызвал правильный инструмент
@@ -70,47 +70,47 @@ grep -rn "quality_score" migrations/
   - `bot_was_concise` — ответы не слишком длинные
   - `call_resolved_without_human` — решено без оператора
   - `customer_seemed_satisfied` — клиент не выражал недовольства
-- [ ] LLM вызов: Claude Haiku анализирует транскрипцию
-- [ ] Результат: оценка 0-1 по каждому критерию + общий score
-- [ ] Сохранение в calls.quality_score и доп. JSONB поле
+- [x] LLM вызов: Claude Haiku анализирует транскрипцию
+- [x] Результат: оценка 0-1 по каждому критерию + общий score
+- [x] Сохранение в calls.quality_score и доп. JSONB поле
 
 **Файлы:** `src/tasks/quality_evaluator.py`
-**Заметки:** Claude Haiku для экономии
+**Заметки:** Claude Haiku для экономии. JSON-ответ парсится, средний score по 8 критериям. Retry до 3 раз при ошибках API.
 
 ---
 
 ### 2.3 Выявление проблем
 
-- [ ] Звонки с quality_score < 0.5 → помечаются для ручного просмотра
-- [ ] Паттерн: >30% переключений по сценарию за день → алерт
-- [ ] Частые переспрашивания STT → алерт (проблема с распознаванием)
-- [ ] Сохранение результатов анализа для аналитики
+- [x] Звонки с quality_score < 0.5 → помечаются для ручного просмотра
+- [x] Паттерн: >30% переключений по сценарию за день → алерт
+- [x] Частые переспрашивания STT → алерт (проблема с распознаванием)
+- [x] Сохранение результатов анализа для аналитики
 
 **Файлы:** `src/tasks/quality_evaluator.py`
-**Заметки:** -
+**Заметки:** needs_review=True при score < threshold. Алерт HighTransferRate покрывает паттерн переключений. quality_details JSONB сохраняет полную детализацию.
 
 ---
 
 ### 2.4 Миграция БД для аналитики
 
-- [ ] Создать `migrations/versions/005_add_analytics.py`
-- [ ] Таблица `daily_stats`: stat_date, total_calls, resolved_by_bot, transferred, avg_duration, avg_quality_score, total_cost_usd, scenario_breakdown (JSONB), transfer_reasons (JSONB)
-- [ ] Доп. поля в calls: quality_details (JSONB) — детализация по критериям
-- [ ] Cron-задача (Celery beat) для ежедневного расчёта daily_stats
+- [x] Создать `migrations/versions/005_add_analytics.py`
+- [x] Таблица `daily_stats`: stat_date, total_calls, resolved_by_bot, transferred, avg_duration, avg_quality_score, total_cost_usd, scenario_breakdown (JSONB), transfer_reasons (JSONB)
+- [x] Доп. поля в calls: quality_details (JSONB) — детализация по критериям
+- [x] Cron-задача (Celery beat) для ежедневного расчёта daily_stats
 
 **Файлы:** `migrations/versions/005_add_analytics.py`
-**Заметки:** -
+**Заметки:** daily_stats с ON CONFLICT upsert. hourly_distribution JSONB добавлен. Celery beat запускает calculate_daily_stats в 01:00 по Киеву.
 
 ---
 
 ### 2.5 API endpoints для качества
 
-- [ ] `GET /analytics/quality` — отчёт по качеству (агрегация quality_score)
-- [ ] `GET /analytics/calls?quality_below=0.5` — фильтр проблемных звонков
-- [ ] `GET /analytics/calls/{id}` — детали с quality_details
+- [x] `GET /analytics/quality` — отчёт по качеству (агрегация quality_score)
+- [x] `GET /analytics/calls?quality_below=0.5` — фильтр проблемных звонков
+- [x] `GET /analytics/calls/{id}` — детали с quality_details
 
-**Файлы:** `src/api/routes.py` или `src/store_client/client.py`
-**Заметки:** -
+**Файлы:** `src/api/analytics.py`
+**Заметки:** FastAPI router с pagination, фильтрами по scenario/date/quality/transferred. GET /analytics/summary для daily_stats.
 
 ---
 
