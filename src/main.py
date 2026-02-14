@@ -14,6 +14,7 @@ from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from src.agent.agent import LLMAgent, ToolRouter
+from src.logging.pii_vault import PIIVault
 from src.api.analytics import router as analytics_router
 from src.api.auth import router as auth_router
 from src.api.knowledge import router as knowledge_router
@@ -163,12 +164,14 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             alternative_languages=settings.google_stt.alternative_language_list,
         )
 
-        # Per-call tool router and LLM agent
+        # Per-call tool router, PII vault, and LLM agent
         router = _build_tool_router(session)
+        vault = PIIVault()
         agent = LLMAgent(
             api_key=settings.anthropic.api_key,
             model=settings.anthropic.model,
             tool_router=router,
+            pii_vault=vault,
         )
 
         # Run the pipeline (greeting → listen → STT → LLM → TTS loop)

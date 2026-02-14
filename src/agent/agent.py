@@ -13,6 +13,7 @@ import anthropic
 
 from src.agent.prompts import PROMPT_VERSION, SYSTEM_PROMPT
 from src.agent.tools import ALL_TOOLS
+from src.logging.pii_vault import PIIVault
 
 logger = logging.getLogger(__name__)
 
@@ -69,10 +70,12 @@ class LLMAgent:
         api_key: str,
         model: str = "claude-sonnet-4-5-20250929",
         tool_router: ToolRouter | None = None,
+        pii_vault: PIIVault | None = None,
     ) -> None:
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._model = model
         self._tool_router = tool_router or ToolRouter()
+        self._pii_vault = pii_vault
 
     @property
     def tool_router(self) -> ToolRouter:
@@ -96,6 +99,10 @@ class LLMAgent:
         Returns:
             Tuple of (response_text, updated_conversation_history).
         """
+        # Mask PII before sending to LLM
+        if self._pii_vault is not None:
+            user_text = self._pii_vault.mask(user_text)
+
         # Add user message
         conversation_history.append({"role": "user", "content": user_text})
 
@@ -107,8 +114,11 @@ class LLMAgent:
                 + conversation_history[-(MAX_HISTORY_MESSAGES - 1) :]
             )
 
-        # Build system prompt with caller context
-        system = self._build_system_prompt(caller_phone, order_id)
+        # Build system prompt with caller context (mask caller phone)
+        masked_phone = caller_phone
+        if self._pii_vault is not None and caller_phone:
+            masked_phone = self._pii_vault.mask(caller_phone)
+        system = self._build_system_prompt(masked_phone, order_id)
 
         response_text = ""
         tool_call_count = 0
@@ -176,14 +186,25 @@ class LLMAgent:
             # Execute tool calls and add results
             tool_results: list[dict[str, Any]] = []
             for tool_use in tool_uses:
+                # Restore PII in tool arguments so real values reach Store API
+                args = tool_use["input"]
+                if self._pii_vault is not None:
+                    args = self._pii_vault.restore_in_args(args)
+
                 result = await self._tool_router.execute(
-                    tool_use["name"], tool_use["input"]
+                    tool_use["name"], args
                 )
+
+                # Mask PII in tool results before adding to LLM history
+                content = str(result)
+                if self._pii_vault is not None:
+                    content = self._pii_vault.mask(content)
+
                 tool_results.append(
                     {
                         "type": "tool_result",
                         "tool_use_id": tool_use["id"],
-                        "content": str(result),
+                        "content": content,
                     }
                 )
                 tool_call_count += 1
