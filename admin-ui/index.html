@@ -67,15 +67,44 @@
         .tab-bar { display: flex; gap: 0; margin-bottom: 1rem; border-bottom: 2px solid #e5e7eb; }
         .tab-bar button { padding: .5rem 1rem; border: none; background: none; cursor: pointer; font-size: .85rem; color: #64748b; border-bottom: 2px solid transparent; margin-bottom: -2px; }
         .tab-bar button.active { color: #2563eb; border-bottom-color: #2563eb; }
+
+        .spinner { display: inline-block; width: 18px; height: 18px; border: 2px solid #e5e7eb; border-top-color: #2563eb; border-radius: 50%; animation: spin .6s linear infinite; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-overlay { text-align: center; padding: 2rem; color: #64748b; }
+
+        .toast-container { position: fixed; top: 1rem; right: 1rem; z-index: 200; display: flex; flex-direction: column; gap: .5rem; }
+        .toast { padding: .6rem 1rem; border-radius: 6px; font-size: .85rem; color: #fff; box-shadow: 0 2px 8px rgba(0,0,0,.2); animation: slideIn .3s ease; }
+        .toast-success { background: #059669; }
+        .toast-error { background: #dc2626; }
+        @keyframes slideIn { from { transform: translateX(100%); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+
+        .btn { padding: .4rem 1rem; border: none; border-radius: 4px; cursor: pointer; font-size: .85rem; }
+        .btn-primary { background: #2563eb; color: #fff; }
+        .btn-primary:hover { background: #1d4ed8; }
+        .btn-danger { background: #dc2626; color: #fff; }
+        .btn-danger:hover { background: #b91c1c; }
+        .btn-sm { padding: .2rem .5rem; font-size: .75rem; }
+
+        .form-group { margin-bottom: .8rem; }
+        .form-group label { display: block; font-size: .8rem; font-weight: 600; color: #475569; margin-bottom: .3rem; }
+        .form-group input, .form-group textarea, .form-group select { width: 100%; padding: .5rem; border: 1px solid #d1d5db; border-radius: 4px; font-size: .85rem; }
+        .form-group textarea { min-height: 120px; font-family: monospace; resize: vertical; }
+
+        .empty-state { text-align: center; padding: 2rem; color: #94a3b8; }
+
+        .breadcrumbs { font-size: .8rem; color: #64748b; margin-bottom: .8rem; }
+        .breadcrumbs a { color: #2563eb; text-decoration: none; }
     </style>
 </head>
 <body>
+    <div class="toast-container" id="toastContainer"></div>
+
     <!-- Login -->
     <div class="login-container" id="loginContainer">
         <div class="login-form">
             <h1>Call Center AI</h1>
             <div class="error" id="loginError">Invalid credentials</div>
-            <input type="text" id="loginUsername" placeholder="Username" value="admin">
+            <input type="text" id="loginUsername" placeholder="Username">
             <input type="password" id="loginPassword" placeholder="Password">
             <button onclick="login()">Login</button>
         </div>
@@ -96,8 +125,9 @@
         <div class="main">
             <!-- Dashboard -->
             <div id="page-dashboard">
+                <div class="breadcrumbs"><a href="#" onclick="showPage('dashboard')">Home</a> / Dashboard</div>
                 <h1>Dashboard</h1>
-                <div class="stats-grid" id="dashboardStats"></div>
+                <div class="stats-grid" id="dashboardStats"><div class="loading-overlay"><div class="spinner"></div></div></div>
                 <div class="card">
                     <h3>Grafana Real-time</h3>
                     <iframe class="grafana-frame" id="grafanaFrame" src=""></iframe>
@@ -106,6 +136,7 @@
 
             <!-- Calls -->
             <div id="page-calls" style="display:none">
+                <div class="breadcrumbs"><a href="#" onclick="showPage('dashboard')">Home</a> / Call Journal</div>
                 <h1>Call Journal</h1>
                 <div class="filters">
                     <input type="date" id="filterDateFrom" placeholder="From">
@@ -123,10 +154,12 @@
                         <option value="true">Transferred</option>
                         <option value="false">Resolved by bot</option>
                     </select>
+                    <input type="text" id="filterSearch" placeholder="Search transcription...">
                     <input type="number" id="filterQualityBelow" placeholder="Quality below" step="0.1" min="0" max="1">
                     <button onclick="loadCalls()">Filter</button>
                 </div>
                 <div class="card">
+                    <div id="callsLoading" class="loading-overlay" style="display:none"><div class="spinner"></div></div>
                     <table id="callsTable">
                         <thead>
                             <tr>
@@ -147,10 +180,11 @@
 
             <!-- Prompts -->
             <div id="page-prompts" style="display:none">
+                <div class="breadcrumbs"><a href="#" onclick="showPage('dashboard')">Home</a> / Prompts</div>
                 <h1>Prompt Management</h1>
                 <div class="tab-bar">
-                    <button class="active" onclick="showPromptTab('versions')">Versions</button>
-                    <button onclick="showPromptTab('abtests')">A/B Tests</button>
+                    <button class="active" onclick="showPromptTab('versions', this)">Versions</button>
+                    <button onclick="showPromptTab('abtests', this)">A/B Tests</button>
                 </div>
                 <div id="promptVersions" class="card"></div>
                 <div id="promptABTests" class="card" style="display:none"></div>
@@ -158,6 +192,7 @@
 
             <!-- Knowledge -->
             <div id="page-knowledge" style="display:none">
+                <div class="breadcrumbs"><a href="#" onclick="showPage('dashboard')">Home</a> / Knowledge Base</div>
                 <h1>Knowledge Base</h1>
                 <div class="filters">
                     <select id="kbCategory">
@@ -169,22 +204,31 @@
                     </select>
                     <input type="text" id="kbSearch" placeholder="Search...">
                     <button onclick="loadArticles()">Filter</button>
+                    <button class="btn btn-primary" onclick="showCreateArticle()">+ New Article</button>
                 </div>
                 <div class="card" id="articlesContainer"></div>
             </div>
 
             <!-- Settings -->
             <div id="page-settings" style="display:none">
+                <div class="breadcrumbs"><a href="#" onclick="showPage('dashboard')">Home</a> / Settings</div>
                 <h1>System Settings</h1>
+                <div class="card">
+                    <h3>System Health</h3>
+                    <div id="systemInfo"><div class="loading-overlay"><div class="spinner"></div></div></div>
+                    <button class="btn btn-primary" onclick="loadSettings()" style="margin-top:.8rem">Check Connection</button>
+                </div>
+                <div class="card">
+                    <h3>Application Info</h3>
+                    <table>
+                        <tr><td>Version</td><td>v0.1.0</td></tr>
+                    </table>
+                </div>
                 <div class="card">
                     <h3>Grafana Dashboards</h3>
                     <p style="margin:.5rem 0; font-size:.85rem">
                         <a href="/grafana" target="_blank">Open Grafana</a> (default: admin/admin)
                     </p>
-                </div>
-                <div class="card">
-                    <h3>System Info</h3>
-                    <div id="systemInfo"></div>
                 </div>
             </div>
         </div>
@@ -199,21 +243,103 @@
         </div>
     </div>
 
+    <!-- Create Prompt Modal -->
+    <div class="modal-overlay" id="createPromptModal">
+        <div class="modal">
+            <span class="close" onclick="closeModal('createPromptModal')">&times;</span>
+            <h2>Create New Prompt Version</h2>
+            <div class="form-group">
+                <label>Name</label>
+                <input type="text" id="promptName" placeholder="e.g. v2.0-improved-search">
+            </div>
+            <div class="form-group">
+                <label>System Prompt</label>
+                <textarea id="promptSystemPrompt" placeholder="Enter system prompt text..."></textarea>
+            </div>
+            <button class="btn btn-primary" onclick="createPrompt()">Create</button>
+        </div>
+    </div>
+
+    <!-- Create/Edit Article Modal -->
+    <div class="modal-overlay" id="createArticleModal">
+        <div class="modal">
+            <span class="close" onclick="closeModal('createArticleModal')">&times;</span>
+            <h2 id="articleModalTitle">New Article</h2>
+            <input type="hidden" id="editArticleId">
+            <div class="form-group">
+                <label>Title</label>
+                <input type="text" id="articleTitle" placeholder="Article title">
+            </div>
+            <div class="form-group">
+                <label>Category</label>
+                <select id="articleCategory">
+                    <option value="brands">Brands</option>
+                    <option value="guides">Guides</option>
+                    <option value="faq">FAQ</option>
+                    <option value="comparisons">Comparisons</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Content (Markdown)</label>
+                <textarea id="articleContent" placeholder="Article content in Markdown..."></textarea>
+            </div>
+            <button class="btn btn-primary" onclick="saveArticle()">Save</button>
+        </div>
+    </div>
+
     <script>
         const API = '';
         let token = localStorage.getItem('admin_token');
+        let dashboardRefreshTimer = null;
 
+        // --- Toast notifications ---
+        function showToast(message, type = 'success') {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 4000);
+        }
+
+        // --- API helper ---
         async function api(path, opts = {}) {
             const headers = { 'Content-Type': 'application/json' };
             if (token) headers['Authorization'] = `Bearer ${token}`;
             const res = await fetch(`${API}${path}`, { ...opts, headers });
-            if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
+            if (res.status === 401) {
+                showToast('Session expired. Please login again.', 'error');
+                logout();
+                throw new Error('Unauthorized');
+            }
+            if (!res.ok) {
+                const body = await res.json().catch(() => ({}));
+                throw new Error(body.detail || `HTTP ${res.status}`);
+            }
             return res.json();
         }
 
+        // --- JWT expiry check ---
+        function checkTokenExpiry() {
+            if (!token) return;
+            try {
+                const payload = JSON.parse(atob(token.split('.')[1]));
+                if (payload.exp && payload.exp < Date.now() / 1000) {
+                    showToast('Session expired. Please login again.', 'error');
+                    logout();
+                }
+            } catch { /* ignore parse errors */ }
+        }
+
+        // --- Auth ---
         async function login() {
             const u = document.getElementById('loginUsername').value;
             const p = document.getElementById('loginPassword').value;
+            if (!u || !p) {
+                document.getElementById('loginError').textContent = 'Please enter username and password';
+                document.getElementById('loginError').style.display = 'block';
+                return;
+            }
             try {
                 const data = await api('/auth/login', {
                     method: 'POST',
@@ -223,8 +349,11 @@
                 localStorage.setItem('admin_token', token);
                 document.getElementById('loginContainer').style.display = 'none';
                 document.getElementById('app').style.display = 'block';
-                showPage('dashboard');
-            } catch {
+                document.getElementById('loginError').style.display = 'none';
+                const savedPage = localStorage.getItem('admin_active_page') || 'dashboard';
+                showPage(savedPage);
+            } catch (e) {
+                document.getElementById('loginError').textContent = 'Invalid credentials';
                 document.getElementById('loginError').style.display = 'block';
             }
         }
@@ -232,23 +361,31 @@
         function logout() {
             token = null;
             localStorage.removeItem('admin_token');
+            if (dashboardRefreshTimer) clearInterval(dashboardRefreshTimer);
             document.getElementById('app').style.display = 'none';
             document.getElementById('loginContainer').style.display = 'flex';
         }
 
+        // --- Navigation ---
         function showPage(page) {
             document.querySelectorAll('[id^="page-"]').forEach(el => el.style.display = 'none');
             document.getElementById(`page-${page}`).style.display = 'block';
             document.querySelectorAll('.sidebar a').forEach(a => a.classList.remove('active'));
-            document.querySelector(`[data-page="${page}"]`).classList.add('active');
+            const pageLink = document.querySelector(`[data-page="${page}"]`);
+            if (pageLink) pageLink.classList.add('active');
 
-            if (page === 'dashboard') loadDashboard();
+            localStorage.setItem('admin_active_page', page);
+
+            if (dashboardRefreshTimer) { clearInterval(dashboardRefreshTimer); dashboardRefreshTimer = null; }
+
+            if (page === 'dashboard') { loadDashboard(); dashboardRefreshTimer = setInterval(loadDashboard, 30000); }
             if (page === 'calls') loadCalls();
             if (page === 'prompts') loadPromptVersions();
             if (page === 'knowledge') loadArticles();
             if (page === 'settings') loadSettings();
         }
 
+        // --- Helpers ---
         function qualityBadge(score) {
             if (score == null) return '<span class="badge">N/A</span>';
             const s = parseFloat(score).toFixed(2);
@@ -262,104 +399,150 @@
             return new Date(d).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' });
         }
 
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('show');
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }
+
         // --- Dashboard ---
         async function loadDashboard() {
             try {
                 const data = await api('/analytics/summary');
                 const stats = data.daily_stats || [];
                 const latest = stats[0] || {};
+                const total = latest.total_calls || 0;
+                const resolved = latest.resolved_by_bot || 0;
+                const resolvedPct = total > 0 ? (resolved / total * 100).toFixed(1) : '0.0';
                 document.getElementById('dashboardStats').innerHTML = `
-                    <div class="card stat-card"><div class="value">${latest.total_calls || 0}</div><div class="label">Calls today</div></div>
-                    <div class="card stat-card"><div class="value">${latest.resolved_by_bot || 0}</div><div class="label">Resolved by bot</div></div>
+                    <div class="card stat-card"><div class="value">${total}</div><div class="label">Calls today</div></div>
+                    <div class="card stat-card"><div class="value">${resolved}<small style="font-size:.7rem;color:#64748b"> (${resolvedPct}%)</small></div><div class="label">Resolved by bot</div></div>
                     <div class="card stat-card"><div class="value">${latest.transferred || 0}</div><div class="label">Transferred</div></div>
                     <div class="card stat-card"><div class="value">${(latest.avg_quality_score || 0).toFixed(2)}</div><div class="label">Avg quality</div></div>
                     <div class="card stat-card"><div class="value">$${(latest.total_cost_usd || 0).toFixed(2)}</div><div class="label">Cost today</div></div>
                 `;
-            } catch { /* ignore */ }
+            } catch (e) {
+                document.getElementById('dashboardStats').innerHTML = `
+                    <div class="empty-state">Failed to load dashboard: ${escapeHtml(e.message)}
+                    <br><button class="btn btn-primary" onclick="loadDashboard()" style="margin-top:.5rem">Retry</button></div>
+                `;
+            }
         }
 
         // --- Calls ---
         let callsOffset = 0;
         async function loadCalls(offset = 0) {
             callsOffset = offset;
+            const loading = document.getElementById('callsLoading');
+            const tbody = document.querySelector('#callsTable tbody');
+            loading.style.display = 'block';
+
             const params = new URLSearchParams({ limit: 20, offset });
             const df = document.getElementById('filterDateFrom').value;
             const dt = document.getElementById('filterDateTo').value;
             const sc = document.getElementById('filterScenario').value;
             const tr = document.getElementById('filterTransferred').value;
             const qb = document.getElementById('filterQualityBelow').value;
+            const search = document.getElementById('filterSearch').value;
             if (df) params.set('date_from', df);
             if (dt) params.set('date_to', dt);
             if (sc) params.set('scenario', sc);
             if (tr) params.set('transferred', tr);
             if (qb) params.set('quality_below', qb);
+            if (search) params.set('search', search);
 
-            const data = await api(`/analytics/calls?${params}`);
-            const tbody = document.querySelector('#callsTable tbody');
-            tbody.innerHTML = data.calls.map(c => `
-                <tr style="cursor:pointer" onclick="showCallDetail('${c.id}')">
-                    <td>${formatDate(c.started_at)}</td>
-                    <td>${c.caller_id || '-'}</td>
-                    <td>${c.scenario || '-'}</td>
-                    <td>${c.duration_seconds || 0}s</td>
-                    <td>${qualityBadge(c.quality_score)}</td>
-                    <td>$${(c.total_cost_usd || 0).toFixed(3)}</td>
-                    <td>${c.transferred_to_operator ? '<span class="badge badge-yellow">Transferred</span>' : '<span class="badge badge-green">Resolved</span>'}</td>
-                </tr>
-            `).join('');
+            try {
+                const data = await api(`/analytics/calls?${params}`);
+                loading.style.display = 'none';
 
-            const pages = Math.ceil(data.total / 20);
-            const current = Math.floor(offset / 20);
-            document.getElementById('callsPagination').innerHTML = Array.from({length: Math.min(pages, 10)}, (_, i) =>
-                `<button class="${i === current ? 'active' : ''}" onclick="loadCalls(${i * 20})">${i + 1}</button>`
-            ).join('');
+                if (!data.calls || data.calls.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No calls found</td></tr>';
+                    document.getElementById('callsPagination').innerHTML = '';
+                    return;
+                }
+
+                tbody.innerHTML = data.calls.map(c => `
+                    <tr style="cursor:pointer" onclick="showCallDetail('${c.id}')">
+                        <td>${formatDate(c.started_at)}</td>
+                        <td>${escapeHtml(c.caller_id) || '-'}</td>
+                        <td>${escapeHtml(c.scenario) || '-'}</td>
+                        <td>${c.duration_seconds || 0}s</td>
+                        <td>${qualityBadge(c.quality_score)}</td>
+                        <td>$${(c.total_cost_usd || 0).toFixed(3)}</td>
+                        <td>${c.transferred_to_operator ? '<span class="badge badge-yellow">Transferred</span>' : '<span class="badge badge-green">Resolved</span>'}</td>
+                    </tr>
+                `).join('');
+
+                const pages = Math.ceil(data.total / 20);
+                const current = Math.floor(offset / 20);
+                document.getElementById('callsPagination').innerHTML = Array.from({length: Math.min(pages, 10)}, (_, i) =>
+                    `<button class="${i === current ? 'active' : ''}" onclick="loadCalls(${i * 20})">${i + 1}</button>`
+                ).join('');
+            } catch (e) {
+                loading.style.display = 'none';
+                tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Failed to load calls: ${escapeHtml(e.message)}
+                    <br><button class="btn btn-primary btn-sm" onclick="loadCalls(${offset})" style="margin-top:.5rem">Retry</button></td></tr>`;
+            }
         }
 
         async function showCallDetail(callId) {
-            const data = await api(`/analytics/calls/${callId}`);
-            const c = data.call;
-            const turns = data.turns || [];
-            const tools = data.tool_calls || [];
+            try {
+                const data = await api(`/analytics/calls/${callId}`);
+                const c = data.call;
+                const turns = data.turns || [];
+                const tools = data.tool_calls || [];
 
-            let html = `
-                <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-bottom:1rem">
-                    <div><strong>Caller:</strong> ${c.caller_id || '-'}</div>
-                    <div><strong>Scenario:</strong> ${c.scenario || '-'}</div>
-                    <div><strong>Duration:</strong> ${c.duration_seconds || 0}s</div>
-                    <div><strong>Quality:</strong> ${qualityBadge(c.quality_score)}</div>
-                    <div><strong>Cost:</strong> $${(c.total_cost_usd || 0).toFixed(3)}</div>
-                    <div><strong>Prompt:</strong> ${c.prompt_version || '-'}</div>
-                </div>
-            `;
+                let html = `
+                    <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-bottom:1rem">
+                        <div><strong>Caller:</strong> ${escapeHtml(c.caller_id) || '-'}</div>
+                        <div><strong>Scenario:</strong> ${escapeHtml(c.scenario) || '-'}</div>
+                        <div><strong>Duration:</strong> ${c.duration_seconds || 0}s</div>
+                        <div><strong>Quality:</strong> ${qualityBadge(c.quality_score)}</div>
+                        <div><strong>Cost:</strong> $${(c.total_cost_usd || 0).toFixed(3)}</div>
+                        <div><strong>Prompt:</strong> ${escapeHtml(c.prompt_version) || '-'}</div>
+                    </div>
+                `;
 
-            if (c.quality_details) {
-                html += '<h3 style="margin:.8rem 0 .5rem">Quality Breakdown</h3><table>';
-                for (const [k, v] of Object.entries(c.quality_details)) {
-                    if (k === 'comment') continue;
-                    html += `<tr><td>${k}</td><td>${qualityBadge(v)}</td></tr>`;
+                if (c.quality_details) {
+                    html += '<h3 style="margin:.8rem 0 .5rem">Quality Breakdown</h3><table>';
+                    for (const [k, v] of Object.entries(c.quality_details)) {
+                        if (k === 'comment') continue;
+                        html += `<tr><td>${escapeHtml(k)}</td><td>${qualityBadge(v)}</td></tr>`;
+                    }
+                    if (c.quality_details.comment) {
+                        html += `<tr><td colspan="2" style="font-style:italic">${escapeHtml(c.quality_details.comment)}</td></tr>`;
+                    }
+                    html += '</table>';
                 }
-                if (c.quality_details.comment) {
-                    html += `<tr><td colspan="2" style="font-style:italic">${c.quality_details.comment}</td></tr>`;
+
+                html += '<h3 style="margin:.8rem 0 .5rem">Transcription</h3>';
+                if (turns.length === 0) {
+                    html += '<div class="empty-state">No transcription available</div>';
+                } else {
+                    turns.forEach(t => {
+                        html += `<div class="turn"><span class="speaker ${t.speaker}">${t.speaker === 'customer' ? 'Customer' : 'Bot'}</span>`;
+                        html += `<div class="text">${escapeHtml(t.text)}</div></div>`;
+                    });
                 }
-                html += '</table>';
+
+                if (tools.length) {
+                    html += '<h3 style="margin:.8rem 0 .5rem">Tool Calls</h3><table><tr><th>Tool</th><th>Success</th><th>Duration</th></tr>';
+                    tools.forEach(t => {
+                        html += `<tr><td>${escapeHtml(t.tool_name)}</td><td>${t.success ? 'Yes' : 'No'}</td><td>${t.duration_ms || 0}ms</td></tr>`;
+                    });
+                    html += '</table>';
+                }
+
+                document.getElementById('callDetailContent').innerHTML = html;
+                document.getElementById('callModal').classList.add('show');
+            } catch (e) {
+                showToast('Failed to load call details: ' + e.message, 'error');
             }
-
-            html += '<h3 style="margin:.8rem 0 .5rem">Transcription</h3>';
-            turns.forEach(t => {
-                html += `<div class="turn"><span class="speaker ${t.speaker}">${t.speaker === 'customer' ? 'Customer' : 'Bot'}</span>`;
-                html += `<div class="text">${t.text || ''}</div></div>`;
-            });
-
-            if (tools.length) {
-                html += '<h3 style="margin:.8rem 0 .5rem">Tool Calls</h3><table><tr><th>Tool</th><th>Success</th><th>Duration</th></tr>';
-                tools.forEach(t => {
-                    html += `<tr><td>${t.tool_name}</td><td>${t.success ? 'Yes' : 'No'}</td><td>${t.duration_ms || 0}ms</td></tr>`;
-                });
-                html += '</table>';
-            }
-
-            document.getElementById('callDetailContent').innerHTML = html;
-            document.getElementById('callModal').classList.add('show');
         }
 
         function closeCallModal() {
@@ -367,9 +550,9 @@
         }
 
         // --- Prompts ---
-        function showPromptTab(tab) {
-            document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
-            event.target.classList.add('active');
+        function showPromptTab(tab, btn) {
+            document.querySelectorAll('#page-prompts .tab-bar button').forEach(b => b.classList.remove('active'));
+            if (btn) btn.classList.add('active');
             document.getElementById('promptVersions').style.display = tab === 'versions' ? 'block' : 'none';
             document.getElementById('promptABTests').style.display = tab === 'abtests' ? 'block' : 'none';
             if (tab === 'versions') loadPromptVersions();
@@ -377,94 +560,248 @@
         }
 
         async function loadPromptVersions() {
-            const data = await api('/prompts');
-            const versions = data.versions || [];
-            document.getElementById('promptVersions').innerHTML = `
-                <table><thead><tr><th>Name</th><th>Active</th><th>Created</th><th>Action</th></tr></thead><tbody>
-                ${versions.map(v => `
-                    <tr>
-                        <td>${v.name}</td>
-                        <td>${v.is_active ? '<span class="badge badge-green">Active</span>' : ''}</td>
-                        <td>${formatDate(v.created_at)}</td>
-                        <td>${!v.is_active ? `<button onclick="activatePrompt('${v.id}')" style="font-size:.75rem;padding:.2rem .5rem;background:#2563eb;color:#fff;border:none;border-radius:3px;cursor:pointer">Activate</button>` : ''}</td>
-                    </tr>
-                `).join('')}
-                </tbody></table>
-            `;
+            try {
+                const data = await api('/prompts');
+                const versions = data.versions || [];
+                if (versions.length === 0) {
+                    document.getElementById('promptVersions').innerHTML = `
+                        <div style="margin-bottom:1rem"><button class="btn btn-primary" onclick="showCreatePrompt()">+ New Version</button></div>
+                        <div class="empty-state">No prompt versions found</div>`;
+                    return;
+                }
+                document.getElementById('promptVersions').innerHTML = `
+                    <div style="margin-bottom:1rem"><button class="btn btn-primary" onclick="showCreatePrompt()">+ New Version</button></div>
+                    <table><thead><tr><th>Name</th><th>Active</th><th>Created</th><th>Action</th></tr></thead><tbody>
+                    ${versions.map(v => `
+                        <tr>
+                            <td>${escapeHtml(v.name)}</td>
+                            <td>${v.is_active ? '<span class="badge badge-green">Active</span>' : ''}</td>
+                            <td>${formatDate(v.created_at)}</td>
+                            <td>${!v.is_active ? `<button class="btn btn-primary btn-sm" onclick="activatePrompt('${v.id}')">Activate</button>` : ''}</td>
+                        </tr>
+                    `).join('')}
+                    </tbody></table>
+                `;
+            } catch (e) {
+                document.getElementById('promptVersions').innerHTML = `<div class="empty-state">Failed to load prompts: ${escapeHtml(e.message)}
+                    <br><button class="btn btn-primary btn-sm" onclick="loadPromptVersions()" style="margin-top:.5rem">Retry</button></div>`;
+            }
+        }
+
+        function showCreatePrompt() {
+            document.getElementById('promptName').value = '';
+            document.getElementById('promptSystemPrompt').value = '';
+            document.getElementById('createPromptModal').classList.add('show');
+        }
+
+        async function createPrompt() {
+            const name = document.getElementById('promptName').value.trim();
+            const systemPrompt = document.getElementById('promptSystemPrompt').value.trim();
+            if (!name || !systemPrompt) { showToast('Name and system prompt are required', 'error'); return; }
+            try {
+                await api('/prompts', { method: 'POST', body: JSON.stringify({ name, system_prompt: systemPrompt }) });
+                closeModal('createPromptModal');
+                showToast('Prompt version created');
+                loadPromptVersions();
+            } catch (e) { showToast('Failed to create prompt: ' + e.message, 'error'); }
         }
 
         async function activatePrompt(id) {
-            await api(`/prompts/${id}/activate`, { method: 'PATCH' });
-            loadPromptVersions();
+            if (!confirm('Activate this prompt version? All calls will use it.')) return;
+            try {
+                await api(`/prompts/${id}/activate`, { method: 'PATCH' });
+                showToast('Prompt version activated');
+                loadPromptVersions();
+            } catch (e) { showToast('Failed to activate prompt: ' + e.message, 'error'); }
         }
 
         async function loadABTests() {
-            const data = await api('/prompts/ab-tests');
-            const tests = data.tests || [];
-            document.getElementById('promptABTests').innerHTML = `
-                <table><thead><tr><th>Test</th><th>Variant A</th><th>Variant B</th><th>Calls A/B</th><th>Quality A/B</th><th>Status</th></tr></thead><tbody>
-                ${tests.map(t => `
-                    <tr>
-                        <td>${t.test_name}</td>
-                        <td>${t.variant_a_name}</td>
-                        <td>${t.variant_b_name}</td>
-                        <td>${t.calls_a}/${t.calls_b}</td>
-                        <td>${(t.quality_a || 0).toFixed(2)}/${(t.quality_b || 0).toFixed(2)}</td>
-                        <td><span class="badge ${t.status === 'active' ? 'badge-blue' : 'badge-green'}">${t.status}</span></td>
-                    </tr>
-                `).join('')}
-                </tbody></table>
-            `;
+            try {
+                const data = await api('/prompts/ab-tests');
+                const tests = data.tests || [];
+                if (tests.length === 0) {
+                    document.getElementById('promptABTests').innerHTML = '<div class="empty-state">No A/B tests found</div>';
+                    return;
+                }
+                document.getElementById('promptABTests').innerHTML = `
+                    <table><thead><tr><th>Test</th><th>Variant A</th><th>Variant B</th><th>Calls A/B</th><th>Quality A/B</th><th>Status</th><th>Action</th></tr></thead><tbody>
+                    ${tests.map(t => `
+                        <tr>
+                            <td>${escapeHtml(t.test_name)}</td>
+                            <td>${escapeHtml(t.variant_a_name)}</td>
+                            <td>${escapeHtml(t.variant_b_name)}</td>
+                            <td>${t.calls_a}/${t.calls_b}</td>
+                            <td>${(t.quality_a || 0).toFixed(2)}/${(t.quality_b || 0).toFixed(2)}</td>
+                            <td><span class="badge ${t.status === 'active' ? 'badge-blue' : 'badge-green'}">${escapeHtml(t.status)}</span></td>
+                            <td>${t.status === 'active' ? `<button class="btn btn-danger btn-sm" onclick="stopABTest('${t.id}')">Stop</button>` : ''}</td>
+                        </tr>
+                    `).join('')}
+                    </tbody></table>
+                `;
+            } catch (e) {
+                document.getElementById('promptABTests').innerHTML = `<div class="empty-state">Failed to load A/B tests: ${escapeHtml(e.message)}</div>`;
+            }
+        }
+
+        async function stopABTest(id) {
+            if (!confirm('Stop this A/B test?')) return;
+            try {
+                await api(`/prompts/ab-tests/${id}/stop`, { method: 'PATCH' });
+                showToast('A/B test stopped');
+                loadABTests();
+            } catch (e) { showToast('Failed to stop test: ' + e.message, 'error'); }
         }
 
         // --- Knowledge Base ---
         async function loadArticles() {
+            const container = document.getElementById('articlesContainer');
+            container.innerHTML = '<div class="loading-overlay"><div class="spinner"></div></div>';
+
             const params = new URLSearchParams();
             const cat = document.getElementById('kbCategory').value;
             const search = document.getElementById('kbSearch').value;
             if (cat) params.set('category', cat);
             if (search) params.set('search', search);
 
-            const data = await api(`/knowledge/articles?${params}`);
-            const articles = data.articles || [];
-            document.getElementById('articlesContainer').innerHTML = `
-                <table><thead><tr><th>Title</th><th>Category</th><th>Active</th><th>Updated</th></tr></thead><tbody>
-                ${articles.map(a => `
-                    <tr>
-                        <td>${a.title}</td>
-                        <td><span class="badge badge-blue">${a.category}</span></td>
-                        <td>${a.active ? '<span class="badge badge-green">Yes</span>' : '<span class="badge badge-red">No</span>'}</td>
-                        <td>${formatDate(a.updated_at || a.created_at)}</td>
-                    </tr>
-                `).join('')}
-                </tbody></table>
-                <p style="margin-top:.5rem;font-size:.8rem;color:#64748b">Total: ${data.total} articles</p>
-            `;
+            try {
+                const data = await api(`/knowledge/articles?${params}`);
+                const articles = data.articles || [];
+                if (articles.length === 0) {
+                    container.innerHTML = '<div class="empty-state">No articles found</div>';
+                    return;
+                }
+                container.innerHTML = `
+                    <table><thead><tr><th>Title</th><th>Category</th><th>Active</th><th>Updated</th><th>Actions</th></tr></thead><tbody>
+                    ${articles.map(a => `
+                        <tr>
+                            <td>${escapeHtml(a.title)}</td>
+                            <td><span class="badge badge-blue">${escapeHtml(a.category)}</span></td>
+                            <td>${a.active !== false ? '<span class="badge badge-green">Yes</span>' : '<span class="badge badge-red">No</span>'}</td>
+                            <td>${formatDate(a.updated_at || a.created_at)}</td>
+                            <td>
+                                <button class="btn btn-primary btn-sm" onclick="editArticle('${a.id}')">Edit</button>
+                                <button class="btn btn-sm" style="background:#64748b;color:#fff" onclick="toggleArticle('${a.id}', ${a.active !== false})">${a.active !== false ? 'Deactivate' : 'Activate'}</button>
+                                <button class="btn btn-danger btn-sm" onclick="deleteArticle('${a.id}', '${escapeHtml(a.title).replace(/'/g, "\\'")}')">Delete</button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                    </tbody></table>
+                    <p style="margin-top:.5rem;font-size:.8rem;color:#64748b">Total: ${data.total} articles</p>
+                `;
+            } catch (e) {
+                container.innerHTML = `<div class="empty-state">Failed to load articles: ${escapeHtml(e.message)}
+                    <br><button class="btn btn-primary btn-sm" onclick="loadArticles()" style="margin-top:.5rem">Retry</button></div>`;
+            }
+        }
+
+        function showCreateArticle() {
+            document.getElementById('articleModalTitle').textContent = 'New Article';
+            document.getElementById('editArticleId').value = '';
+            document.getElementById('articleTitle').value = '';
+            document.getElementById('articleCategory').value = 'faq';
+            document.getElementById('articleContent').value = '';
+            document.getElementById('createArticleModal').classList.add('show');
+        }
+
+        async function editArticle(id) {
+            try {
+                const data = await api(`/knowledge/articles/${id}`);
+                const a = data.article;
+                document.getElementById('articleModalTitle').textContent = 'Edit Article';
+                document.getElementById('editArticleId').value = id;
+                document.getElementById('articleTitle').value = a.title || '';
+                document.getElementById('articleCategory').value = a.category || 'faq';
+                document.getElementById('articleContent').value = a.content || '';
+                document.getElementById('createArticleModal').classList.add('show');
+            } catch (e) { showToast('Failed to load article: ' + e.message, 'error'); }
+        }
+
+        async function saveArticle() {
+            const id = document.getElementById('editArticleId').value;
+            const title = document.getElementById('articleTitle').value.trim();
+            const category = document.getElementById('articleCategory').value;
+            const content = document.getElementById('articleContent').value.trim();
+            if (!title || !content) { showToast('Title and content are required', 'error'); return; }
+
+            try {
+                if (id) {
+                    await api(`/knowledge/articles/${id}`, { method: 'PATCH', body: JSON.stringify({ title, category, content }) });
+                    showToast('Article updated');
+                } else {
+                    await api('/knowledge/articles', { method: 'POST', body: JSON.stringify({ title, category, content }) });
+                    showToast('Article created');
+                }
+                closeModal('createArticleModal');
+                loadArticles();
+            } catch (e) { showToast('Failed to save article: ' + e.message, 'error'); }
+        }
+
+        async function toggleArticle(id, currentlyActive) {
+            try {
+                await api(`/knowledge/articles/${id}`, { method: 'PATCH', body: JSON.stringify({ active: !currentlyActive }) });
+                showToast(currentlyActive ? 'Article deactivated' : 'Article activated');
+                loadArticles();
+            } catch (e) { showToast('Failed to update article: ' + e.message, 'error'); }
+        }
+
+        async function deleteArticle(id, title) {
+            if (!confirm(`Delete article "${title}"?`)) return;
+            try {
+                await api(`/knowledge/articles/${id}`, { method: 'DELETE' });
+                showToast('Article deleted');
+                loadArticles();
+            } catch (e) { showToast('Failed to delete article: ' + e.message, 'error'); }
         }
 
         // --- Settings ---
         async function loadSettings() {
+            const container = document.getElementById('systemInfo');
+            container.innerHTML = '<div class="loading-overlay"><div class="spinner"></div></div>';
             try {
-                const health = await fetch('/health').then(r => r.json());
-                document.getElementById('systemInfo').innerHTML = `
-                    <table>
-                        <tr><td>Status</td><td><span class="badge badge-green">${health.status}</span></td></tr>
-                        <tr><td>Active calls</td><td>${health.active_calls}</td></tr>
-                        <tr><td>Redis</td><td><span class="badge ${health.redis === 'connected' ? 'badge-green' : 'badge-red'}">${health.redis}</span></td></tr>
-                    </table>
+                const [health, ready] = await Promise.all([
+                    fetch('/health').then(r => r.json()),
+                    fetch('/health/ready').then(r => r.json()).catch(() => null),
+                ]);
+                let html = `<table>
+                    <tr><td>Status</td><td><span class="badge badge-green">${health.status}</span></td></tr>
+                    <tr><td>Active calls</td><td>${health.active_calls}</td></tr>
+                    <tr><td>Redis</td><td><span class="badge ${health.redis === 'connected' ? 'badge-green' : 'badge-red'}">${health.redis}</span></td></tr>
                 `;
-            } catch { /* ignore */ }
+                if (ready) {
+                    if (ready.store_api) html += `<tr><td>Store API</td><td><span class="badge ${ready.store_api === 'reachable' ? 'badge-green' : 'badge-red'}">${ready.store_api}</span></td></tr>`;
+                    if (ready.claude_api) html += `<tr><td>Claude API</td><td><span class="badge ${ready.claude_api === 'reachable' ? 'badge-green' : 'badge-red'}">${ready.claude_api}</span></td></tr>`;
+                    if (ready.google_stt) html += `<tr><td>Google STT</td><td><span class="badge ${ready.google_stt === 'credentials_present' ? 'badge-green' : 'badge-yellow'}">${ready.google_stt}</span></td></tr>`;
+                    if (ready.tts_engine) html += `<tr><td>TTS Engine</td><td><span class="badge ${ready.tts_engine === 'initialized' ? 'badge-green' : 'badge-yellow'}">${ready.tts_engine}</span></td></tr>`;
+                }
+                html += '</table>';
+                container.innerHTML = html;
+            } catch (e) {
+                container.innerHTML = `<div class="empty-state">Failed to load system info: ${escapeHtml(e.message)}
+                    <br><button class="btn btn-primary btn-sm" onclick="loadSettings()" style="margin-top:.5rem">Retry</button></div>`;
+            }
         }
 
-        // Init
+        // --- Init ---
+        setInterval(checkTokenExpiry, 60000);
+
         if (token) {
-            document.getElementById('loginContainer').style.display = 'none';
-            document.getElementById('app').style.display = 'block';
-            showPage('dashboard');
+            checkTokenExpiry();
+            if (token) {
+                document.getElementById('loginContainer').style.display = 'none';
+                document.getElementById('app').style.display = 'block';
+                const savedPage = localStorage.getItem('admin_active_page') || 'dashboard';
+                showPage(savedPage);
+            }
         }
 
         document.getElementById('loginPassword').addEventListener('keypress', e => {
             if (e.key === 'Enter') login();
+        });
+
+        document.addEventListener('keydown', e => {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
+            }
         });
     </script>
 </body>
