@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <style>
+        @page { size: A4; margin: 2cm; }
+        body { font-family: sans-serif; color: #333; font-size: 12px; }
+        h1 { font-size: 18px; color: #1e293b; border-bottom: 2px solid #2563eb; padding-bottom: 8px; }
+        h2 { font-size: 14px; color: #475569; margin-top: 20px; }
+        .period { font-size: 13px; color: #64748b; margin-bottom: 16px; }
+        .summary-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 20px; }
+        .summary-card { border: 1px solid #e5e7eb; border-radius: 6px; padding: 12px; text-align: center; }
+        .summary-card .value { font-size: 22px; font-weight: 700; color: #2563eb; }
+        .summary-card .label { font-size: 10px; color: #64748b; margin-top: 4px; }
+        table { width: 100%; border-collapse: collapse; margin-bottom: 16px; font-size: 11px; }
+        th { background: #f1f5f9; font-weight: 600; color: #475569; text-align: left; padding: 6px 8px; border-bottom: 1px solid #d1d5db; }
+        td { padding: 5px 8px; border-bottom: 1px solid #e5e7eb; }
+        tr:nth-child(even) { background: #f8fafc; }
+        .footer { margin-top: 24px; font-size: 10px; color: #94a3b8; text-align: center; border-top: 1px solid #e5e7eb; padding-top: 8px; }
+    </style>
+</head>
+<body>
+    <h1>Call Center AI — Еженедельный отчёт</h1>
+    <div class="period">Период: {{ date_from }} — {{ date_to }}</div>
+
+    <div class="summary-grid">
+        <div class="summary-card">
+            <div class="value">{{ totals.total_calls }}</div>
+            <div class="label">Всего звонков</div>
+        </div>
+        <div class="summary-card">
+            <div class="value">{{ totals.resolved_pct }}%</div>
+            <div class="label">Решено ботом</div>
+        </div>
+        <div class="summary-card">
+            <div class="value">{{ totals.transferred }}</div>
+            <div class="label">Переведено</div>
+        </div>
+        <div class="summary-card">
+            <div class="value">{{ totals.avg_quality }}</div>
+            <div class="label">Средн. качество</div>
+        </div>
+        <div class="summary-card">
+            <div class="value">${{ totals.total_cost }}</div>
+            <div class="label">Общая стоимость</div>
+        </div>
+        <div class="summary-card">
+            <div class="value">{{ totals.avg_duration }}с</div>
+            <div class="label">Средн. длительность</div>
+        </div>
+    </div>
+
+    <h2>Статистика по дням</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Дата</th>
+                <th>Звонки</th>
+                <th>Решено</th>
+                <th>Перевод</th>
+                <th>Средн. длит.</th>
+                <th>Качество</th>
+                <th>Стоимость</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for day in days %}
+            <tr>
+                <td>{{ day.date }}</td>
+                <td>{{ day.total_calls }}</td>
+                <td>{{ day.resolved_by_bot }}</td>
+                <td>{{ day.transferred }}</td>
+                <td>{{ day.avg_duration }}с</td>
+                <td>{{ day.avg_quality }}</td>
+                <td>${{ day.total_cost }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    {% if top_transfer_reasons %}
+    <h2>Топ-5 причин перевода на оператора</h2>
+    <table>
+        <thead>
+            <tr>
+                <th>Причина</th>
+                <th>Количество</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for reason in top_transfer_reasons %}
+            <tr>
+                <td>{{ reason.name }}</td>
+                <td>{{ reason.count }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
+    <div class="footer">
+        Отчёт сгенерирован автоматически — Call Center AI v0.1.0
+    </div>
+</body>
+</html>

@@ -1,12 +1,12 @@
 # Фаза 3: Экспорт данных и отчётность
 
 ## Статус
-- [ ] Не начата
-- [ ] В процессе
-- [ ] Завершена
+- [x] Не начата
+- [x] В процессе
+- [x] Завершена
 
-**Начата:** -
-**Завершена:** -
+**Начата:** 2026-02-14
+**Завершена:** 2026-02-14
 
 ## Цель фазы
 Дать администратору возможность экспортировать данные в CSV/PDF.
@@ -17,10 +17,10 @@
 ### 3.0 ОБЯЗАТЕЛЬНО: Анализ и планирование
 
 #### A. Анализ существующего кода
-- [ ] Изучить `src/api/analytics.py` — существующие эндпоинты аналитики, форматы ответов
-- [ ] Изучить `src/tasks/daily_stats.py` — как агрегируются данные, структура `daily_stats`
-- [ ] Изучить модели данных: calls, call_turns, call_tool_calls — для экспорта
-- [ ] Проверить наличие библиотек: `csv` (stdlib), нужен ли `reportlab`/`weasyprint` для PDF
+- [x] Изучить `src/api/analytics.py` — существующие эндпоинты аналитики, форматы ответов
+- [x] Изучить `src/tasks/daily_stats.py` — как агрегируются данные, структура `daily_stats`
+- [x] Изучить модели данных: calls, call_turns, call_tool_calls — для экспорта
+- [x] Проверить наличие библиотек: `csv` (stdlib), нужен ли `reportlab`/`weasyprint` для PDF
 
 **Команды для поиска:**
 ```bash
@@ -33,18 +33,18 @@ grep -rn "reportlab\|weasyprint\|jinja2" pyproject.toml requirements*.txt
 ```
 
 #### B. Анализ зависимостей
-- [ ] Нужны ли новые пакеты? (`weasyprint` для PDF, `aiosmtplib` для email)
-- [ ] Нужны ли новые env variables? (SMTP_HOST, SMTP_PORT, REPORT_RECIPIENTS)
-- [ ] Нужны ли миграции БД? (нет)
+- [x] Нужны ли новые пакеты? (`weasyprint` для PDF, `aiosmtplib` для email)
+- [x] Нужны ли новые env variables? (SMTP_HOST, SMTP_PORT, REPORT_RECIPIENTS)
+- [x] Нужны ли миграции БД? (нет)
 
 **Новые пакеты:** `weasyprint` (PDF), `aiosmtplib` (email), `jinja2` (шаблоны отчётов)
 **Новые env variables:** `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `REPORT_RECIPIENTS`
 **Миграции БД:** нет
 
 #### C. Проверка архитектуры
-- [ ] CSV-экспорт — streaming response или генерация в памяти? (streaming для больших объёмов)
-- [ ] PDF — серверный рендеринг через HTML-шаблон
-- [ ] Email-отчёты — Celery задача по расписанию
+- [x] CSV-экспорт — streaming response или генерация в памяти? (streaming для больших объёмов)
+- [x] PDF — серверный рендеринг через HTML-шаблон
+- [x] Email-отчёты — Celery задача по расписанию
 
 **Референс-модуль:** `src/api/analytics.py` (паттерн API), `src/tasks/daily_stats.py` (паттерн scheduled task)
 
@@ -55,13 +55,13 @@ grep -rn "reportlab\|weasyprint\|jinja2" pyproject.toml requirements*.txt
 ---
 
 ### 3.1 CSV-экспорт звонков через API
-- [ ] Добавить эндпоинт `GET /analytics/calls/export` — возвращает CSV с Content-Type `text/csv`
-- [ ] Поддержать те же фильтры, что и `GET /analytics/calls` (date_from, date_to, scenario, transferred, min_quality)
-- [ ] Колонки CSV: call_id, started_at, duration_sec, caller_id (маскированный), scenario, transferred, transfer_reason, quality_score, total_cost
-- [ ] Streaming response через `StreamingResponse` для больших объёмов (>1000 записей)
-- [ ] Ограничение: максимум 10000 записей за один запрос
-- [ ] Имя файла: `calls_YYYY-MM-DD_YYYY-MM-DD.csv`
-- [ ] Написать тесты: `tests/unit/test_export.py`
+- [x] Добавить эндпоинт `GET /analytics/calls/export` — возвращает CSV с Content-Type `text/csv`
+- [x] Поддержать те же фильтры, что и `GET /analytics/calls` (date_from, date_to, scenario, transferred, min_quality)
+- [x] Колонки CSV: call_id, started_at, duration_sec, caller_id (маскированный), scenario, transferred, transfer_reason, quality_score, total_cost
+- [x] Streaming response через `StreamingResponse` для больших объёмов (>1000 записей)
+- [x] Ограничение: максимум 10000 записей за один запрос
+- [x] Имя файла: `calls_YYYY-MM-DD_YYYY-MM-DD.csv`
+- [x] Написать тесты: `tests/unit/test_export.py`
 
 **Файлы:** `src/api/analytics.py` (или новый `src/api/export.py`), `tests/unit/test_export.py`
 **Заметки:** PII (caller_id) маскировать через `pii_sanitizer` в экспорте. CSV через `csv.writer` из stdlib.
@@ -69,10 +69,10 @@ grep -rn "reportlab\|weasyprint\|jinja2" pyproject.toml requirements*.txt
 ---
 
 ### 3.2 CSV-экспорт статистики
-- [ ] Добавить эндпоинт `GET /analytics/summary/export` — дневная статистика за период в CSV
-- [ ] Колонки: date, total_calls, resolved_by_bot, transferred, avg_duration_sec, avg_quality, total_cost, top_scenario
-- [ ] Имя файла: `daily_stats_YYYY-MM-DD_YYYY-MM-DD.csv`
-- [ ] Написать тесты
+- [x] Добавить эндпоинт `GET /analytics/summary/export` — дневная статистика за период в CSV
+- [x] Колонки: date, total_calls, resolved_by_bot, transferred, avg_duration_sec, avg_quality, total_cost, top_scenario
+- [x] Имя файла: `daily_stats_YYYY-MM-DD_YYYY-MM-DD.csv`
+- [x] Написать тесты
 
 **Файлы:** `src/api/analytics.py`, `tests/unit/test_export.py`
 **Заметки:** Данные из таблицы `daily_stats`. Простой запрос с фильтром по дате.
@@ -80,10 +80,10 @@ grep -rn "reportlab\|weasyprint\|jinja2" pyproject.toml requirements*.txt
 ---
 
 ### 3.3 Кнопки экспорта в Admin UI
-- [ ] Добавить кнопку «Экспорт CSV» на страницу журнала звонков
-- [ ] Добавить кнопку «Экспорт CSV» на дашборд (статистика)
-- [ ] При клике — скачивать файл через `window.location` или `fetch` + `Blob`
-- [ ] Передавать текущие фильтры в запрос экспорта
+- [x] Добавить кнопку «Экспорт CSV» на страницу журнала звонков
+- [x] Добавить кнопку «Экспорт CSV» на дашборд (статистика)
+- [x] При клике — скачивать файл через `window.location` или `fetch` + `Blob`
+- [x] Передавать текущие фильтры в запрос экспорта
 
 **Файлы:** `admin-ui/index.html`
 **Заметки:** Для скачивания через JS: `fetch()` → `response.blob()` → `URL.createObjectURL()` → `<a download>`.
@@ -91,10 +91,10 @@ grep -rn "reportlab\|weasyprint\|jinja2" pyproject.toml requirements*.txt
 ---
 
 ### 3.4 PDF-отчёт: шаблон
-- [ ] Создать HTML-шаблон отчёта: `src/reports/templates/weekly_report.html`
-- [ ] Шаблон включает: период, сводка (звонки, resolved %, transfers, quality, cost), таблица по дням, топ-5 причин трансферов
-- [ ] Использовать Jinja2 для рендеринга шаблона
-- [ ] Стилизация: минимальный CSS для печати (A4-совместимый)
+- [x] Создать HTML-шаблон отчёта: `src/reports/templates/weekly_report.html`
+- [x] Шаблон включает: период, сводка (звонки, resolved %, transfers, quality, cost), таблица по дням, топ-5 причин трансферов
+- [x] Использовать Jinja2 для рендеринга шаблона
+- [x] Стилизация: минимальный CSS для печати (A4-совместимый)
 
 **Файлы:** `src/reports/__init__.py`, `src/reports/templates/weekly_report.html`
 **Заметки:** HTML → PDF через `weasyprint`. Шаблон на русском языке.
@@ -102,11 +102,11 @@ grep -rn "reportlab\|weasyprint\|jinja2" pyproject.toml requirements*.txt
 ---
 
 ### 3.5 PDF-генератор
-- [ ] Создать `src/reports/generator.py` — функция `generate_weekly_report(date_from, date_to) -> bytes`
-- [ ] Запрос данных из `daily_stats` за указанный период
-- [ ] Рендеринг HTML через Jinja2 → конвертация в PDF через weasyprint
-- [ ] Возвращает PDF как bytes
-- [ ] Написать тесты: `tests/unit/test_report_generator.py`
+- [x] Создать `src/reports/generator.py` — функция `generate_weekly_report(date_from, date_to) -> bytes`
+- [x] Запрос данных из `daily_stats` за указанный период
+- [x] Рендеринг HTML через Jinja2 → конвертация в PDF через weasyprint
+- [x] Возвращает PDF как bytes
+- [x] Написать тесты: `tests/unit/test_report_generator.py`
 
 **Файлы:** `src/reports/generator.py`, `tests/unit/test_report_generator.py`
 **Заметки:** Weasyprint требует системные зависимости (cairo, pango). Добавить в `Dockerfile`.
@@ -114,10 +114,10 @@ grep -rn "reportlab\|weasyprint\|jinja2" pyproject.toml requirements*.txt
 ---
 
 ### 3.6 API-эндпоинт для скачивания PDF
-- [ ] Добавить `GET /analytics/report/pdf?date_from=...&date_to=...` — возвращает PDF
-- [ ] Content-Type: `application/pdf`
-- [ ] Имя файла: `report_YYYY-MM-DD_YYYY-MM-DD.pdf`
-- [ ] Добавить кнопку «Скачать PDF» на дашборд в Admin UI
+- [x] Добавить `GET /analytics/report/pdf?date_from=...&date_to=...` — возвращает PDF
+- [x] Content-Type: `application/pdf`
+- [x] Имя файла: `report_YYYY-MM-DD_YYYY-MM-DD.pdf`
+- [x] Добавить кнопку «Скачать PDF» на дашборд в Admin UI
 
 **Файлы:** `src/api/analytics.py`, `admin-ui/index.html`
 **Заметки:** -
@@ -125,13 +125,13 @@ grep -rn "reportlab\|weasyprint\|jinja2" pyproject.toml requirements*.txt
 ---
 
 ### 3.7 Email-отчёт по расписанию
-- [ ] Создать `src/tasks/email_report.py` — Celery-задача `send_weekly_report()`
-- [ ] Расписание: каждый понедельник в 09:00 по Киеву
-- [ ] Генерирует PDF за прошедшую неделю (пн-вс)
-- [ ] Отправляет на адреса из `REPORT_RECIPIENTS` (env variable, через запятую)
-- [ ] Использовать `aiosmtplib` для отправки
-- [ ] Добавить конфигурацию SMTP в `src/config.py`: `SMTPSettings`
-- [ ] Написать тесты (с mock SMTP)
+- [x] Создать `src/tasks/email_report.py` — Celery-задача `send_weekly_report()`
+- [x] Расписание: каждый понедельник в 09:00 по Киеву
+- [x] Генерирует PDF за прошедшую неделю (пн-вс)
+- [x] Отправляет на адреса из `REPORT_RECIPIENTS` (env variable, через запятую)
+- [x] Использовать `aiosmtplib` для отправки
+- [x] Добавить конфигурацию SMTP в `src/config.py`: `SMTPSettings`
+- [x] Написать тесты (с mock SMTP)
 
 **Файлы:** `src/tasks/email_report.py`, `src/config.py`, `tests/unit/test_email_report.py`
 **Заметки:** Паттерн — аналогично `src/tasks/daily_stats.py`. Celery beat schedule.
@@ -139,9 +139,9 @@ grep -rn "reportlab\|weasyprint\|jinja2" pyproject.toml requirements*.txt
 ---
 
 ### 3.8 CLI: команды экспорта
-- [ ] Добавить `call-center-admin export calls --date-from ... --date-to ... --format csv --output calls.csv`
-- [ ] Добавить `call-center-admin export report --date-from ... --date-to ... --output report.pdf`
-- [ ] Переиспользовать логику из `src/reports/generator.py`
+- [x] Добавить `call-center-admin export calls --date-from ... --date-to ... --format csv --output calls.csv`
+- [x] Добавить `call-center-admin export report --date-from ... --date-to ... --output report.pdf`
+- [x] Переиспользовать логику из `src/reports/generator.py`
 
 **Файлы:** `src/cli/export.py`, `tests/unit/test_cli_export.py`
 **Заметки:** -

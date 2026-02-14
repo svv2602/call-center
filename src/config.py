@@ -125,6 +125,22 @@ class AdminSettings(BaseSettings):
     model_config = {"env_prefix": "ADMIN_"}
 
 
+class SMTPSettings(BaseSettings):
+    host: str = ""
+    port: int = 587
+    user: str = ""
+    password: str = ""
+    use_tls: bool = True
+    from_address: str = "callcenter@example.com"
+    report_recipients: str = ""
+
+    model_config = {"env_prefix": "SMTP_"}
+
+    @property
+    def recipient_list(self) -> list[str]:
+        return [r.strip() for r in self.report_recipients.split(",") if r.strip()]
+
+
 class BackupSettings(BaseSettings):
     backup_dir: str = "/var/backups/callcenter"
     retention_days: int = 7
@@ -173,6 +189,7 @@ class Settings(BaseSettings):
     admin: AdminSettings = AdminSettings()
     whisper: WhisperSettings = WhisperSettings()
     feature_flags: FeatureFlagSettings = FeatureFlagSettings()
+    smtp: SMTPSettings = SMTPSettings()
     backup: BackupSettings = BackupSettings()
     prometheus_port: int = 8080
 

@@ -14,6 +14,7 @@ from redis.asyncio import Redis
 from src.agent.agent import LLMAgent, ToolRouter
 from src.api.analytics import router as analytics_router
 from src.api.auth import router as auth_router
+from src.api.export import router as export_router
 from src.api.knowledge import router as knowledge_router
 from src.api.prompts import router as prompts_router
 from src.config import Settings, get_settings
@@ -37,6 +38,7 @@ app = FastAPI(
 )
 app.include_router(analytics_router)
 app.include_router(auth_router)
+app.include_router(export_router)
 app.include_router(knowledge_router)
 app.include_router(prompts_router)
 

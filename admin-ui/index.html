@@ -128,6 +128,10 @@
                 <div class="breadcrumbs"><a href="#" onclick="showPage('dashboard')">Home</a> / Dashboard</div>
                 <h1>Dashboard</h1>
                 <div class="stats-grid" id="dashboardStats"><div class="loading-overlay"><div class="spinner"></div></div></div>
+                <div style="margin-bottom:1rem">
+                    <button class="btn" style="background:#059669;color:#fff" onclick="exportStatsCSV()">Export Stats CSV</button>
+                    <button class="btn" style="background:#7c3aed;color:#fff;margin-left:.5rem" onclick="downloadPdfReport()">Download PDF</button>
+                </div>
                 <div class="card">
                     <h3>Grafana Real-time</h3>
                     <iframe class="grafana-frame" id="grafanaFrame" src=""></iframe>
@@ -157,6 +161,7 @@
                     <input type="text" id="filterSearch" placeholder="Search transcription...">
                     <input type="number" id="filterQualityBelow" placeholder="Quality below" step="0.1" min="0" max="1">
                     <button onclick="loadCalls()">Filter</button>
+                    <button class="btn" style="background:#059669;color:#fff" onclick="exportCallsCSV()">Export CSV</button>
                 </div>
                 <div class="card">
                     <div id="callsLoading" class="loading-overlay" style="display:none"><div class="spinner"></div></div>
@@ -487,6 +492,86 @@
                 loading.style.display = 'none';
                 tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Failed to load calls: ${escapeHtml(e.message)}
                     <br><button class="btn btn-primary btn-sm" onclick="loadCalls(${offset})" style="margin-top:.5rem">Retry</button></td></tr>`;
+            }
+        }
+
+        function downloadBlob(blob, filename) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+        }
+
+        async function exportCallsCSV() {
+            const params = new URLSearchParams();
+            const df = document.getElementById('filterDateFrom').value;
+            const dt = document.getElementById('filterDateTo').value;
+            const sc = document.getElementById('filterScenario').value;
+            const tr = document.getElementById('filterTransferred').value;
+            const qb = document.getElementById('filterQualityBelow').value;
+            if (df) params.set('date_from', df);
+            if (dt) params.set('date_to', dt);
+            if (sc) params.set('scenario', sc);
+            if (tr) params.set('transferred', tr);
+            if (qb) params.set('min_quality', qb);
+
+            try {
+                const headers = {};
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+                const res = await fetch(`${API}/analytics/calls/export?${params}`, { headers });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const blob = await res.blob();
+                const disposition = res.headers.get('Content-Disposition') || '';
+                const match = disposition.match(/filename="(.+)"/);
+                const filename = match ? match[1] : 'calls_export.csv';
+                downloadBlob(blob, filename);
+                showToast('CSV exported');
+            } catch (e) {
+                showToast('Export failed: ' + e.message, 'error');
+            }
+        }
+
+        async function exportStatsCSV() {
+            try {
+                const headers = {};
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+                const res = await fetch(`${API}/analytics/summary/export`, { headers });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const blob = await res.blob();
+                const disposition = res.headers.get('Content-Disposition') || '';
+                const match = disposition.match(/filename="(.+)"/);
+                const filename = match ? match[1] : 'daily_stats_export.csv';
+                downloadBlob(blob, filename);
+                showToast('CSV exported');
+            } catch (e) {
+                showToast('Export failed: ' + e.message, 'error');
+            }
+        }
+
+        async function downloadPdfReport() {
+            const today = new Date();
+            const weekAgo = new Date(today);
+            weekAgo.setDate(weekAgo.getDate() - 7);
+            const df = weekAgo.toISOString().split('T')[0];
+            const dt = today.toISOString().split('T')[0];
+
+            try {
+                const headers = {};
+                if (token) headers['Authorization'] = `Bearer ${token}`;
+                const res = await fetch(`${API}/analytics/report/pdf?date_from=${df}&date_to=${dt}`, { headers });
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const blob = await res.blob();
+                const disposition = res.headers.get('Content-Disposition') || '';
+                const match = disposition.match(/filename="(.+)"/);
+                const filename = match ? match[1] : `report_${df}_${dt}.pdf`;
+                downloadBlob(blob, filename);
+                showToast('PDF report downloaded');
+            } catch (e) {
+                showToast('PDF download failed: ' + e.message, 'error');
             }
         }
 
