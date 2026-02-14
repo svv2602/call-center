@@ -26,12 +26,14 @@ from src.api.middleware.security_headers import SecurityHeadersMiddleware
 from src.api.operators import router as operators_router
 from src.api.prompts import router as prompts_router
 from src.api.system import router as system_router
+from src.api.websocket import router as websocket_router
 from src.config import Settings, get_settings
 from src.core.audio_socket import AudioSocketConnection, AudioSocketServer
 from src.core.call_session import CallSession, CallState, SessionStore
 from src.core.pipeline import CallPipeline
 from src.logging.pii_vault import PIIVault
 from src.logging.structured_logger import setup_logging
+from src.events.publisher import publish_event
 from src.monitoring.metrics import active_calls, calls_total, get_metrics
 from src.store_client.client import StoreClient
 from src.stt.base import STTConfig
@@ -53,6 +55,7 @@ app.include_router(knowledge_router)
 app.include_router(operators_router)
 app.include_router(prompts_router)
 app.include_router(system_router)
+app.include_router(websocket_router)
 # Middleware order (last added = outermost = runs first):
 # SecurityHeaders → RateLimit → CORS → Audit
 app.add_middleware(AuditMiddleware)
@@ -186,6 +189,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
 
     active_calls.inc()
     logger.info("Call started: %s", conn.channel_uuid)
+    await publish_event("call:started", {"call_id": str(conn.channel_uuid)})
 
     try:
         # Per-call STT engine (each call gets its own streaming session)
@@ -223,7 +227,13 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         await store.delete(conn.channel_uuid)
 
     active_calls.dec()
-    calls_total.labels(status="transferred" if session.transferred else "completed").inc()
+    status = "transferred" if session.transferred else "completed"
+    calls_total.labels(status=status).inc()
+    await publish_event("call:ended", {
+        "call_id": str(conn.channel_uuid),
+        "status": status,
+        "duration_seconds": session.duration_seconds,
+    })
 
     logger.info(
         "Call ended: %s, duration=%ds, turns=%d",
@@ -254,6 +264,7 @@ def _build_tool_router(session: CallSession) -> ToolRouter:
 
     async def transfer_to_operator(**_: object) -> dict[str, str]:
         session.transferred = True
+        await publish_event("call:transferred", {"call_id": str(session.call_id)})
         return {"status": "transferring", "message": "З'єдную з оператором"}
 
     router.register("transfer_to_operator", transfer_to_operator)

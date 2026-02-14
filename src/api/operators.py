@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.api.auth import require_role
 from src.config import get_settings
+from src.events.publisher import publish_event
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/operators", tags=["operators"])
@@ -241,6 +242,11 @@ async def change_operator_status(
             """),
             {"op_id": operator_id, "status": req.status},
         )
+
+    await publish_event("operator:status_changed", {
+        "operator_id": operator_id,
+        "status": req.status,
+    })
 
     return {"status": req.status, "operator_id": operator_id}
 

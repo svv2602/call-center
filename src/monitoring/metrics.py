@@ -200,6 +200,18 @@ partition_errors_total = Counter(
 )
 
 
+# --- Admin WebSocket metrics ---
+
+admin_websocket_connections_active = Gauge(
+    "callcenter_admin_websocket_connections_active",
+    "Number of active admin WebSocket connections",
+)
+
+admin_websocket_messages_sent_total = Counter(
+    "callcenter_admin_websocket_messages_sent_total",
+    "Total WebSocket messages sent to admin clients",
+)
+
 # --- Rate limiting metrics ---
 
 rate_limit_exceeded_total = Counter(
