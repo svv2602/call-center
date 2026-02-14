@@ -123,6 +123,8 @@ markers = [
     "integration: marks tests as integration (deselect with '-m \"not integration\"')",
     "e2e: marks tests as end-to-end (deselect with '-m \"not e2e\"')",
     "load: marks tests as load tests (deselect with '-m \"not load\"')",
+    "chaos: marks tests as chaos/failure-injection tests (deselect with '-m \"not chaos\"')",
+    "prompt_regression: marks tests as prompt regression (verify prompt/tool invariants)",
 ]
 
 [tool.bandit]
