@@ -2,12 +2,12 @@
 
 ## Текущий статус
 - **Последнее обновление:** 2026-02-14 19:00
-- **Текущая фаза:** 3 из 8
+- **Текущая фаза:** 4 из 8
 - **Статус фазы:** не начата
-- **Общий прогресс:** 14/55 задач (25%)
+- **Общий прогресс:** 20/55 задач (36%)
 
 ## Как продолжить работу
-1. Открой файл текущей фазы: `phase-03-readme.md`
+1. Открой файл текущей фазы: `phase-04-compose-services.md`
 2. Найди первую незавершённую задачу (без [x])
 3. Выполни задачу
 4. Отметь [x] в чекбоксе
@@ -19,7 +19,7 @@
 |------|-------|-------|--------|
 | 1. Dockerfile и сборка | phase-01-dockerfile.md | 7 | завершена |
 | 2. CI/CD и ветки Git | phase-02-ci-git.md | 7 | завершена |
-| 3. README и quickstart | phase-03-readme.md | 6 | не начата |
+| 3. README и quickstart | phase-03-readme.md | 6 | завершена |
 | 4. Docker Compose: сервисы | phase-04-compose-services.md | 8 | не начата |
 | 5. Python-версия | phase-05-python-version.md | 5 | не начата |
 | 6. Автоматизация партиций | phase-06-partitions.md | 8 | не начата |
@@ -32,3 +32,4 @@
 | 2026-02-14 | Проект создан на основе внешнего аудита |
 | 2026-02-14 | Фаза 1 завершена: Dockerfile (multi-stage, 308MB), .dockerignore. docker build + docker compose build OK |
 | 2026-02-14 | Фаза 2 завершена: ветка master→main, CI workflow исправлен (env vars, healthchecks, context, safety→pip-audit) |
+| 2026-02-14 | Фаза 3 завершена: README.md создан (quickstart dev/docker, структура, тесты, contributing) |
