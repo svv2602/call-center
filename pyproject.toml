@@ -124,3 +124,7 @@ markers = [
     "e2e: marks tests as end-to-end (deselect with '-m \"not e2e\"')",
     "load: marks tests as load tests (deselect with '-m \"not load\"')",
 ]
+
+[tool.bandit]
+exclude_dirs = ["tests", "scripts"]
+skips = ["B101"]  # assert used in non-test code (FastAPI patterns)

@@ -7,7 +7,10 @@ import sys
 
 import aiohttp
 import uvicorn
+import os
+
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from redis.asyncio import Redis
 
@@ -18,6 +21,8 @@ from src.api.auth import router as auth_router
 from src.api.export import router as export_router
 from src.api.knowledge import router as knowledge_router
 from src.api.middleware.audit import AuditMiddleware
+from src.api.middleware.rate_limit import RateLimitMiddleware
+from src.api.middleware.security_headers import SecurityHeadersMiddleware
 from src.api.operators import router as operators_router
 from src.api.prompts import router as prompts_router
 from src.api.system import router as system_router
@@ -48,7 +53,17 @@ app.include_router(knowledge_router)
 app.include_router(operators_router)
 app.include_router(prompts_router)
 app.include_router(system_router)
+# Middleware order (last added = outermost = runs first):
+# SecurityHeaders → RateLimit → CORS → Audit
 app.add_middleware(AuditMiddleware)
+app.add_middleware(CORSMiddleware,
+    allow_origins=os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if os.environ.get("CORS_ALLOWED_ORIGINS") else [],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
+    allow_headers=["Authorization", "Content-Type"],
+)
+app.add_middleware(RateLimitMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 
 @app.get("/admin")

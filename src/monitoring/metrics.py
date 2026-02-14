@@ -200,6 +200,15 @@ partition_errors_total = Counter(
 )
 
 
+# --- Rate limiting metrics ---
+
+rate_limit_exceeded_total = Counter(
+    "callcenter_rate_limit_exceeded_total",
+    "Rate limit exceeded count",
+    ["endpoint", "ip"],
+)
+
+
 def get_metrics() -> bytes:
     """Generate Prometheus metrics output."""
     return generate_latest()
