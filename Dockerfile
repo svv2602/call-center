@@ -1,0 +1,51 @@
+# ---- Builder stage ----
+FROM python:3.12-slim AS builder
+
+WORKDIR /build
+
+# Install build dependencies for asyncpg (libpq-dev) and general compilation
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends gcc libpq-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml ./
+# Install only production dependencies into /build/venv
+RUN python -m venv /build/venv && \
+    /build/venv/bin/pip install --no-cache-dir --upgrade pip && \
+    /build/venv/bin/pip install --no-cache-dir .
+
+# ---- Runtime stage ----
+FROM python:3.12-slim
+
+# libpq is needed at runtime by asyncpg
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libpq5 && \
+    rm -rf /var/lib/apt/lists/*
+
+# Non-root user
+RUN groupadd --gid 1000 app && \
+    useradd --uid 1000 --gid app --create-home app
+
+WORKDIR /app
+
+# Copy virtualenv from builder
+COPY --from=builder /build/venv /app/venv
+ENV PATH="/app/venv/bin:$PATH"
+
+# Copy application code and resources
+COPY src/ ./src/
+COPY migrations/ ./migrations/
+COPY alembic.ini ./
+COPY asterisk/ ./asterisk/
+COPY knowledge_base/ ./knowledge_base/
+COPY admin-ui/ ./admin-ui/
+
+# Install the package itself (src/) — metadata only, deps already in venv
+COPY pyproject.toml ./
+RUN pip install --no-cache-dir --no-deps .
+
+USER app
+
+EXPOSE 9092 8080
+
+CMD ["python", "-m", "src.main"]
