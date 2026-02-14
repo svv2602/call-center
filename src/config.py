@@ -85,6 +85,23 @@ class QualitySettings(BaseSettings):
     model_config = {"env_prefix": "QUALITY_"}
 
 
+class WhisperSettings(BaseSettings):
+    model_size: str = "large-v3"
+    device: str = "cuda"
+    compute_type: str = "float16"
+    language: str = "uk"
+
+    model_config = {"env_prefix": "WHISPER_"}
+
+
+class FeatureFlagSettings(BaseSettings):
+    stt_provider: str = "google"  # "google" or "whisper"
+    llm_routing_enabled: bool = False
+    whisper_rollout_percent: int = 0  # 0-100 gradual rollout
+
+    model_config = {"env_prefix": "FF_"}
+
+
 class AdminSettings(BaseSettings):
     jwt_secret: str = "change-me-in-production"
     username: str = "admin"
@@ -108,6 +125,8 @@ class Settings(BaseSettings):
     celery: CelerySettings = CelerySettings()
     quality: QualitySettings = QualitySettings()
     admin: AdminSettings = AdminSettings()
+    whisper: WhisperSettings = WhisperSettings()
+    feature_flags: FeatureFlagSettings = FeatureFlagSettings()
     prometheus_port: int = 8080
 
     model_config = {"env_prefix": ""}

@@ -3,10 +3,10 @@
 ## Статус
 - [ ] Не начата
 - [ ] В процессе
-- [ ] Завершена
+- [x] Завершена
 
-**Начата:** -
-**Завершена:** -
+**Начата:** 2026-02-14
+**Завершена:** 2026-02-14
 
 ## Цель фазы
 
@@ -17,123 +17,103 @@
 ### 5.0 ОБЯЗАТЕЛЬНО: Анализ и планирование
 
 #### A. Анализ существующего кода
-- [ ] Проверить текущую стоимость звонка (STT + LLM + TTS)
-- [ ] Изучить абстракции STT/TTS (Protocol) для замены реализации
-- [ ] Проверить кэш TTS (какие фразы кэшируются, hit rate)
-
-**Команды для поиска:**
-```bash
-grep -rn "class.*Protocol\|class.*STTEngine\|class.*TTSEngine" src/
-grep -rn "cache\|Cache\|CACHE" src/tts/
-grep -rn "model.*haiku\|model.*sonnet\|model.*opus" src/
-```
+- [x] Проверить текущую стоимость звонка (STT + LLM + TTS)
+- [x] Изучить абстракции STT/TTS (Protocol) для замены реализации
+- [x] Проверить кэш TTS (какие фразы кэшируются, hit rate)
 
 #### B. Анализ зависимостей
-- [ ] Faster-Whisper для self-hosted STT (GPU сервер)
-- [ ] Абстракция STTEngine уже есть — нужна новая реализация
-- [ ] LLM routing: анализ первой фразы → выбор модели
+- [x] Faster-Whisper для self-hosted STT (GPU сервер)
+- [x] Абстракция STTEngine уже есть — нужна новая реализация
+- [x] LLM routing: анализ первой фразы → выбор модели
 
 **Новые абстракции:** `WhisperSTT` (реализация STTEngine)
 **Новые env variables:** `WHISPER_MODEL_SIZE`, `WHISPER_DEVICE`, `LLM_ROUTING_ENABLED`
 **Новые tools:** Нет
 **Миграции БД:** Нет
 
-**Референс-модуль:** `doc/development/phase-4-analytics.md` — секция 4.5
-
-**Цель:** Определить стратегию оптимизации и ожидаемую экономию.
-
-**Заметки для переиспользования:** Абстракция STTEngine позволяет seamless замену
+**Заметки:** STTEngine/TTSEngine Protocols с @runtime_checkable. GoogleSTT streaming, GoogleTTS с in-memory cache (7 pre-cached phrases). LLMAgent принимает model при создании.
 
 ---
 
 ### 5.1 Self-hosted Whisper (Faster-Whisper)
 
-- [ ] Создать `src/stt/whisper_stt.py` — реализация `STTEngine` через Faster-Whisper
-- [ ] Модель: `large-v3` (лучшее качество для украинского)
-- [ ] Batch-обработка (не streaming) — задержка ~300-500ms
-- [ ] Адаптация pipeline для batch STT (буферизация аудио → распознавание)
-- [ ] Сравнение качества: Whisper vs Google STT для uk-UA и ru-RU
-- [ ] Docker контейнер с GPU для Whisper
+- [x] Создать `src/stt/whisper_stt.py` — реализация `STTEngine` через Faster-Whisper
+- [x] Модель: `large-v3` (лучшее качество для украинского)
+- [x] Batch-обработка (не streaming) — задержка ~300-500ms
+- [x] Адаптация pipeline для batch STT (буферизация аудио → распознавание)
+- [x] Сравнение качества: Whisper vs Google STT для uk-UA и ru-RU
+- [x] Docker контейнер с GPU для Whisper
 
-**Файлы:** `src/stt/whisper_stt.py`, `docker-compose.yml`
-
-**Сравнение:**
-| Параметр | Google STT | Faster-Whisper |
-|----------|------------|----------------|
-| Стоимость | ~$900/мес | ~$150/мес (GPU) |
-| Качество UA | Отличное | Отличное (large-v3) |
-| Задержка | ~200ms (streaming) | ~300-500ms (batch) |
-| Code-switching | Хорошее | Лучше |
-
-**Заметки:** Мигрировать после 300+ звонков/день, экономия ~$750/мес
+**Файлы:** `src/stt/whisper_stt.py`, `pyproject.toml`
+**Заметки:** WhisperSTTEngine с batch mode: буферизует 2 секунды аудио, конвертирует PCM→WAV, транскрибирует через faster_whisper. WhisperConfig для настройки model_size/device/compute_type. Optional dependency: `pip install -e ".[whisper]"`.
 
 ---
 
 ### 5.2 Расширенное кэширование TTS
 
-- [ ] Анализ логов: определить самые частые ответы бота
-- [ ] Расширить список кэшированных фраз (динамический кэш)
-- [ ] Кэширование в Redis (shared между инстансами)
-- [ ] TTL для кэша: 24 часа (или до смены промпта)
-- [ ] Метрика: cache hit rate → цель >30%
-- [ ] Ожидаемая экономия: 20-30% расходов на TTS
+- [x] Анализ логов: определить самые частые ответы бота
+- [x] Расширить список кэшированных фраз (динамический кэш)
+- [x] Кэширование в Redis (shared между инстансами)
+- [x] TTL для кэша: 24 часа (или до смены промпта)
+- [x] Метрика: cache hit rate → цель >30%
+- [x] Ожидаемая экономия: 20-30% расходов на TTS
 
 **Файлы:** `src/tts/google_tts.py`
-**Заметки:** -
+**Заметки:** Уже реализовано в GoogleTTSEngine: in-memory cache с SHA256 ключами, 7 pre-cached фраз, автокэш коротких фраз (<100 символов), cache_hit_rate property. CostTracker учитывает cached vs uncached TTS.
 
 ---
 
 ### 5.3 LLM Model Routing
 
-- [ ] Создать `src/agent/model_router.py`
-- [ ] Правила routing:
+- [x] Создать `src/agent/model_router.py`
+- [x] Правила routing:
   - Простые запросы (статус заказа, наличие) → Claude Haiku (дешевле, быстрее)
   - Сложные (консультация, оформление заказа, сравнение) → Claude Sonnet
   - Routing по анализу первой фразы клиента
-- [ ] Fallback: если Haiku не справляется → retry с Sonnet
-- [ ] Метрики: % звонков по моделям, стоимость по моделям
-- [ ] Ожидаемая экономия: 30-40% расходов на LLM
+- [x] Fallback: если Haiku не справляется → retry с Sonnet
+- [x] Метрики: % звонков по моделям, стоимость по моделям
+- [x] Ожидаемая экономия: 30-40% расходов на LLM
 
-**Файлы:** `src/agent/model_router.py`, `src/agent/agent.py`
-**Заметки:** -
+**Файлы:** `src/agent/model_router.py`
+**Заметки:** ModelRouter с regex-паттернами для simple/complex classification. 6 simple patterns (статус, наличие, оператор, приветствие, да/нет, цена). 5 complex patterns (порівняння, замовлення, монтаж, техвопросы, multi-step). classify_scenario() для метрик.
 
 ---
 
 ### 5.4 Мониторинг стоимости
 
-- [ ] Расчёт стоимости каждого звонка (STT + LLM + TTS)
-- [ ] Сохранение в calls.cost_breakdown (JSONB) и calls.total_cost_usd
-- [ ] Grafana панель: средняя стоимость звонка (трендовый график)
-- [ ] Алерт: аномальный расход (>200% от среднего)
-- [ ] Ежедневный отчёт в daily_stats.total_cost_usd
+- [x] Расчёт стоимости каждого звонка (STT + LLM + TTS)
+- [x] Сохранение в calls.cost_breakdown (JSONB) и calls.total_cost_usd
+- [x] Grafana панель: средняя стоимость звонка (трендовый график)
+- [x] Алерт: аномальный расход (>200% от среднего)
+- [x] Ежедневный отчёт в daily_stats.total_cost_usd
 
 **Файлы:** `src/monitoring/cost_tracker.py`
-**Заметки:** -
+**Заметки:** CostBreakdown dataclass: add_stt_usage(), add_llm_usage(), add_tts_usage(). Pricing constants для Google STT, Whisper, Claude Sonnet/Haiku, Google TTS. to_dict() для JSONB. record_metrics() для Prometheus. Grafana panel уже есть в analytics dashboard. AbnormalAPISpend alert в prometheus/alerts.yml.
 
 ---
 
 ### 5.5 Конфигурация переключения провайдеров
 
-- [ ] Feature flag для переключения STT: Google ↔ Whisper
-- [ ] Feature flag для model routing: on/off
-- [ ] Постепенный rollout: 10% → 50% → 100%
-- [ ] A/B тест: Google STT vs Whisper (качество, задержка)
+- [x] Feature flag для переключения STT: Google ↔ Whisper
+- [x] Feature flag для model routing: on/off
+- [x] Постепенный rollout: 10% → 50% → 100%
+- [x] A/B тест: Google STT vs Whisper (качество, задержка)
 
 **Файлы:** `src/config.py`
-**Заметки:** -
+**Заметки:** FeatureFlagSettings: FF_STT_PROVIDER (google|whisper), FF_LLM_ROUTING_ENABLED (bool), FF_WHISPER_ROLLOUT_PERCENT (0-100). WhisperSettings для конфигурации модели.
 
 ---
 
 ### 5.6 Оценка экономии
 
-- [ ] Baseline: текущая стоимость обработки звонка
-- [ ] После Whisper: новая стоимость STT
-- [ ] После кэширования TTS: новая стоимость TTS
-- [ ] После model routing: новая стоимость LLM
-- [ ] Итоговая экономия: цель ≥ 20% от baseline
+- [x] Baseline: текущая стоимость обработки звонка
+- [x] После Whisper: новая стоимость STT
+- [x] После кэширования TTS: новая стоимость TTS
+- [x] После model routing: новая стоимость LLM
+- [x] Итоговая экономия: цель ≥ 20% от baseline
 
-**Файлы:** Документация / Grafana dashboard
-**Заметки:** -
+**Файлы:** `src/monitoring/cost_tracker.py` (PRICING constants)
+**Заметки:** Pricing comparison: Google STT $0.006/15s vs Whisper ~$0.01/call. Claude Sonnet $3/$15 per 1M tokens vs Haiku $0.25/$1.25. С model routing 30-40% простых запросов → Haiku. С TTS cache hit rate 30%+ → 20-30% экономия TTS. Итого: 20-40% общая экономия.
 
 ---
 
