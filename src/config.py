@@ -120,10 +120,16 @@ class FeatureFlagSettings(BaseSettings):
 class AdminSettings(BaseSettings):
     jwt_secret: str = "change-me-in-production"
     jwt_ttl_hours: int = 24
+    jwt_blacklist_ttl: int = 0  # seconds; 0 = use jwt_ttl_hours * 3600
     username: str = "admin"
     password: str = "admin"
 
     model_config = {"env_prefix": "ADMIN_"}
+
+    @property
+    def effective_blacklist_ttl(self) -> int:
+        """Return blacklist TTL in seconds (defaults to JWT expiry time)."""
+        return self.jwt_blacklist_ttl if self.jwt_blacklist_ttl > 0 else self.jwt_ttl_hours * 3600
 
 
 class SMTPSettings(BaseSettings):

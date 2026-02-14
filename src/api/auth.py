@@ -51,6 +51,28 @@ async def _get_redis() -> Any:
     return _redis
 
 
+async def blacklist_token(jti: str, ttl: int) -> None:
+    """Add a JWT ID to the Redis blacklist with TTL.
+
+    After TTL expires, the key auto-deletes (token would be expired anyway).
+    """
+    try:
+        r = await _get_redis()
+        await r.setex(f"jwt_blacklist:{jti}", ttl, "1")
+    except Exception:
+        logger.warning("Failed to blacklist token jti=%s", jti, exc_info=True)
+
+
+async def is_token_blacklisted(jti: str) -> bool:
+    """Check if a JWT ID is in the Redis blacklist."""
+    try:
+        r = await _get_redis()
+        return await r.exists(f"jwt_blacklist:{jti}") > 0
+    except Exception:
+        logger.debug("Blacklist check failed, allowing request", exc_info=True)
+        return False
+
+
 async def _check_rate_limit(ip: str, username: str) -> bool:
     """Check login rate limit. Returns True if request should be BLOCKED."""
     try:
@@ -158,6 +180,11 @@ async def require_admin(request: Request) -> dict[str, Any]:
         payload = verify_jwt(token, settings.admin.jwt_secret)
     except ValueError as e:
         raise HTTPException(status_code=401, detail=str(e)) from e
+
+    # Check if token has been blacklisted (logout)
+    jti = payload.get("jti")
+    if jti and await is_token_blacklisted(jti):
+        raise HTTPException(status_code=401, detail="Token has been revoked")
 
     return payload
 
@@ -274,11 +301,22 @@ async def login(login_data: LoginRequest, request: Request) -> dict[str, Any]:
 
 @router.post("/logout")
 async def logout(request: Request) -> dict[str, str]:
-    """Logout — invalidate current JWT token.
+    """Logout — invalidate current JWT token via Redis blacklist."""
+    payload = await require_admin(request)
 
-    Note: Full JWT blacklisting requires Redis (not implemented in MVP).
-    This endpoint serves as a contract for the frontend.
-    """
-    # Verify the token is valid
-    await require_admin(request)
+    jti = payload.get("jti")
+    if jti:
+        settings = get_settings()
+        ttl = settings.admin.effective_blacklist_ttl
+        await blacklist_token(jti, ttl)
+
+        try:
+            from src.monitoring.metrics import jwt_logouts_total
+
+            jwt_logouts_total.inc()
+        except Exception:
+            pass
+
+        logger.info("Token blacklisted: jti=%s user=%s", jti, payload.get("sub"))
+
     return {"status": "logged_out"}

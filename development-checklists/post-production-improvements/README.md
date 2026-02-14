@@ -1,47 +1,28 @@
-# Production Readiness — подготовка к production-развёртыванию
+# Post-Production Improvements
 
 ## Цель
-Довести проект Call Center AI от состояния "кодовая база готова" до полной production-готовности: автоматизировать операции, настроить staging, расширить тестирование, усилить безопасность и улучшить admin UI.
+Реализовать улучшения после достижения production-ready статуса: усилить безопасность, улучшить observability, расширить тестирование, подготовить инфраструктуру для масштабирования и модернизировать admin UI.
 
 ## Критерии успеха
-- [ ] Партиции PostgreSQL создаются автоматически (cron/systemd)
-- [ ] Backup-скрипты развёрнуты и работают по расписанию
-- [ ] Staging-окружение поднимается одной командой
-- [ ] E2E-тесты покрывают основные сценарии звонков
-- [ ] Load-тесты подтверждают выполнение NFR (p95 < 2s, 20 concurrent calls)
-- [ ] API rate limiting на всех публичных эндпоинтах
-- [ ] Admin UI обновляется в реальном времени через WebSocket
-- [ ] Admin UI корректно работает на мобильных устройствах
+- [ ] JWT logout полноценно инвалидирует токен через Redis blacklist
+- [ ] PII sanitizer маскирует email, адреса, номера карт
+- [ ] Grafana дашборды хранятся как JSON в репозитории (reproducibility)
+- [ ] Chaos-тесты подтверждают graceful degradation при сбое Redis, PostgreSQL, Store API
+- [ ] Регрессионные тесты промптов защищают от деградации качества
+- [ ] Kubernetes manifests позволяют развернуть приложение в K8s с auto-scaling
+- [ ] Admin UI разбит на модули с build pipeline
 
 ## Фазы работы
-1. **Operational Automation** — автоматизация партиций, backup-скриптов, cron-задач
-2. **Staging Environment** — docker-compose.staging.yml, env-конфигурация, CI-деплой
-3. **Testing & Load** — расширение E2E-тестов, load-тестирование с Locust/SIPp
-4. **Security Hardening** — API rate limiting, OWASP-ревью, расширенное сканирование зависимостей
-5. **Admin UI Improvements** — WebSocket real-time обновления, мобильная адаптивность
+1. **Security & Auth** — JWT blacklist, расширение PII sanitizer
+2. **Observability** — Grafana dashboards as code
+3. **Testing & Quality** — Chaos testing, prompt regression tests
+4. **Infrastructure** — Kubernetes manifests
+5. **Admin UI Modularization** — разбиение на модули, Vite build pipeline
+6. **STT & Cost Optimization** — Whisper STT rollout, анализ стоимости
 
 ## Источник требований
-- Независимый анализ production-готовности проекта (2026-02-14)
-- `doc/technical/nfr.md` — нефункциональные требования
-- `doc/operations/runbooks/` — операционные процедуры
-- `scripts/backup_procedures.md` — документация backup
-
-## Текущее состояние (на момент создания чеклиста)
-
-| Компонент | Статус | Комментарий |
-|-----------|--------|-------------|
-| Кодовая база | 100% | Все модули реализованы |
-| Unit-тесты | 95% | 39 файлов, хорошее покрытие |
-| Мониторинг/Alerting | 90% | Prometheus + AlertManager + Telegram |
-| Runbooks | 90% | 6 runbooks для основных инцидентов |
-| Партиции | 70% | Скрипт есть, автоматизация нет |
-| Backup | 30% | Документация есть, скрипты не развёрнуты |
-| Staging | 10% | Только stub в CI |
-| E2E-тесты | 20% | 2 файла, нет аудио-симуляции |
-| Load-тесты | 5% | Только stub locustfile |
-| Rate limiting | 20% | Только login endpoint |
-| WebSocket (Admin) | 0% | Polling каждые 10-30 сек |
-| Mobile UI | 30% | Viewport есть, media queries нет |
+- `audit/next-steps-2026-02-14.md` — приоритеты 3 и 4
+- `development-checklists/production-readiness/` — завершённый production-readiness чеклист
 
 ## Правила переиспользования кода
 
@@ -58,16 +39,28 @@ src/
 │   ├── call_session.py  # Управление сессией — паттерн state machine
 │   └── pipeline.py      # STT → LLM → TTS — паттерн оркестрации
 ├── stt/                 # Speech-to-Text — паттерн абстракции внешних сервисов
+│   ├── base.py          # Абстрактный интерфейс (Protocol)
+│   └── google_stt.py    # Реализация Google Cloud STT
 ├── tts/                 # Text-to-Speech — аналогичный паттерн
-├── agent/               # LLM агент с tool calling
-├── api/                 # REST API (FastAPI) — auth, admin, analytics, operators, knowledge, export
+│   ├── base.py
+│   └── google_tts.py
+├── agent/               # LLM агент
+│   ├── agent.py         # Логика агента — паттерн tool calling
+│   ├── prompts.py       # Системные промпты
+│   └── tools.py         # Tool definitions (канонический список: doc/development/00-overview.md)
+├── api/                 # REST API (FastAPI)
+│   ├── auth.py          # JWT аутентификация
+│   ├── middleware/       # Rate limiting, security headers
+│   ├── websocket.py     # WebSocket endpoint для admin UI
+│   └── operators.py     # Управление операторами
+├── events/              # Redis Pub/Sub события
+│   └── publisher.py     # publish_event()
+├── monitoring/          # Prometheus метрики
+│   └── metrics.py       # Все метрики приложения
 ├── store_client/        # Клиент Store API — паттерн circuit breaker + retry
-├── tasks/               # Celery tasks — quality, stats, retention
-├── knowledge/           # RAG embeddings и search
-├── logging/             # Structured logging + PII sanitizer
-├── monitoring/          # Prometheus metrics
-├── cli/                 # CLI tools
-├── reports/             # PDF/CSV export
+│   └── client.py
+├── logging/             # PII sanitizer
+│   └── pii_sanitizer.py # Маскирование персональных данных
 └── config.py            # Конфигурация через env variables
 ```
 
@@ -90,11 +83,13 @@ src/
 | Graceful degradation | Внешние сервисы | Сбой → переключение на оператора, не обрыв звонка |
 | TTL на сессиях | Redis | `setex("call_session:{uuid}", ttl=1800, ...)` |
 | Idempotency-Key | Store API mutations | POST /orders, POST /orders/{id}/confirm |
+| Redis Pub/Sub | События для admin UI | `publish_event("call:started", {...})` |
 
 ### Async паттерны:
 - Все I/O операции — `async/await`
 - Каждый звонок — отдельная `asyncio.Task`
 - Streaming: STT (gRPC), TTS (по предложениям), LLM (token streaming)
+- Буферизация аудио в pipeline
 
 ### Чеклист:
 - [ ] Все I/O через async/await?
@@ -115,6 +110,7 @@ src/
 ```bash
 pytest tests/unit/                        # unit
 pytest tests/integration/                 # integration (нужен Docker)
+pytest tests/unit/test_audio_socket.py -v # один файл
 pytest tests/ --cov=src --cov-report=html # с покрытием
 ```
 

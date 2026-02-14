@@ -212,6 +212,13 @@ admin_websocket_messages_sent_total = Counter(
     "Total WebSocket messages sent to admin clients",
 )
 
+# --- Auth metrics ---
+
+jwt_logouts_total = Counter(
+    "callcenter_jwt_logouts_total",
+    "Total JWT token logouts (blacklisted tokens)",
+)
+
 # --- Rate limiting metrics ---
 
 rate_limit_exceeded_total = Counter(
