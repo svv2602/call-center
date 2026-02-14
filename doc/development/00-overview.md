@@ -134,6 +134,8 @@ call_center/
 | `get_fitting_stations` | 3 | Список точек шиномонтажа | `GET /fitting/stations` |
 | `get_fitting_slots` | 3 | Доступные слоты для записи | `GET /fitting/stations/{id}/slots` |
 | `book_fitting` | 3 | Запись на шиномонтаж | `POST /fitting/bookings` |
+| `cancel_fitting` | 3 | Отмена или перенос записи на шиномонтаж | `DELETE /fitting/bookings/{id}`, `PATCH /fitting/bookings/{id}` |
+| `get_fitting_price` | 3 | Стоимость шиномонтажа | `GET /fitting/prices` |
 | `search_knowledge_base` | 3 | Поиск по базе знаний (RAG) | `GET /knowledge/search` |
 
 > **Правило:** при упоминании tools в документах используйте только имена из этой таблицы. При добавлении нового tool — сначала добавьте его сюда.

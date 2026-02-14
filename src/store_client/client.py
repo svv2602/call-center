@@ -310,6 +310,202 @@ class StoreClient:
             params["order_id"] = order_id
         return await self._get("/api/v1/delivery/calculate", params=params)
 
+    # --- Fitting Tool Handlers ---
+
+    async def get_fitting_stations(
+        self, city: str, **_: Any
+    ) -> dict[str, Any]:
+        """Get fitting stations in a city.
+
+        Maps to: GET /api/v1/fitting/stations?city=...
+        """
+        data = await self._get(
+            "/api/v1/fitting/stations", params={"city": city}
+        )
+        stations = data.get("data", data.get("items", []))
+        return {
+            "total": len(stations),
+            "stations": [
+                {
+                    "id": s.get("id"),
+                    "name": s.get("name", ""),
+                    "city": s.get("city", ""),
+                    "district": s.get("district", ""),
+                    "address": s.get("address", ""),
+                    "phone": s.get("phone", ""),
+                    "working_hours": s.get("working_hours", ""),
+                    "services": s.get("services", []),
+                }
+                for s in stations
+            ],
+        }
+
+    async def get_fitting_slots(
+        self,
+        station_id: str,
+        date_from: str = "today",
+        date_to: str = "",
+        service_type: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Get available fitting slots for a station.
+
+        Maps to: GET /api/v1/fitting/stations/{id}/slots
+        """
+        params: dict[str, Any] = {"date_from": date_from}
+        if date_to:
+            params["date_to"] = date_to
+        if service_type:
+            params["service_type"] = service_type
+
+        data = await self._get(
+            f"/api/v1/fitting/stations/{station_id}/slots", params=params
+        )
+        return {
+            "station_id": station_id,
+            "slots": data.get("data", {}).get("slots", data.get("slots", [])),
+        }
+
+    async def book_fitting(
+        self,
+        station_id: str,
+        date: str,
+        time: str,
+        customer_phone: str,
+        vehicle_info: str = "",
+        service_type: str = "tire_change",
+        tire_diameter: int = 0,
+        linked_order_id: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Book a fitting appointment.
+
+        Maps to: POST /api/v1/fitting/bookings (with Idempotency-Key)
+        """
+        idempotency_key = str(uuid.uuid4())
+        body: dict[str, Any] = {
+            "station_id": station_id,
+            "date": date,
+            "time": time,
+            "customer_phone": customer_phone,
+            "service_type": service_type,
+            "source": "ai_agent",
+        }
+        if vehicle_info:
+            body["vehicle_info"] = vehicle_info
+        if tire_diameter:
+            body["tire_diameter"] = tire_diameter
+        if linked_order_id:
+            body["linked_order_id"] = linked_order_id
+
+        data = await self._post(
+            "/api/v1/fitting/bookings",
+            json_data=body,
+            idempotency_key=idempotency_key,
+        )
+        booking = data.get("data", data)
+        return {
+            "booking_id": booking.get("id"),
+            "station_name": booking.get("station", {}).get("name", ""),
+            "station_address": booking.get("station", {}).get("address", ""),
+            "date": booking.get("date"),
+            "time": booking.get("time"),
+            "service_type": booking.get("service_type"),
+            "estimated_duration_min": booking.get("estimated_duration_min"),
+            "price": booking.get("price"),
+            "currency": booking.get("currency", "UAH"),
+            "sms_sent": booking.get("sms_sent", False),
+        }
+
+    async def cancel_fitting(
+        self,
+        booking_id: str,
+        action: str = "cancel",
+        new_date: str = "",
+        new_time: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Cancel or reschedule a fitting booking.
+
+        Maps to:
+          - cancel: DELETE /api/v1/fitting/bookings/{id}
+          - reschedule: PATCH /api/v1/fitting/bookings/{id}
+        """
+        if action == "reschedule":
+            body: dict[str, Any] = {}
+            if new_date:
+                body["date"] = new_date
+            if new_time:
+                body["time"] = new_time
+            data = await self._patch(
+                f"/api/v1/fitting/bookings/{booking_id}", json_data=body
+            )
+            booking = data.get("data", data)
+            return {
+                "booking_id": booking_id,
+                "action": "rescheduled",
+                "new_date": booking.get("date", new_date),
+                "new_time": booking.get("time", new_time),
+            }
+
+        # cancel
+        await self._delete(f"/api/v1/fitting/bookings/{booking_id}")
+        return {
+            "booking_id": booking_id,
+            "action": "cancelled",
+        }
+
+    async def get_fitting_price(
+        self,
+        tire_diameter: int,
+        station_id: str = "",
+        service_type: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Get fitting service prices.
+
+        Maps to: GET /api/v1/fitting/prices
+        """
+        params: dict[str, Any] = {"tire_diameter": tire_diameter}
+        if station_id:
+            params["station_id"] = station_id
+        if service_type:
+            params["service_type"] = service_type
+
+        data = await self._get("/api/v1/fitting/prices", params=params)
+        return {
+            "prices": data.get("data", data.get("prices", data.get("items", []))),
+        }
+
+    async def search_knowledge_base(
+        self,
+        query: str,
+        category: str = "",
+        **_: Any,
+    ) -> dict[str, Any]:
+        """Search the knowledge base (RAG).
+
+        Maps to: GET /api/v1/knowledge/search
+        """
+        params: dict[str, Any] = {"query": query, "limit": 5}
+        if category:
+            params["category"] = category
+
+        data = await self._get("/api/v1/knowledge/search", params=params)
+        articles = data.get("data", data.get("items", []))
+        return {
+            "total": len(articles),
+            "articles": [
+                {
+                    "title": a.get("title", ""),
+                    "category": a.get("category", ""),
+                    "content": a.get("content", a.get("chunk_text", "")),
+                    "relevance": a.get("relevance", a.get("score", 0)),
+                }
+                for a in articles[:5]
+            ],
+        }
+
     # --- HTTP helpers ---
 
     async def _get(
@@ -336,6 +532,10 @@ class StoreClient:
     ) -> dict[str, Any]:
         """Make a PATCH request with circuit breaker and retry."""
         return await self._request("PATCH", path, json_data=json_data)
+
+    async def _delete(self, path: str) -> dict[str, Any]:
+        """Make a DELETE request with circuit breaker and retry."""
+        return await self._request("DELETE", path)
 
     async def _request(
         self,
@@ -431,6 +631,9 @@ class StoreClient:
             if resp.status >= 400:
                 body = await resp.text()
                 raise StoreAPIError(resp.status, body[:200])
+
+            if resp.status == 204:
+                return {}
 
             return await resp.json()
 

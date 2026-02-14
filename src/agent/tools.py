@@ -3,6 +3,8 @@
 Canonical tool names from doc/development/00-overview.md.
 MVP tools: search_tires, check_availability, transfer_to_operator.
 Phase 2 tools: get_order_status, create_order_draft, update_order_delivery, confirm_order.
+Phase 3 tools: get_fitting_stations, get_fitting_slots, book_fitting, cancel_fitting,
+               get_fitting_price, search_knowledge_base.
 """
 
 from __future__ import annotations
@@ -222,5 +224,180 @@ ORDER_TOOLS: list[dict] = [  # type: ignore[type-arg]
     },
 ]
 
-# All tools for the agent (MVP + Orders)
-ALL_TOOLS = MVP_TOOLS + ORDER_TOOLS
+# Phase 3: Fitting and knowledge base tools
+FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
+    {
+        "name": "get_fitting_stations",
+        "description": (
+            "Отримати список точок шиномонтажу в місті. "
+            "Використовуй, коли клієнт хоче записатися на шиномонтаж."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "city": {
+                    "type": "string",
+                    "description": "Місто для пошуку точок шиномонтажу",
+                },
+            },
+            "required": ["city"],
+        },
+    },
+    {
+        "name": "get_fitting_slots",
+        "description": (
+            "Отримати доступні слоти для запису на шиномонтаж. "
+            "Використовуй після вибору точки шиномонтажу."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "station_id": {
+                    "type": "string",
+                    "description": "ID точки шиномонтажу",
+                },
+                "date_from": {
+                    "type": "string",
+                    "description": "Початкова дата (YYYY-MM-DD або 'today')",
+                },
+                "date_to": {
+                    "type": "string",
+                    "description": "Кінцева дата (YYYY-MM-DD)",
+                },
+                "service_type": {
+                    "type": "string",
+                    "enum": ["tire_change", "balancing", "full_service"],
+                    "description": "Тип послуги: заміна шин, балансування, повний сервіс",
+                },
+            },
+            "required": ["station_id"],
+        },
+    },
+    {
+        "name": "book_fitting",
+        "description": (
+            "Записати клієнта на шиномонтаж. "
+            "Використовуй після вибору точки, дати та часу."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "station_id": {
+                    "type": "string",
+                    "description": "ID точки шиномонтажу",
+                },
+                "date": {
+                    "type": "string",
+                    "description": "Дата запису (YYYY-MM-DD)",
+                },
+                "time": {
+                    "type": "string",
+                    "description": "Час запису (HH:MM)",
+                },
+                "customer_phone": {
+                    "type": "string",
+                    "description": "Телефон клієнта (+380XXXXXXXXX)",
+                },
+                "vehicle_info": {
+                    "type": "string",
+                    "description": "Інформація про автомобіль (марка, модель, рік)",
+                },
+                "service_type": {
+                    "type": "string",
+                    "enum": ["tire_change", "balancing", "full_service"],
+                    "description": "Тип послуги",
+                },
+                "tire_diameter": {
+                    "type": "integer",
+                    "description": "Діаметр шин у дюймах (наприклад, 16, 17)",
+                },
+                "linked_order_id": {
+                    "type": "string",
+                    "description": "ID пов'язаного замовлення (якщо клієнт замовив шини)",
+                },
+            },
+            "required": ["station_id", "date", "time", "customer_phone"],
+        },
+    },
+    {
+        "name": "cancel_fitting",
+        "description": (
+            "Скасувати або перенести запис на шиномонтаж. "
+            "Використовуй, коли клієнт хоче скасувати або змінити час запису."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "booking_id": {
+                    "type": "string",
+                    "description": "ID запису на шиномонтаж",
+                },
+                "action": {
+                    "type": "string",
+                    "enum": ["cancel", "reschedule"],
+                    "description": "Дія: скасувати або перенести",
+                },
+                "new_date": {
+                    "type": "string",
+                    "description": "Нова дата (YYYY-MM-DD, тільки для перенесення)",
+                },
+                "new_time": {
+                    "type": "string",
+                    "description": "Новий час (HH:MM, тільки для перенесення)",
+                },
+            },
+            "required": ["booking_id", "action"],
+        },
+    },
+    {
+        "name": "get_fitting_price",
+        "description": (
+            "Дізнатися вартість шиномонтажу. "
+            "Використовуй, коли клієнт запитує про ціну монтажу."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "tire_diameter": {
+                    "type": "integer",
+                    "description": "Діаметр шин у дюймах (наприклад, 16, 17)",
+                },
+                "station_id": {
+                    "type": "string",
+                    "description": "ID точки шиномонтажу (для конкретних цін)",
+                },
+                "service_type": {
+                    "type": "string",
+                    "enum": ["tire_change", "balancing", "full_service"],
+                    "description": "Тип послуги",
+                },
+            },
+            "required": ["tire_diameter"],
+        },
+    },
+    {
+        "name": "search_knowledge_base",
+        "description": (
+            "Пошук по базі знань магазину (характеристики шин, порівняння, рекомендації, FAQ). "
+            "Використовуй для експертних консультацій та складних питань клієнтів."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {
+                    "type": "string",
+                    "description": "Пошуковий запит (питання клієнта)",
+                },
+                "category": {
+                    "type": "string",
+                    "enum": ["brands", "guides", "faq", "comparisons"],
+                    "description": "Категорія пошуку для точнішого результату",
+                },
+            },
+            "required": ["query"],
+        },
+    },
+]
+
+# All tools for the agent (MVP + Orders + Fitting/Knowledge)
+ALL_TOOLS = MVP_TOOLS + ORDER_TOOLS + FITTING_TOOLS

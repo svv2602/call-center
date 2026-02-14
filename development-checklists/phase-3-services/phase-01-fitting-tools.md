@@ -3,10 +3,10 @@
 ## Статус
 - [ ] Не начата
 - [ ] В процессе
-- [ ] Завершена
+- [x] Завершена
 
-**Начата:** -
-**Завершена:** -
+**Начата:** 2026-02-14
+**Завершена:** 2026-02-14
 
 ## Цель фазы
 
@@ -17,9 +17,9 @@
 ### 1.0 ОБЯЗАТЕЛЬНО: Анализ и планирование
 
 #### A. Анализ существующего кода
-- [ ] Изучить существующие tools в `src/agent/tools.py` (MVP + заказы)
-- [ ] Проверить канонический список tools в `doc/development/00-overview.md`
-- [ ] Изучить сценарий записи на монтаж из `doc/development/phase-3-services.md`
+- [x] Изучить существующие tools в `src/agent/tools.py` (MVP + заказы)
+- [x] Проверить канонический список tools в `doc/development/00-overview.md`
+- [x] Изучить сценарий записи на монтаж из `doc/development/phase-3-services.md`
 
 **Команды для поиска:**
 ```bash
@@ -28,9 +28,9 @@ grep -rn "fitting\|booking\|station\|slot" src/
 ```
 
 #### B. Анализ зависимостей
-- [ ] Канонические tools: `get_fitting_stations`, `get_fitting_slots`, `book_fitting`, `search_knowledge_base`
-- [ ] Доп. tools из phase-3-services.md: `cancel_fitting`, `get_fitting_price` (добавить в канонический список?)
-- [ ] Store API endpoints для шиномонтажа
+- [x] Канонические tools: `get_fitting_stations`, `get_fitting_slots`, `book_fitting`, `search_knowledge_base`
+- [x] Доп. tools из phase-3-services.md: `cancel_fitting`, `get_fitting_price` (добавить в канонический список?)
+- [x] Store API endpoints для шиномонтажа
 
 **Новые абстракции:** Нет
 **Новые env variables:** Нет
@@ -38,8 +38,8 @@ grep -rn "fitting\|booking\|station\|slot" src/
 **Миграции БД:** `003_add_fitting.py` — таблицы fitting_stations, fitting_bookings
 
 #### C. Проверка архитектуры
-- [ ] Связка booking с заказом (linked_order_id)
-- [ ] CallerID для customer_phone в booking
+- [x] Связка booking с заказом (linked_order_id)
+- [x] CallerID для customer_phone в booking
 
 **Референс-модуль:** `src/agent/tools.py` (существующие tools)
 
@@ -51,10 +51,10 @@ grep -rn "fitting\|booking\|station\|slot" src/
 
 ### 1.1 Tool: get_fitting_stations
 
-- [ ] Добавить schema в `src/agent/tools.py`
-- [ ] Параметры: `city` (string, required)
-- [ ] Описание: "Получить список точек шиномонтажа"
-- [ ] Маршрутизация: → `GET /fitting/stations?city=...`
+- [x] Добавить schema в `src/agent/tools.py`
+- [x] Параметры: `city` (string, required)
+- [x] Описание: "Получить список точек шиномонтажа"
+- [x] Маршрутизация: → `GET /fitting/stations?city=...`
 
 **Файлы:** `src/agent/tools.py`
 **Заметки:** -
@@ -63,10 +63,10 @@ grep -rn "fitting\|booking\|station\|slot" src/
 
 ### 1.2 Tool: get_fitting_slots
 
-- [ ] Добавить schema в `src/agent/tools.py`
-- [ ] Параметры: `station_id` (required), `date_from` (YYYY-MM-DD или "today"), `date_to`, `service_type` (enum: tire_change, balancing, full_service)
-- [ ] Описание: "Получить доступные слоты для записи"
-- [ ] Маршрутизация: → `GET /fitting/stations/{id}/slots`
+- [x] Добавить schema в `src/agent/tools.py`
+- [x] Параметры: `station_id` (required), `date_from` (YYYY-MM-DD или "today"), `date_to`, `service_type` (enum: tire_change, balancing, full_service)
+- [x] Описание: "Получить доступные слоты для записи"
+- [x] Маршрутизация: → `GET /fitting/stations/{id}/slots`
 
 **Файлы:** `src/agent/tools.py`
 **Заметки:** -
@@ -75,11 +75,11 @@ grep -rn "fitting\|booking\|station\|slot" src/
 
 ### 1.3 Tool: book_fitting
 
-- [ ] Добавить schema в `src/agent/tools.py`
-- [ ] Параметры: `station_id` (required), `date` (YYYY-MM-DD, required), `time` (HH:MM, required), `customer_phone` (required), `vehicle_info`, `service_type`, `tire_diameter`, `linked_order_id`
-- [ ] Описание: "Записать клиента на шиномонтаж"
-- [ ] Маршрутизация: → `POST /fitting/bookings`
-- [ ] CallerID как customer_phone по умолчанию
+- [x] Добавить schema в `src/agent/tools.py`
+- [x] Параметры: `station_id` (required), `date` (YYYY-MM-DD, required), `time` (HH:MM, required), `customer_phone` (required), `vehicle_info`, `service_type`, `tire_diameter`, `linked_order_id`
+- [x] Описание: "Записать клиента на шиномонтаж"
+- [x] Маршрутизация: → `POST /fitting/bookings`
+- [x] CallerID как customer_phone по умолчанию
 
 **Файлы:** `src/agent/tools.py`
 **Заметки:** -
@@ -88,23 +88,23 @@ grep -rn "fitting\|booking\|station\|slot" src/
 
 ### 1.4 Дополнительные tools (cancel_fitting, get_fitting_price)
 
-- [ ] `cancel_fitting`: booking_id (required), action (enum: cancel, reschedule), new_date, new_time
-- [ ] Маршрутизация: cancel → `DELETE /fitting/bookings/{id}`, reschedule → `PATCH /fitting/bookings/{id}`
-- [ ] `get_fitting_price`: tire_diameter (required), station_id, service_type
-- [ ] Маршрутизация: → `GET /fitting/prices`
-- [ ] Обновить канонический список tools в `doc/development/00-overview.md` (если добавляются)
+- [x] `cancel_fitting`: booking_id (required), action (enum: cancel, reschedule), new_date, new_time
+- [x] Маршрутизация: cancel → `DELETE /fitting/bookings/{id}`, reschedule → `PATCH /fitting/bookings/{id}`
+- [x] `get_fitting_price`: tire_diameter (required), station_id, service_type
+- [x] Маршрутизация: → `GET /fitting/prices`
+- [x] Обновить канонический список tools в `doc/development/00-overview.md` (если добавляются)
 
 **Файлы:** `src/agent/tools.py`
-**Заметки:** cancel_fitting и get_fitting_price описаны в phase-3-services.md, но не в каноническом списке — уточнить необходимость
+**Заметки:** cancel_fitting и get_fitting_price добавлены в канонический список tools в `doc/development/00-overview.md`
 
 ---
 
 ### 1.5 Миграция БД для шиномонтажа
 
-- [ ] Создать `migrations/versions/003_add_fitting.py`
-- [ ] Таблица `fitting_stations`: id, name, city, district, address, phone, working_hours, services (JSONB), active
-- [ ] Таблица `fitting_bookings`: id, station_id, customer_id, linked_order_id, booking_date, booking_time, service_type, tire_diameter, vehicle_info, status, price, source, source_call_id
-- [ ] Связь calls.fitting_booking_id → fitting_bookings.id
+- [x] Создать `migrations/versions/003_add_fitting.py`
+- [x] Таблица `fitting_stations`: id, name, city, district, address, phone, working_hours, services (JSONB), active
+- [x] Таблица `fitting_bookings`: id, station_id, customer_id, linked_order_id, booking_date, booking_time, service_type, tire_diameter, vehicle_info, status, price, source, source_call_id
+- [x] Связь calls.fitting_booking_id → fitting_bookings.id
 
 **Файлы:** `migrations/versions/003_add_fitting.py`
 **Заметки:** Схема из `doc/technical/data-model.md`
