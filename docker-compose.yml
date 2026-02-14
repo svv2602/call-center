@@ -8,16 +8,19 @@ services:
       - GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-key.json
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
       - STORE_API_URL=http://store-api:3000/api/v1
-      - STORE_API_KEY=${STORE_API_KEY}
+      - STORE_API_KEY=${STORE_API_KEY:-test-store-api-key}
       - DATABASE_URL=postgresql+asyncpg://callcenter:${POSTGRES_PASSWORD}@postgres:5432/callcenter
       - REDIS_URL=redis://redis:6379/0
-      - ARI_URL=http://asterisk:8088/ari
-      - ARI_USER=${ARI_USER}
-      - ARI_PASSWORD=${ARI_PASSWORD}
+      # Asterisk ARI — внешняя зависимость, не входит в compose
+      - ARI_URL=${ARI_URL:-http://localhost:8088/ari}
+      - ARI_USER=${ARI_USER:-}
+      - ARI_PASSWORD=${ARI_PASSWORD:-}
     depends_on:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      store-api:
         condition: service_healthy
     restart: unless-stopped
     deploy:
@@ -25,6 +28,24 @@ services:
         limits:
           cpus: "2.0"
           memory: 4G
+
+  store-api:
+    build: ./mock-store-api
+    ports:
+      - "3002:3000"
+    environment:
+      - STORE_API_KEY=${STORE_API_KEY:-test-store-api-key}
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:3000/api/v1/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
 
   postgres:
     image: pgvector/pgvector:pg16

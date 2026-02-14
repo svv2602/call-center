@@ -61,7 +61,11 @@ docker compose ps
 curl http://localhost:8080/health
 ```
 
-Сервисы: call-processor (:9092, :8080), PostgreSQL (:5432), Redis (:6379), Prometheus (:9090), Grafana (:3000), Celery worker + beat.
+Сервисы: call-processor (:9092, :8080), mock store-api (:3002), PostgreSQL (:5432), Redis (:6379), Prometheus (:9090), Grafana (:3000), Celery worker + beat.
+
+### Asterisk (опционально для разработки)
+
+Asterisk 20 не входит в docker-compose и запускается отдельно. Call Processor работает без Asterisk — AudioSocket сервер принимает TCP-соединения напрямую. Для полного тестирования с телефонией см. конфигурацию в `asterisk/extensions.conf`.
 
 ## Структура проекта
 
