@@ -228,6 +228,39 @@ rate_limit_exceeded_total = Counter(
 )
 
 
+# --- Whisper STT metrics ---
+
+stt_whisper_latency_seconds = Histogram(
+    "callcenter_stt_whisper_latency_seconds",
+    "Whisper STT transcription latency in seconds",
+    buckets=[0.1, 0.3, 0.5, 1.0, 2.0, 3.0, 5.0, 10.0],
+)
+
+stt_whisper_errors_total = Counter(
+    "callcenter_stt_whisper_errors_total",
+    "Whisper STT errors (triggering fallback to Google)",
+    ["error_type"],  # connection_error, timeout, model_error
+)
+
+stt_whisper_fallback_total = Counter(
+    "callcenter_stt_whisper_fallback_total",
+    "Number of times Whisper STT fell back to Google STT",
+)
+
+stt_provider_requests_total = Counter(
+    "callcenter_stt_provider_requests_total",
+    "Total STT requests by provider",
+    ["provider"],  # google, whisper
+)
+
+stt_provider_accuracy = Histogram(
+    "callcenter_stt_provider_accuracy",
+    "STT provider transcription confidence score (0-1) for A/B comparison",
+    ["provider"],  # google, whisper
+    buckets=[0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0],
+)
+
+
 def get_metrics() -> bytes:
     """Generate Prometheus metrics output."""
     return generate_latest()

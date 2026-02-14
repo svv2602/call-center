@@ -13,9 +13,16 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from src.monitoring.metrics import (
+    stt_provider_accuracy,
+    stt_provider_requests_total,
+    stt_whisper_errors_total,
+    stt_whisper_latency_seconds,
+)
 from src.stt.base import STTConfig, Transcript
 
 if TYPE_CHECKING:
@@ -86,6 +93,7 @@ class WhisperSTTEngine:
         self._audio_buffer = bytearray()
         self._transcripts = asyncio.Queue()
         self._is_streaming = True
+        stt_provider_requests_total.labels(provider="whisper").inc()
         logger.debug("Whisper STT stream started")
 
     async def feed_audio(self, chunk: bytes) -> None:
@@ -119,47 +127,60 @@ class WhisperSTTEngine:
 
         wav_buffer.seek(0)
 
-        # Run transcription in thread pool
-        segments, info = await asyncio.to_thread(
-            self._model.transcribe,
-            wav_buffer,
-            language=self._config.language,
-            beam_size=self._config.beam_size,
-            vad_filter=self._config.vad_filter,
-        )
+        start_time = time.monotonic()
 
-        # Collect segments
-        text_parts: list[str] = []
-        total_confidence = 0.0
-        segment_count = 0
-
-        for segment in segments:
-            text_parts.append(segment.text.strip())
-            total_confidence += getattr(segment, "avg_logprob", -0.5)
-            segment_count += 1
-
-        if text_parts:
-            full_text = " ".join(text_parts)
-            # Convert log probability to confidence (0-1)
-            avg_logprob = total_confidence / max(segment_count, 1)
-            confidence = min(1.0, max(0.0, 1.0 + avg_logprob))
-
-            detected_lang = getattr(info, "language", self._config.language)
-
-            transcript = Transcript(
-                text=full_text,
-                is_final=True,
-                confidence=confidence,
-                language=detected_lang,
+        try:
+            # Run transcription in thread pool
+            segments, info = await asyncio.to_thread(
+                self._model.transcribe,
+                wav_buffer,
+                language=self._config.language,
+                beam_size=self._config.beam_size,
+                vad_filter=self._config.vad_filter,
             )
-            await self._transcripts.put(transcript)
 
-            logger.debug(
-                "Whisper transcript: '%s' (confidence=%.2f, lang=%s)",
-                full_text[:100],
-                confidence,
-                detected_lang,
-            )
+            # Collect segments
+            text_parts: list[str] = []
+            total_confidence = 0.0
+            segment_count = 0
+
+            for segment in segments:
+                text_parts.append(segment.text.strip())
+                total_confidence += getattr(segment, "avg_logprob", -0.5)
+                segment_count += 1
+
+            latency = time.monotonic() - start_time
+            stt_whisper_latency_seconds.observe(latency)
+
+            if text_parts:
+                full_text = " ".join(text_parts)
+                # Convert log probability to confidence (0-1)
+                avg_logprob = total_confidence / max(segment_count, 1)
+                confidence = min(1.0, max(0.0, 1.0 + avg_logprob))
+
+                detected_lang = getattr(info, "language", self._config.language)
+
+                transcript = Transcript(
+                    text=full_text,
+                    is_final=True,
+                    confidence=confidence,
+                    language=detected_lang,
+                )
+                await self._transcripts.put(transcript)
+                stt_provider_accuracy.labels(provider="whisper").observe(confidence)
+
+                logger.debug(
+                    "Whisper transcript: '%s' (confidence=%.2f, lang=%s, latency=%.2fs)",
+                    full_text[:100],
+                    confidence,
+                    detected_lang,
+                    latency,
+                )
+
+        except Exception:
+            latency = time.monotonic() - start_time
+            stt_whisper_errors_total.labels(error_type="model_error").inc()
+            logger.exception("Whisper transcription error (latency=%.2fs)", latency)
 
     async def get_transcripts(self) -> AsyncIterator[Transcript]:
         """Yield transcripts as they become available."""

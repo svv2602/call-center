@@ -4,13 +4,13 @@
 Реализовать улучшения после достижения production-ready статуса: усилить безопасность, улучшить observability, расширить тестирование, подготовить инфраструктуру для масштабирования и модернизировать admin UI.
 
 ## Критерии успеха
-- [ ] JWT logout полноценно инвалидирует токен через Redis blacklist
-- [ ] PII sanitizer маскирует email, адреса, номера карт
-- [ ] Grafana дашборды хранятся как JSON в репозитории (reproducibility)
-- [ ] Chaos-тесты подтверждают graceful degradation при сбое Redis, PostgreSQL, Store API
-- [ ] Регрессионные тесты промптов защищают от деградации качества
-- [ ] Kubernetes manifests позволяют развернуть приложение в K8s с auto-scaling
-- [ ] Admin UI разбит на модули с build pipeline
+- [x] JWT logout полноценно инвалидирует токен через Redis blacklist
+- [x] PII sanitizer маскирует email, адреса, номера карт
+- [x] Grafana дашборды хранятся как JSON в репозитории (reproducibility)
+- [x] Chaos-тесты подтверждают graceful degradation при сбое Redis, PostgreSQL, Store API
+- [x] Регрессионные тесты промптов защищают от деградации качества
+- [x] Kubernetes manifests позволяют развернуть приложение в K8s с auto-scaling
+- [x] Admin UI разбит на модули с build pipeline
 
 ## Фазы работы
 1. **Security & Auth** — JWT blacklist, расширение PII sanitizer

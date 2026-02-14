@@ -2,16 +2,9 @@
 
 ## Текущий статус
 - **Последнее обновление:** 2026-02-15
-- **Текущая фаза:** 6 из 6
-- **Статус фазы:** не начата
-- **Общий прогресс:** 5/6 фаз (83%)
-
-## Как продолжить работу
-1. Открой файл текущей фазы: `phase-06-stt-and-cost.md`
-2. Найди первую незавершённую задачу (без [x])
-3. Выполни задачу
-4. Отметь [x] в чекбоксе
-5. Обнови этот файл (PROGRESS.md)
+- **Текущая фаза:** ЗАВЕРШЕНО
+- **Статус фазы:** все фазы завершены
+- **Общий прогресс:** 6/6 фаз (100%)
 
 ## Обзор фаз
 
@@ -22,7 +15,7 @@
 | 3 | `phase-03-testing-and-quality.md` | завершена | 4 |
 | 4 | `phase-04-kubernetes.md` | завершена | 4 |
 | 5 | `phase-05-admin-ui-modularization.md` | завершена | 5 |
-| 6 | `phase-06-stt-and-cost.md` | не начата | 3 |
+| 6 | `phase-06-stt-and-cost.md` | завершена | 3 |
 
 ## История выполнения
 | Дата | Событие |
@@ -33,3 +26,14 @@
 | 2026-02-14 | Фаза 3 завершена: 16 chaos tests (Redis fail-open, circuit breaker, DB fallback), 50 prompt regression tests (12 сценариев) |
 | 2026-02-14 | Фаза 4 завершена: 17 K8s манифестов (namespace, secrets, configmap, deployments, StatefulSets, HPA, PDB, ingress, monitoring, kustomize) |
 | 2026-02-15 | Фаза 5 завершена: Admin UI модуляризация — 22 модуля (6 core, 4 CSS, 8 pages, main.js, index.html), Vite build pipeline, CI/Dockerfile обновлены |
+| 2026-02-15 | Фаза 6 завершена: Whisper STT метрики + fallback engine, cost analysis ($0.07-0.10/звонок, ROI 12-57% vs оператор) |
+
+## Итоги чеклиста
+
+Все 6 фаз post-production improvements завершены:
+- **Security & Auth** — JWT blacklist, PII sanitizer
+- **Observability** — 3 Grafana дашборда as code
+- **Testing & Quality** — chaos tests, prompt regression tests
+- **Infrastructure** — 17 Kubernetes манифестов
+- **Admin UI** — модуляризация 1480-строчного монолита на 22 ES модуля + Vite build
+- **STT & Cost** — Whisper STT с fallback, анализ стоимости ($0.07/звонок)
