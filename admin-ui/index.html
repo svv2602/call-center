@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Call Center AI — Admin</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f5f5f5; color: #333; }
+        .login-container { display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+        .login-form { background: #fff; padding: 2rem; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,.1); width: 320px; }
+        .login-form h1 { font-size: 1.2rem; margin-bottom: 1.5rem; text-align: center; }
+        .login-form input { width: 100%; padding: .6rem; margin-bottom: .8rem; border: 1px solid #ddd; border-radius: 4px; font-size: .9rem; }
+        .login-form button { width: 100%; padding: .6rem; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: .9rem; }
+        .login-form button:hover { background: #1d4ed8; }
+        .login-form .error { color: #dc2626; font-size: .8rem; margin-bottom: .5rem; display: none; }
+
+        .app { display: none; }
+        .sidebar { position: fixed; left: 0; top: 0; bottom: 0; width: 220px; background: #1e293b; color: #e2e8f0; padding: 1rem 0; }
+        .sidebar h2 { font-size: 1rem; padding: .5rem 1rem; margin-bottom: 1rem; border-bottom: 1px solid #334155; }
+        .sidebar a { display: block; padding: .5rem 1rem; color: #94a3b8; text-decoration: none; font-size: .85rem; }
+        .sidebar a:hover, .sidebar a.active { color: #fff; background: #334155; }
+        .sidebar .logout { position: absolute; bottom: 1rem; left: 1rem; color: #ef4444; cursor: pointer; font-size: .8rem; }
+
+        .main { margin-left: 220px; padding: 1.5rem; }
+        .main h1 { font-size: 1.3rem; margin-bottom: 1rem; }
+
+        .card { background: #fff; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,.1); padding: 1.2rem; margin-bottom: 1rem; }
+        .stats-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 1rem; margin-bottom: 1.5rem; }
+        .stat-card { text-align: center; }
+        .stat-card .value { font-size: 1.8rem; font-weight: 700; color: #2563eb; }
+        .stat-card .label { font-size: .75rem; color: #64748b; margin-top: .3rem; }
+
+        table { width: 100%; border-collapse: collapse; font-size: .85rem; }
+        th, td { padding: .5rem .8rem; text-align: left; border-bottom: 1px solid #e5e7eb; }
+        th { background: #f8fafc; font-weight: 600; color: #475569; }
+        tr:hover { background: #f8fafc; }
+
+        .badge { display: inline-block; padding: .15rem .5rem; border-radius: 12px; font-size: .75rem; font-weight: 500; }
+        .badge-green { background: #dcfce7; color: #166534; }
+        .badge-yellow { background: #fef9c3; color: #854d0e; }
+        .badge-red { background: #fecaca; color: #991b1b; }
+        .badge-blue { background: #dbeafe; color: #1e40af; }
+
+        .filters { display: flex; gap: .8rem; margin-bottom: 1rem; flex-wrap: wrap; align-items: center; }
+        .filters input, .filters select { padding: .4rem .6rem; border: 1px solid #d1d5db; border-radius: 4px; font-size: .85rem; }
+        .filters button { padding: .4rem 1rem; background: #2563eb; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: .85rem; }
+
+        .pagination { display: flex; gap: .5rem; margin-top: 1rem; justify-content: center; }
+        .pagination button { padding: .3rem .8rem; border: 1px solid #d1d5db; border-radius: 4px; background: #fff; cursor: pointer; }
+        .pagination button.active { background: #2563eb; color: #fff; border-color: #2563eb; }
+
+        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 100; justify-content: center; align-items: center; }
+        .modal-overlay.show { display: flex; }
+        .modal { background: #fff; border-radius: 8px; padding: 1.5rem; max-width: 700px; width: 90%; max-height: 80vh; overflow-y: auto; }
+        .modal h2 { margin-bottom: 1rem; font-size: 1.1rem; }
+        .modal .close { float: right; cursor: pointer; font-size: 1.2rem; color: #64748b; }
+
+        .turn { padding: .4rem 0; border-bottom: 1px solid #f1f5f9; }
+        .turn .speaker { font-weight: 600; font-size: .8rem; }
+        .turn .speaker.customer { color: #2563eb; }
+        .turn .speaker.bot { color: #059669; }
+        .turn .text { font-size: .85rem; margin-top: .2rem; }
+
+        .grafana-frame { width: 100%; height: 600px; border: none; border-radius: 8px; }
+
+        .tab-bar { display: flex; gap: 0; margin-bottom: 1rem; border-bottom: 2px solid #e5e7eb; }
+        .tab-bar button { padding: .5rem 1rem; border: none; background: none; cursor: pointer; font-size: .85rem; color: #64748b; border-bottom: 2px solid transparent; margin-bottom: -2px; }
+        .tab-bar button.active { color: #2563eb; border-bottom-color: #2563eb; }
+    </style>
+</head>
+<body>
+    <!-- Login -->
+    <div class="login-container" id="loginContainer">
+        <div class="login-form">
+            <h1>Call Center AI</h1>
+            <div class="error" id="loginError">Invalid credentials</div>
+            <input type="text" id="loginUsername" placeholder="Username" value="admin">
+            <input type="password" id="loginPassword" placeholder="Password">
+            <button onclick="login()">Login</button>
+        </div>
+    </div>
+
+    <!-- App -->
+    <div class="app" id="app">
+        <nav class="sidebar">
+            <h2>Call Center AI</h2>
+            <a href="#" onclick="showPage('dashboard')" class="active" data-page="dashboard">Dashboard</a>
+            <a href="#" onclick="showPage('calls')" data-page="calls">Call Journal</a>
+            <a href="#" onclick="showPage('prompts')" data-page="prompts">Prompts</a>
+            <a href="#" onclick="showPage('knowledge')" data-page="knowledge">Knowledge Base</a>
+            <a href="#" onclick="showPage('settings')" data-page="settings">Settings</a>
+            <span class="logout" onclick="logout()">Logout</span>
+        </nav>
+
+        <div class="main">
+            <!-- Dashboard -->
+            <div id="page-dashboard">
+                <h1>Dashboard</h1>
+                <div class="stats-grid" id="dashboardStats"></div>
+                <div class="card">
+                    <h3>Grafana Real-time</h3>
+                    <iframe class="grafana-frame" id="grafanaFrame" src=""></iframe>
+                </div>
+            </div>
+
+            <!-- Calls -->
+            <div id="page-calls" style="display:none">
+                <h1>Call Journal</h1>
+                <div class="filters">
+                    <input type="date" id="filterDateFrom" placeholder="From">
+                    <input type="date" id="filterDateTo" placeholder="To">
+                    <select id="filterScenario">
+                        <option value="">All scenarios</option>
+                        <option value="tire_search">Tire search</option>
+                        <option value="availability">Availability</option>
+                        <option value="order">Order</option>
+                        <option value="fitting">Fitting</option>
+                        <option value="consultation">Consultation</option>
+                    </select>
+                    <select id="filterTransferred">
+                        <option value="">All</option>
+                        <option value="true">Transferred</option>
+                        <option value="false">Resolved by bot</option>
+                    </select>
+                    <input type="number" id="filterQualityBelow" placeholder="Quality below" step="0.1" min="0" max="1">
+                    <button onclick="loadCalls()">Filter</button>
+                </div>
+                <div class="card">
+                    <table id="callsTable">
+                        <thead>
+                            <tr>
+                                <th>Date</th>
+                                <th>Caller</th>
+                                <th>Scenario</th>
+                                <th>Duration</th>
+                                <th>Quality</th>
+                                <th>Cost</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                    <div class="pagination" id="callsPagination"></div>
+                </div>
+            </div>
+
+            <!-- Prompts -->
+            <div id="page-prompts" style="display:none">
+                <h1>Prompt Management</h1>
+                <div class="tab-bar">
+                    <button class="active" onclick="showPromptTab('versions')">Versions</button>
+                    <button onclick="showPromptTab('abtests')">A/B Tests</button>
+                </div>
+                <div id="promptVersions" class="card"></div>
+                <div id="promptABTests" class="card" style="display:none"></div>
+            </div>
+
+            <!-- Knowledge -->
+            <div id="page-knowledge" style="display:none">
+                <h1>Knowledge Base</h1>
+                <div class="filters">
+                    <select id="kbCategory">
+                        <option value="">All categories</option>
+                        <option value="brands">Brands</option>
+                        <option value="guides">Guides</option>
+                        <option value="faq">FAQ</option>
+                        <option value="comparisons">Comparisons</option>
+                    </select>
+                    <input type="text" id="kbSearch" placeholder="Search...">
+                    <button onclick="loadArticles()">Filter</button>
+                </div>
+                <div class="card" id="articlesContainer"></div>
+            </div>
+
+            <!-- Settings -->
+            <div id="page-settings" style="display:none">
+                <h1>System Settings</h1>
+                <div class="card">
+                    <h3>Grafana Dashboards</h3>
+                    <p style="margin:.5rem 0; font-size:.85rem">
+                        <a href="/grafana" target="_blank">Open Grafana</a> (default: admin/admin)
+                    </p>
+                </div>
+                <div class="card">
+                    <h3>System Info</h3>
+                    <div id="systemInfo"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Call Detail Modal -->
+    <div class="modal-overlay" id="callModal">
+        <div class="modal">
+            <span class="close" onclick="closeCallModal()">&times;</span>
+            <h2>Call Details</h2>
+            <div id="callDetailContent"></div>
+        </div>
+    </div>
+
+    <script>
+        const API = '';
+        let token = localStorage.getItem('admin_token');
+
+        async function api(path, opts = {}) {
+            const headers = { 'Content-Type': 'application/json' };
+            if (token) headers['Authorization'] = `Bearer ${token}`;
+            const res = await fetch(`${API}${path}`, { ...opts, headers });
+            if (res.status === 401) { logout(); throw new Error('Unauthorized'); }
+            return res.json();
+        }
+
+        async function login() {
+            const u = document.getElementById('loginUsername').value;
+            const p = document.getElementById('loginPassword').value;
+            try {
+                const data = await api('/auth/login', {
+                    method: 'POST',
+                    body: JSON.stringify({ username: u, password: p })
+                });
+                token = data.token;
+                localStorage.setItem('admin_token', token);
+                document.getElementById('loginContainer').style.display = 'none';
+                document.getElementById('app').style.display = 'block';
+                showPage('dashboard');
+            } catch {
+                document.getElementById('loginError').style.display = 'block';
+            }
+        }
+
+        function logout() {
+            token = null;
+            localStorage.removeItem('admin_token');
+            document.getElementById('app').style.display = 'none';
+            document.getElementById('loginContainer').style.display = 'flex';
+        }
+
+        function showPage(page) {
+            document.querySelectorAll('[id^="page-"]').forEach(el => el.style.display = 'none');
+            document.getElementById(`page-${page}`).style.display = 'block';
+            document.querySelectorAll('.sidebar a').forEach(a => a.classList.remove('active'));
+            document.querySelector(`[data-page="${page}"]`).classList.add('active');
+
+            if (page === 'dashboard') loadDashboard();
+            if (page === 'calls') loadCalls();
+            if (page === 'prompts') loadPromptVersions();
+            if (page === 'knowledge') loadArticles();
+            if (page === 'settings') loadSettings();
+        }
+
+        function qualityBadge(score) {
+            if (score == null) return '<span class="badge">N/A</span>';
+            const s = parseFloat(score).toFixed(2);
+            if (score >= 0.8) return `<span class="badge badge-green">${s}</span>`;
+            if (score >= 0.5) return `<span class="badge badge-yellow">${s}</span>`;
+            return `<span class="badge badge-red">${s}</span>`;
+        }
+
+        function formatDate(d) {
+            if (!d) return '-';
+            return new Date(d).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' });
+        }
+
+        // --- Dashboard ---
+        async function loadDashboard() {
+            try {
+                const data = await api('/analytics/summary');
+                const stats = data.daily_stats || [];
+                const latest = stats[0] || {};
+                document.getElementById('dashboardStats').innerHTML = `
+                    <div class="card stat-card"><div class="value">${latest.total_calls || 0}</div><div class="label">Calls today</div></div>
+                    <div class="card stat-card"><div class="value">${latest.resolved_by_bot || 0}</div><div class="label">Resolved by bot</div></div>
+                    <div class="card stat-card"><div class="value">${latest.transferred || 0}</div><div class="label">Transferred</div></div>
+                    <div class="card stat-card"><div class="value">${(latest.avg_quality_score || 0).toFixed(2)}</div><div class="label">Avg quality</div></div>
+                    <div class="card stat-card"><div class="value">$${(latest.total_cost_usd || 0).toFixed(2)}</div><div class="label">Cost today</div></div>
+                `;
+            } catch { /* ignore */ }
+        }
+
+        // --- Calls ---
+        let callsOffset = 0;
+        async function loadCalls(offset = 0) {
+            callsOffset = offset;
+            const params = new URLSearchParams({ limit: 20, offset });
+            const df = document.getElementById('filterDateFrom').value;
+            const dt = document.getElementById('filterDateTo').value;
+            const sc = document.getElementById('filterScenario').value;
+            const tr = document.getElementById('filterTransferred').value;
+            const qb = document.getElementById('filterQualityBelow').value;
+            if (df) params.set('date_from', df);
+            if (dt) params.set('date_to', dt);
+            if (sc) params.set('scenario', sc);
+            if (tr) params.set('transferred', tr);
+            if (qb) params.set('quality_below', qb);
+
+            const data = await api(`/analytics/calls?${params}`);
+            const tbody = document.querySelector('#callsTable tbody');
+            tbody.innerHTML = data.calls.map(c => `
+                <tr style="cursor:pointer" onclick="showCallDetail('${c.id}')">
+                    <td>${formatDate(c.started_at)}</td>
+                    <td>${c.caller_id || '-'}</td>
+                    <td>${c.scenario || '-'}</td>
+                    <td>${c.duration_seconds || 0}s</td>
+                    <td>${qualityBadge(c.quality_score)}</td>
+                    <td>$${(c.total_cost_usd || 0).toFixed(3)}</td>
+                    <td>${c.transferred_to_operator ? '<span class="badge badge-yellow">Transferred</span>' : '<span class="badge badge-green">Resolved</span>'}</td>
+                </tr>
+            `).join('');
+
+            const pages = Math.ceil(data.total / 20);
+            const current = Math.floor(offset / 20);
+            document.getElementById('callsPagination').innerHTML = Array.from({length: Math.min(pages, 10)}, (_, i) =>
+                `<button class="${i === current ? 'active' : ''}" onclick="loadCalls(${i * 20})">${i + 1}</button>`
+            ).join('');
+        }
+
+        async function showCallDetail(callId) {
+            const data = await api(`/analytics/calls/${callId}`);
+            const c = data.call;
+            const turns = data.turns || [];
+            const tools = data.tool_calls || [];
+
+            let html = `
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-bottom:1rem">
+                    <div><strong>Caller:</strong> ${c.caller_id || '-'}</div>
+                    <div><strong>Scenario:</strong> ${c.scenario || '-'}</div>
+                    <div><strong>Duration:</strong> ${c.duration_seconds || 0}s</div>
+                    <div><strong>Quality:</strong> ${qualityBadge(c.quality_score)}</div>
+                    <div><strong>Cost:</strong> $${(c.total_cost_usd || 0).toFixed(3)}</div>
+                    <div><strong>Prompt:</strong> ${c.prompt_version || '-'}</div>
+                </div>
+            `;
+
+            if (c.quality_details) {
+                html += '<h3 style="margin:.8rem 0 .5rem">Quality Breakdown</h3><table>';
+                for (const [k, v] of Object.entries(c.quality_details)) {
+                    if (k === 'comment') continue;
+                    html += `<tr><td>${k}</td><td>${qualityBadge(v)}</td></tr>`;
+                }
+                if (c.quality_details.comment) {
+                    html += `<tr><td colspan="2" style="font-style:italic">${c.quality_details.comment}</td></tr>`;
+                }
+                html += '</table>';
+            }
+
+            html += '<h3 style="margin:.8rem 0 .5rem">Transcription</h3>';
+            turns.forEach(t => {
+                html += `<div class="turn"><span class="speaker ${t.speaker}">${t.speaker === 'customer' ? 'Customer' : 'Bot'}</span>`;
+                html += `<div class="text">${t.text || ''}</div></div>`;
+            });
+
+            if (tools.length) {
+                html += '<h3 style="margin:.8rem 0 .5rem">Tool Calls</h3><table><tr><th>Tool</th><th>Success</th><th>Duration</th></tr>';
+                tools.forEach(t => {
+                    html += `<tr><td>${t.tool_name}</td><td>${t.success ? 'Yes' : 'No'}</td><td>${t.duration_ms || 0}ms</td></tr>`;
+                });
+                html += '</table>';
+            }
+
+            document.getElementById('callDetailContent').innerHTML = html;
+            document.getElementById('callModal').classList.add('show');
+        }
+
+        function closeCallModal() {
+            document.getElementById('callModal').classList.remove('show');
+        }
+
+        // --- Prompts ---
+        function showPromptTab(tab) {
+            document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
+            event.target.classList.add('active');
+            document.getElementById('promptVersions').style.display = tab === 'versions' ? 'block' : 'none';
+            document.getElementById('promptABTests').style.display = tab === 'abtests' ? 'block' : 'none';
+            if (tab === 'versions') loadPromptVersions();
+            else loadABTests();
+        }
+
+        async function loadPromptVersions() {
+            const data = await api('/prompts');
+            const versions = data.versions || [];
+            document.getElementById('promptVersions').innerHTML = `
+                <table><thead><tr><th>Name</th><th>Active</th><th>Created</th><th>Action</th></tr></thead><tbody>
+                ${versions.map(v => `
+                    <tr>
+                        <td>${v.name}</td>
+                        <td>${v.is_active ? '<span class="badge badge-green">Active</span>' : ''}</td>
+                        <td>${formatDate(v.created_at)}</td>
+                        <td>${!v.is_active ? `<button onclick="activatePrompt('${v.id}')" style="font-size:.75rem;padding:.2rem .5rem;background:#2563eb;color:#fff;border:none;border-radius:3px;cursor:pointer">Activate</button>` : ''}</td>
+                    </tr>
+                `).join('')}
+                </tbody></table>
+            `;
+        }
+
+        async function activatePrompt(id) {
+            await api(`/prompts/${id}/activate`, { method: 'PATCH' });
+            loadPromptVersions();
+        }
+
+        async function loadABTests() {
+            const data = await api('/prompts/ab-tests');
+            const tests = data.tests || [];
+            document.getElementById('promptABTests').innerHTML = `
+                <table><thead><tr><th>Test</th><th>Variant A</th><th>Variant B</th><th>Calls A/B</th><th>Quality A/B</th><th>Status</th></tr></thead><tbody>
+                ${tests.map(t => `
+                    <tr>
+                        <td>${t.test_name}</td>
+                        <td>${t.variant_a_name}</td>
+                        <td>${t.variant_b_name}</td>
+                        <td>${t.calls_a}/${t.calls_b}</td>
+                        <td>${(t.quality_a || 0).toFixed(2)}/${(t.quality_b || 0).toFixed(2)}</td>
+                        <td><span class="badge ${t.status === 'active' ? 'badge-blue' : 'badge-green'}">${t.status}</span></td>
+                    </tr>
+                `).join('')}
+                </tbody></table>
+            `;
+        }
+
+        // --- Knowledge Base ---
+        async function loadArticles() {
+            const params = new URLSearchParams();
+            const cat = document.getElementById('kbCategory').value;
+            const search = document.getElementById('kbSearch').value;
+            if (cat) params.set('category', cat);
+            if (search) params.set('search', search);
+
+            const data = await api(`/knowledge/articles?${params}`);
+            const articles = data.articles || [];
+            document.getElementById('articlesContainer').innerHTML = `
+                <table><thead><tr><th>Title</th><th>Category</th><th>Active</th><th>Updated</th></tr></thead><tbody>
+                ${articles.map(a => `
+                    <tr>
+                        <td>${a.title}</td>
+                        <td><span class="badge badge-blue">${a.category}</span></td>
+                        <td>${a.active ? '<span class="badge badge-green">Yes</span>' : '<span class="badge badge-red">No</span>'}</td>
+                        <td>${formatDate(a.updated_at || a.created_at)}</td>
+                    </tr>
+                `).join('')}
+                </tbody></table>
+                <p style="margin-top:.5rem;font-size:.8rem;color:#64748b">Total: ${data.total} articles</p>
+            `;
+        }
+
+        // --- Settings ---
+        async function loadSettings() {
+            try {
+                const health = await fetch('/health').then(r => r.json());
+                document.getElementById('systemInfo').innerHTML = `
+                    <table>
+                        <tr><td>Status</td><td><span class="badge badge-green">${health.status}</span></td></tr>
+                        <tr><td>Active calls</td><td>${health.active_calls}</td></tr>
+                        <tr><td>Redis</td><td><span class="badge ${health.redis === 'connected' ? 'badge-green' : 'badge-red'}">${health.redis}</span></td></tr>
+                    </table>
+                `;
+            } catch { /* ignore */ }
+        }
+
+        // Init
+        if (token) {
+            document.getElementById('loginContainer').style.display = 'none';
+            document.getElementById('app').style.display = 'block';
+            showPage('dashboard');
+        }
+
+        document.getElementById('loginPassword').addEventListener('keypress', e => {
+            if (e.key === 'Enter') login();
+        });
+    </script>
+</body>
+</html>

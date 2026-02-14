@@ -9,9 +9,12 @@ import uvicorn
 from fastapi import FastAPI
 from redis.asyncio import Redis
 
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
+from fastapi.staticfiles import StaticFiles
 
 from src.api.analytics import router as analytics_router
+from src.api.auth import router as auth_router
+from src.api.knowledge import router as knowledge_router
 from src.api.prompts import router as prompts_router
 from src.config import Settings, get_settings
 from src.core.audio_socket import AudioSocketConnection, AudioSocketServer, PacketType
@@ -27,7 +30,15 @@ app = FastAPI(
     version="0.1.0",
 )
 app.include_router(analytics_router)
+app.include_router(auth_router)
+app.include_router(knowledge_router)
 app.include_router(prompts_router)
+
+
+@app.get("/admin")
+async def admin_ui() -> FileResponse:
+    """Serve the admin UI."""
+    return FileResponse("admin-ui/index.html")
 
 # Module-level references for health checks
 _audio_server: AudioSocketServer | None = None

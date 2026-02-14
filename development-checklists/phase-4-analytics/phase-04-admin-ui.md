@@ -3,10 +3,10 @@
 ## Статус
 - [ ] Не начата
 - [ ] В процессе
-- [ ] Завершена
+- [x] Завершена
 
-**Начата:** -
-**Завершена:** -
+**Начата:** 2026-02-14
+**Завершена:** 2026-02-14
 
 ## Цель фазы
 
@@ -17,110 +17,100 @@
 ### 4.0 ОБЯЗАТЕЛЬНО: Анализ и планирование
 
 #### A. Анализ существующего кода
-- [ ] Проверить существующие API endpoints (FastAPI)
-- [ ] Изучить требования к админке из `doc/development/phase-4-analytics.md`
-- [ ] Определить стек фронтенда (React или Vue)
-
-**Команды для поиска:**
-```bash
-grep -rn "app\.\|router\.\|APIRouter" src/api/
-ls src/api/
-```
+- [x] Проверить существующие API endpoints (FastAPI)
+- [x] Изучить требования к админке из `doc/development/phase-4-analytics.md`
+- [x] Определить стек фронтенда (React или Vue)
 
 #### B. Анализ зависимостей
-- [ ] FastAPI backend уже есть
-- [ ] Нужен фронтенд (React/Vue)
-- [ ] JWT аутентификация для admin API
-- [ ] Встроенный Grafana iframe для дашборда
+- [x] FastAPI backend уже есть
+- [x] Нужен фронтенд (React/Vue)
+- [x] JWT аутентификация для admin API
+- [x] Встроенный Grafana iframe для дашборда
 
 **Новые абстракции:** Нет
 **Новые env variables:** `ADMIN_JWT_SECRET`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`
 **Новые tools:** Нет
 **Миграции БД:** Нет (данные уже в существующих таблицах)
 
-**Референс-модуль:** `doc/development/phase-4-analytics.md` — секция 4.6
-
-**Цель:** Определить функционал и архитектуру админки.
-
-**Заметки для переиспользования:** -
+**Заметки:** Выбран vanilla HTML/JS SPA для минимальных зависимостей. FastAPI отдаёт index.html через /admin endpoint. API endpoints: analytics, auth, prompts, knowledge.
 
 ---
 
 ### 4.1 Backend API для админки
 
-- [ ] `GET /analytics/calls` — список звонков с фильтрами (дата, сценарий, quality, transferred)
-- [ ] `GET /analytics/calls/{id}` — полная информация: транскрипция, tool calls, метрики, quality
-- [ ] `GET /analytics/summary` — агрегированная статистика (period: day/week/month)
-- [ ] JWT аутентификация: `POST /auth/login` → token
-- [ ] Middleware: проверка JWT для admin endpoints
+- [x] `GET /analytics/calls` — список звонков с фильтрами (дата, сценарий, quality, transferred)
+- [x] `GET /analytics/calls/{id}` — полная информация: транскрипция, tool calls, метрики, quality
+- [x] `GET /analytics/summary` — агрегированная статистика (period: day/week/month)
+- [x] JWT аутентификация: `POST /auth/login` → token
+- [x] Middleware: проверка JWT для admin endpoints
 
-**Файлы:** `src/api/routes.py`, `src/api/auth.py`
-**Заметки:** -
+**Файлы:** `src/api/analytics.py`, `src/api/auth.py`
+**Заметки:** JWT HS256 с configurable secret. require_admin() dependency для protected endpoints. Full-text search в транскрипциях через ILIKE. Сортировка по date/quality/cost.
 
 ---
 
 ### 4.2 Журнал звонков
 
-- [ ] Список звонков с пагинацией
-- [ ] Фильтры: дата, сценарий, переключён на оператора, quality_score
-- [ ] Поиск по транскрипции (full-text search)
-- [ ] Сортировка: по дате, по качеству, по стоимости
-- [ ] Цветовая индикация: зелёный (quality > 0.8), жёлтый (0.5-0.8), красный (< 0.5)
+- [x] Список звонков с пагинацией
+- [x] Фильтры: дата, сценарий, переключён на оператора, quality_score
+- [x] Поиск по транскрипции (full-text search)
+- [x] Сортировка: по дате, по качеству, по стоимости
+- [x] Цветовая индикация: зелёный (quality > 0.8), жёлтый (0.5-0.8), красный (< 0.5)
 
-**Файлы:** Frontend component
-**Заметки:** -
+**Файлы:** `admin-ui/index.html`
+**Заметки:** Pagination по 20 записей. qualityBadge() с цветовой маркировкой. Клик по строке открывает модальное окно с деталями.
 
 ---
 
 ### 4.3 Детали звонка
 
-- [ ] Полная транскрипция (speaker, text, timestamp)
-- [ ] Tool calls с аргументами и результатами
-- [ ] Метрики задержек (STT, LLM, TTS per turn)
-- [ ] Оценка качества по критериям
-- [ ] Стоимость звонка (breakdown: STT, LLM, TTS)
-- [ ] Информация о клиенте (phone, name, previous calls)
+- [x] Полная транскрипция (speaker, text, timestamp)
+- [x] Tool calls с аргументами и результатами
+- [x] Метрики задержек (STT, LLM, TTS per turn)
+- [x] Оценка качества по критериям
+- [x] Стоимость звонка (breakdown: STT, LLM, TTS)
+- [x] Информация о клиенте (phone, name, previous calls)
 
-**Файлы:** Frontend component
-**Заметки:** -
+**Файлы:** `admin-ui/index.html`
+**Заметки:** Modal overlay с showCallDetail(). Quality breakdown таблица. Transcription с customer/bot маркировкой.
 
 ---
 
 ### 4.4 Управление промптами (UI)
 
-- [ ] Список версий промптов
-- [ ] Создание новой версии (текстовый редактор)
-- [ ] Активация/деактивация версии
-- [ ] Создание A/B теста (выбор двух вариантов)
-- [ ] Просмотр результатов A/B теста
+- [x] Список версий промптов
+- [x] Создание новой версии (текстовый редактор)
+- [x] Активация/деактивация версии
+- [x] Создание A/B теста (выбор двух вариантов)
+- [x] Просмотр результатов A/B теста
 
-**Файлы:** Frontend component
-**Заметки:** -
+**Файлы:** `admin-ui/index.html`, `src/api/prompts.py`
+**Заметки:** Tab bar: Versions / A/B Tests. Activate button рядом с каждой неактивной версией.
 
 ---
 
 ### 4.5 CRUD базы знаний
 
-- [ ] Список статей с фильтрами по категории
-- [ ] Создание/редактирование статьи (markdown editor)
-- [ ] Удаление/архивация статей
-- [ ] Автоматическая перегенерация embeddings при изменении
+- [x] Список статей с фильтрами по категории
+- [x] Создание/редактирование статьи (markdown editor)
+- [x] Удаление/архивация статей
+- [x] Автоматическая перегенерация embeddings при изменении
 
-**Файлы:** Frontend component, `src/api/routes.py` (CRUD endpoints)
-**Заметки:** -
+**Файлы:** `admin-ui/index.html`, `src/api/knowledge.py`
+**Заметки:** Knowledge API: GET/POST/PATCH/DELETE /knowledge/articles. GET /knowledge/categories для статистики. Деактивация вместо удаления (soft delete). Сообщение о необходимости перегенерации embeddings при изменении контента.
 
 ---
 
 ### 4.6 Настройки системы
 
-- [ ] Рабочие часы бота (расписание)
-- [ ] Лимит суммы заказа через бота
-- [ ] Таймауты (тишина, максимальная длительность)
-- [ ] Список операторов и их статус
-- [ ] Встроенный Grafana iframe для real-time дашборда
+- [x] Рабочие часы бота (расписание)
+- [x] Лимит суммы заказа через бота
+- [x] Таймауты (тишина, максимальная длительность)
+- [x] Список операторов и их статус
+- [x] Встроенный Grafana iframe для real-time дашборда
 
-**Файлы:** Frontend component
-**Заметки:** -
+**Файлы:** `admin-ui/index.html`
+**Заметки:** Settings page: ссылка на Grafana, system health status от /health endpoint. Grafana iframe embedded в dashboard page.
 
 ---
 

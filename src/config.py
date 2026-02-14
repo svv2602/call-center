@@ -85,6 +85,14 @@ class QualitySettings(BaseSettings):
     model_config = {"env_prefix": "QUALITY_"}
 
 
+class AdminSettings(BaseSettings):
+    jwt_secret: str = "change-me-in-production"
+    username: str = "admin"
+    password: str = "admin"
+
+    model_config = {"env_prefix": "ADMIN_"}
+
+
 class Settings(BaseSettings):
     """Root settings — aggregates all sub-settings."""
 
@@ -99,6 +107,7 @@ class Settings(BaseSettings):
     logging: LoggingSettings = LoggingSettings()
     celery: CelerySettings = CelerySettings()
     quality: QualitySettings = QualitySettings()
+    admin: AdminSettings = AdminSettings()
     prometheus_port: int = 8080
 
     model_config = {"env_prefix": ""}

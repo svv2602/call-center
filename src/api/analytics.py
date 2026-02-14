@@ -100,6 +100,8 @@ async def get_calls_list(
     transferred: bool | None = Query(None, description="Filter transferred calls"),
     date_from: str | None = Query(None, description="Start date (YYYY-MM-DD)"),
     date_to: str | None = Query(None, description="End date (YYYY-MM-DD)"),
+    search: str | None = Query(None, description="Full-text search in transcriptions"),
+    sort_by: str | None = Query(None, description="Sort by: date, quality, cost"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
 ) -> dict[str, Any]:
@@ -124,8 +126,20 @@ async def get_calls_list(
     if date_to:
         conditions.append("started_at < :date_to::date + interval '1 day'")
         params["date_to"] = date_to
+    if search:
+        conditions.append(
+            "id IN (SELECT call_id FROM call_turns WHERE text ILIKE :search)"
+        )
+        params["search"] = f"%{search}%"
 
     where_clause = " AND ".join(conditions)
+
+    # Sort order
+    order_map = {
+        "quality": "quality_score ASC NULLS LAST",
+        "cost": "total_cost_usd DESC NULLS LAST",
+    }
+    order_by = order_map.get(sort_by or "", "started_at DESC")
 
     async with engine.begin() as conn:
         # Get total count
@@ -144,7 +158,7 @@ async def get_calls_list(
                     quality_score, total_cost_usd
                 FROM calls
                 WHERE {where_clause}
-                ORDER BY started_at DESC
+                ORDER BY {order_by}
                 LIMIT :limit OFFSET :offset
             """),
             params,
