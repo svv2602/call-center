@@ -1,12 +1,12 @@
 # Фаза 2: Observability
 
 ## Статус
-- [ ] Не начата
-- [ ] В процессе
-- [ ] Завершена
+- [x] Не начата
+- [x] В процессе
+- [x] Завершена
 
-**Начата:** -
-**Завершена:** -
+**Начата:** 2026-02-14
+**Завершена:** 2026-02-14
 
 ## Цель фазы
 Экспортировать Grafana дашборды в JSON и хранить в репозитории. Обеспечить reproducibility и version control для мониторинга. После этой фазы дашборды можно восстановить из кода, а изменения отслеживаются через git.
@@ -16,15 +16,15 @@
 ### 2.0 ОБЯЗАТЕЛЬНО: Анализ и планирование
 
 #### A. Анализ существующего кода
-- [ ] Изучить `monitoring/` — текущая конфигурация Prometheus, Grafana
-- [ ] Изучить `docker-compose*.yml` — как подключены сервисы мониторинга
-- [ ] Изучить `src/monitoring/metrics.py` — все зарегистрированные метрики
-- [ ] Определить какие дашборды нужны (system, application, business)
+- [x] Изучить `grafana/` — текущая конфигурация Prometheus, Grafana (путь `grafana/`, не `monitoring/`)
+- [x] Изучить `docker-compose*.yml` — как подключены сервисы мониторинга
+- [x] Изучить `src/monitoring/metrics.py` — все зарегистрированные метрики
+- [x] Определить какие дашборды нужны (system, application, business)
 
 **Команды для поиска:**
 ```bash
 # Мониторинг
-ls monitoring/
+ls grafana/
 # Метрики
 grep -rn "Counter\|Gauge\|Histogram\|Summary" src/monitoring/metrics.py
 # Docker compose
@@ -32,62 +32,67 @@ grep -n "grafana\|prometheus" docker-compose*.yml
 ```
 
 #### B. Анализ зависимостей
-- [ ] Нужны ли новые абстракции (Protocol)? — Нет
-- [ ] Нужны ли новые env variables? — Нет (Grafana provisioning через volume mount)
-- [ ] Нужны ли миграции БД? — Нет
+- [x] Нужны ли новые абстракции (Protocol)? — Нет
+- [x] Нужны ли новые env variables? — Нет (Grafana provisioning через volume mount)
+- [x] Нужны ли миграции БД? — Нет
 
 **Новые env variables:** нет
 **Миграции БД:** нет
 
 #### C. Проверка архитектуры
-- [ ] Grafana provisioning: dashboards в `monitoring/grafana/dashboards/`
-- [ ] Provisioning config в `monitoring/grafana/provisioning/dashboards/`
-- [ ] Docker compose volume mount для автоматической загрузки
+- [x] Grafana provisioning: dashboards в `grafana/dashboards/`
+- [x] Provisioning config в `grafana/provisioning/dashboards/dashboards.yml`
+- [x] Docker compose volume mount для автоматической загрузки
 
-**Референс-модуль:** `monitoring/` (существующая структура)
+**Референс-модуль:** `grafana/` (существующая структура)
 
 **Цель:** Понять существующие паттерны проекта ПЕРЕД написанием кода.
 
-**Заметки для переиспользования:** -
+**Заметки для переиспользования:** Проект использует `grafana/` (не `monitoring/grafana/`). Существующие дашборды: realtime.json, analytics.json, operators.json. Provisioning и volume mounts уже настроены в docker-compose.yml.
 
 ---
 
 ### 2.1 Grafana provisioning configuration
 
-- [ ] Создать `monitoring/grafana/provisioning/dashboards/default.yml` — datasource provisioning config
-- [ ] Убедиться что `monitoring/grafana/provisioning/datasources/` настроен на Prometheus
-- [ ] Обновить `docker-compose*.yml` — volume mount для dashboards и provisioning
-- [ ] Проверить что Grafana автоматически загружает дашборды при старте
+- [x] Создать `grafana/provisioning/dashboards/dashboards.yml` — уже существует
+- [x] Убедиться что `grafana/provisioning/datasources/` настроен на Prometheus — настроен (Prometheus + PostgreSQL)
+- [x] Обновить `docker-compose*.yml` — volume mount уже настроены (./grafana/provisioning, ./grafana/dashboards)
+- [x] Проверить что Grafana автоматически загружает дашборды при старте — provisioning config указывает на /var/lib/grafana/dashboards
 
-**Файлы:** `monitoring/grafana/provisioning/`, `docker-compose.yml`
-**Заметки:** -
+**Файлы:** `grafana/provisioning/`, `docker-compose.yml`
+**Заметки:** Provisioning и volume mounts были настроены ранее в production-readiness чеклисте.
 
 ---
 
 ### 2.2 Создание дашбордов
 
-- [ ] **System Overview** (`monitoring/grafana/dashboards/system-overview.json`):
-  - CPU, Memory, Disk, Network
-  - Container metrics (Docker)
-  - PostgreSQL connections, query latency
+- [x] **System Overview** (`grafana/dashboards/system-overview.json`):
+  - CPU, Memory, Disk (gauge panels с thresholds)
+  - Network I/O (timeseries: receive + transmit)
+  - PostgreSQL connections, query latency (p95)
   - Redis memory, connections, ops/sec
-- [ ] **Application Metrics** (`monitoring/grafana/dashboards/application-metrics.json`):
-  - Active calls (gauge)
-  - Call duration (histogram)
-  - STT/TTS/LLM latency (p50, p95, p99)
-  - Error rates по компонентам
-  - Circuit breaker state
-  - WebSocket connections
-  - Rate limit events
-- [ ] **Business Dashboard** (`monitoring/grafana/dashboards/business-dashboard.json`):
-  - Calls per hour/day
-  - Resolution rate (AI vs operator transfer)
-  - Tool usage distribution
-  - Average quality score
-  - Top reasons for operator transfer
+- [x] **Application Metrics** (`grafana/dashboards/application-metrics.json`):
+  - Active calls (stat), call rate (stat)
+  - Call duration (histogram p50/p95)
+  - STT/LLM/TTS latency (p50, p95, p99) — 3 отдельных timeseries
+  - Circuit breaker state (stat с value mappings)
+  - Store API errors by status_code
+  - WebSocket connections (stat)
+  - Rate limit events (timeseries)
+  - TTS cache hit rate (gauge)
+  - Backup status (stat by component)
+- [x] **Business Dashboard** (`grafana/dashboards/business-dashboard.json`):
+  - Calls today (stat), bot resolution rate (gauge)
+  - Orders created, fittings booked (stat)
+  - Calls per hour (timeseries)
+  - Resolution: Bot vs Operator (piechart donut)
+  - Tool usage distribution (piechart by tool_name)
+  - Transfer reasons (barchart by reason)
+  - Average call cost (timeseries)
+  - Scenario distribution (piechart by scenario)
 
-**Файлы:** `monitoring/grafana/dashboards/`
-**Заметки:** Каждый дашборд — отдельный JSON файл. Использовать переменные для datasource.
+**Файлы:** `grafana/dashboards/`
+**Заметки:** Все дашборды — валидный JSON, schemaVersion 39, datasource uid = "prometheus".
 
 ---
 
