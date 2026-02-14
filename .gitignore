@@ -16,6 +16,8 @@ dist/
 build/
 .venv/
 venv/
+.coverage
+htmlcov/
 
 # IDE
 .idea/
