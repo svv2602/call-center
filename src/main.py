@@ -354,9 +354,13 @@ async def main() -> None:
     await _store_client.open()
     logger.info("StoreClient initialized: %s", settings.store_api.url)
 
-    _tts_engine = GoogleTTSEngine()
-    await _tts_engine.initialize()
-    logger.info("TTS engine initialized")
+    try:
+        _tts_engine = GoogleTTSEngine()
+        await _tts_engine.initialize()
+        logger.info("TTS engine initialized")
+    except Exception:
+        logger.warning("TTS engine unavailable (no Google credentials?) — calls will not work, but API is running")
+        _tts_engine = None
 
     # Start API server (health checks, metrics)
     api_task = asyncio.create_task(start_api_server(settings))

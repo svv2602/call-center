@@ -21,24 +21,23 @@ def upgrade() -> None:
             shift_end TIME DEFAULT '18:00',
             created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
             updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-
-        CREATE INDEX idx_operators_extension ON operators(extension);
-
+        )
+    """)
+    op.execute("CREATE INDEX idx_operators_extension ON operators(extension)")
+    op.execute("""
         CREATE TABLE operator_status_log (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
             operator_id UUID NOT NULL REFERENCES operators(id),
             status VARCHAR(20) NOT NULL DEFAULT 'offline',
             changed_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-
+        )
+    """)
+    op.execute("""
         CREATE INDEX idx_op_status_log_operator_changed
-            ON operator_status_log(operator_id, changed_at DESC);
+            ON operator_status_log(operator_id, changed_at DESC)
     """)
 
 
 def downgrade() -> None:
-    op.execute("""
-        DROP TABLE IF EXISTS operator_status_log;
-        DROP TABLE IF EXISTS operators;
-    """)
+    op.execute("DROP TABLE IF EXISTS operator_status_log")
+    op.execute("DROP TABLE IF EXISTS operators")

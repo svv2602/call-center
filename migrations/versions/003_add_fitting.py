@@ -113,18 +113,8 @@ def upgrade() -> None:
         ["status"],
     )
 
-    # --- Add fitting_booking_id FK to calls ---
-    op.add_column(
-        "calls",
-        sa.Column(
-            "fitting_booking_id",
-            postgresql.UUID(as_uuid=True),
-            nullable=True,
-        ),
-    )
 
 
 def downgrade() -> None:
-    op.drop_column("calls", "fitting_booking_id")
     op.drop_table("fitting_bookings")
     op.drop_table("fitting_stations")
