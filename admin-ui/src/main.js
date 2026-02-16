@@ -5,9 +5,10 @@ import './styles/main.css';
 import { getToken } from './api.js';
 import { login, logout, checkTokenExpiry, applyRoleVisibility } from './auth.js';
 import { showPage } from './router.js';
-import { connectWebSocket, setWsEventHandler } from './websocket.js';
+import { connectWebSocket, setWsEventHandler, refreshWsStatus } from './websocket.js';
 import { closeModal } from './utils.js';
-import { initTheme, toggleTheme } from './theme.js';
+import { initTheme, toggleTheme, refreshThemeLabel } from './theme.js';
+import { initLang, toggleLang, translateStaticDOM } from './i18n.js';
 
 // Page modules — each registers its page loader via init()
 import { init as initDashboard } from './pages/dashboard.js';
@@ -19,8 +20,10 @@ import { init as initSettings } from './pages/settings.js';
 import { init as initUsers } from './pages/users.js';
 import { init as initAudit } from './pages/audit.js';
 
-// Initialize theme
+// Initialize language and theme
+initLang();
 initTheme();
+translateStaticDOM();
 
 // Initialize all page loaders
 initDashboard();
@@ -91,5 +94,13 @@ document.querySelectorAll('.sidebar a').forEach(a => {
     });
 });
 
+// Language change handler — re-render active page and refresh labels
+window.addEventListener('langchange', () => {
+    refreshThemeLabel();
+    refreshWsStatus();
+    const activePage = localStorage.getItem('admin_active_page') || 'dashboard';
+    showPage(activePage);
+});
+
 // Expose globals for onclick handlers in HTML
-window._app = { login, logout, showPage, closeModal, toggleSidebar, toggleTheme };
+window._app = { login, logout, showPage, closeModal, toggleSidebar, toggleTheme, toggleLang };

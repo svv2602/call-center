@@ -1,4 +1,5 @@
 import { getToken } from './api.js';
+import { t } from './i18n.js';
 
 let ws = null;
 let wsReconnectDelay = 1000;
@@ -58,14 +59,21 @@ function scheduleReconnect() {
     wsReconnectDelay = Math.min(wsReconnectDelay * 2, WS_MAX_RECONNECT_DELAY);
 }
 
+let currentWsState = 'disconnected';
+
 function updateWsStatus(state) {
+    currentWsState = state;
     const dot = document.getElementById('wsDot');
     const label = document.getElementById('wsLabel');
     if (!dot || !label) return;
     const colors = { connected: 'bg-green-500', reconnecting: 'bg-yellow-500', disconnected: 'bg-red-500' };
     dot.className = `w-2 h-2 rounded-full ${colors[state] || 'bg-red-500'}`;
-    const labels = { connected: 'Live', reconnecting: 'Reconnecting...', disconnected: 'Offline' };
-    label.textContent = labels[state] || 'Offline';
+    const labels = { connected: t('ws.live'), reconnecting: t('ws.reconnecting'), disconnected: t('ws.offline') };
+    label.textContent = labels[state] || t('ws.offline');
+}
+
+export function refreshWsStatus() {
+    updateWsStatus(currentWsState);
 }
 
 // Keep-alive pings

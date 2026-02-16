@@ -2,6 +2,7 @@ import { api, fetchWithAuth } from '../api.js';
 import { showToast } from '../notifications.js';
 import { escapeHtml, downloadBlob } from '../utils.js';
 import { registerPageLoader, setRefreshTimer } from '../router.js';
+import { t } from '../i18n.js';
 import * as tw from '../tw.js';
 
 async function loadDashboard() {
@@ -13,16 +14,16 @@ async function loadDashboard() {
         const resolved = latest.resolved_by_bot || 0;
         const resolvedPct = total > 0 ? (resolved / total * 100).toFixed(1) : '0.0';
         document.getElementById('dashboardStats').innerHTML = `
-            <div class="${tw.card} text-center"><div class="${tw.statValue}">${total}</div><div class="${tw.statLabel}">Calls today</div></div>
-            <div class="${tw.card} text-center"><div class="${tw.statValue}">${resolved}<small class="text-xs text-neutral-500 dark:text-neutral-400"> (${resolvedPct}%)</small></div><div class="${tw.statLabel}">Resolved by bot</div></div>
-            <div class="${tw.card} text-center"><div class="${tw.statValue}">${latest.transferred || 0}</div><div class="${tw.statLabel}">Transferred</div></div>
-            <div class="${tw.card} text-center"><div class="${tw.statValue}">${(latest.avg_quality_score || 0).toFixed(2)}</div><div class="${tw.statLabel}">Avg quality</div></div>
-            <div class="${tw.card} text-center"><div class="${tw.statValue}">$${(latest.total_cost_usd || 0).toFixed(2)}</div><div class="${tw.statLabel}">Cost today</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">${total}</div><div class="${tw.statLabel}">${t('dashboard.callsToday')}</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">${resolved}<small class="text-xs text-neutral-500 dark:text-neutral-400"> (${resolvedPct}%)</small></div><div class="${tw.statLabel}">${t('dashboard.resolvedByBot')}</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">${latest.transferred || 0}</div><div class="${tw.statLabel}">${t('dashboard.transferred')}</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">${(latest.avg_quality_score || 0).toFixed(2)}</div><div class="${tw.statLabel}">${t('dashboard.avgQuality')}</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">$${(latest.total_cost_usd || 0).toFixed(2)}</div><div class="${tw.statLabel}">${t('dashboard.costToday')}</div></div>
         `;
     } catch (e) {
         document.getElementById('dashboardStats').innerHTML = `
-            <div class="${tw.emptyState}">Failed to load dashboard: ${escapeHtml(e.message)}
-            <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.dashboard.loadDashboard()">Retry</button></div>
+            <div class="${tw.emptyState}">${t('dashboard.failedToLoad', {error: escapeHtml(e.message)})}
+            <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.dashboard.loadDashboard()">${t('common.retry')}</button></div>
         `;
     }
 }
@@ -36,9 +37,9 @@ async function exportStatsCSV() {
         const match = disposition.match(/filename="(.+)"/);
         const filename = match ? match[1] : 'daily_stats_export.csv';
         downloadBlob(blob, filename);
-        showToast('CSV exported');
+        showToast(t('dashboard.csvExported'));
     } catch (e) {
-        showToast('Export failed: ' + e.message, 'error');
+        showToast(t('dashboard.exportFailed', {error: e.message}), 'error');
     }
 }
 
@@ -56,9 +57,9 @@ async function downloadPdfReport() {
         const match = disposition.match(/filename="(.+)"/);
         const filename = match ? match[1] : `report_${df}_${dt}.pdf`;
         downloadBlob(blob, filename);
-        showToast('PDF report downloaded');
+        showToast(t('dashboard.pdfDownloaded'));
     } catch (e) {
-        showToast('PDF download failed: ' + e.message, 'error');
+        showToast(t('dashboard.pdfFailed', {error: e.message}), 'error');
     }
 }
 

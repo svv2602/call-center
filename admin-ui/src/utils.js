@@ -1,4 +1,5 @@
 import * as tw from './tw.js';
+import { getLocale } from './i18n.js';
 
 export function qualityBadge(score) {
     if (score == null) return `<span class="${tw.badge}">N/A</span>`;
@@ -10,7 +11,7 @@ export function qualityBadge(score) {
 
 export function formatDate(d) {
     if (!d) return '-';
-    return new Date(d).toLocaleString('uk-UA', { dateStyle: 'short', timeStyle: 'short' });
+    return new Date(d).toLocaleString(getLocale(), { dateStyle: 'short', timeStyle: 'short' });
 }
 
 export function closeModal(id) {

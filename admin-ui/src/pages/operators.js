@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { showToast } from '../notifications.js';
 import { escapeHtml, statusBadge, closeModal } from '../utils.js';
 import { registerPageLoader, setRefreshTimer } from '../router.js';
+import { t } from '../i18n.js';
 import * as tw from '../tw.js';
 
 async function loadOperators() {
@@ -14,7 +15,7 @@ async function loadOperators() {
         loading.style.display = 'none';
         const ops = data.operators || [];
         if (ops.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="7" class="${tw.emptyState}">No operators found</td></tr>`;
+            tbody.innerHTML = `<tr><td colspan="7" class="${tw.emptyState}">${t('operators.noOperators')}</td></tr>`;
             return;
         }
         tbody.innerHTML = ops.map(o => `
@@ -24,26 +25,26 @@ async function loadOperators() {
                 <td class="${tw.td}">${statusBadge(o.current_status)}</td>
                 <td class="${tw.td}">${(o.skills || []).map(s => `<span class="${tw.badgeBlue}">${escapeHtml(s)}</span>`).join(' ')}</td>
                 <td class="${tw.td}">${o.shift_start || '09:00'} - ${o.shift_end || '18:00'}</td>
-                <td class="${tw.td}">${o.is_active ? `<span class="${tw.badgeGreen}">Yes</span>` : `<span class="${tw.badgeRed}">No</span>`}</td>
+                <td class="${tw.td}">${o.is_active ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
                 <td class="${tw.td}">
                     <div class="flex flex-wrap items-center gap-1">
                         <select onchange="window._pages.operators.changeOperatorStatus('${o.id}', this.value); this.selectedIndex=0" class="${tw.selectSm}">
-                            <option value="">Status...</option>
-                            <option value="online">Online</option>
-                            <option value="offline">Offline</option>
-                            <option value="busy">Busy</option>
-                            <option value="break">Break</option>
+                            <option value="">${t('operators.statusSelect')}</option>
+                            <option value="online">${t('operators.statusOnline')}</option>
+                            <option value="offline">${t('operators.statusOffline')}</option>
+                            <option value="busy">${t('operators.statusBusy')}</option>
+                            <option value="break">${t('operators.statusBreak')}</option>
                         </select>
-                        <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.operators.editOperator('${o.id}')">Edit</button>
-                        ${o.is_active ? `<button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.operators.deactivateOperator('${o.id}', '${escapeHtml(o.name).replace(/'/g, "\\'")}')">Deactivate</button>` : ''}
+                        <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.operators.editOperator('${o.id}')">${t('operators.editBtn')}</button>
+                        ${o.is_active ? `<button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.operators.deactivateOperator('${o.id}', '${escapeHtml(o.name).replace(/'/g, "\\'")}')">×</button>` : ''}
                     </div>
                 </td>
             </tr>
         `).join('');
     } catch (e) {
         loading.style.display = 'none';
-        tbody.innerHTML = `<tr><td colspan="7" class="${tw.emptyState}">Failed to load operators: ${escapeHtml(e.message)}
-            <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.operators.loadOperators()">Retry</button></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="${tw.emptyState}">${t('operators.failedToLoad', {error: escapeHtml(e.message)})}
+            <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.operators.loadOperators()">${t('common.retry')}</button></td></tr>`;
     }
 }
 
@@ -51,16 +52,16 @@ async function loadQueueStatus() {
     try {
         const data = await api('/operators/queue');
         document.getElementById('operatorQueueStats').innerHTML = `
-            <div class="${tw.card} text-center"><div class="${tw.statValue}">${data.operators_online || 0}</div><div class="${tw.statLabel}">Operators Online</div></div>
-            <div class="${tw.card} text-center"><div class="${tw.statValue}">${data.transfers_last_hour || 0}</div><div class="${tw.statLabel}">Transfers (1h)</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">${data.operators_online || 0}</div><div class="${tw.statLabel}">${t('operators.online')}</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">${data.transfers_last_hour || 0}</div><div class="${tw.statLabel}">${t('operators.transfers1h')}</div></div>
         `;
     } catch (e) {
-        document.getElementById('operatorQueueStats').innerHTML = `<div class="${tw.emptyState}">Queue status unavailable</div>`;
+        document.getElementById('operatorQueueStats').innerHTML = `<div class="${tw.emptyState}">${t('operators.queueUnavailable')}</div>`;
     }
 }
 
 function showCreateOperator() {
-    document.getElementById('operatorModalTitle').textContent = 'New Operator';
+    document.getElementById('operatorModalTitle').textContent = t('operators.newOperatorTitle');
     document.getElementById('editOperatorId').value = '';
     document.getElementById('operatorName').value = '';
     document.getElementById('operatorExtension').value = '';
@@ -74,8 +75,8 @@ async function editOperator(id) {
     try {
         const data = await api('/operators');
         const op = (data.operators || []).find(o => o.id === id);
-        if (!op) { showToast('Operator not found', 'error'); return; }
-        document.getElementById('operatorModalTitle').textContent = 'Edit Operator';
+        if (!op) { showToast(t('operators.notFound'), 'error'); return; }
+        document.getElementById('operatorModalTitle').textContent = t('operators.editOperatorTitle');
         document.getElementById('editOperatorId').value = id;
         document.getElementById('operatorName').value = op.name || '';
         document.getElementById('operatorExtension').value = op.extension || '';
@@ -83,7 +84,7 @@ async function editOperator(id) {
         document.getElementById('operatorShiftStart').value = op.shift_start || '09:00';
         document.getElementById('operatorShiftEnd').value = op.shift_end || '18:00';
         document.getElementById('operatorModal').classList.add('show');
-    } catch (e) { showToast('Failed to load operator: ' + e.message, 'error'); }
+    } catch (e) { showToast(t('operators.loadFailed', {error: e.message}), 'error'); }
 }
 
 async function saveOperator() {
@@ -94,36 +95,36 @@ async function saveOperator() {
     const skills = skillsStr ? skillsStr.split(',').map(s => s.trim()).filter(Boolean) : [];
     const shift_start = document.getElementById('operatorShiftStart').value;
     const shift_end = document.getElementById('operatorShiftEnd').value;
-    if (!name || !extension) { showToast('Name and extension are required', 'error'); return; }
+    if (!name || !extension) { showToast(t('operators.nameRequired'), 'error'); return; }
     try {
         if (id) {
             await api(`/operators/${id}`, { method: 'PATCH', body: JSON.stringify({ name, extension, skills, shift_start, shift_end }) });
-            showToast('Operator updated');
+            showToast(t('operators.operatorUpdated'));
         } else {
             await api('/operators', { method: 'POST', body: JSON.stringify({ name, extension, skills, shift_start, shift_end }) });
-            showToast('Operator created');
+            showToast(t('operators.operatorCreated'));
         }
         closeModal('operatorModal');
         loadOperators();
-    } catch (e) { showToast('Failed to save operator: ' + e.message, 'error'); }
+    } catch (e) { showToast(t('operators.saveFailed', {error: e.message}), 'error'); }
 }
 
 async function changeOperatorStatus(id, status) {
     if (!status) return;
     try {
         await api(`/operators/${id}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
-        showToast(`Status changed to ${status}`);
+        showToast(t('operators.statusChanged', {status}));
         loadOperators();
-    } catch (e) { showToast('Failed to change status: ' + e.message, 'error'); }
+    } catch (e) { showToast(t('operators.statusFailed', {error: e.message}), 'error'); }
 }
 
 async function deactivateOperator(id, name) {
-    if (!confirm(`Deactivate operator "${name}"?`)) return;
+    if (!confirm(t('operators.deactivateConfirm', {name}))) return;
     try {
         await api(`/operators/${id}`, { method: 'DELETE' });
-        showToast('Operator deactivated');
+        showToast(t('operators.operatorDeactivated'));
         loadOperators();
-    } catch (e) { showToast('Failed to deactivate: ' + e.message, 'error'); }
+    } catch (e) { showToast(t('operators.deactivateFailed', {error: e.message}), 'error'); }
 }
 
 export function init() {

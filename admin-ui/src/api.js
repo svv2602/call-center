@@ -1,4 +1,5 @@
 import { showToast } from './notifications.js';
+import { t } from './i18n.js';
 
 const API = '';
 let token = localStorage.getItem('admin_token');
@@ -14,9 +15,9 @@ export async function api(path, opts = {}) {
     if (token) headers['Authorization'] = `Bearer ${token}`;
     const res = await fetch(`${API}${path}`, { ...opts, headers });
     if (res.status === 401) {
-        showToast('Session expired. Please login again.', 'error');
+        showToast(t('api.sessionExpired'), 'error');
         if (logoutCallback) logoutCallback();
-        throw new Error('Unauthorized');
+        throw new Error(t('api.unauthorized'));
     }
     if (!res.ok) {
         const body = await res.json().catch(() => ({}));
@@ -30,9 +31,9 @@ export async function apiUpload(path, formData) {
     if (token) headers['Authorization'] = `Bearer ${token}`;
     const res = await fetch(`${API}${path}`, { method: 'POST', headers, body: formData });
     if (res.status === 401) {
-        showToast('Session expired. Please login again.', 'error');
+        showToast(t('api.sessionExpired'), 'error');
         if (logoutCallback) logoutCallback();
-        throw new Error('Unauthorized');
+        throw new Error(t('api.unauthorized'));
     }
     if (!res.ok) {
         const body = await res.json().catch(() => ({}));

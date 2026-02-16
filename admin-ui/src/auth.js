@@ -2,6 +2,7 @@ import { api, getToken, setToken, clearToken, onLogout } from './api.js';
 import { showToast } from './notifications.js';
 import { connectWebSocket, disconnectWebSocket } from './websocket.js';
 import { showPage, clearRefreshTimer } from './router.js';
+import { t } from './i18n.js';
 
 export function getUserRole() {
     const token = getToken();
@@ -26,7 +27,7 @@ export async function login() {
     const u = document.getElementById('loginUsername').value;
     const p = document.getElementById('loginPassword').value;
     if (!u || !p) {
-        document.getElementById('loginError').textContent = 'Please enter username and password';
+        document.getElementById('loginError').textContent = t('login.error');
         document.getElementById('loginError').style.display = 'block';
         return;
     }
@@ -44,7 +45,7 @@ export async function login() {
         const savedPage = localStorage.getItem('admin_active_page') || 'dashboard';
         showPage(savedPage);
     } catch (e) {
-        document.getElementById('loginError').textContent = 'Invalid credentials';
+        document.getElementById('loginError').textContent = t('login.error');
         document.getElementById('loginError').style.display = 'block';
     }
 }
@@ -63,7 +64,7 @@ export function checkTokenExpiry() {
     try {
         const payload = JSON.parse(atob(token.split('.')[1]));
         if (payload.exp && payload.exp < Date.now() / 1000) {
-            showToast('Session expired. Please login again.', 'error');
+            showToast(t('api.sessionExpired'), 'error');
             logout();
         }
     } catch { /* ignore parse errors */ }
