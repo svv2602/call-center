@@ -2,59 +2,60 @@ import { api } from '../api.js';
 import { showToast } from '../notifications.js';
 import { escapeHtml } from '../utils.js';
 import { registerPageLoader } from '../router.js';
+import * as tw from '../tw.js';
 
 async function loadSettings() {
     const container = document.getElementById('systemInfo');
-    container.innerHTML = '<div class="loading-overlay"><div class="spinner"></div></div>';
+    container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
     try {
         const [health, ready] = await Promise.all([
             fetch('/health').then(r => r.json()),
             fetch('/health/ready').then(r => r.json()).catch(() => null),
         ]);
-        let html = `<table>
-            <tr><td>Status</td><td><span class="badge badge-green">${health.status}</span></td></tr>
-            <tr><td>Active calls</td><td>${health.active_calls}</td></tr>
-            <tr><td>Redis</td><td><span class="badge ${health.redis === 'connected' ? 'badge-green' : 'badge-red'}">${health.redis}</span></td></tr>
+        let html = `<div class="overflow-x-auto"><table class="${tw.table}">
+            <tr class="${tw.trHover}"><td class="${tw.td}">Status</td><td class="${tw.td}"><span class="${tw.badgeGreen}">${health.status}</span></td></tr>
+            <tr class="${tw.trHover}"><td class="${tw.td}">Active calls</td><td class="${tw.td}">${health.active_calls}</td></tr>
+            <tr class="${tw.trHover}"><td class="${tw.td}">Redis</td><td class="${tw.td}"><span class="${health.redis === 'connected' ? tw.badgeGreen : tw.badgeRed}">${health.redis}</span></td></tr>
         `;
         if (ready) {
-            if (ready.store_api) html += `<tr><td>Store API</td><td><span class="badge ${ready.store_api === 'reachable' ? 'badge-green' : 'badge-red'}">${ready.store_api}</span></td></tr>`;
-            if (ready.claude_api) html += `<tr><td>Claude API</td><td><span class="badge ${ready.claude_api === 'reachable' ? 'badge-green' : 'badge-red'}">${ready.claude_api}</span></td></tr>`;
-            if (ready.google_stt) html += `<tr><td>Google STT</td><td><span class="badge ${ready.google_stt === 'credentials_present' ? 'badge-green' : 'badge-yellow'}">${ready.google_stt}</span></td></tr>`;
-            if (ready.tts_engine) html += `<tr><td>TTS Engine</td><td><span class="badge ${ready.tts_engine === 'initialized' ? 'badge-green' : 'badge-yellow'}">${ready.tts_engine}</span></td></tr>`;
+            if (ready.store_api) html += `<tr class="${tw.trHover}"><td class="${tw.td}">Store API</td><td class="${tw.td}"><span class="${ready.store_api === 'reachable' ? tw.badgeGreen : tw.badgeRed}">${ready.store_api}</span></td></tr>`;
+            if (ready.claude_api) html += `<tr class="${tw.trHover}"><td class="${tw.td}">Claude API</td><td class="${tw.td}"><span class="${ready.claude_api === 'reachable' ? tw.badgeGreen : tw.badgeRed}">${ready.claude_api}</span></td></tr>`;
+            if (ready.google_stt) html += `<tr class="${tw.trHover}"><td class="${tw.td}">Google STT</td><td class="${tw.td}"><span class="${ready.google_stt === 'credentials_present' ? tw.badgeGreen : tw.badgeYellow}">${ready.google_stt}</span></td></tr>`;
+            if (ready.tts_engine) html += `<tr class="${tw.trHover}"><td class="${tw.td}">TTS Engine</td><td class="${tw.td}"><span class="${ready.tts_engine === 'initialized' ? tw.badgeGreen : tw.badgeYellow}">${ready.tts_engine}</span></td></tr>`;
         }
-        html += '</table>';
+        html += '</table></div>';
         container.innerHTML = html;
     } catch (e) {
-        container.innerHTML = `<div class="empty-state">Failed to load system info: ${escapeHtml(e.message)}
-            <br><button class="btn btn-primary btn-sm" onclick="window._pages.settings.loadSettings()" style="margin-top:.5rem">Retry</button></div>`;
+        container.innerHTML = `<div class="${tw.emptyState}">Failed to load system info: ${escapeHtml(e.message)}
+            <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.settings.loadSettings()">Retry</button></div>`;
     }
 }
 
 async function loadSystemStatus() {
     const container = document.getElementById('extendedStatus');
-    container.innerHTML = '<div class="loading-overlay"><div class="spinner"></div></div>';
+    container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
     try {
         const data = await api('/admin/system-status');
         const uptimeH = Math.floor(data.uptime_seconds / 3600);
         const uptimeM = Math.floor((data.uptime_seconds % 3600) / 60);
-        let html = '<table>';
-        html += `<tr><td>Version</td><td>${escapeHtml(data.version || 'unknown')}</td></tr>`;
-        html += `<tr><td>Uptime</td><td>${uptimeH}h ${uptimeM}m</td></tr>`;
+        let html = `<div class="overflow-x-auto"><table class="${tw.table}">`;
+        html += `<tr class="${tw.trHover}"><td class="${tw.td}">Version</td><td class="${tw.td}">${escapeHtml(data.version || 'unknown')}</td></tr>`;
+        html += `<tr class="${tw.trHover}"><td class="${tw.td}">Uptime</td><td class="${tw.td}">${uptimeH}h ${uptimeM}m</td></tr>`;
         if (data.postgres_db_size_bytes) {
             const sizeMB = (data.postgres_db_size_bytes / 1048576).toFixed(1);
-            html += `<tr><td>PostgreSQL DB size</td><td>${sizeMB} MB</td></tr>`;
+            html += `<tr class="${tw.trHover}"><td class="${tw.td}">PostgreSQL DB size</td><td class="${tw.td}">${sizeMB} MB</td></tr>`;
         }
-        if (data.postgres_connections !== undefined) html += `<tr><td>PostgreSQL connections</td><td>${data.postgres_connections}</td></tr>`;
-        if (data.redis_used_memory) html += `<tr><td>Redis memory</td><td>${escapeHtml(data.redis_used_memory)}</td></tr>`;
-        html += `<tr><td>Celery workers</td><td><span class="badge ${data.celery_workers_online > 0 ? 'badge-green' : 'badge-red'}">${data.celery_workers_online}</span></td></tr>`;
+        if (data.postgres_connections !== undefined) html += `<tr class="${tw.trHover}"><td class="${tw.td}">PostgreSQL connections</td><td class="${tw.td}">${data.postgres_connections}</td></tr>`;
+        if (data.redis_used_memory) html += `<tr class="${tw.trHover}"><td class="${tw.td}">Redis memory</td><td class="${tw.td}">${escapeHtml(data.redis_used_memory)}</td></tr>`;
+        html += `<tr class="${tw.trHover}"><td class="${tw.td}">Celery workers</td><td class="${tw.td}"><span class="${data.celery_workers_online > 0 ? tw.badgeGreen : tw.badgeRed}">${data.celery_workers_online}</span></td></tr>`;
         if (data.last_backup) {
             const sizeMB = (data.last_backup.size_bytes / 1048576).toFixed(1);
-            html += `<tr><td>Last backup</td><td>${escapeHtml(data.last_backup.file)} (${sizeMB} MB, ${escapeHtml(data.last_backup.modified)})</td></tr>`;
+            html += `<tr class="${tw.trHover}"><td class="${tw.td}">Last backup</td><td class="${tw.td}">${escapeHtml(data.last_backup.file)} (${sizeMB} MB, ${escapeHtml(data.last_backup.modified)})</td></tr>`;
         }
-        html += '</table>';
+        html += '</table></div>';
         container.innerHTML = html;
     } catch (e) {
-        container.innerHTML = `<div class="empty-state">Failed: ${escapeHtml(e.message)}</div>`;
+        container.innerHTML = `<div class="${tw.emptyState}">Failed: ${escapeHtml(e.message)}</div>`;
     }
 }
 

@@ -2,6 +2,7 @@ import { api, fetchWithAuth } from '../api.js';
 import { showToast } from '../notifications.js';
 import { escapeHtml, downloadBlob } from '../utils.js';
 import { registerPageLoader, setRefreshTimer } from '../router.js';
+import * as tw from '../tw.js';
 
 async function loadDashboard() {
     try {
@@ -12,16 +13,16 @@ async function loadDashboard() {
         const resolved = latest.resolved_by_bot || 0;
         const resolvedPct = total > 0 ? (resolved / total * 100).toFixed(1) : '0.0';
         document.getElementById('dashboardStats').innerHTML = `
-            <div class="card stat-card"><div class="value">${total}</div><div class="label">Calls today</div></div>
-            <div class="card stat-card"><div class="value">${resolved}<small style="font-size:.7rem;color:#64748b"> (${resolvedPct}%)</small></div><div class="label">Resolved by bot</div></div>
-            <div class="card stat-card"><div class="value">${latest.transferred || 0}</div><div class="label">Transferred</div></div>
-            <div class="card stat-card"><div class="value">${(latest.avg_quality_score || 0).toFixed(2)}</div><div class="label">Avg quality</div></div>
-            <div class="card stat-card"><div class="value">$${(latest.total_cost_usd || 0).toFixed(2)}</div><div class="label">Cost today</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">${total}</div><div class="${tw.statLabel}">Calls today</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">${resolved}<small class="text-xs text-neutral-500 dark:text-neutral-400"> (${resolvedPct}%)</small></div><div class="${tw.statLabel}">Resolved by bot</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">${latest.transferred || 0}</div><div class="${tw.statLabel}">Transferred</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">${(latest.avg_quality_score || 0).toFixed(2)}</div><div class="${tw.statLabel}">Avg quality</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">$${(latest.total_cost_usd || 0).toFixed(2)}</div><div class="${tw.statLabel}">Cost today</div></div>
         `;
     } catch (e) {
         document.getElementById('dashboardStats').innerHTML = `
-            <div class="empty-state">Failed to load dashboard: ${escapeHtml(e.message)}
-            <br><button class="btn btn-primary" onclick="window._pages.dashboard.loadDashboard()" style="margin-top:.5rem">Retry</button></div>
+            <div class="${tw.emptyState}">Failed to load dashboard: ${escapeHtml(e.message)}
+            <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.dashboard.loadDashboard()">Retry</button></div>
         `;
     }
 }

@@ -2,6 +2,7 @@ import { api } from '../api.js';
 import { showToast } from '../notifications.js';
 import { formatDate, escapeHtml, closeModal } from '../utils.js';
 import { registerPageLoader } from '../router.js';
+import * as tw from '../tw.js';
 
 async function loadPromptVersions() {
     try {
@@ -9,26 +10,26 @@ async function loadPromptVersions() {
         const versions = data.versions || [];
         if (versions.length === 0) {
             document.getElementById('promptVersions').innerHTML = `
-                <div style="margin-bottom:1rem"><button class="btn btn-primary" onclick="window._pages.prompts.showCreatePrompt()">+ New Version</button></div>
-                <div class="empty-state">No prompt versions found</div>`;
+                <div class="mb-4"><button class="${tw.btnPrimary}" onclick="window._pages.prompts.showCreatePrompt()">+ New Version</button></div>
+                <div class="${tw.emptyState}">No prompt versions found</div>`;
             return;
         }
         document.getElementById('promptVersions').innerHTML = `
-            <div style="margin-bottom:1rem"><button class="btn btn-primary" onclick="window._pages.prompts.showCreatePrompt()">+ New Version</button></div>
-            <table><thead><tr><th>Name</th><th>Active</th><th>Created</th><th>Action</th></tr></thead><tbody>
+            <div class="mb-4"><button class="${tw.btnPrimary}" onclick="window._pages.prompts.showCreatePrompt()">+ New Version</button></div>
+            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr><th class="${tw.th}">Name</th><th class="${tw.th}">Active</th><th class="${tw.th}">Created</th><th class="${tw.th}">Action</th></tr></thead><tbody>
             ${versions.map(v => `
-                <tr>
-                    <td>${escapeHtml(v.name)}</td>
-                    <td>${v.is_active ? '<span class="badge badge-green">Active</span>' : ''}</td>
-                    <td>${formatDate(v.created_at)}</td>
-                    <td>${!v.is_active ? `<button class="btn btn-primary btn-sm" onclick="window._pages.prompts.activatePrompt('${v.id}')">Activate</button>` : ''}</td>
+                <tr class="${tw.trHover}">
+                    <td class="${tw.td}">${escapeHtml(v.name)}</td>
+                    <td class="${tw.td}">${v.is_active ? `<span class="${tw.badgeGreen}">Active</span>` : ''}</td>
+                    <td class="${tw.td}">${formatDate(v.created_at)}</td>
+                    <td class="${tw.td}">${!v.is_active ? `<button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.prompts.activatePrompt('${v.id}')">Activate</button>` : ''}</td>
                 </tr>
             `).join('')}
-            </tbody></table>
+            </tbody></table></div>
         `;
     } catch (e) {
-        document.getElementById('promptVersions').innerHTML = `<div class="empty-state">Failed to load prompts: ${escapeHtml(e.message)}
-            <br><button class="btn btn-primary btn-sm" onclick="window._pages.prompts.loadPromptVersions()" style="margin-top:.5rem">Retry</button></div>`;
+        document.getElementById('promptVersions').innerHTML = `<div class="${tw.emptyState}">Failed to load prompts: ${escapeHtml(e.message)}
+            <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.prompts.loadPromptVersions()">Retry</button></div>`;
     }
 }
 
@@ -73,26 +74,26 @@ async function loadABTests() {
         const data = await api('/prompts/ab-tests');
         const tests = data.tests || [];
         if (tests.length === 0) {
-            document.getElementById('promptABTests').innerHTML = '<div class="empty-state">No A/B tests found</div>';
+            document.getElementById('promptABTests').innerHTML = `<div class="${tw.emptyState}">No A/B tests found</div>`;
             return;
         }
         document.getElementById('promptABTests').innerHTML = `
-            <table><thead><tr><th>Test</th><th>Variant A</th><th>Variant B</th><th>Calls A/B</th><th>Quality A/B</th><th>Status</th><th>Action</th></tr></thead><tbody>
+            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr><th class="${tw.th}">Test</th><th class="${tw.th}">Variant A</th><th class="${tw.th}">Variant B</th><th class="${tw.th}">Calls A/B</th><th class="${tw.th}">Quality A/B</th><th class="${tw.th}">Status</th><th class="${tw.th}">Action</th></tr></thead><tbody>
             ${tests.map(t => `
-                <tr>
-                    <td>${escapeHtml(t.test_name)}</td>
-                    <td>${escapeHtml(t.variant_a_name)}</td>
-                    <td>${escapeHtml(t.variant_b_name)}</td>
-                    <td>${t.calls_a}/${t.calls_b}</td>
-                    <td>${(t.quality_a || 0).toFixed(2)}/${(t.quality_b || 0).toFixed(2)}</td>
-                    <td><span class="badge ${t.status === 'active' ? 'badge-blue' : 'badge-green'}">${escapeHtml(t.status)}</span></td>
-                    <td>${t.status === 'active' ? `<button class="btn btn-danger btn-sm" onclick="window._pages.prompts.stopABTest('${t.id}')">Stop</button>` : ''}</td>
+                <tr class="${tw.trHover}">
+                    <td class="${tw.td}">${escapeHtml(t.test_name)}</td>
+                    <td class="${tw.td}">${escapeHtml(t.variant_a_name)}</td>
+                    <td class="${tw.td}">${escapeHtml(t.variant_b_name)}</td>
+                    <td class="${tw.td}">${t.calls_a}/${t.calls_b}</td>
+                    <td class="${tw.td}">${(t.quality_a || 0).toFixed(2)}/${(t.quality_b || 0).toFixed(2)}</td>
+                    <td class="${tw.td}"><span class="${t.status === 'active' ? tw.badgeBlue : tw.badgeGreen}">${escapeHtml(t.status)}</span></td>
+                    <td class="${tw.td}">${t.status === 'active' ? `<button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.prompts.stopABTest('${t.id}')">Stop</button>` : ''}</td>
                 </tr>
             `).join('')}
-            </tbody></table>
+            </tbody></table></div>
         `;
     } catch (e) {
-        document.getElementById('promptABTests').innerHTML = `<div class="empty-state">Failed to load A/B tests: ${escapeHtml(e.message)}</div>`;
+        document.getElementById('promptABTests').innerHTML = `<div class="${tw.emptyState}">Failed to load A/B tests: ${escapeHtml(e.message)}</div>`;
     }
 }
 

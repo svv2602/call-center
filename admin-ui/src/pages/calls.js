@@ -2,6 +2,7 @@ import { api, fetchWithAuth } from '../api.js';
 import { showToast } from '../notifications.js';
 import { qualityBadge, formatDate, escapeHtml, downloadBlob } from '../utils.js';
 import { registerPageLoader } from '../router.js';
+import * as tw from '../tw.js';
 
 let callsOffset = 0;
 
@@ -9,7 +10,7 @@ async function loadCalls(offset = 0) {
     callsOffset = offset;
     const loading = document.getElementById('callsLoading');
     const tbody = document.querySelector('#callsTable tbody');
-    loading.style.display = 'block';
+    loading.style.display = 'flex';
 
     const params = new URLSearchParams({ limit: 20, offset });
     const df = document.getElementById('filterDateFrom').value;
@@ -30,32 +31,32 @@ async function loadCalls(offset = 0) {
         loading.style.display = 'none';
 
         if (!data.calls || data.calls.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No calls found</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="7" class="${tw.emptyState}">No calls found</td></tr>`;
             document.getElementById('callsPagination').innerHTML = '';
             return;
         }
 
         tbody.innerHTML = data.calls.map(c => `
-            <tr style="cursor:pointer" onclick="window._pages.calls.showCallDetail('${c.id}')">
-                <td>${formatDate(c.started_at)}</td>
-                <td>${escapeHtml(c.caller_id) || '-'}</td>
-                <td>${escapeHtml(c.scenario) || '-'}</td>
-                <td>${c.duration_seconds || 0}s</td>
-                <td>${qualityBadge(c.quality_score)}</td>
-                <td>$${(c.total_cost_usd || 0).toFixed(3)}</td>
-                <td>${c.transferred_to_operator ? '<span class="badge badge-yellow">Transferred</span>' : '<span class="badge badge-green">Resolved</span>'}</td>
+            <tr class="${tw.trHover} cursor-pointer" onclick="window._pages.calls.showCallDetail('${c.id}')">
+                <td class="${tw.td}">${formatDate(c.started_at)}</td>
+                <td class="${tw.td}">${escapeHtml(c.caller_id) || '-'}</td>
+                <td class="${tw.td}">${escapeHtml(c.scenario) || '-'}</td>
+                <td class="${tw.td}">${c.duration_seconds || 0}s</td>
+                <td class="${tw.td}">${qualityBadge(c.quality_score)}</td>
+                <td class="${tw.td}">$${(c.total_cost_usd || 0).toFixed(3)}</td>
+                <td class="${tw.td}">${c.transferred_to_operator ? `<span class="${tw.badgeYellow}">Transferred</span>` : `<span class="${tw.badgeGreen}">Resolved</span>`}</td>
             </tr>
         `).join('');
 
         const pages = Math.ceil(data.total / 20);
         const current = Math.floor(offset / 20);
         document.getElementById('callsPagination').innerHTML = Array.from({length: Math.min(pages, 10)}, (_, i) =>
-            `<button class="${i === current ? 'active' : ''}" onclick="window._pages.calls.loadCalls(${i * 20})">${i + 1}</button>`
+            `<button class="${tw.pageBtn}${i === current ? ' active' : ''}" onclick="window._pages.calls.loadCalls(${i * 20})">${i + 1}</button>`
         ).join('');
     } catch (e) {
         loading.style.display = 'none';
-        tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Failed to load calls: ${escapeHtml(e.message)}
-            <br><button class="btn btn-primary btn-sm" onclick="window._pages.calls.loadCalls(${offset})" style="margin-top:.5rem">Retry</button></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="${tw.emptyState}">Failed to load calls: ${escapeHtml(e.message)}
+            <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.calls.loadCalls(${offset})">Retry</button></td></tr>`;
     }
 }
 
@@ -94,44 +95,44 @@ async function showCallDetail(callId) {
         const tools = data.tool_calls || [];
 
         let html = `
-            <div style="display:grid;grid-template-columns:1fr 1fr;gap:.8rem;margin-bottom:1rem">
-                <div><strong>Caller:</strong> ${escapeHtml(c.caller_id) || '-'}</div>
-                <div><strong>Scenario:</strong> ${escapeHtml(c.scenario) || '-'}</div>
-                <div><strong>Duration:</strong> ${c.duration_seconds || 0}s</div>
-                <div><strong>Quality:</strong> ${qualityBadge(c.quality_score)}</div>
-                <div><strong>Cost:</strong> $${(c.total_cost_usd || 0).toFixed(3)}</div>
-                <div><strong>Prompt:</strong> ${escapeHtml(c.prompt_version) || '-'}</div>
+            <div class="grid grid-cols-2 gap-3 mb-4 text-sm">
+                <div><span class="font-medium text-neutral-500 dark:text-neutral-400">Caller:</span> <span class="text-neutral-900 dark:text-neutral-100">${escapeHtml(c.caller_id) || '-'}</span></div>
+                <div><span class="font-medium text-neutral-500 dark:text-neutral-400">Scenario:</span> <span class="text-neutral-900 dark:text-neutral-100">${escapeHtml(c.scenario) || '-'}</span></div>
+                <div><span class="font-medium text-neutral-500 dark:text-neutral-400">Duration:</span> <span class="text-neutral-900 dark:text-neutral-100">${c.duration_seconds || 0}s</span></div>
+                <div><span class="font-medium text-neutral-500 dark:text-neutral-400">Quality:</span> ${qualityBadge(c.quality_score)}</div>
+                <div><span class="font-medium text-neutral-500 dark:text-neutral-400">Cost:</span> <span class="text-neutral-900 dark:text-neutral-100">$${(c.total_cost_usd || 0).toFixed(3)}</span></div>
+                <div><span class="font-medium text-neutral-500 dark:text-neutral-400">Prompt:</span> <span class="text-neutral-900 dark:text-neutral-100">${escapeHtml(c.prompt_version) || '-'}</span></div>
             </div>
         `;
 
         if (c.quality_details) {
-            html += '<h3 style="margin:.8rem 0 .5rem">Quality Breakdown</h3><table>';
+            html += `<h3 class="${tw.sectionTitle} mt-4">Quality Breakdown</h3><div class="overflow-x-auto"><table class="${tw.table}">`;
             for (const [k, v] of Object.entries(c.quality_details)) {
                 if (k === 'comment') continue;
-                html += `<tr><td>${escapeHtml(k)}</td><td>${qualityBadge(v)}</td></tr>`;
+                html += `<tr class="${tw.trHover}"><td class="${tw.td}">${escapeHtml(k)}</td><td class="${tw.td}">${qualityBadge(v)}</td></tr>`;
             }
             if (c.quality_details.comment) {
-                html += `<tr><td colspan="2" style="font-style:italic">${escapeHtml(c.quality_details.comment)}</td></tr>`;
+                html += `<tr><td colspan="2" class="${tw.td} italic">${escapeHtml(c.quality_details.comment)}</td></tr>`;
             }
-            html += '</table>';
+            html += '</table></div>';
         }
 
-        html += '<h3 style="margin:.8rem 0 .5rem">Transcription</h3>';
+        html += `<h3 class="${tw.sectionTitle} mt-4">Transcription</h3>`;
         if (turns.length === 0) {
-            html += '<div class="empty-state">No transcription available</div>';
+            html += `<div class="${tw.emptyState}">No transcription available</div>`;
         } else {
             turns.forEach(t => {
-                html += `<div class="turn"><span class="speaker ${t.speaker}">${t.speaker === 'customer' ? 'Customer' : 'Bot'}</span>`;
-                html += `<div class="text">${escapeHtml(t.text)}</div></div>`;
+                html += `<div class="${tw.turnWrap}"><span class="${t.speaker === 'customer' ? tw.speakerCustomer : tw.speakerBot}">${t.speaker === 'customer' ? 'Customer' : 'Bot'}</span>`;
+                html += `<div class="${tw.turnText}">${escapeHtml(t.text)}</div></div>`;
             });
         }
 
         if (tools.length) {
-            html += '<h3 style="margin:.8rem 0 .5rem">Tool Calls</h3><table><tr><th>Tool</th><th>Success</th><th>Duration</th></tr>';
+            html += `<h3 class="${tw.sectionTitle} mt-4">Tool Calls</h3><div class="overflow-x-auto"><table class="${tw.table}"><tr><th class="${tw.th}">Tool</th><th class="${tw.th}">Success</th><th class="${tw.th}">Duration</th></tr>`;
             tools.forEach(t => {
-                html += `<tr><td>${escapeHtml(t.tool_name)}</td><td>${t.success ? 'Yes' : 'No'}</td><td>${t.duration_ms || 0}ms</td></tr>`;
+                html += `<tr class="${tw.trHover}"><td class="${tw.td}">${escapeHtml(t.tool_name)}</td><td class="${tw.td}">${t.success ? `<span class="${tw.badgeGreen}">Yes</span>` : `<span class="${tw.badgeRed}">No</span>`}</td><td class="${tw.td}">${t.duration_ms || 0}ms</td></tr>`;
             });
-            html += '</table>';
+            html += '</table></div>';
         }
 
         document.getElementById('callDetailContent').innerHTML = html;

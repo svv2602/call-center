@@ -1,9 +1,11 @@
+import * as tw from './tw.js';
+
 export function qualityBadge(score) {
-    if (score == null) return '<span class="badge">N/A</span>';
+    if (score == null) return `<span class="${tw.badge}">N/A</span>`;
     const s = parseFloat(score).toFixed(2);
-    if (score >= 0.8) return `<span class="badge badge-green">${s}</span>`;
-    if (score >= 0.5) return `<span class="badge badge-yellow">${s}</span>`;
-    return `<span class="badge badge-red">${s}</span>`;
+    if (score >= 0.8) return `<span class="${tw.badgeGreen}">${s}</span>`;
+    if (score >= 0.5) return `<span class="${tw.badgeYellow}">${s}</span>`;
+    return `<span class="${tw.badgeRed}">${s}</span>`;
 }
 
 export function formatDate(d) {
@@ -23,9 +25,9 @@ export function escapeHtml(str) {
 }
 
 export function statusBadge(status) {
-    if (!status) return '<span class="badge badge-gray">unknown</span>';
-    const map = { online: 'badge-green', offline: 'badge-gray', busy: 'badge-yellow', break: 'badge-blue' };
-    return `<span class="badge ${map[status] || 'badge-gray'}">${escapeHtml(status)}</span>`;
+    if (!status) return `<span class="${tw.badgeGray}">unknown</span>`;
+    const map = { online: tw.badgeGreen, offline: tw.badgeGray, busy: tw.badgeYellow, break: tw.badgeBlue };
+    return `<span class="${map[status] || tw.badgeGray}">${escapeHtml(status)}</span>`;
 }
 
 export function downloadBlob(blob, filename) {

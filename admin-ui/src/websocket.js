@@ -62,7 +62,8 @@ function updateWsStatus(state) {
     const dot = document.getElementById('wsDot');
     const label = document.getElementById('wsLabel');
     if (!dot || !label) return;
-    dot.className = 'ws-dot ' + state;
+    const colors = { connected: 'bg-green-500', reconnecting: 'bg-yellow-500', disconnected: 'bg-red-500' };
+    dot.className = `w-2 h-2 rounded-full ${colors[state] || 'bg-red-500'}`;
     const labels = { connected: 'Live', reconnecting: 'Reconnecting...', disconnected: 'Offline' };
     label.textContent = labels[state] || 'Offline';
 }

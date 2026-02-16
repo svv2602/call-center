@@ -1,8 +1,5 @@
-// CSS imports
-import './styles/variables.css';
-import './styles/base.css';
-import './styles/components.css';
-import './styles/responsive.css';
+// Styles
+import './styles/main.css';
 
 // Core modules
 import { getToken } from './api.js';
@@ -10,6 +7,7 @@ import { login, logout, checkTokenExpiry, applyRoleVisibility } from './auth.js'
 import { showPage } from './router.js';
 import { connectWebSocket, setWsEventHandler } from './websocket.js';
 import { closeModal } from './utils.js';
+import { initTheme, toggleTheme } from './theme.js';
 
 // Page modules — each registers its page loader via init()
 import { init as initDashboard } from './pages/dashboard.js';
@@ -20,6 +18,9 @@ import { init as initOperators } from './pages/operators.js';
 import { init as initSettings } from './pages/settings.js';
 import { init as initUsers } from './pages/users.js';
 import { init as initAudit } from './pages/audit.js';
+
+// Initialize theme
+initTheme();
 
 // Initialize all page loaders
 initDashboard();
@@ -91,4 +92,4 @@ document.querySelectorAll('.sidebar a').forEach(a => {
 });
 
 // Expose globals for onclick handlers in HTML
-window._app = { login, logout, showPage, closeModal, toggleSidebar };
+window._app = { login, logout, showPage, closeModal, toggleSidebar, toggleTheme };

@@ -2,45 +2,48 @@ import { api } from '../api.js';
 import { showToast } from '../notifications.js';
 import { escapeHtml, statusBadge, closeModal } from '../utils.js';
 import { registerPageLoader, setRefreshTimer } from '../router.js';
+import * as tw from '../tw.js';
 
 async function loadOperators() {
     const loading = document.getElementById('operatorsLoading');
     const tbody = document.querySelector('#operatorsTable tbody');
-    loading.style.display = 'block';
+    loading.style.display = 'flex';
 
     try {
         const data = await api('/operators');
         loading.style.display = 'none';
         const ops = data.operators || [];
         if (ops.length === 0) {
-            tbody.innerHTML = '<tr><td colspan="7" class="empty-state">No operators found</td></tr>';
+            tbody.innerHTML = `<tr><td colspan="7" class="${tw.emptyState}">No operators found</td></tr>`;
             return;
         }
         tbody.innerHTML = ops.map(o => `
-            <tr>
-                <td>${escapeHtml(o.name)}</td>
-                <td>${escapeHtml(o.extension)}</td>
-                <td>${statusBadge(o.current_status)}</td>
-                <td>${(o.skills || []).map(s => `<span class="badge badge-blue">${escapeHtml(s)}</span>`).join(' ')}</td>
-                <td>${o.shift_start || '09:00'} - ${o.shift_end || '18:00'}</td>
-                <td>${o.is_active ? '<span class="badge badge-green">Yes</span>' : '<span class="badge badge-red">No</span>'}</td>
-                <td>
-                    <select onchange="window._pages.operators.changeOperatorStatus('${o.id}', this.value); this.selectedIndex=0" style="font-size:.75rem;padding:.2rem">
-                        <option value="">Status...</option>
-                        <option value="online">Online</option>
-                        <option value="offline">Offline</option>
-                        <option value="busy">Busy</option>
-                        <option value="break">Break</option>
-                    </select>
-                    <button class="btn btn-primary btn-sm" onclick="window._pages.operators.editOperator('${o.id}')">Edit</button>
-                    ${o.is_active ? `<button class="btn btn-danger btn-sm" onclick="window._pages.operators.deactivateOperator('${o.id}', '${escapeHtml(o.name).replace(/'/g, "\\'")}')">Deactivate</button>` : ''}
+            <tr class="${tw.trHover}">
+                <td class="${tw.td}">${escapeHtml(o.name)}</td>
+                <td class="${tw.td}">${escapeHtml(o.extension)}</td>
+                <td class="${tw.td}">${statusBadge(o.current_status)}</td>
+                <td class="${tw.td}">${(o.skills || []).map(s => `<span class="${tw.badgeBlue}">${escapeHtml(s)}</span>`).join(' ')}</td>
+                <td class="${tw.td}">${o.shift_start || '09:00'} - ${o.shift_end || '18:00'}</td>
+                <td class="${tw.td}">${o.is_active ? `<span class="${tw.badgeGreen}">Yes</span>` : `<span class="${tw.badgeRed}">No</span>`}</td>
+                <td class="${tw.td}">
+                    <div class="flex flex-wrap items-center gap-1">
+                        <select onchange="window._pages.operators.changeOperatorStatus('${o.id}', this.value); this.selectedIndex=0" class="${tw.selectSm}">
+                            <option value="">Status...</option>
+                            <option value="online">Online</option>
+                            <option value="offline">Offline</option>
+                            <option value="busy">Busy</option>
+                            <option value="break">Break</option>
+                        </select>
+                        <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.operators.editOperator('${o.id}')">Edit</button>
+                        ${o.is_active ? `<button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.operators.deactivateOperator('${o.id}', '${escapeHtml(o.name).replace(/'/g, "\\'")}')">Deactivate</button>` : ''}
+                    </div>
                 </td>
             </tr>
         `).join('');
     } catch (e) {
         loading.style.display = 'none';
-        tbody.innerHTML = `<tr><td colspan="7" class="empty-state">Failed to load operators: ${escapeHtml(e.message)}
-            <br><button class="btn btn-primary btn-sm" onclick="window._pages.operators.loadOperators()" style="margin-top:.5rem">Retry</button></td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="7" class="${tw.emptyState}">Failed to load operators: ${escapeHtml(e.message)}
+            <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.operators.loadOperators()">Retry</button></td></tr>`;
     }
 }
 
@@ -48,11 +51,11 @@ async function loadQueueStatus() {
     try {
         const data = await api('/operators/queue');
         document.getElementById('operatorQueueStats').innerHTML = `
-            <div class="card stat-card"><div class="value">${data.operators_online || 0}</div><div class="label">Operators Online</div></div>
-            <div class="card stat-card"><div class="value">${data.transfers_last_hour || 0}</div><div class="label">Transfers (1h)</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">${data.operators_online || 0}</div><div class="${tw.statLabel}">Operators Online</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">${data.transfers_last_hour || 0}</div><div class="${tw.statLabel}">Transfers (1h)</div></div>
         `;
     } catch (e) {
-        document.getElementById('operatorQueueStats').innerHTML = `<div class="empty-state">Queue status unavailable</div>`;
+        document.getElementById('operatorQueueStats').innerHTML = `<div class="${tw.emptyState}">Queue status unavailable</div>`;
     }
 }
 

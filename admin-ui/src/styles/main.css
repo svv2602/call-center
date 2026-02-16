@@ -1,0 +1,81 @@
+@import "tailwindcss";
+
+/* Class-based dark mode (toggle via .dark on <html>) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* --- Programmatic state classes (toggled by JS) --- */
+
+/* Modal visibility toggle */
+.modal-overlay {
+  display: none;
+}
+.modal-overlay.show {
+  display: flex;
+}
+
+/* Mobile sidebar slide-in */
+@media (max-width: 768px) {
+  .sidebar {
+    transform: translateX(-100%);
+    transition: transform 0.3s ease;
+  }
+  .sidebar.open {
+    transform: translateX(0);
+  }
+}
+
+/* Active sidebar link */
+.sidebar a.active {
+  color: white;
+  background-color: rgb(39 39 42); /* zinc-800 */
+}
+
+/* Active tab */
+.tab-bar button.active {
+  color: rgb(37 99 235);
+  border-bottom-color: rgb(37 99 235);
+  font-weight: 500;
+}
+.dark .tab-bar button.active {
+  color: rgb(96 165 250);
+  border-bottom-color: rgb(96 165 250);
+}
+
+/* Active pagination button */
+.pagination button.active {
+  background-color: rgb(37 99 235);
+  color: white;
+  border-color: rgb(37 99 235);
+}
+
+/* RBAC visibility — toggled by auth.js */
+/* .admin-only — no default styles, JS controls display */
+
+/* --- Loading spinner --- */
+.spinner {
+  display: inline-block;
+  width: 1.25rem;
+  height: 1.25rem;
+  border: 2px solid rgb(229 231 235);
+  border-top-color: rgb(37 99 235);
+  border-radius: 9999px;
+  animation: spin 0.6s linear infinite;
+}
+.dark .spinner {
+  border-color: rgb(64 64 64);
+  border-top-color: rgb(96 165 250);
+}
+
+/* --- Toast slide-in --- */
+.toast {
+  animation: slideIn 0.3s ease;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes slideIn {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
