@@ -9,9 +9,9 @@
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import List
 
 import asyncpg
+
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -51,7 +51,7 @@ async def create_partitions_for_month(conn: asyncpg.Connection, year: int, month
     logger.info(f"Создана партиция {tools_table}")
 
 
-async def get_existing_partitions(conn: asyncpg.Connection, table_name: str) -> List[str]:
+async def get_existing_partitions(conn: asyncpg.Connection, table_name: str) -> list[str]:
     """Получить список существующих партиций для таблицы."""
     query = """
         SELECT inhrelid::regclass::text as partition_name

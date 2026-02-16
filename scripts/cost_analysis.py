@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from dataclasses import asdict, dataclass
 
 # ========== Pricing constants (as of Feb 2026) ==========
@@ -173,7 +172,7 @@ def print_report(result: CostResult) -> None:
     print(f"  STT (Whisper):   ${result.stt_whisper_per_call:.4f}")
     print(f"  LLM (Claude):    ${result.llm_per_call:.4f}")
     print(f"  TTS (Google):    ${result.tts_per_call:.4f}")
-    print(f"  ---")
+    print("  ---")
     print(f"  Total (Google STT):  ${result.total_google_per_call:.4f}")
     print(f"  Total (Whisper STT): ${result.total_whisper_per_call:.4f}")
 
@@ -183,15 +182,15 @@ def print_report(result: CostResult) -> None:
     print(f"  LLM (Claude):        ${result.llm_monthly:>8.2f}")
     print(f"  TTS (Google):        ${result.tts_monthly:>8.2f}")
     print(f"  Infrastructure:      ${result.infrastructure_monthly:>8.2f}")
-    print(f"  ---")
+    print("  ---")
     print(f"  Total (Google STT):  ${result.total_google_monthly:>8.2f}/month")
     print(f"  Total (Whisper STT): ${result.total_whisper_monthly:>8.2f}/month")
 
-    print(f"\n--- Whisper Savings ---")
+    print("\n--- Whisper Savings ---")
     print(f"  Monthly savings:     ${result.whisper_savings_monthly:>8.2f}")
     print(f"  Savings percent:     {result.whisper_savings_percent:.1f}%")
 
-    print(f"\n--- vs Operator ($5/hr) ---")
+    print("\n--- vs Operator ($5/hr) ---")
     print(f"  Operator per call:   ${result.operator_cost_per_call:.4f}")
     print(f"  Operator monthly:    ${result.operator_monthly:>8.2f}")
     print(f"  ROI (Google STT):    {result.roi_vs_operator_google:.0f}%")
@@ -200,7 +199,7 @@ def print_report(result: CostResult) -> None:
     target_low, target_high = 0.15, 0.30
     google_ok = target_low <= result.total_google_per_call <= target_high
     whisper_ok = target_low <= result.total_whisper_per_call <= target_high
-    print(f"\n--- Target: $0.15-0.30 per call ---")
+    print("\n--- Target: $0.15-0.30 per call ---")
     print(f"  Google STT: ${result.total_google_per_call:.4f} {'OK' if google_ok else 'OUTSIDE TARGET'}")
     print(f"  Whisper STT: ${result.total_whisper_per_call:.4f} {'OK' if whisper_ok else 'OUTSIDE TARGET'}")
     print("=" * 60)

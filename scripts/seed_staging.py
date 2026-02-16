@@ -15,7 +15,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -47,7 +47,7 @@ async def seed_operators(engine) -> int:  # type: ignore[no-untyped-def]
                     "name": name,
                     "email": email,
                     "status": status,
-                    "created_at": datetime.now(timezone.utc),
+                    "created_at": datetime.now(UTC),
                 },
             )
             count += 1
@@ -107,7 +107,7 @@ async def seed_knowledge_base(engine) -> int:  # type: ignore[no-untyped-def]
                     "title": article["title"],
                     "category": article["category"],
                     "content": article["content"],
-                    "created_at": datetime.now(timezone.utc),
+                    "created_at": datetime.now(UTC),
                 },
             )
             count += 1
@@ -116,7 +116,7 @@ async def seed_knowledge_base(engine) -> int:  # type: ignore[no-untyped-def]
 
 async def seed_sample_calls(engine) -> int:  # type: ignore[no-untyped-def]
     """Create sample call records for dashboard testing."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     statuses = ["completed", "completed", "completed", "transferred", "error"]
     scenarios = ["tire_search", "tire_search", "order", "fitting", "consultation"]
     count = 0
@@ -154,7 +154,7 @@ async def seed_sample_calls(engine) -> int:  # type: ignore[no-untyped-def]
 
 async def create_partitions(engine) -> None:  # type: ignore[no-untyped-def]
     """Ensure current month partitions exist."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     year = now.year
     month = now.month
     next_month = month + 1 if month < 12 else 1
