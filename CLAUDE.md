@@ -80,6 +80,17 @@ Key entry points: `doc/README.md` (navigation), `doc/development/00-overview.md`
 3. **Services** — fitting booking, RAG knowledge base consultations
 4. **Analytics** — dashboards, quality scoring, A/B prompt testing, self-hosted Whisper
 
+## Admin UI — i18n
+
+Админка (`admin-ui/`) поддерживает два языка: **русский** (по умолчанию) и **английский**. При любых изменениях в UI необходимо:
+
+1. **Новые строки** — добавлять ключ в оба словаря: `admin-ui/src/translations/ru.js` и `admin-ui/src/translations/en.js`
+2. **Статический HTML** (`index.html`) — использовать атрибуты `data-i18n="key"` / `data-i18n-placeholder="key"`, текст по умолчанию на русском
+3. **Динамический JS** (`pages/*.js`) — использовать `import { t } from '../i18n.js'` и вызовы `t('namespace.key')` / `t('key', {param: value})`
+4. **Именование ключей** — неймспейсы по страницам: `common.*`, `nav.*`, `dashboard.*`, `calls.*`, `prompts.*`, `knowledge.*`, `operators.*`, `settings.*`, `users.*`, `audit.*`, `login.*`, `theme.*`, `ws.*`, `api.*`
+
+Ядро i18n: `admin-ui/src/i18n.js` (`t()`, `initLang()`, `toggleLang()`, `translateStaticDOM()`, `getLocale()`).
+
 ## Key Design Decisions
 
 - Audio is **never stored** — streaming STT only, transcriptions retained 90 days
