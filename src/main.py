@@ -2,16 +2,14 @@
 
 import asyncio
 import logging
+import os
 import signal
 import sys
+from pathlib import Path
 from typing import Any
 
 import aiohttp
 import uvicorn
-import os
-
-from pathlib import Path
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
@@ -39,9 +37,9 @@ from src.config import Settings, get_settings
 from src.core.audio_socket import AudioSocketConnection, AudioSocketServer
 from src.core.call_session import CallSession, CallState, SessionStore
 from src.core.pipeline import CallPipeline
+from src.events.publisher import publish_event
 from src.logging.pii_vault import PIIVault
 from src.logging.structured_logger import setup_logging
-from src.events.publisher import publish_event
 from src.monitoring.metrics import active_calls, calls_total, get_metrics
 from src.onec_client.client import OneCClient
 from src.onec_client.sync import CatalogSyncService

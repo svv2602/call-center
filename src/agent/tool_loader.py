@@ -9,12 +9,14 @@ from __future__ import annotations
 
 import copy
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from src.agent.tools import ALL_TOOLS
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncEngine
 
 logger = logging.getLogger(__name__)
 

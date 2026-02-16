@@ -21,6 +21,9 @@ from src.agent.prompts import (
     WAIT_TEXT,
 )
 from src.core.audio_socket import AudioSocketConnection, PacketType
+from src.core.call_session import SILENCE_TIMEOUT_SEC, CallSession, CallState
+from src.monitoring.metrics import audiosocket_to_stt_ms, tts_delivery_ms
+from src.stt.base import STTConfig, STTEngine, Transcript
 
 # Default template dict (used if no PromptManager or DB unavailable)
 _DEFAULT_TEMPLATES: dict[str, str] = {
@@ -31,9 +34,6 @@ _DEFAULT_TEMPLATES: dict[str, str] = {
     "error": ERROR_TEXT,
     "wait": WAIT_TEXT,
 }
-from src.core.call_session import SILENCE_TIMEOUT_SEC, CallSession, CallState
-from src.monitoring.metrics import audiosocket_to_stt_ms, tts_delivery_ms
-from src.stt.base import STTConfig, STTEngine, Transcript
 
 if TYPE_CHECKING:
     from src.agent.agent import LLMAgent
