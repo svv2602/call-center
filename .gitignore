@@ -33,6 +33,9 @@ Thumbs.db
 pgdata/
 redisdata/
 
+# PID files (start.sh)
+.pids/
+
 # Logs
 *.log
 
