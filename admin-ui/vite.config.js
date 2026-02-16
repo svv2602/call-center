@@ -1,6 +1,8 @@
 import { defineConfig } from 'vite';
 import tailwindcss from '@tailwindcss/vite';
 
+const backend = 'http://localhost:8080';
+
 export default defineConfig({
   root: '.',
   plugins: [tailwindcss()],
@@ -11,18 +13,18 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      '/auth': 'http://localhost:8080',
-      '/analytics': 'http://localhost:8080',
-      '/prompts': 'http://localhost:8080',
-      '/knowledge': 'http://localhost:8080',
-      '/training': 'http://localhost:8080',
-      '/operators': 'http://localhost:8080',
-      '/system': 'http://localhost:8080',
-      '/admin-users': 'http://localhost:8080',
-      '/export': 'http://localhost:8080',
-      '/admin': 'http://localhost:8080',
-      '/health': 'http://localhost:8080',
-      '/metrics': 'http://localhost:8080',
+      '/auth': backend,
+      '/analytics': backend,
+      '/prompts': backend,
+      '/knowledge': backend,
+      '/training': backend,
+      '/operators': backend,
+      '/system': backend,
+      '/admin-users': backend,
+      '/export': backend,
+      '/admin': backend,
+      '/health': backend,
+      '/metrics': backend,
       '/ws': {
         target: 'ws://localhost:8080',
         ws: true,

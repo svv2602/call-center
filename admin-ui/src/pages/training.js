@@ -299,7 +299,7 @@ async function loadTemplates() {
     const container = document.getElementById('trainingContent-templates');
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
     try {
-        const data = await api('/training/templates');
+        const data = await api('/training/templates/');
         const items = data.items || [];
         if (items.length === 0) {
             container.innerHTML = `
@@ -363,7 +363,7 @@ async function saveTemplate() {
             await api(`/training/templates/${id}`, { method: 'PATCH', body: JSON.stringify({ title, content, description: description || null }) });
         } else {
             if (!templateKey) { showToast(t('training.keyRequired'), 'error'); return; }
-            await api('/training/templates', { method: 'POST', body: JSON.stringify({ template_key: templateKey, title, content, description: description || null }) });
+            await api('/training/templates/', { method: 'POST', body: JSON.stringify({ template_key: templateKey, title, content, description: description || null }) });
         }
         closeModal('responseTemplateModal');
         showToast(t('training.templateSaved'));
@@ -378,7 +378,7 @@ async function loadDialogues() {
     const container = document.getElementById('trainingContent-dialogues');
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
     try {
-        const data = await api('/training/dialogues');
+        const data = await api('/training/dialogues/');
         const items = data.items || [];
         if (items.length === 0) {
             container.innerHTML = `
@@ -453,7 +453,7 @@ async function saveDialogue() {
         if (id) {
             await api(`/training/dialogues/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
         } else {
-            await api('/training/dialogues', { method: 'POST', body: JSON.stringify(body) });
+            await api('/training/dialogues/', { method: 'POST', body: JSON.stringify(body) });
         }
         closeModal('dialogueModal');
         showToast(t('training.dialogueSaved'));
@@ -486,7 +486,7 @@ async function loadSafetyRules() {
     const container = document.getElementById('trainingContent-safety');
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
     try {
-        const data = await api('/training/safety-rules');
+        const data = await api('/training/safety-rules/');
         const items = data.items || [];
         if (items.length === 0) {
             container.innerHTML = `
@@ -558,7 +558,7 @@ async function saveSafetyRule() {
         if (id) {
             await api(`/training/safety-rules/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
         } else {
-            await api('/training/safety-rules', { method: 'POST', body: JSON.stringify(body) });
+            await api('/training/safety-rules/', { method: 'POST', body: JSON.stringify(body) });
         }
         closeModal('safetyRuleModal');
         showToast(t('training.safetyRuleSaved'));
@@ -582,7 +582,7 @@ async function loadTools() {
     const container = document.getElementById('trainingContent-tools');
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
     try {
-        const data = await api('/training/tools');
+        const data = await api('/training/tools/');
         const items = data.items || [];
         container.innerHTML = `
             <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr><th class="${tw.th}">${t('training.toolName')}</th><th class="${tw.th}">${t('training.description')}</th><th class="${tw.th}">${t('training.override')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
@@ -607,7 +607,7 @@ async function loadTools() {
 
 async function editToolOverride(toolName) {
     try {
-        const data = await api('/training/tools');
+        const data = await api('/training/tools/');
         const tool = (data.items || []).find(t => t.name === toolName);
         if (!tool) { showToast(t('training.toolNotFound'), 'error'); return; }
 
