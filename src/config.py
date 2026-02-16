@@ -58,6 +58,17 @@ class StoreAPISettings(BaseSettings):
     model_config = {"env_prefix": "STORE_API_"}
 
 
+class OneCSettings(BaseSettings):
+    url: str = "http://192.168.11.9"
+    username: str = ""
+    password: str = ""
+    timeout: int = 10
+    sync_interval_minutes: int = 5
+    stock_cache_ttl: int = 300  # Redis TTL for stock cache (seconds)
+
+    model_config = {"env_prefix": "ONEC_"}
+
+
 class DatabaseSettings(BaseSettings):
     url: str = "postgresql+asyncpg://callcenter:callcenter_dev_pass@localhost:5432/callcenter_dev"
 
@@ -187,6 +198,7 @@ class Settings(BaseSettings):
     anthropic: AnthropicSettings = AnthropicSettings()
     openai: OpenAISettings = OpenAISettings()
     store_api: StoreAPISettings = StoreAPISettings()
+    onec: OneCSettings = OneCSettings()
     database: DatabaseSettings = DatabaseSettings()
     redis: RedisSettings = RedisSettings()
     ari: ARISettings = ARISettings()
@@ -246,6 +258,17 @@ class Settings(BaseSettings):
                 f"невалидный URL: {store_url!r}",
                 "Ожидается http://host:port/path или https://...",
             )
+
+        # ONEC_URL — must be a valid URL with scheme (if credentials set)
+        if self.onec.username:
+            onec_url = self.onec.url
+            parsed_onec = urlparse(onec_url)
+            if not parsed_onec.scheme or not parsed_onec.netloc:
+                result.add(
+                    "ONEC_URL",
+                    f"невалидный URL: {onec_url!r}",
+                    "Ожидается http://host:port или https://...",
+                )
 
         # GOOGLE_APPLICATION_CREDENTIALS — file must exist (if set)
         creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")

@@ -2,11 +2,16 @@
 
 Integrates with the tire shop's REST API for product search,
 availability checks, and order management.
+
+MVP: search_tires and check_availability can use PostgreSQL + Redis
+(synced from 1C) when db_engine/onec_client are provided.
+Falls back to HTTP calls if not (backward compat).
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import uuid
 from typing import Any
@@ -44,11 +49,23 @@ class StoreClient:
       - X-Request-Id header for distributed tracing
     """
 
-    def __init__(self, base_url: str, api_key: str, timeout: int = 5) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        timeout: int = 5,
+        db_engine: Any = None,
+        redis: Any = None,
+        stock_cache_ttl: int = 300,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
         self._api_key = api_key
         self._timeout = aiohttp.ClientTimeout(total=timeout)
         self._session: aiohttp.ClientSession | None = None
+        # 1C integration (MVP): PostgreSQL catalog + Redis stock cache
+        self._db_engine = db_engine
+        self._redis = redis
+        self._stock_cache_ttl = stock_cache_ttl
 
     async def open(self) -> None:
         """Open the HTTP session."""
@@ -72,10 +89,14 @@ class StoreClient:
     async def search_tires(self, **params: Any) -> dict[str, Any]:
         """Search tires by parameters.
 
-        Maps to: GET /api/v1/tires/search
-        Also supports vehicle search: GET /api/v1/vehicles/tires
+        If db_engine is available, queries PostgreSQL catalog (synced from 1C).
+        Otherwise falls back to HTTP Store API.
         """
-        # If vehicle params provided, use vehicle endpoint
+        # MVP: use PostgreSQL catalog if available
+        if self._db_engine is not None:
+            return await self._search_tires_db(**params)
+
+        # Fallback: HTTP Store API
         if any(k in params for k in ("vehicle_make", "vehicle_model", "vehicle_year")):
             query = {
                 "make": params.get("vehicle_make", ""),
@@ -99,10 +120,15 @@ class StoreClient:
     ) -> dict[str, Any]:
         """Check tire availability.
 
-        Maps to: GET /api/v1/tires/{id}/availability
+        If db_engine is available, checks Redis cache then PostgreSQL (synced from 1C).
+        Otherwise falls back to HTTP Store API.
         """
+        # MVP: use Redis/PostgreSQL if available
+        if self._db_engine is not None:
+            return await self._check_availability_1c(product_id, query)
+
+        # Fallback: HTTP Store API
         if not product_id and query:
-            # Search by name first
             search_result = await self._get("/api/v1/tires/search", params={"q": query})
             items = search_result.get("items", [])
             if not items:
@@ -489,6 +515,151 @@ class StoreClient:
                 for a in articles[:5]
             ],
         }
+
+    # --- 1C / PostgreSQL / Redis helpers (MVP) ---
+
+    async def _search_tires_db(self, **params: Any) -> dict[str, Any]:
+        """Search tires in PostgreSQL catalog (synced from 1C)."""
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import AsyncEngine
+
+        # Vehicle search is not supported via 1C catalog
+        if any(k in params for k in ("vehicle_make", "vehicle_model", "vehicle_year")):
+            return {
+                "total": 0,
+                "items": [],
+                "message": "Пошук за авто тимчасово недоступний, вкажіть розмір шин",
+            }
+
+        engine: AsyncEngine = self._db_engine
+
+        # Build WHERE clauses dynamically
+        conditions = []
+        bind_params: dict[str, Any] = {}
+
+        if params.get("width"):
+            conditions.append("p.width = :width")
+            bind_params["width"] = int(params["width"])
+        if params.get("profile"):
+            conditions.append("p.profile = :profile")
+            bind_params["profile"] = int(params["profile"])
+        if params.get("diameter"):
+            conditions.append("p.diameter = :diameter")
+            bind_params["diameter"] = int(params["diameter"])
+        if params.get("season"):
+            conditions.append("m.seasonality = :season")
+            bind_params["season"] = params["season"]
+        if params.get("brand"):
+            conditions.append("LOWER(m.manufacturer) = LOWER(:brand)")
+            bind_params["brand"] = params["brand"]
+
+        where_clause = " AND ".join(conditions) if conditions else "1=1"
+
+        query = text(f"""
+            SELECT p.sku AS id, m.manufacturer AS brand, m.name AS model,
+                   p.size, m.seasonality AS season,
+                   COALESCE(s.price, 0) AS price,
+                   COALESCE(s.stock_quantity, 0) AS stock_quantity
+            FROM tire_products p
+            JOIN tire_models m ON p.model_id = m.id
+            LEFT JOIN tire_stock s ON p.sku = s.sku
+            WHERE {where_clause}
+            ORDER BY s.price ASC NULLS LAST
+            LIMIT 5
+        """)
+
+        async with engine.connect() as conn:
+            result = await conn.execute(query, bind_params)
+            rows = result.mappings().all()
+
+        items = [
+            {
+                "id": row["id"],
+                "brand": row["brand"],
+                "model": row["model"],
+                "size": row["size"],
+                "season": row["season"],
+                "price": row["price"],
+                "in_stock": row["stock_quantity"] > 0,
+            }
+            for row in rows
+        ]
+
+        return {
+            "total": len(items),
+            "items": items,
+        }
+
+    async def _check_availability_1c(
+        self, product_id: str, query: str
+    ) -> dict[str, Any]:
+        """Check availability via Redis cache → PostgreSQL fallback."""
+        from sqlalchemy import text
+        from sqlalchemy.ext.asyncio import AsyncEngine
+
+        sku = product_id
+        if not sku and query:
+            # Try to find SKU by searching
+            search = await self._search_tires_db(brand=query)
+            items = search.get("items", [])
+            if not items:
+                return {"available": False, "message": "Товар не знайдено"}
+            sku = items[0].get("id", "")
+
+        if not sku:
+            return {"available": False, "message": "Потрібен ID товару або запит"}
+
+        # 1) Try Redis cache first (fastest)
+        stock_data = await self._get_stock_from_redis(sku)
+        if stock_data is not None:
+            return stock_data
+
+        # 2) Fallback to PostgreSQL (last synced data)
+        engine: AsyncEngine = self._db_engine
+        async with engine.connect() as conn:
+            result = await conn.execute(
+                text("""
+                    SELECT s.price, s.stock_quantity, s.country, s.year_issue,
+                           s.trading_network
+                    FROM tire_stock s
+                    WHERE s.sku = :sku
+                    ORDER BY s.stock_quantity DESC
+                    LIMIT 1
+                """),
+                {"sku": sku},
+            )
+            row = result.mappings().first()
+
+        if row is None:
+            return {"available": False, "message": "Дані про наявність відсутні"}
+
+        return {
+            "available": row["stock_quantity"] > 0,
+            "quantity": row["stock_quantity"],
+            "price": row["price"],
+            "country": row["country"],
+            "year": row["year_issue"],
+        }
+
+    async def _get_stock_from_redis(self, sku: str) -> dict[str, Any] | None:
+        """Try to get stock data from Redis cache."""
+        if self._redis is None:
+            return None
+
+        for network in ("ProKoleso", "Tshina"):
+            key = f"onec:stock:{network}"
+            raw = await self._redis.hget(key, sku)
+            if raw is not None:
+                data = json.loads(raw)
+                return {
+                    "available": data["stock"] > 0,
+                    "quantity": data["stock"],
+                    "price": data["price"],
+                    "country": data.get("country", ""),
+                    "year": data.get("year_issue", ""),
+                }
+
+        return None
 
     # --- HTTP helpers ---
 

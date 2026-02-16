@@ -4,6 +4,7 @@ import asyncio
 import logging
 import signal
 import sys
+from typing import Any
 
 import aiohttp
 import uvicorn
@@ -38,6 +39,8 @@ from src.logging.pii_vault import PIIVault
 from src.logging.structured_logger import setup_logging
 from src.events.publisher import publish_event
 from src.monitoring.metrics import active_calls, calls_total, get_metrics
+from src.onec_client.client import OneCClient
+from src.onec_client.sync import CatalogSyncService
 from src.store_client.client import StoreClient
 from src.stt.base import STTConfig
 from src.stt.google_stt import GoogleSTTEngine
@@ -92,6 +95,10 @@ _audio_server: AudioSocketServer | None = None
 _redis: Redis | None = None
 _store_client: StoreClient | None = None
 _tts_engine: GoogleTTSEngine | None = None
+_onec_client: OneCClient | None = None
+_sync_service: CatalogSyncService | None = None
+_sync_task: asyncio.Task | None = None  # type: ignore[type-arg]
+_db_engine: Any = None
 
 
 @app.get("/health")
@@ -161,6 +168,19 @@ async def readiness_check() -> dict[str, object]:
     else:
         checks["claude_api"] = "no_api_key"
 
+    # 1C API
+    if _onec_client is not None and _onec_client._session is not None:
+        try:
+            # Lightweight stock request to check 1C connectivity
+            resp = await asyncio.wait_for(
+                _onec_client.get_stock("ProKoleso"), timeout=5.0
+            )
+            checks["onec_api"] = "reachable" if resp.get("success") else "error"
+        except Exception:
+            checks["onec_api"] = "unreachable"
+    else:
+        checks["onec_api"] = "not_configured"
+
     # Google STT — check credentials file exists
     import os
 
@@ -170,7 +190,7 @@ async def readiness_check() -> dict[str, object]:
     )
 
     all_ok = all(
-        v in ("connected", "reachable", "initialized", "credentials_present")
+        v in ("connected", "reachable", "initialized", "credentials_present", "not_configured")
         for v in checks.values()
     )
 
@@ -296,9 +316,22 @@ async def start_api_server(settings: Settings) -> None:
     await server.serve()
 
 
+async def _periodic_sync(sync_service: CatalogSyncService, interval_minutes: int) -> None:
+    """Run incremental catalog sync periodically."""
+    while True:
+        await asyncio.sleep(interval_minutes * 60)
+        try:
+            await sync_service.incremental_sync()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Periodic catalog sync failed")
+
+
 async def main() -> None:
     """Main application entry point."""
     global _audio_server, _redis, _store_client, _tts_engine
+    global _onec_client, _sync_service, _sync_task, _db_engine
 
     settings = get_settings()
 
@@ -345,11 +378,55 @@ async def main() -> None:
     for sig in (signal.SIGINT, signal.SIGTERM):
         loop.add_signal_handler(sig, _signal_handler)
 
+    # Initialize 1C client and DB engine (MVP: tire catalog + stock)
+    if settings.onec.username:
+        try:
+            from sqlalchemy.ext.asyncio import create_async_engine
+
+            _db_engine = create_async_engine(settings.database.url, pool_size=5, max_overflow=5)
+            logger.info("Database engine created: %s", settings.database.url.split("@")[-1])
+
+            _onec_client = OneCClient(
+                base_url=settings.onec.url,
+                username=settings.onec.username,
+                password=settings.onec.password,
+                timeout=settings.onec.timeout,
+            )
+            await _onec_client.open()
+            logger.info("OneCClient initialized: %s", settings.onec.url)
+
+            # Full sync at startup (non-fatal if 1C is unreachable)
+            _sync_service = CatalogSyncService(
+                onec_client=_onec_client,
+                db_engine=_db_engine,
+                redis=_redis,
+                stock_cache_ttl=settings.onec.stock_cache_ttl,
+            )
+            try:
+                await _sync_service.full_sync()
+                logger.info("Initial catalog sync completed")
+            except Exception:
+                logger.warning("Initial catalog sync failed — will retry periodically", exc_info=True)
+
+            # Start periodic incremental sync
+            _sync_task = asyncio.create_task(
+                _periodic_sync(_sync_service, settings.onec.sync_interval_minutes)
+            )
+        except Exception:
+            logger.warning("1C integration init failed — MVP tools will use fallback HTTP", exc_info=True)
+            _onec_client = None
+            _db_engine = None
+    else:
+        logger.info("1C integration not configured (ONEC_USERNAME empty)")
+
     # Initialize shared components (TTS is shared across calls, StoreClient too)
     _store_client = StoreClient(
         base_url=settings.store_api.url,
         api_key=settings.store_api.key,
         timeout=settings.store_api.timeout,
+        db_engine=_db_engine,
+        redis=_redis,
+        stock_cache_ttl=settings.onec.stock_cache_ttl,
     )
     await _store_client.open()
     logger.info("StoreClient initialized: %s", settings.store_api.url)
@@ -378,9 +455,26 @@ async def main() -> None:
     await _audio_server.stop()
     api_task.cancel()
 
+    # Cancel periodic sync
+    if _sync_task is not None:
+        _sync_task.cancel()
+        try:
+            await _sync_task
+        except asyncio.CancelledError:
+            pass
+        logger.info("Periodic sync stopped")
+
     if _store_client is not None:
         await _store_client.close()
         logger.info("StoreClient closed")
+
+    if _onec_client is not None:
+        await _onec_client.close()
+        logger.info("OneCClient closed")
+
+    if _db_engine is not None:
+        await _db_engine.dispose()
+        logger.info("Database engine disposed")
 
     if _redis is not None:
         await _redis.aclose()
