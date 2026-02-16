@@ -34,6 +34,7 @@ app.conf.update(
         "src.tasks.partition_manager.*": {"queue": "stats"},
         "src.tasks.backup.*": {"queue": "stats"},
         "src.tasks.email_report.*": {"queue": "stats"},
+        "src.tasks.embedding_tasks.*": {"queue": "embeddings"},
     },
 )
 

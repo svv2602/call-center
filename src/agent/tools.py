@@ -9,6 +9,8 @@ Phase 3 tools: get_fitting_stations, get_fitting_slots, book_fitting, cancel_fit
 
 from __future__ import annotations
 
+from src.knowledge.categories import CATEGORY_VALUES
+
 # MVP tools — Claude API tool_use format
 MVP_TOOLS: list[dict] = [  # type: ignore[type-arg]
     {
@@ -388,7 +390,7 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
                 },
                 "category": {
                     "type": "string",
-                    "enum": ["brands", "guides", "faq", "comparisons"],
+                    "enum": CATEGORY_VALUES,
                     "description": "Категорія пошуку для точнішого результату",
                 },
             },

@@ -2,20 +2,23 @@
 
 Manage knowledge articles: create, read, update, delete.
 Triggers embedding regeneration on content changes.
+Supports bulk document import (MD, PDF, DOCX).
 """
 
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.api.auth import require_role
 from src.config import get_settings
+from src.knowledge.categories import CATEGORIES, is_valid_category
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -38,6 +41,16 @@ async def _get_engine() -> AsyncEngine:
     return _engine
 
 
+def _dispatch_embedding(article_id: str) -> None:
+    """Dispatch embedding generation task (best-effort, no failure on import error)."""
+    try:
+        from src.tasks.embedding_tasks import generate_article_embeddings
+
+        generate_article_embeddings.delay(article_id)
+    except Exception:
+        logger.warning("Could not dispatch embedding task for article %s", article_id, exc_info=True)
+
+
 class ArticleCreateRequest(BaseModel):
     title: str
     category: str
@@ -49,6 +62,12 @@ class ArticleUpdateRequest(BaseModel):
     category: str | None = None
     content: str | None = None
     active: bool | None = None
+
+
+@router.get("/article-categories")
+async def get_article_categories(_: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
+    """Return the list of available article categories."""
+    return {"categories": CATEGORIES}
 
 
 @router.get("/articles")
@@ -87,7 +106,7 @@ async def list_articles(
 
         result = await conn.execute(
             text(f"""
-                SELECT id, title, category, active, created_at, updated_at
+                SELECT id, title, category, active, embedding_status, created_at, updated_at
                 FROM knowledge_articles
                 WHERE {where_clause}
                 ORDER BY category, title
@@ -100,6 +119,112 @@ async def list_articles(
     return {"total": total, "articles": articles}
 
 
+@router.post("/articles/import")
+async def import_articles(
+    files: list[UploadFile],
+    category: str | None = Query(None, description="Override category for all imported files"),
+    _: dict[str, Any] = _admin_dep,
+) -> dict[str, Any]:
+    """Bulk import documents (MD, PDF, DOCX) as knowledge articles."""
+    from src.knowledge.parsers import PARSERS, SUPPORTED_EXTENSIONS, detect_category_from_filename
+
+    if category and not is_valid_category(category):
+        raise HTTPException(status_code=400, detail=f"Invalid category: {category}")
+
+    engine = await _get_engine()
+    imported: list[dict[str, Any]] = []
+    errors: list[dict[str, str]] = []
+
+    for file in files:
+        filename = file.filename or "unknown"
+        ext = Path(filename).suffix.lower()
+
+        if ext not in SUPPORTED_EXTENSIONS:
+            errors.append({
+                "filename": filename,
+                "error": f"Unsupported file type: {ext}. Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}",
+            })
+            continue
+
+        try:
+            content_bytes = await file.read()
+            parser = PARSERS[ext]
+            title, body = parser(content_bytes, filename)
+
+            if not body.strip():
+                errors.append({"filename": filename, "error": "Empty content after parsing"})
+                continue
+
+            file_category = category or detect_category_from_filename(filename)
+
+            async with engine.begin() as conn:
+                result = await conn.execute(
+                    text("""
+                        INSERT INTO knowledge_articles (title, category, content, embedding_status)
+                        VALUES (:title, :category, :content, 'pending')
+                        RETURNING id, title, category, active, embedding_status, created_at
+                    """),
+                    {"title": title, "category": file_category, "content": body},
+                )
+                row = result.first()
+                if row is None:
+                    msg = "Expected row from INSERT RETURNING"
+                    raise RuntimeError(msg)
+                article = dict(row._mapping)
+
+            _dispatch_embedding(str(article["id"]))
+            imported.append(article)
+            logger.info("Imported article from %s: %s (%s)", filename, title, article["id"])
+
+        except Exception as exc:
+            logger.exception("Failed to import %s", filename)
+            errors.append({"filename": filename, "error": str(exc)})
+
+    return {
+        "imported": len(imported),
+        "errors": len(errors),
+        "articles": imported,
+        "error_details": errors,
+    }
+
+
+@router.post("/articles/{article_id}/reindex")
+async def reindex_article(article_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+    """Trigger embedding regeneration for a specific article."""
+    engine = await _get_engine()
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                UPDATE knowledge_articles
+                SET embedding_status = 'pending'
+                WHERE id = :id
+                RETURNING id, title
+            """),
+            {"id": str(article_id)},
+        )
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Article not found")
+
+    _dispatch_embedding(str(article_id))
+    return {"message": f"Reindex queued for '{row.title}'", "article_id": str(article_id)}
+
+
+@router.post("/reindex-all")
+async def reindex_all(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+    """Trigger embedding regeneration for all active articles."""
+    try:
+        from src.tasks.embedding_tasks import reindex_all_articles
+
+        reindex_all_articles.delay()
+    except Exception as exc:
+        logger.exception("Could not dispatch reindex-all task")
+        raise HTTPException(status_code=500, detail="Failed to dispatch reindex task") from exc
+
+    return {"message": "Reindex-all task dispatched"}
+
+
 @router.get("/articles/{article_id}")
 async def get_article(article_id: UUID, _: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
     """Get a specific article with full content."""
@@ -108,7 +233,7 @@ async def get_article(article_id: UUID, _: dict[str, Any] = _analyst_dep) -> dic
     async with engine.begin() as conn:
         result = await conn.execute(
             text("""
-                SELECT id, title, category, content, active, created_at, updated_at
+                SELECT id, title, category, content, active, embedding_status, created_at, updated_at
                 FROM knowledge_articles
                 WHERE id = :id
             """),
@@ -124,14 +249,17 @@ async def get_article(article_id: UUID, _: dict[str, Any] = _analyst_dep) -> dic
 @router.post("/articles")
 async def create_article(request: ArticleCreateRequest, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Create a new knowledge article."""
+    if not is_valid_category(request.category):
+        raise HTTPException(status_code=400, detail=f"Invalid category: {request.category}")
+
     engine = await _get_engine()
 
     async with engine.begin() as conn:
         result = await conn.execute(
             text("""
-                INSERT INTO knowledge_articles (title, category, content)
-                VALUES (:title, :category, :content)
-                RETURNING id, title, category, active, created_at
+                INSERT INTO knowledge_articles (title, category, content, embedding_status)
+                VALUES (:title, :category, :content, 'pending')
+                RETURNING id, title, category, active, embedding_status, created_at
             """),
             {
                 "title": request.title,
@@ -145,13 +273,17 @@ async def create_article(request: ArticleCreateRequest, _: dict[str, Any] = _adm
             raise RuntimeError(msg)
         article = dict(row._mapping)
 
+    _dispatch_embedding(str(article["id"]))
     logger.info("Knowledge article created: %s (%s)", article["title"], article["id"])
-    return {"article": article, "message": "Article created. Run embedding generation to index."}
+    return {"article": article, "message": "Article created. Embedding generation queued."}
 
 
 @router.patch("/articles/{article_id}")
 async def update_article(article_id: UUID, request: ArticleUpdateRequest, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Update a knowledge article."""
+    if request.category is not None and not is_valid_category(request.category):
+        raise HTTPException(status_code=400, detail=f"Invalid category: {request.category}")
+
     engine = await _get_engine()
 
     updates: list[str] = []
@@ -173,6 +305,10 @@ async def update_article(article_id: UUID, request: ArticleUpdateRequest, _: dic
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
 
+    needs_reindex = request.content is not None or request.title is not None
+    if needs_reindex:
+        updates.append("embedding_status = 'pending'")
+
     updates.append("updated_at = now()")
     set_clause = ", ".join(updates)
 
@@ -182,7 +318,7 @@ async def update_article(article_id: UUID, request: ArticleUpdateRequest, _: dic
                 UPDATE knowledge_articles
                 SET {set_clause}
                 WHERE id = :id
-                RETURNING id, title, category, active, updated_at
+                RETURNING id, title, category, active, embedding_status, updated_at
             """),
             params,
         )
@@ -190,10 +326,13 @@ async def update_article(article_id: UUID, request: ArticleUpdateRequest, _: dic
         if not row:
             raise HTTPException(status_code=404, detail="Article not found")
 
-    needs_reindex = request.content is not None or request.title is not None
-    msg = "Article updated. Embeddings need regeneration." if needs_reindex else "Article updated."
+    article = dict(row._mapping)
 
-    return {"article": dict(row._mapping), "message": msg}
+    if needs_reindex:
+        _dispatch_embedding(str(article_id))
+
+    msg = "Article updated. Embedding regeneration queued." if needs_reindex else "Article updated."
+    return {"article": article, "message": msg}
 
 
 @router.delete("/articles/{article_id}")

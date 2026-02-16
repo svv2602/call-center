@@ -4,65 +4,98 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Call Center AI — Admin</title>
+    <script>
+        // Prevent FOUC: apply dark class before first paint
+        (function() {
+            var t = localStorage.getItem('admin_theme');
+            if (t === 'dark' || (!t && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+                document.documentElement.classList.add('dark');
+            }
+        })();
+    </script>
 </head>
-<body>
-    <div class="toast-container" id="toastContainer"></div>
+<body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-50 font-sans antialiased">
+    <!-- Toast container -->
+    <div class="fixed top-4 right-4 z-[200] flex flex-col gap-2" id="toastContainer"></div>
 
     <!-- Login -->
-    <div class="login-container" id="loginContainer">
-        <div class="login-form">
-            <h1>Call Center AI</h1>
-            <div class="error" id="loginError">Invalid credentials</div>
-            <input type="text" id="loginUsername" placeholder="Username">
-            <input type="password" id="loginPassword" placeholder="Password">
-            <button onclick="window._app.login()">Login</button>
+    <div class="flex justify-center items-center min-h-screen" id="loginContainer">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 p-8 rounded-xl shadow-lg w-80">
+            <h1 class="text-lg font-semibold text-center mb-6 text-neutral-900 dark:text-neutral-50">Call Center AI</h1>
+            <div class="text-red-500 text-sm mb-2 hidden" id="loginError">Invalid credentials</div>
+            <input type="text" id="loginUsername" placeholder="Username"
+                class="w-full px-3 py-2 mb-3 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <input type="password" id="loginPassword" placeholder="Password"
+                class="w-full px-3 py-2 mb-4 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            <button onclick="window._app.login()"
+                class="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer focus:outline-none focus:ring-2 focus:ring-blue-500">Login</button>
         </div>
     </div>
 
     <!-- App -->
-    <div class="app" id="app">
-        <button class="hamburger" id="hamburgerBtn" onclick="window._app.toggleSidebar()">&#9776;</button>
-        <nav class="sidebar" id="sidebar">
-            <h2>Call Center AI</h2>
-            <a href="#" onclick="window._app.showPage('dashboard')" class="active" data-page="dashboard">Dashboard</a>
-            <a href="#" onclick="window._app.showPage('calls')" data-page="calls">Call Journal</a>
-            <a href="#" onclick="window._app.showPage('prompts')" data-page="prompts">Prompts</a>
-            <a href="#" onclick="window._app.showPage('knowledge')" data-page="knowledge">Knowledge Base</a>
-            <a href="#" onclick="window._app.showPage('operators')" data-page="operators">Operators</a>
-            <a href="#" onclick="window._app.showPage('settings')" data-page="settings">System</a>
-            <a href="#" onclick="window._app.showPage('users')" data-page="users" class="admin-only">Users</a>
-            <a href="#" onclick="window._app.showPage('audit')" data-page="audit" class="admin-only">Audit Log</a>
-            <div class="ws-status" id="wsStatus">
-                <span class="ws-dot disconnected" id="wsDot"></span>
-                <span id="wsLabel">Offline</span>
+    <div class="hidden" id="app">
+        <!-- Hamburger (mobile) -->
+        <button class="hidden max-md:block fixed top-3 left-3 z-50 bg-zinc-900 text-white border-none rounded-md px-2.5 py-1.5 cursor-pointer text-xl"
+            id="hamburgerBtn" onclick="window._app.toggleSidebar()">&#9776;</button>
+
+        <!-- Sidebar -->
+        <nav class="sidebar fixed left-0 top-0 bottom-0 w-56 max-md:w-64 bg-zinc-950 text-neutral-300 flex flex-col z-40" id="sidebar">
+            <div class="flex items-center px-4 py-4 border-b border-zinc-800">
+                <h2 class="text-sm font-semibold text-white tracking-wide">Call Center AI</h2>
             </div>
-            <span class="logout" onclick="window._app.logout()">Logout</span>
+            <div class="flex-1 py-2 overflow-y-auto">
+                <a href="#" onclick="window._app.showPage('dashboard')" class="active flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="dashboard">Dashboard</a>
+                <a href="#" onclick="window._app.showPage('calls')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="calls">Call Journal</a>
+                <a href="#" onclick="window._app.showPage('prompts')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="prompts">Prompts</a>
+                <a href="#" onclick="window._app.showPage('knowledge')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="knowledge">Knowledge Base</a>
+                <a href="#" onclick="window._app.showPage('operators')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="operators">Operators</a>
+                <a href="#" onclick="window._app.showPage('settings')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="settings">System</a>
+                <a href="#" onclick="window._app.showPage('users')" class="admin-only flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="users">Users</a>
+                <a href="#" onclick="window._app.showPage('audit')" class="admin-only flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="audit">Audit Log</a>
+            </div>
+            <div class="border-t border-zinc-800 px-4 py-3 space-y-2">
+                <button onclick="window._app.toggleTheme()" id="themeToggle"
+                    class="flex items-center gap-2 w-full px-2 py-1.5 text-xs text-neutral-400 hover:text-white hover:bg-zinc-800 rounded transition-colors cursor-pointer">
+                    <span id="themeIcon"></span>
+                    <span id="themeLabel">Dark</span>
+                </button>
+                <div class="flex items-center gap-2 text-xs text-neutral-500" id="wsStatus">
+                    <span class="w-2 h-2 rounded-full bg-red-500" id="wsDot"></span>
+                    <span id="wsLabel">Offline</span>
+                </div>
+            </div>
+            <div class="border-t border-zinc-800 px-4 py-3">
+                <span class="text-xs text-red-400 cursor-pointer hover:text-red-300 transition-colors" onclick="window._app.logout()">Logout</span>
+            </div>
         </nav>
 
-        <div class="main">
+        <!-- Main content -->
+        <div class="ml-56 max-md:ml-0 p-6 max-md:p-4 min-h-screen">
             <!-- Dashboard -->
             <div id="page-dashboard">
-                <div class="breadcrumbs"><a href="#" onclick="window._app.showPage('dashboard')">Home</a> / Dashboard</div>
-                <h1>Dashboard</h1>
-                <div class="stats-grid" id="dashboardStats"><div class="loading-overlay"><div class="spinner"></div></div></div>
-                <div style="margin-bottom:1rem">
-                    <button class="btn" style="background:#059669;color:#fff" onclick="window._pages.dashboard.exportStatsCSV()">Export Stats CSV</button>
-                    <button class="btn" style="background:#7c3aed;color:#fff;margin-left:.5rem" onclick="window._pages.dashboard.downloadPdfReport()">Download PDF</button>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / Dashboard</div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">Dashboard</h1>
+                <div class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4 mb-6 max-md:grid-cols-2 max-[480px]:grid-cols-1" id="dashboardStats">
+                    <div class="flex justify-center py-8"><div class="spinner"></div></div>
                 </div>
-                <div class="card">
-                    <h3>Grafana Real-time</h3>
-                    <iframe class="grafana-frame" id="grafanaFrame" src=""></iframe>
+                <div class="flex gap-2 mb-4 flex-wrap">
+                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-emerald-600 text-white hover:bg-emerald-700" onclick="window._pages.dashboard.exportStatsCSV()">Export Stats CSV</button>
+                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-violet-600 text-white hover:bg-violet-700" onclick="window._pages.dashboard.downloadPdfReport()">Download PDF</button>
+                </div>
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
+                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3">Grafana Real-time</h3>
+                    <iframe class="w-full h-[600px] max-md:h-[350px] border-none rounded-lg" id="grafanaFrame" src=""></iframe>
                 </div>
             </div>
 
             <!-- Calls -->
             <div id="page-calls" style="display:none">
-                <div class="breadcrumbs"><a href="#" onclick="window._app.showPage('dashboard')">Home</a> / Call Journal</div>
-                <h1>Call Journal</h1>
-                <div class="filters">
-                    <input type="date" id="filterDateFrom" placeholder="From">
-                    <input type="date" id="filterDateTo" placeholder="To">
-                    <select id="filterScenario">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / Call Journal</div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">Call Journal</h1>
+                <div class="flex flex-wrap items-center gap-2 mb-4">
+                    <input type="date" id="filterDateFrom" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                    <input type="date" id="filterDateTo" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                    <select id="filterScenario" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                         <option value="">All scenarios</option>
                         <option value="tire_search">Tire search</option>
                         <option value="availability">Availability</option>
@@ -70,265 +103,317 @@
                         <option value="fitting">Fitting</option>
                         <option value="consultation">Consultation</option>
                     </select>
-                    <select id="filterTransferred">
+                    <select id="filterTransferred" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                         <option value="">All</option>
                         <option value="true">Transferred</option>
                         <option value="false">Resolved by bot</option>
                     </select>
-                    <input type="text" id="filterSearch" placeholder="Search transcription...">
-                    <input type="number" id="filterQualityBelow" placeholder="Quality below" step="0.1" min="0" max="1">
-                    <button onclick="window._pages.calls.loadCalls()">Filter</button>
-                    <button class="btn" style="background:#059669;color:#fff" onclick="window._pages.calls.exportCallsCSV()">Export CSV</button>
+                    <input type="text" id="filterSearch" placeholder="Search transcription..."
+                        class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                    <input type="number" id="filterQualityBelow" placeholder="Quality below" step="0.1" min="0" max="1"
+                        class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                    <button onclick="window._pages.calls.loadCalls()"
+                        class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full">Filter</button>
+                    <button onclick="window._pages.calls.exportCallsCSV()"
+                        class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-emerald-600 text-white hover:bg-emerald-700 max-md:w-full">Export CSV</button>
                 </div>
-                <div class="card">
-                    <div id="callsLoading" class="loading-overlay" style="display:none"><div class="spinner"></div></div>
-                    <table id="callsTable">
-                        <thead>
-                            <tr>
-                                <th>Date</th>
-                                <th>Caller</th>
-                                <th>Scenario</th>
-                                <th>Duration</th>
-                                <th>Quality</th>
-                                <th>Cost</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
-                    <div class="pagination" id="callsPagination"></div>
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 relative">
+                    <div id="callsLoading" class="flex justify-center py-8" style="display:none"><div class="spinner"></div></div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm" id="callsTable">
+                            <thead>
+                                <tr>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700">Date</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700">Caller</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700">Scenario</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700">Duration</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700">Quality</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700">Cost</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
+                    <div class="pagination flex justify-center gap-1 mt-4" id="callsPagination"></div>
                 </div>
             </div>
 
             <!-- Prompts -->
             <div id="page-prompts" style="display:none">
-                <div class="breadcrumbs"><a href="#" onclick="window._app.showPage('dashboard')">Home</a> / Prompts</div>
-                <h1>Prompt Management</h1>
-                <div class="tab-bar">
-                    <button class="active" onclick="window._pages.prompts.showPromptTab('versions', this)">Versions</button>
-                    <button onclick="window._pages.prompts.showPromptTab('abtests', this)">A/B Tests</button>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / Prompts</div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">Prompt Management</h1>
+                <div class="tab-bar flex border-b border-neutral-200 dark:border-neutral-700 mb-4">
+                    <button class="active px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" onclick="window._pages.prompts.showPromptTab('versions', this)">Versions</button>
+                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" onclick="window._pages.prompts.showPromptTab('abtests', this)">A/B Tests</button>
                 </div>
-                <div id="promptVersions" class="card"></div>
-                <div id="promptABTests" class="card" style="display:none"></div>
+                <div id="promptVersions" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
+                <div id="promptABTests" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" style="display:none"></div>
             </div>
 
             <!-- Knowledge -->
             <div id="page-knowledge" style="display:none">
-                <div class="breadcrumbs"><a href="#" onclick="window._app.showPage('dashboard')">Home</a> / Knowledge Base</div>
-                <h1>Knowledge Base</h1>
-                <div class="filters">
-                    <select id="kbCategory">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / Knowledge Base</div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">Knowledge Base</h1>
+                <div class="flex flex-wrap items-center gap-2 mb-4">
+                    <select id="kbCategory" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                         <option value="">All categories</option>
-                        <option value="brands">Brands</option>
-                        <option value="guides">Guides</option>
-                        <option value="faq">FAQ</option>
-                        <option value="comparisons">Comparisons</option>
                     </select>
-                    <input type="text" id="kbSearch" placeholder="Search...">
-                    <button onclick="window._pages.knowledge.loadArticles()">Filter</button>
-                    <button class="btn btn-primary" onclick="window._pages.knowledge.showCreateArticle()">+ New Article</button>
+                    <input type="text" id="kbSearch" placeholder="Search..."
+                        class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                    <button onclick="window._pages.knowledge.loadArticles()"
+                        class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full">Filter</button>
+                    <button onclick="window._pages.knowledge.showCreateArticle()"
+                        class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full">+ New Article</button>
+                    <button onclick="window._pages.knowledge.reindexAll()"
+                        class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-emerald-600 text-white hover:bg-emerald-700 max-md:w-full">Reindex All</button>
+                    <button onclick="window._pages.knowledge.showImportModal()"
+                        class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-violet-600 text-white hover:bg-violet-700 max-md:w-full">Import Documents</button>
                 </div>
-                <div class="card" id="articlesContainer"></div>
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="articlesContainer"></div>
             </div>
 
             <!-- Operators -->
             <div id="page-operators" style="display:none">
-                <div class="breadcrumbs"><a href="#" onclick="window._app.showPage('dashboard')">Home</a> / Operators</div>
-                <h1>Operators</h1>
-                <div class="stats-grid" id="operatorQueueStats"></div>
-                <div class="filters">
-                    <button class="btn btn-primary" onclick="window._pages.operators.showCreateOperator()">+ New Operator</button>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / Operators</div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">Operators</h1>
+                <div class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4 mb-6 max-md:grid-cols-2 max-[480px]:grid-cols-1" id="operatorQueueStats"></div>
+                <div class="flex flex-wrap items-center gap-2 mb-4">
+                    <button onclick="window._pages.operators.showCreateOperator()"
+                        class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full">+ New Operator</button>
                 </div>
-                <div class="card">
-                    <div id="operatorsLoading" class="loading-overlay" style="display:none"><div class="spinner"></div></div>
-                    <table id="operatorsTable">
-                        <thead>
-                            <tr>
-                                <th>Name</th>
-                                <th>Extension</th>
-                                <th>Status</th>
-                                <th>Skills</th>
-                                <th>Shift</th>
-                                <th>Active</th>
-                                <th>Actions</th>
-                            </tr>
-                        </thead>
-                        <tbody></tbody>
-                    </table>
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 relative">
+                    <div id="operatorsLoading" class="flex justify-center py-8" style="display:none"><div class="spinner"></div></div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm" id="operatorsTable">
+                            <thead>
+                                <tr>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700">Name</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700">Extension</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700">Status</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700">Skills</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700">Shift</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700">Active</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody></tbody>
+                        </table>
+                    </div>
                 </div>
             </div>
 
             <!-- System -->
             <div id="page-settings" style="display:none">
-                <div class="breadcrumbs"><a href="#" onclick="window._app.showPage('dashboard')">Home</a> / System</div>
-                <h1>System Status</h1>
-                <div class="card">
-                    <h3>Health Check</h3>
-                    <div id="systemInfo"><div class="loading-overlay"><div class="spinner"></div></div></div>
-                    <button class="btn btn-primary" onclick="window._pages.settings.loadSettings()" style="margin-top:.8rem">Refresh</button>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / System</div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">System Status</h1>
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
+                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3">Health Check</h3>
+                    <div id="systemInfo"><div class="flex justify-center py-8"><div class="spinner"></div></div></div>
+                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.settings.loadSettings()">Refresh</button>
                 </div>
-                <div class="card admin-only">
-                    <h3>Extended Status</h3>
-                    <div id="extendedStatus"><div class="empty-state">Click to load</div></div>
-                    <button class="btn btn-primary" onclick="window._pages.settings.loadSystemStatus()" style="margin-top:.8rem">Load Status</button>
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
+                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3">Extended Status</h3>
+                    <div id="extendedStatus"><div class="text-center py-8 text-neutral-400 dark:text-neutral-500 text-sm">Click to load</div></div>
+                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.settings.loadSystemStatus()">Load Status</button>
                 </div>
-                <div class="card admin-only">
-                    <h3>Configuration</h3>
-                    <p style="margin:.5rem 0; font-size:.85rem">Reload safe config parameters (quality, feature flags, logging) without restart.</p>
-                    <button class="btn btn-primary" onclick="window._pages.settings.reloadConfig()">Reload Config</button>
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
+                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3">Configuration</h3>
+                    <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3">Reload safe config parameters (quality, feature flags, logging) without restart.</p>
+                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.settings.reloadConfig()">Reload Config</button>
                 </div>
-                <div class="card">
-                    <h3>External Tools</h3>
-                    <table>
-                        <tr><td>Grafana</td><td><a href="http://localhost:3000" target="_blank">Open Grafana</a></td></tr>
-                        <tr><td>Prometheus</td><td><a href="http://localhost:9090" target="_blank">Open Prometheus</a></td></tr>
-                        <tr><td>Flower (Celery)</td><td><a href="http://localhost:5555" target="_blank">Open Flower</a></td></tr>
-                    </table>
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
+                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3">External Tools</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">Grafana</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800"><a href="http://localhost:3000" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">Open Grafana</a></td></tr>
+                            <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">Prometheus</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800"><a href="http://localhost:9090" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">Open Prometheus</a></td></tr>
+                            <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">Flower (Celery)</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800"><a href="http://localhost:5555" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline">Open Flower</a></td></tr>
+                        </table>
+                    </div>
                 </div>
-                <div class="card">
-                    <h3>Application Info</h3>
-                    <table>
-                        <tr><td>Version</td><td>v0.1.0</td></tr>
-                    </table>
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
+                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3">Application Info</h3>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm">
+                            <tr><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">Version</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">v0.1.0</td></tr>
+                        </table>
+                    </div>
                 </div>
             </div>
 
             <!-- Users -->
             <div id="page-users" style="display:none">
-                <div class="breadcrumbs"><a href="#" onclick="window._app.showPage('dashboard')">Home</a> / Users</div>
-                <h1>User Management</h1>
-                <div class="filters">
-                    <button class="btn btn-primary" onclick="window._pages.users.showCreateUser()">+ New User</button>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / Users</div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">User Management</h1>
+                <div class="flex flex-wrap items-center gap-2 mb-4">
+                    <button onclick="window._pages.users.showCreateUser()"
+                        class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full">+ New User</button>
                 </div>
-                <div class="card" id="usersContainer"><div class="loading-overlay"><div class="spinner"></div></div></div>
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="usersContainer">
+                    <div class="flex justify-center py-8"><div class="spinner"></div></div>
+                </div>
             </div>
 
             <!-- Audit Log -->
             <div id="page-audit" style="display:none">
-                <div class="breadcrumbs"><a href="#" onclick="window._app.showPage('dashboard')">Home</a> / Audit Log</div>
-                <h1>Audit Log</h1>
-                <div class="filters">
-                    <input type="date" id="auditDateFrom" placeholder="From">
-                    <input type="date" id="auditDateTo" placeholder="To">
-                    <select id="auditAction">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / Audit Log</div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">Audit Log</h1>
+                <div class="flex flex-wrap items-center gap-2 mb-4">
+                    <input type="date" id="auditDateFrom" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                    <input type="date" id="auditDateTo" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                    <select id="auditAction" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                         <option value="">All actions</option>
                         <option value="POST">POST</option>
                         <option value="PATCH">PATCH</option>
                         <option value="DELETE">DELETE</option>
                     </select>
-                    <button onclick="window._pages.audit.loadAuditLog()">Filter</button>
+                    <button onclick="window._pages.audit.loadAuditLog()"
+                        class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full">Filter</button>
                 </div>
-                <div class="card" id="auditContainer"><div class="loading-overlay"><div class="spinner"></div></div></div>
-                <div class="pagination" id="auditPagination"></div>
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="auditContainer">
+                    <div class="flex justify-center py-8"><div class="spinner"></div></div>
+                </div>
+                <div class="pagination flex justify-center gap-1 mt-4" id="auditPagination"></div>
             </div>
         </div>
     </div>
 
     <!-- Create User Modal -->
-    <div class="modal-overlay" id="createUserModal">
-        <div class="modal">
-            <span class="close" onclick="window._app.closeModal('createUserModal')">&times;</span>
-            <h2>Create New User</h2>
-            <div class="form-group">
-                <label>Username</label>
-                <input type="text" id="newUsername" placeholder="username">
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="createUserModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('createUserModal')">&times;</span>
+            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4">Create New User</h2>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Username</label>
+                <input type="text" id="newUsername" placeholder="username"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
-            <div class="form-group">
-                <label>Password</label>
-                <input type="password" id="newPassword" placeholder="password">
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Password</label>
+                <input type="password" id="newPassword" placeholder="password"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
-            <div class="form-group">
-                <label>Role</label>
-                <select id="newRole">
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Role</label>
+                <select id="newRole"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <option value="operator">Operator</option>
                     <option value="analyst">Analyst</option>
                     <option value="admin">Admin</option>
                 </select>
             </div>
-            <button class="btn btn-primary" onclick="window._pages.users.createUser()">Create</button>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.users.createUser()">Create</button>
         </div>
     </div>
 
     <!-- Call Detail Modal -->
-    <div class="modal-overlay" id="callModal">
-        <div class="modal">
-            <span class="close" onclick="window._pages.calls.closeCallModal()">&times;</span>
-            <h2>Call Details</h2>
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="callModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._pages.calls.closeCallModal()">&times;</span>
+            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4">Call Details</h2>
             <div id="callDetailContent"></div>
         </div>
     </div>
 
     <!-- Create Prompt Modal -->
-    <div class="modal-overlay" id="createPromptModal">
-        <div class="modal">
-            <span class="close" onclick="window._app.closeModal('createPromptModal')">&times;</span>
-            <h2>Create New Prompt Version</h2>
-            <div class="form-group">
-                <label>Name</label>
-                <input type="text" id="promptName" placeholder="e.g. v2.0-improved-search">
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="createPromptModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('createPromptModal')">&times;</span>
+            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4">Create New Prompt Version</h2>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Name</label>
+                <input type="text" id="promptName" placeholder="e.g. v2.0-improved-search"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
-            <div class="form-group">
-                <label>System Prompt</label>
-                <textarea id="promptSystemPrompt" placeholder="Enter system prompt text..."></textarea>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">System Prompt</label>
+                <textarea id="promptSystemPrompt" placeholder="Enter system prompt text..."
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-30 font-mono resize-y"></textarea>
             </div>
-            <button class="btn btn-primary" onclick="window._pages.prompts.createPrompt()">Create</button>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.prompts.createPrompt()">Create</button>
         </div>
     </div>
 
     <!-- Create/Edit Article Modal -->
-    <div class="modal-overlay" id="createArticleModal">
-        <div class="modal">
-            <span class="close" onclick="window._app.closeModal('createArticleModal')">&times;</span>
-            <h2 id="articleModalTitle">New Article</h2>
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="createArticleModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('createArticleModal')">&times;</span>
+            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" id="articleModalTitle">New Article</h2>
             <input type="hidden" id="editArticleId">
-            <div class="form-group">
-                <label>Title</label>
-                <input type="text" id="articleTitle" placeholder="Article title">
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Title</label>
+                <input type="text" id="articleTitle" placeholder="Article title"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
-            <div class="form-group">
-                <label>Category</label>
-                <select id="articleCategory">
-                    <option value="brands">Brands</option>
-                    <option value="guides">Guides</option>
-                    <option value="faq">FAQ</option>
-                    <option value="comparisons">Comparisons</option>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Category</label>
+                <select id="articleCategory"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
                 </select>
             </div>
-            <div class="form-group">
-                <label>Content (Markdown)</label>
-                <textarea id="articleContent" placeholder="Article content in Markdown..."></textarea>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Content (Markdown)</label>
+                <textarea id="articleContent" placeholder="Article content in Markdown..."
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-30 font-mono resize-y"></textarea>
             </div>
-            <button class="btn btn-primary" onclick="window._pages.knowledge.saveArticle()">Save</button>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.knowledge.saveArticle()">Save</button>
         </div>
     </div>
 
     <!-- Create/Edit Operator Modal -->
-    <div class="modal-overlay" id="operatorModal">
-        <div class="modal">
-            <span class="close" onclick="window._app.closeModal('operatorModal')">&times;</span>
-            <h2 id="operatorModalTitle">New Operator</h2>
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="operatorModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('operatorModal')">&times;</span>
+            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" id="operatorModalTitle">New Operator</h2>
             <input type="hidden" id="editOperatorId">
-            <div class="form-group">
-                <label>Name</label>
-                <input type="text" id="operatorName" placeholder="Full name">
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Name</label>
+                <input type="text" id="operatorName" placeholder="Full name"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
-            <div class="form-group">
-                <label>Extension (SIP)</label>
-                <input type="text" id="operatorExtension" placeholder="e.g. 101">
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Extension (SIP)</label>
+                <input type="text" id="operatorExtension" placeholder="e.g. 101"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
-            <div class="form-group">
-                <label>Skills (comma-separated)</label>
-                <input type="text" id="operatorSkills" placeholder="tires, orders, fitting">
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Skills (comma-separated)</label>
+                <input type="text" id="operatorSkills" placeholder="tires, orders, fitting"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
-            <div class="form-group">
-                <label>Shift Start</label>
-                <input type="time" id="operatorShiftStart" value="09:00">
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Shift Start</label>
+                <input type="time" id="operatorShiftStart" value="09:00"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
-            <div class="form-group">
-                <label>Shift End</label>
-                <input type="time" id="operatorShiftEnd" value="18:00">
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Shift End</label>
+                <input type="time" id="operatorShiftEnd" value="18:00"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
-            <button class="btn btn-primary" onclick="window._pages.operators.saveOperator()">Save</button>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.operators.saveOperator()">Save</button>
+        </div>
+    </div>
+
+    <!-- Import Documents Modal -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="importDocumentsModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('importDocumentsModal')">&times;</span>
+            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4">Import Documents</h2>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Files (MD, PDF, DOCX)</label>
+                <input type="file" id="importFiles" multiple accept=".md,.markdown,.pdf,.docx"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Category (optional, auto-detect if empty)</label>
+                <select id="importCategory"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">Auto-detect from filename</option>
+                </select>
+            </div>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-violet-600 text-white hover:bg-violet-700" onclick="window._pages.knowledge.importDocuments()">Import</button>
         </div>
     </div>
 
