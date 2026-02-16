@@ -98,6 +98,23 @@ class TestOneCClientRequests:
             assert result["data"][0]["sku"] == "00000000023"
 
 
+    @pytest.mark.asyncio
+    async def test_get_novapost_cities(self, onec_client: OneCClient) -> None:
+        mock_response = {"success": True, "data": [{"Ref": "abc", "Description": "Київ"}]}
+        with patch.object(onec_client, "_get", new_callable=AsyncMock, return_value=mock_response) as mock_get:
+            result = await onec_client.get_novapost_cities()
+            mock_get.assert_called_once_with("/Trade/hs/site/novapost/city")
+            assert result["data"][0]["Description"] == "Київ"
+
+    @pytest.mark.asyncio
+    async def test_get_novapost_branches(self, onec_client: OneCClient) -> None:
+        mock_response = {"success": True, "data": [{"Ref": "xyz", "Description": "Відділення №1"}]}
+        with patch.object(onec_client, "_get", new_callable=AsyncMock, return_value=mock_response) as mock_get:
+            result = await onec_client.get_novapost_branches()
+            mock_get.assert_called_once_with("/Trade/hs/site/novapost/branch")
+            assert result["data"][0]["Ref"] == "xyz"
+
+
 class TestOneCAPIError:
     def test_error_message(self) -> None:
         err = OneCAPIError(401, "Unauthorized")

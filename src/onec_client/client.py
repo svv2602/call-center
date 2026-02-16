@@ -113,6 +113,16 @@ class OneCClient:
         """
         return await self._get(f"/Trade/hs/site/get_stock/{network}")
 
+    # --- Nova Poshta reference data ---
+
+    async def get_novapost_cities(self) -> dict[str, Any]:
+        """GET /Trade/hs/site/novapost/city"""
+        return await self._get("/Trade/hs/site/novapost/city")
+
+    async def get_novapost_branches(self) -> dict[str, Any]:
+        """GET /Trade/hs/site/novapost/branch"""
+        return await self._get("/Trade/hs/site/novapost/branch")
+
     # --- HTTP helpers ---
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:

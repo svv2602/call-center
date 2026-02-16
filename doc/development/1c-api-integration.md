@@ -546,6 +546,106 @@ POST /Trade/hs/site/zakaz
 
 ---
 
+### 5. Справочники Новой Почты
+
+1С API предоставляет справочники Новой Почты через два эндпоинта. Оба возвращают полные списки (без фильтрации на стороне сервера). Данные синхронизируются в PostgreSQL при старте и периодически.
+
+#### 5.1 Города / населённые пункты
+
+```
+GET /Trade/hs/site/novapost/city
+```
+
+**Пример ответа:**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "Ref": "8d5a980d-391c-11dd-90d9-001a92567626",
+      "Description": "Київ",
+      "DescriptionRu": "Киев",
+      "CityID": "1",
+      "Area": "dcaad4db-4b33-11e4-ab6d-005056801329",
+      "SettlementTypeDescription": "місто",
+      "IsBranch": "0"
+    }
+  ]
+}
+```
+
+**Маппинг полей → `novapost_cities`:**
+
+| Поле 1С | Тип | Колонка БД | Описание |
+|---------|-----|------------|----------|
+| `Ref` | string | `ref` (PK) | GUID населённого пункта |
+| `Description` | string | `description` | Название (укр) |
+| `DescriptionRu` | string | `description_ru` | Название (рус) |
+| `CityID` | string | `city_id` | Числовой ID города |
+| `Area` | string | `area_ref` | GUID области |
+| `SettlementTypeDescription` | string | `settlement_type` | Тип (місто, селище, село) |
+| `IsBranch` | string→bool | `is_branch` | Наличие отделения НП |
+
+**Использование:** `city_id` в `POST /zakaz` при оформлении заказа с доставкой Новой Почтой.
+
+#### 5.2 Отделения Новой Почты
+
+```
+GET /Trade/hs/site/novapost/branch
+```
+
+**Пример ответа:**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "Ref": "1ec09d88-e1c2-11e3-8c4a-0050568002cf",
+      "Description": "Відділення №1 (до 30 кг): вул. Пирогівський шлях, 135",
+      "DescriptionRu": "Отделение №1 (до 30 кг): ул. Пироговский путь, 135",
+      "ShortAddress": "Київ, вул. Пирогівський шлях, 135",
+      "CityRef": "8d5a980d-391c-11dd-90d9-001a92567626",
+      "CityDescription": "Київ",
+      "Number": "1",
+      "Phone": "(044) 364-12-81",
+      "CategoryOfWarehouse": "Branch",
+      "WarehouseStatus": "Working",
+      "Latitude": "50.4016",
+      "Longitude": "30.4525",
+      "PostalCodeUA": "03045",
+      "PlaceMaxWeightAllowed": "30"
+    }
+  ]
+}
+```
+
+**Маппинг полей → `novapost_branches`:**
+
+| Поле 1С | Тип | Колонка БД | Описание |
+|---------|-----|------------|----------|
+| `Ref` | string | `ref` (PK) | GUID отделения |
+| `Description` | string | `description` | Название (укр) |
+| `DescriptionRu` | string | `description_ru` | Название (рус) |
+| `ShortAddress` | string | `short_address` | Короткий адрес |
+| `CityRef` | string | `city_ref` (FK) | GUID города → `novapost_cities.ref` |
+| `CityDescription` | string | `city_description` | Название города |
+| `Number` | string | `number` | Номер отделения |
+| `Phone` | string | `phone` | Телефон |
+| `CategoryOfWarehouse` | string | `category` | Категория (Branch, Postomat, ...) |
+| `WarehouseStatus` | string | `warehouse_status` | Статус (Working, Closed) |
+| `Latitude` | string | `latitude` | Широта |
+| `Longitude` | string | `longitude` | Долгота |
+| `PostalCodeUA` | string | `postal_code` | Почтовый индекс |
+| `PlaceMaxWeightAllowed` | string→int | `max_weight` | Макс. вес отправления (кг) |
+
+**Использование:** Поле `branch` в `POST /zakaz` при доставке Новой Почтой. При синхронизации сохраняются только отделения со статусом `Working`.
+
+> **Стратегия синхронизации:** Оба справочника загружаются целиком при старте (`full_sync()`) и обновляются при каждом `incremental_sync()`. UPSERT по `Ref`. Запросы к данным выполняются локально по PostgreSQL.
+
+---
+
 ## Открытые вопросы (TODO)
 
 | # | Вопрос | Статус |
@@ -554,7 +654,7 @@ POST /Trade/hs/site/zakaz
 | ~~2~~ | ~~Коды `payment`~~ | Решён — 7 кодов, для агента: 1 (наличные), 2 (безнал) |
 | ~~3~~ | ~~Формат `sum` в заказе~~ | Решён — гривны, целое число (60364 грн за 4 шт) |
 | ~~4~~ | ~~Значения `delivery`~~ | Решён — "Точки выдачи", "NovaPost" |
-| 5 | **Справочник `city_id`** — откуда брать GUID городов? | Ждёт уточнения |
+| ~~5~~ | ~~Справочник `city_id`~~ | Решён — `GET /Trade/hs/site/novapost/city`, синхр. в `novapost_cities` |
 | 6 | **Справочник `point`** — откуда получать список точек выдачи? | Ждёт уточнения |
 | 7 | **Статус заказа** — эндпоинт будет добавлен позже со стороны 1С | Ждём 1С |
 | 8 | **`order_channel`** — какой код использовать для AI-агента? (предлагаем `"AI_AGENT"`) | Ждёт согласования |

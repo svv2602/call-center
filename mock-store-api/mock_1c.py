@@ -168,6 +168,88 @@ STOCK = {
     ],
 }
 
+# In-memory Nova Poshta reference data
+NOVAPOST_CITIES = [
+    {
+        "Ref": "8d5a980d-391c-11dd-90d9-001a92567626",
+        "Description": "Київ",
+        "DescriptionRu": "Киев",
+        "CityID": "1",
+        "Area": "dcaad4db-4b33-11e4-ab6d-005056801329",
+        "SettlementTypeDescription": "місто",
+        "IsBranch": "0",
+    },
+    {
+        "Ref": "db5c88e0-391c-11dd-90d9-001a92567626",
+        "Description": "Одеса",
+        "DescriptionRu": "Одесса",
+        "CityID": "2",
+        "Area": "7150812c-9b87-11de-822f-000c2965ae0e",
+        "SettlementTypeDescription": "місто",
+        "IsBranch": "0",
+    },
+    {
+        "Ref": "db5c88f0-391c-11dd-90d9-001a92567626",
+        "Description": "Харків",
+        "DescriptionRu": "Харьков",
+        "CityID": "3",
+        "Area": "7150813e-9b87-11de-822f-000c2965ae0e",
+        "SettlementTypeDescription": "місто",
+        "IsBranch": "0",
+    },
+]
+
+NOVAPOST_BRANCHES = [
+    {
+        "Ref": "1ec09d88-e1c2-11e3-8c4a-0050568002cf",
+        "Description": "Відділення №1 (до 30 кг): вул. Пирогівський шлях, 135",
+        "DescriptionRu": "Отделение №1 (до 30 кг): ул. Пироговский путь, 135",
+        "ShortAddress": "Київ, вул. Пирогівський шлях, 135",
+        "CityRef": "8d5a980d-391c-11dd-90d9-001a92567626",
+        "CityDescription": "Київ",
+        "Number": "1",
+        "Phone": "(044) 364-12-81",
+        "CategoryOfWarehouse": "Branch",
+        "WarehouseStatus": "Working",
+        "Latitude": "50.4016",
+        "Longitude": "30.4525",
+        "PostalCodeUA": "03045",
+        "PlaceMaxWeightAllowed": "30",
+    },
+    {
+        "Ref": "2a8ed341-e1c2-11e3-8c4a-0050568002cf",
+        "Description": "Відділення №2 (до 30 кг): вул. Хрещатик, 22",
+        "DescriptionRu": "Отделение №2 (до 30 кг): ул. Крещатик, 22",
+        "ShortAddress": "Київ, вул. Хрещатик, 22",
+        "CityRef": "8d5a980d-391c-11dd-90d9-001a92567626",
+        "CityDescription": "Київ",
+        "Number": "2",
+        "Phone": "(044) 364-12-82",
+        "CategoryOfWarehouse": "Branch",
+        "WarehouseStatus": "Working",
+        "Latitude": "50.4474",
+        "Longitude": "30.5225",
+        "PostalCodeUA": "01001",
+        "PlaceMaxWeightAllowed": "30",
+    },
+    {
+        "Ref": "3b9fe452-e1c2-11e3-8c4a-0050568002cf",
+        "Description": "Відділення №1 (до 30 кг): вул. Дерибасівська, 1",
+        "DescriptionRu": "Отделение №1 (до 30 кг): ул. Дерибасовская, 1",
+        "ShortAddress": "Одеса, вул. Дерибасівська, 1",
+        "CityRef": "db5c88e0-391c-11dd-90d9-001a92567626",
+        "CityDescription": "Одеса",
+        "Number": "1",
+        "Phone": "(048) 700-11-22",
+        "CategoryOfWarehouse": "Branch",
+        "WarehouseStatus": "Working",
+        "Latitude": "46.4856",
+        "Longitude": "30.7406",
+        "PostalCodeUA": "65000",
+        "PlaceMaxWeightAllowed": "30",
+    },
+]
+
 # Track receipt confirmations per network
 _confirmed: dict[str, bool] = {}
 
@@ -251,3 +333,19 @@ async def get_stock(
         "TradingNetwork": network,
         "data": STOCK.get(network, []),
     })
+
+
+# --- Nova Poshta reference data ---
+
+@app.get("/Trade/hs/site/novapost/city")
+async def novapost_cities(
+    _auth: None = Depends(verify_basic_auth),
+) -> JSONResponse:
+    return JSONResponse({"success": True, "data": NOVAPOST_CITIES})
+
+
+@app.get("/Trade/hs/site/novapost/branch")
+async def novapost_branches(
+    _auth: None = Depends(verify_basic_auth),
+) -> JSONResponse:
+    return JSONResponse({"success": True, "data": NOVAPOST_BRANCHES})

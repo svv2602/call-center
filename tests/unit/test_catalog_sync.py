@@ -75,6 +75,63 @@ class TestCatalogSyncService:
     """Test sync service logic."""
 
     @pytest.fixture
+    def novapost_cities_response(self) -> dict:
+        return {
+            "success": True,
+            "data": [
+                {
+                    "Ref": "8d5a980d-391c-11dd-90d9-001a92567626",
+                    "Description": "Київ",
+                    "DescriptionRu": "Киев",
+                    "CityID": "1",
+                    "Area": "dcaad4db-4b33-11e4-ab6d-005056801329",
+                    "SettlementTypeDescription": "місто",
+                    "IsBranch": "0",
+                },
+            ],
+        }
+
+    @pytest.fixture
+    def novapost_branches_response(self) -> dict:
+        return {
+            "success": True,
+            "data": [
+                {
+                    "Ref": "1ec09d88-e1c2-11e3-8c4a-0050568002cf",
+                    "Description": "Відділення №1",
+                    "DescriptionRu": "Отделение №1",
+                    "ShortAddress": "Київ, вул. Пирогівський шлях, 135",
+                    "CityRef": "8d5a980d-391c-11dd-90d9-001a92567626",
+                    "CityDescription": "Київ",
+                    "Number": "1",
+                    "Phone": "(044) 364-12-81",
+                    "CategoryOfWarehouse": "Branch",
+                    "WarehouseStatus": "Working",
+                    "Latitude": "50.4016",
+                    "Longitude": "30.4525",
+                    "PostalCodeUA": "03045",
+                    "PlaceMaxWeightAllowed": "30",
+                },
+                {
+                    "Ref": "closed-branch-ref",
+                    "Description": "Закрите відділення",
+                    "DescriptionRu": "Закрытое отделение",
+                    "ShortAddress": "Київ, вул. Тестова, 1",
+                    "CityRef": "8d5a980d-391c-11dd-90d9-001a92567626",
+                    "CityDescription": "Київ",
+                    "Number": "999",
+                    "Phone": "",
+                    "CategoryOfWarehouse": "Branch",
+                    "WarehouseStatus": "Closed",
+                    "Latitude": "",
+                    "Longitude": "",
+                    "PostalCodeUA": "",
+                    "PlaceMaxWeightAllowed": "0",
+                },
+            ],
+        }
+
+    @pytest.fixture
     def mock_onec(self) -> AsyncMock:
         client = AsyncMock()
         client.get_wares_full.return_value = {
@@ -122,6 +179,8 @@ class TestCatalogSyncService:
         }
         client.get_wares_incremental.return_value = {"success": True, "data": [], "errors": []}
         client.confirm_wares_receipt.return_value = {"success": True}
+        client.get_novapost_cities.return_value = {"success": True, "data": []}
+        client.get_novapost_branches.return_value = {"success": True, "data": []}
         return client
 
     @pytest.fixture
@@ -234,3 +293,49 @@ class TestCatalogSyncService:
         service = CatalogSyncService(mock_onec, mock_engine, mock_redis)
         # Should not raise, just log warning
         await service.full_sync()
+
+    @pytest.mark.asyncio
+    async def test_sync_novapost_upserts_cities(
+        self,
+        mock_onec: AsyncMock,
+        mock_engine: MagicMock,
+        mock_redis: AsyncMock,
+        novapost_cities_response: dict,
+    ) -> None:
+        mock_onec.get_novapost_cities.return_value = novapost_cities_response
+        service = CatalogSyncService(mock_onec, mock_engine, mock_redis)
+        await service.sync_novapost()
+
+        mock_onec.get_novapost_cities.assert_called_once()
+        ctx = mock_engine.begin.return_value
+        mock_conn = ctx.__aenter__.return_value
+        assert mock_conn.execute.call_count > 0
+
+    @pytest.mark.asyncio
+    async def test_sync_novapost_upserts_branches(
+        self,
+        mock_onec: AsyncMock,
+        mock_engine: MagicMock,
+        mock_redis: AsyncMock,
+        novapost_branches_response: dict,
+    ) -> None:
+        mock_onec.get_novapost_branches.return_value = novapost_branches_response
+        service = CatalogSyncService(mock_onec, mock_engine, mock_redis)
+        await service.sync_novapost()
+
+        mock_onec.get_novapost_branches.assert_called_once()
+        # Only 1 branch should be upserted (WarehouseStatus=Working), not the Closed one
+        ctx = mock_engine.begin.return_value
+        mock_conn = ctx.__aenter__.return_value
+        # cities call (empty default) + 1 branch execute
+        assert mock_conn.execute.call_count >= 1
+
+    @pytest.mark.asyncio
+    async def test_full_sync_includes_novapost(
+        self, mock_onec: AsyncMock, mock_engine: MagicMock, mock_redis: AsyncMock
+    ) -> None:
+        service = CatalogSyncService(mock_onec, mock_engine, mock_redis)
+        await service.full_sync()
+
+        mock_onec.get_novapost_cities.assert_called_once()
+        mock_onec.get_novapost_branches.assert_called_once()

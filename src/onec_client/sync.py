@@ -91,6 +91,9 @@ class CatalogSyncService:
         # Sync stock for all networks
         await self.sync_stock()
 
+        # Sync Nova Poshta reference data
+        await self.sync_novapost()
+
         logger.info("Full catalog sync completed")
 
     async def incremental_sync(self) -> None:
@@ -119,6 +122,9 @@ class CatalogSyncService:
         # Always refresh stock
         await self.sync_stock()
 
+        # Refresh Nova Poshta reference data
+        await self.sync_novapost()
+
     async def sync_stock(self) -> None:
         """Sync stock/prices from 1C for all networks into DB and Redis."""
         for network in NETWORKS:
@@ -135,6 +141,130 @@ class CatalogSyncService:
                     logger.debug("Stock sync %s: empty response", network)
             except Exception:
                 logger.exception("Failed stock sync for %s", network)
+
+    async def sync_novapost(self) -> None:
+        """Sync Nova Poshta cities and branches from 1C into PostgreSQL."""
+        # Sync cities first (branches reference them via FK)
+        try:
+            resp = await self._onec.get_novapost_cities()
+            cities = resp.get("data", [])
+            if cities:
+                await self._upsert_novapost_cities(cities)
+                logger.info("Nova Poshta cities sync: %d items", len(cities))
+            else:
+                logger.debug("Nova Poshta cities sync: empty response")
+        except Exception:
+            logger.exception("Failed to sync Nova Poshta cities")
+
+        # Sync branches (only working ones)
+        try:
+            resp = await self._onec.get_novapost_branches()
+            all_branches = resp.get("data", [])
+            branches = [
+                b for b in all_branches
+                if b.get("WarehouseStatus") == "Working"
+            ]
+            if branches:
+                await self._upsert_novapost_branches(branches)
+                logger.info(
+                    "Nova Poshta branches sync: %d working of %d total",
+                    len(branches),
+                    len(all_branches),
+                )
+            else:
+                logger.debug("Nova Poshta branches sync: empty response")
+        except Exception:
+            logger.exception("Failed to sync Nova Poshta branches")
+
+    async def _upsert_novapost_cities(self, cities: list[dict[str, Any]]) -> None:
+        """UPSERT Nova Poshta cities into novapost_cities."""
+        async with self._engine.begin() as conn:
+            for city in cities:
+                ref = city.get("Ref", "")
+                if not ref:
+                    continue
+
+                await conn.execute(
+                    text("""
+                        INSERT INTO novapost_cities (ref, description, description_ru,
+                                                     city_id, area_ref, settlement_type,
+                                                     is_branch, synced_at)
+                        VALUES (:ref, :description, :description_ru,
+                                :city_id, :area_ref, :settlement_type,
+                                :is_branch, now())
+                        ON CONFLICT (ref) DO UPDATE SET
+                            description = EXCLUDED.description,
+                            description_ru = EXCLUDED.description_ru,
+                            city_id = EXCLUDED.city_id,
+                            area_ref = EXCLUDED.area_ref,
+                            settlement_type = EXCLUDED.settlement_type,
+                            is_branch = EXCLUDED.is_branch,
+                            synced_at = now()
+                    """),
+                    {
+                        "ref": ref,
+                        "description": city.get("Description", ""),
+                        "description_ru": city.get("DescriptionRu", ""),
+                        "city_id": city.get("CityID", ""),
+                        "area_ref": city.get("Area", ""),
+                        "settlement_type": city.get("SettlementTypeDescription", ""),
+                        "is_branch": _safe_bool(city.get("IsBranch")),
+                    },
+                )
+
+    async def _upsert_novapost_branches(self, branches: list[dict[str, Any]]) -> None:
+        """UPSERT Nova Poshta branches into novapost_branches."""
+        async with self._engine.begin() as conn:
+            for branch in branches:
+                ref = branch.get("Ref", "")
+                if not ref:
+                    continue
+
+                await conn.execute(
+                    text("""
+                        INSERT INTO novapost_branches (ref, description, description_ru,
+                                                       short_address, city_ref, city_description,
+                                                       number, phone, category, warehouse_status,
+                                                       latitude, longitude, postal_code,
+                                                       max_weight, synced_at)
+                        VALUES (:ref, :description, :description_ru,
+                                :short_address, :city_ref, :city_description,
+                                :number, :phone, :category, :warehouse_status,
+                                :latitude, :longitude, :postal_code,
+                                :max_weight, now())
+                        ON CONFLICT (ref) DO UPDATE SET
+                            description = EXCLUDED.description,
+                            description_ru = EXCLUDED.description_ru,
+                            short_address = EXCLUDED.short_address,
+                            city_ref = EXCLUDED.city_ref,
+                            city_description = EXCLUDED.city_description,
+                            number = EXCLUDED.number,
+                            phone = EXCLUDED.phone,
+                            category = EXCLUDED.category,
+                            warehouse_status = EXCLUDED.warehouse_status,
+                            latitude = EXCLUDED.latitude,
+                            longitude = EXCLUDED.longitude,
+                            postal_code = EXCLUDED.postal_code,
+                            max_weight = EXCLUDED.max_weight,
+                            synced_at = now()
+                    """),
+                    {
+                        "ref": ref,
+                        "description": branch.get("Description", ""),
+                        "description_ru": branch.get("DescriptionRu", ""),
+                        "short_address": branch.get("ShortAddress", ""),
+                        "city_ref": branch.get("CityRef", ""),
+                        "city_description": branch.get("CityDescription", ""),
+                        "number": branch.get("Number", ""),
+                        "phone": branch.get("Phone", ""),
+                        "category": branch.get("CategoryOfWarehouse", ""),
+                        "warehouse_status": branch.get("WarehouseStatus", ""),
+                        "latitude": branch.get("Latitude", ""),
+                        "longitude": branch.get("Longitude", ""),
+                        "postal_code": branch.get("PostalCodeUA", ""),
+                        "max_weight": _safe_int(branch.get("PlaceMaxWeightAllowed")),
+                    },
+                )
 
     async def _upsert_wares(self, wares: list[dict[str, Any]]) -> None:
         """UPSERT wares data into tire_models and tire_products."""
