@@ -141,12 +141,14 @@ def make_response(data: dict | list, request: Request) -> JSONResponse:
 
 # --- Health ---
 
+
 @app.get("/api/v1/health")
 async def health() -> dict:
     return {"status": "ok", "service": "mock-store-api"}
 
 
 # --- Tires ---
+
 
 @app.get("/api/v1/tires/search")
 async def search_tires(
@@ -232,6 +234,7 @@ async def tire_availability(
 
 # --- Orders ---
 
+
 @app.get("/api/v1/orders/search")
 async def search_orders(
     request: Request,
@@ -283,12 +286,14 @@ async def create_order(
         qty = item.get("quantity", 1)
         price = tire["price"] if tire else 0
         subtotal += price * qty
-        order_items.append({
-            "product_id": item.get("product_id"),
-            "name": f"{tire['brand']} {tire['model']}" if tire else "Unknown",
-            "quantity": qty,
-            "price": price,
-        })
+        order_items.append(
+            {
+                "product_id": item.get("product_id"),
+                "name": f"{tire['brand']} {tire['model']}" if tire else "Unknown",
+                "quantity": qty,
+                "price": price,
+            }
+        )
 
     order = {
         "id": order_id,
@@ -371,6 +376,7 @@ async def confirm_order(
 
 # --- Fitting ---
 
+
 @app.get("/api/v1/fitting/stations")
 async def fitting_stations(
     request: Request,
@@ -404,12 +410,14 @@ async def fitting_slots(
     for day_offset in range(3):
         d = base_date + timedelta(days=day_offset)
         for hour in [9, 11, 14, 16]:
-            slots.append({
-                "date": str(d),
-                "time": f"{hour:02d}:00",
-                "available": True,
-                "service_type": service_type or "tire_change",
-            })
+            slots.append(
+                {
+                    "date": str(d),
+                    "time": f"{hour:02d}:00",
+                    "available": True,
+                    "service_type": service_type or "tire_change",
+                }
+            )
     return make_response(
         {"station_id": station_id, "slots": slots},
         request,
@@ -499,6 +507,7 @@ async def fitting_prices(
 
 # --- Knowledge Base ---
 
+
 @app.get("/api/v1/knowledge/search")
 async def knowledge_search(
     request: Request,
@@ -531,6 +540,7 @@ async def knowledge_search(
 
 
 # --- Pickup Points ---
+
 
 @app.get("/api/v1/pickup-points")
 async def pickup_points(

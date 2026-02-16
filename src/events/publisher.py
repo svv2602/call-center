@@ -41,11 +41,13 @@ async def publish_event(event_type: str, data: dict[str, Any] | None = None) -> 
         event_type: Event type (e.g. "call:started", "operator:status_changed").
         data: Event payload.
     """
-    message = json.dumps({
-        "type": event_type,
-        "data": data or {},
-        "timestamp": datetime.now(UTC).isoformat(),
-    })
+    message = json.dumps(
+        {
+            "type": event_type,
+            "data": data or {},
+            "timestamp": datetime.now(UTC).isoformat(),
+        }
+    )
     try:
         r = await _get_redis()
         await r.publish(CHANNEL, message)

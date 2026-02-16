@@ -123,14 +123,10 @@ async def system_status(
     try:
         engine = await _get_engine()
         async with engine.begin() as conn:
-            db_size = await conn.execute(
-                text("SELECT pg_database_size(current_database())")
-            )
+            db_size = await conn.execute(text("SELECT pg_database_size(current_database())"))
             result["postgres_db_size_bytes"] = db_size.scalar()
 
-            conn_count = await conn.execute(
-                text("SELECT count(*) FROM pg_stat_activity")
-            )
+            conn_count = await conn.execute(text("SELECT count(*) FROM pg_stat_activity"))
             result["postgres_connections"] = conn_count.scalar()
     except Exception:
         result["postgres"] = "unavailable"
@@ -164,13 +160,17 @@ async def system_status(
 
         backup_dir = Path(settings.backup.backup_dir)
         if backup_dir.exists():
-            backups = sorted(backup_dir.glob("callcenter_*.sql*"), key=lambda f: f.stat().st_mtime, reverse=True)
+            backups = sorted(
+                backup_dir.glob("callcenter_*.sql*"), key=lambda f: f.stat().st_mtime, reverse=True
+            )
             if backups:
                 latest = backups[0]
                 result["last_backup"] = {
                     "file": latest.name,
                     "size_bytes": latest.stat().st_size,
-                    "modified": time.strftime("%Y-%m-%dT%H:%M:%S", time.gmtime(latest.stat().st_mtime)),
+                    "modified": time.strftime(
+                        "%Y-%m-%dT%H:%M:%S", time.gmtime(latest.stat().st_mtime)
+                    ),
                 }
     except Exception:
         pass

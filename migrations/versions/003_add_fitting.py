@@ -4,6 +4,7 @@ Revision ID: 003
 Revises: 002
 Create Date: 2026-02-14
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -40,12 +41,8 @@ def upgrade() -> None:
             server_default=sa.text("now()"),
         ),
     )
-    op.create_index(
-        "idx_fitting_stations_city", "fitting_stations", ["city"]
-    )
-    op.create_index(
-        "idx_fitting_stations_active", "fitting_stations", ["active"]
-    )
+    op.create_index("idx_fitting_stations_city", "fitting_stations", ["city"])
+    op.create_index("idx_fitting_stations_active", "fitting_stations", ["active"])
 
     # --- fitting_bookings ---
     op.create_table(
@@ -112,7 +109,6 @@ def upgrade() -> None:
         "fitting_bookings",
         ["status"],
     )
-
 
 
 def downgrade() -> None:

@@ -136,9 +136,7 @@ class CatalogSyncService:
                 if stock_items:
                     await self._upsert_stock(network, stock_items)
                     await self._update_redis_stock(network, stock_items)
-                    logger.info(
-                        "Stock sync %s: %d items", network, len(stock_items)
-                    )
+                    logger.info("Stock sync %s: %d items", network, len(stock_items))
                 else:
                     logger.debug("Stock sync %s: empty response", network)
             except Exception:
@@ -162,10 +160,7 @@ class CatalogSyncService:
         try:
             resp = await self._onec.get_novapost_branches()
             all_branches = resp.get("data", [])
-            branches = [
-                b for b in all_branches
-                if b.get("WarehouseStatus") == "Working"
-            ]
+            branches = [b for b in all_branches if b.get("WarehouseStatus") == "Working"]
             if branches:
                 await self._upsert_novapost_branches(branches)
                 logger.info(
@@ -343,9 +338,7 @@ class CatalogSyncService:
                         },
                     )
 
-    async def _upsert_stock(
-        self, network: str, stock_items: list[dict[str, Any]]
-    ) -> None:
+    async def _upsert_stock(self, network: str, stock_items: list[dict[str, Any]]) -> None:
         """UPSERT stock data into tire_stock."""
         async with self._engine.begin() as conn:
             for item in stock_items:
@@ -378,9 +371,7 @@ class CatalogSyncService:
                     },
                 )
 
-    async def _update_redis_stock(
-        self, network: str, stock_items: list[dict[str, Any]]
-    ) -> None:
+    async def _update_redis_stock(self, network: str, stock_items: list[dict[str, Any]]) -> None:
         """Update Redis hash with stock data for fast check_availability."""
         if self._redis is None:
             return

@@ -4,6 +4,7 @@ Revision ID: 004
 Revises: 003
 Create Date: 2026-02-14
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -75,10 +76,7 @@ def upgrade() -> None:
     )
 
     # Add vector column via raw SQL (SQLAlchemy doesn't natively support vector type)
-    op.execute(
-        "ALTER TABLE knowledge_embeddings "
-        "ADD COLUMN embedding vector(1536)"
-    )
+    op.execute("ALTER TABLE knowledge_embeddings ADD COLUMN embedding vector(1536)")
 
     op.create_index(
         "idx_knowledge_embeddings_article_id",

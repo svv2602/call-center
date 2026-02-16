@@ -28,8 +28,13 @@ _admin_dep = Depends(require_role("admin"))
 _analyst_dep = Depends(require_role("admin", "analyst"))
 
 SCENARIO_TYPES = [
-    "tire_search", "availability_check", "order_creation", "order_status",
-    "fitting_booking", "expert_consultation", "operator_transfer",
+    "tire_search",
+    "availability_check",
+    "order_creation",
+    "order_status",
+    "fitting_booking",
+    "expert_consultation",
+    "operator_transfer",
 ]
 PHASES = ["mvp", "orders", "services"]
 
@@ -136,10 +141,14 @@ async def get_dialogue(dialogue_id: UUID, _: dict[str, Any] = _analyst_dep) -> d
 
 
 @router.post("/")
-async def create_dialogue(request: DialogueCreateRequest, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def create_dialogue(
+    request: DialogueCreateRequest, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
     """Create a new dialogue example."""
     if request.scenario_type not in SCENARIO_TYPES:
-        raise HTTPException(status_code=400, detail=f"Invalid scenario_type. Must be one of: {SCENARIO_TYPES}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid scenario_type. Must be one of: {SCENARIO_TYPES}"
+        )
     if request.phase not in PHASES:
         raise HTTPException(status_code=400, detail=f"Invalid phase. Must be one of: {PHASES}")
 
@@ -173,12 +182,16 @@ async def create_dialogue(request: DialogueCreateRequest, _: dict[str, Any] = _a
 
 
 @router.patch("/{dialogue_id}")
-async def update_dialogue(dialogue_id: UUID, request: DialogueUpdateRequest, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def update_dialogue(
+    dialogue_id: UUID, request: DialogueUpdateRequest, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
     """Update a dialogue example."""
     import json
 
     if request.scenario_type is not None and request.scenario_type not in SCENARIO_TYPES:
-        raise HTTPException(status_code=400, detail=f"Invalid scenario_type. Must be one of: {SCENARIO_TYPES}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid scenario_type. Must be one of: {SCENARIO_TYPES}"
+        )
     if request.phase is not None and request.phase not in PHASES:
         raise HTTPException(status_code=400, detail=f"Invalid phase. Must be one of: {PHASES}")
 
@@ -258,7 +271,9 @@ async def delete_dialogue(dialogue_id: UUID, _: dict[str, Any] = _admin_dep) -> 
 
 
 @router.post("/import")
-async def import_dialogues(items: list[DialogueCreateRequest], _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def import_dialogues(
+    items: list[DialogueCreateRequest], _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
     """Bulk import dialogue examples from a JSON array."""
     import json
 
@@ -268,7 +283,9 @@ async def import_dialogues(items: list[DialogueCreateRequest], _: dict[str, Any]
 
     for item in items:
         if item.scenario_type not in SCENARIO_TYPES:
-            errors.append({"title": item.title, "error": f"Invalid scenario_type: {item.scenario_type}"})
+            errors.append(
+                {"title": item.title, "error": f"Invalid scenario_type: {item.scenario_type}"}
+            )
             continue
         if item.phase not in PHASES:
             errors.append({"title": item.title, "error": f"Invalid phase: {item.phase}"})

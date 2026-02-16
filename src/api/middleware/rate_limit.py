@@ -119,9 +119,7 @@ def _get_endpoint_limit(path: str, method: str) -> tuple[int, int] | None:
 class RateLimitMiddleware(BaseHTTPMiddleware):
     """Redis-backed rate limiting middleware."""
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         path = request.url.path
 
         # Skip health/metrics endpoints

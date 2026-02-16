@@ -49,9 +49,7 @@ async def _simulate_call(host: str, port: int, duration: float) -> dict:
     start = time.monotonic()
 
     try:
-        reader, writer = await asyncio.wait_for(
-            asyncio.open_connection(host, port), timeout=5.0
-        )
+        reader, writer = await asyncio.wait_for(asyncio.open_connection(host, port), timeout=5.0)
 
         # Send UUID
         uuid_pkt = struct.pack("!BH", 0x01, 16) + channel_uuid.bytes

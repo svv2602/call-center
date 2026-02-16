@@ -31,29 +31,32 @@ CLAUDE_SONNET_OUTPUT_PER_1M = 15.0
 GOOGLE_TTS_PER_1M_CHARS = 4.0
 
 # Infrastructure costs (monthly)
-SIP_TRUNK_MONTHLY = 50.0        # SIP provider
-VPS_APP_SERVER_MONTHLY = 80.0   # App server (4 vCPU, 8GB)
-VPS_DB_SERVER_MONTHLY = 60.0    # PostgreSQL + Redis
-MONITORING_MONTHLY = 20.0       # Grafana Cloud / Prometheus
+SIP_TRUNK_MONTHLY = 50.0  # SIP provider
+VPS_APP_SERVER_MONTHLY = 80.0  # App server (4 vCPU, 8GB)
+VPS_DB_SERVER_MONTHLY = 60.0  # PostgreSQL + Redis
+MONITORING_MONTHLY = 20.0  # Grafana Cloud / Prometheus
 
 
 # ========== Average call parameters ==========
 
+
 @dataclass
 class CallProfile:
     """Average call parameters for cost estimation."""
-    duration_seconds: int = 90          # avg call duration
-    stt_intervals_15s: int = 6          # ~90s of audio
-    llm_input_tokens: int = 2500        # system prompt + context + tools
-    llm_output_tokens: int = 400        # bot responses
-    llm_turns: int = 4                  # avg turns per call
-    tts_characters: int = 600           # bot speech characters
-    tts_cache_hit_rate: float = 0.30    # 30% of phrases are cached
+
+    duration_seconds: int = 90  # avg call duration
+    stt_intervals_15s: int = 6  # ~90s of audio
+    llm_input_tokens: int = 2500  # system prompt + context + tools
+    llm_output_tokens: int = 400  # bot responses
+    llm_turns: int = 4  # avg turns per call
+    tts_characters: int = 600  # bot speech characters
+    tts_cache_hit_rate: float = 0.30  # 30% of phrases are cached
 
 
 @dataclass
 class CostResult:
     """Cost analysis result."""
+
     # Per-call costs
     stt_google_per_call: float = 0.0
     stt_whisper_per_call: float = 0.0
@@ -104,7 +107,9 @@ def calculate_costs(
     result.stt_google_per_call = profile.stt_intervals_15s * GOOGLE_STT_PER_15S
 
     # Whisper: amortized GPU server cost
-    result.stt_whisper_per_call = WHISPER_SERVER_MONTHLY / calls_per_month if calls_per_month > 0 else 0
+    result.stt_whisper_per_call = (
+        WHISPER_SERVER_MONTHLY / calls_per_month if calls_per_month > 0 else 0
+    )
 
     # --- LLM costs ---
     total_input = profile.llm_input_tokens * profile.llm_turns
@@ -119,8 +124,12 @@ def calculate_costs(
     result.tts_per_call = billable_chars / 1_000_000 * GOOGLE_TTS_PER_1M_CHARS
 
     # --- Per-call totals ---
-    result.total_google_per_call = result.stt_google_per_call + result.llm_per_call + result.tts_per_call
-    result.total_whisper_per_call = result.stt_whisper_per_call + result.llm_per_call + result.tts_per_call
+    result.total_google_per_call = (
+        result.stt_google_per_call + result.llm_per_call + result.tts_per_call
+    )
+    result.total_whisper_per_call = (
+        result.stt_whisper_per_call + result.llm_per_call + result.tts_per_call
+    )
 
     # --- Monthly costs ---
     result.stt_google_monthly = result.stt_google_per_call * calls_per_month
@@ -133,16 +142,24 @@ def calculate_costs(
     )
 
     result.total_google_monthly = (
-        result.stt_google_monthly + result.llm_monthly + result.tts_monthly + result.infrastructure_monthly
+        result.stt_google_monthly
+        + result.llm_monthly
+        + result.tts_monthly
+        + result.infrastructure_monthly
     )
     result.total_whisper_monthly = (
-        result.stt_whisper_monthly + result.llm_monthly + result.tts_monthly + result.infrastructure_monthly
+        result.stt_whisper_monthly
+        + result.llm_monthly
+        + result.tts_monthly
+        + result.infrastructure_monthly
     )
 
     # --- Whisper savings ---
     result.whisper_savings_monthly = result.total_google_monthly - result.total_whisper_monthly
     if result.total_google_monthly > 0:
-        result.whisper_savings_percent = result.whisper_savings_monthly / result.total_google_monthly * 100
+        result.whisper_savings_percent = (
+            result.whisper_savings_monthly / result.total_google_monthly * 100
+        )
 
     # --- Operator comparison ---
     avg_call_minutes = avg_duration / 60
@@ -151,10 +168,14 @@ def calculate_costs(
 
     if result.operator_monthly > 0:
         result.roi_vs_operator_google = (
-            (result.operator_monthly - result.total_google_monthly) / result.total_google_monthly * 100
+            (result.operator_monthly - result.total_google_monthly)
+            / result.total_google_monthly
+            * 100
         )
         result.roi_vs_operator_whisper = (
-            (result.operator_monthly - result.total_whisper_monthly) / result.total_whisper_monthly * 100
+            (result.operator_monthly - result.total_whisper_monthly)
+            / result.total_whisper_monthly
+            * 100
         )
 
     return result
@@ -200,16 +221,24 @@ def print_report(result: CostResult) -> None:
     google_ok = target_low <= result.total_google_per_call <= target_high
     whisper_ok = target_low <= result.total_whisper_per_call <= target_high
     print("\n--- Target: $0.15-0.30 per call ---")
-    print(f"  Google STT: ${result.total_google_per_call:.4f} {'OK' if google_ok else 'OUTSIDE TARGET'}")
-    print(f"  Whisper STT: ${result.total_whisper_per_call:.4f} {'OK' if whisper_ok else 'OUTSIDE TARGET'}")
+    print(
+        f"  Google STT: ${result.total_google_per_call:.4f} {'OK' if google_ok else 'OUTSIDE TARGET'}"
+    )
+    print(
+        f"  Whisper STT: ${result.total_whisper_per_call:.4f} {'OK' if whisper_ok else 'OUTSIDE TARGET'}"
+    )
     print("=" * 60)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Call Center AI cost analysis")
     parser.add_argument("--calls-per-day", type=int, default=500, help="Average calls per day")
-    parser.add_argument("--avg-duration", type=int, default=90, help="Average call duration (seconds)")
-    parser.add_argument("--operator-rate", type=float, default=5.0, help="Operator hourly rate (USD)")
+    parser.add_argument(
+        "--avg-duration", type=int, default=90, help="Average call duration (seconds)"
+    )
+    parser.add_argument(
+        "--operator-rate", type=float, default=5.0, help="Operator hourly rate (USD)"
+    )
     parser.add_argument("--json", action="store_true", help="Output as JSON")
     args = parser.parse_args()
 

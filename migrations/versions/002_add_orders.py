@@ -4,6 +4,7 @@ Revision ID: 002
 Revises: 001
 Create Date: 2026-02-14
 """
+
 from collections.abc import Sequence
 
 import sqlalchemy as sa
@@ -60,9 +61,7 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.TIMESTAMP(timezone=True), nullable=True),
     )
     op.create_index("idx_orders_customer_id", "orders", ["customer_id"])
-    op.create_index(
-        "idx_orders_order_number", "orders", ["order_number"], unique=True
-    )
+    op.create_index("idx_orders_order_number", "orders", ["order_number"], unique=True)
     op.create_index("idx_orders_idempotency_key", "orders", ["idempotency_key"])
 
     # --- order_items ---

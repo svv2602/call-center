@@ -68,7 +68,9 @@ async def list_prompts(_: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
 
 
 @router.post("")
-async def create_prompt(request: CreatePromptRequest, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def create_prompt(
+    request: CreatePromptRequest, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
     """Create a new prompt version."""
     engine = await _get_engine()
     manager = PromptManager(engine)
@@ -117,7 +119,9 @@ async def list_ab_tests(_: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
 
 
 @router.post("/ab-tests")
-async def create_ab_test(request: CreateABTestRequest, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def create_ab_test(
+    request: CreateABTestRequest, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
     """Create a new A/B test (stops any existing active test)."""
     engine = await _get_engine()
     ab_manager = ABTestManager(engine)

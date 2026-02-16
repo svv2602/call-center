@@ -17,8 +17,15 @@ class TestTemplateKeys:
     """Test template key definitions."""
 
     def test_template_keys_complete(self) -> None:
-        expected = ["greeting", "farewell", "silence_prompt", "transfer",
-                     "error", "wait", "order_cancelled"]
+        expected = [
+            "greeting",
+            "farewell",
+            "silence_prompt",
+            "transfer",
+            "error",
+            "wait",
+            "order_cancelled",
+        ]
         assert expected == TEMPLATE_KEYS
 
     def test_template_keys_count(self) -> None:
@@ -119,7 +126,11 @@ class TestTemplateEndpoints:
 
         mock_engine.begin = fake_begin
 
-        with patch("src.api.training_templates._get_engine", new_callable=AsyncMock, return_value=mock_engine):
+        with patch(
+            "src.api.training_templates._get_engine",
+            new_callable=AsyncMock,
+            return_value=mock_engine,
+        ):
             req = TemplateCreateRequest(
                 template_key="greeting",
                 title="Test",

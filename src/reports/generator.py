@@ -67,8 +67,7 @@ async def _fetch_report_data(
                     all_reasons[reason] += count
 
     top_transfer_reasons = [
-        {"name": name, "count": count}
-        for name, count in all_reasons.most_common(5)
+        {"name": name, "count": count} for name, count in all_reasons.most_common(5)
     ]
 
     days = [

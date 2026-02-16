@@ -22,8 +22,8 @@ class TestCeleryHealth:
             patch("src.api.system.celery_health.__module__", "src.api.system"),
             patch("src.tasks.celery_app.app") as mock_app,
         ):
-                mock_app.control.inspect.return_value = mock_inspect
-                result = await celery_health()
+            mock_app.control.inspect.return_value = mock_inspect
+            result = await celery_health()
 
         assert result["status"] == "ok"
         assert result["workers_online"] == 1
@@ -59,7 +59,11 @@ class TestConfigReload:
     """Test POST /admin/config/reload."""
 
     @pytest.mark.asyncio
-    @patch("src.api.auth.require_admin", new_callable=AsyncMock, return_value={"sub": "test", "role": "admin"})
+    @patch(
+        "src.api.auth.require_admin",
+        new_callable=AsyncMock,
+        return_value={"sub": "test", "role": "admin"},
+    )
     async def test_reload_config(self, _mock_auth: AsyncMock) -> None:
         from src.api.system import reload_config
 
@@ -77,7 +81,11 @@ class TestSystemStatus:
     """Test GET /admin/system-status."""
 
     @pytest.mark.asyncio
-    @patch("src.api.auth.require_admin", new_callable=AsyncMock, return_value={"sub": "test", "role": "admin"})
+    @patch(
+        "src.api.auth.require_admin",
+        new_callable=AsyncMock,
+        return_value={"sub": "test", "role": "admin"},
+    )
     @patch("src.api.system._get_engine", new_callable=AsyncMock)
     async def test_system_status_basic(self, mock_engine: AsyncMock, _mock_auth: AsyncMock) -> None:
         from src.api.system import system_status

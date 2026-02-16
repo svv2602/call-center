@@ -16,17 +16,13 @@ class TestAsteriskARIClient:
 
     @pytest.fixture
     def ari_client(self) -> AsteriskARIClient:
-        return AsteriskARIClient(
-            url="http://localhost:8088/ari", user="admin", password="secret"
-        )
+        return AsteriskARIClient(url="http://localhost:8088/ari", user="admin", password="secret")
 
     @pytest.mark.asyncio
     async def test_get_caller_id_returns_number(self, ari_client: AsteriskARIClient) -> None:
         mock_resp = AsyncMock()
         mock_resp.status = 200
-        mock_resp.json = AsyncMock(return_value={
-            "caller": {"number": "+380501234567", "name": ""}
-        })
+        mock_resp.json = AsyncMock(return_value={"caller": {"number": "+380501234567", "name": ""}})
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=False)
 
@@ -41,9 +37,7 @@ class TestAsteriskARIClient:
     async def test_get_caller_id_anonymous(self, ari_client: AsteriskARIClient) -> None:
         mock_resp = AsyncMock()
         mock_resp.status = 200
-        mock_resp.json = AsyncMock(return_value={
-            "caller": {"number": "anonymous", "name": ""}
-        })
+        mock_resp.json = AsyncMock(return_value={"caller": {"number": "anonymous", "name": ""}})
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=False)
 
@@ -58,9 +52,7 @@ class TestAsteriskARIClient:
     async def test_get_caller_id_restricted(self, ari_client: AsteriskARIClient) -> None:
         mock_resp = AsyncMock()
         mock_resp.status = 200
-        mock_resp.json = AsyncMock(return_value={
-            "caller": {"number": "restricted", "name": ""}
-        })
+        mock_resp.json = AsyncMock(return_value={"caller": {"number": "restricted", "name": ""}})
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=False)
 
@@ -94,9 +86,7 @@ class TestAsteriskARIClient:
     async def test_get_caller_id_empty_string(self, ari_client: AsteriskARIClient) -> None:
         mock_resp = AsyncMock()
         mock_resp.status = 200
-        mock_resp.json = AsyncMock(return_value={
-            "caller": {"number": "", "name": ""}
-        })
+        mock_resp.json = AsyncMock(return_value={"caller": {"number": "", "name": ""}})
         mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
         mock_resp.__aexit__ = AsyncMock(return_value=False)
 

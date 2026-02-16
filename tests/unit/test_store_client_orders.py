@@ -45,9 +45,7 @@ class TestSearchOrders:
 
     @pytest.mark.asyncio
     async def test_search_by_phone_no_results(self, client: StoreClient) -> None:
-        with patch.object(
-            client, "_get", new_callable=AsyncMock, return_value={"items": []}
-        ):
+        with patch.object(client, "_get", new_callable=AsyncMock, return_value={"items": []}):
             result = await client.search_orders(phone="+380501234567")
             assert result["found"] is False
 
@@ -83,7 +81,9 @@ class TestCreateOrder:
             "subtotal": 12800,
             "total": 12800,
         }
-        with patch.object(client, "_post", new_callable=AsyncMock, return_value=mock_response) as mock_post:
+        with patch.object(
+            client, "_post", new_callable=AsyncMock, return_value=mock_response
+        ) as mock_post:
             result = await client.create_order(
                 items=[{"product_id": "tire-1", "quantity": 4}],
                 customer_phone="+380501234567",
@@ -96,13 +96,17 @@ class TestCreateOrder:
 
     @pytest.mark.asyncio
     async def test_create_order_includes_source(self, client: StoreClient) -> None:
-        with patch.object(client, "_post", new_callable=AsyncMock, return_value={"id": "x"}) as mock_post:
+        with patch.object(
+            client, "_post", new_callable=AsyncMock, return_value={"id": "x"}
+        ) as mock_post:
             await client.create_order(
                 items=[{"product_id": "tire-1", "quantity": 4}],
                 customer_phone="+380501234567",
                 call_id="call-123",
             )
-            body = mock_post.call_args.kwargs.get("json_data") or mock_post.call_args[1].get("json_data")
+            body = mock_post.call_args.kwargs.get("json_data") or mock_post.call_args[1].get(
+                "json_data"
+            )
             assert body["source"] == "ai_agent"
             assert body["call_id"] == "call-123"
 
@@ -159,7 +163,9 @@ class TestConfirmOrder:
             "sms_sent": True,
             "total": 12950,
         }
-        with patch.object(client, "_post", new_callable=AsyncMock, return_value=mock_response) as mock_post:
+        with patch.object(
+            client, "_post", new_callable=AsyncMock, return_value=mock_response
+        ) as mock_post:
             result = await client.confirm_order(
                 order_id="order-1",
                 payment_method="cod",
@@ -201,7 +207,12 @@ class TestGetPickupPoints:
         mock_response = {
             "total": 2,
             "items": [
-                {"id": "pp-1", "name": "Магазин центр", "address": "вул. Центральна 1", "city": "Київ"},
+                {
+                    "id": "pp-1",
+                    "name": "Магазин центр",
+                    "address": "вул. Центральна 1",
+                    "city": "Київ",
+                },
                 {"id": "pp-2", "name": "Магазин схід", "address": "вул. Східна 5", "city": "Київ"},
             ],
         }

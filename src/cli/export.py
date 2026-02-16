@@ -71,26 +71,34 @@ async def _export_calls_csv(
         await engine.dispose()
 
     columns = [
-        "call_id", "started_at", "duration_sec", "caller_id",
-        "scenario", "transferred", "transfer_reason",
-        "quality_score", "total_cost",
+        "call_id",
+        "started_at",
+        "duration_sec",
+        "caller_id",
+        "scenario",
+        "transferred",
+        "transfer_reason",
+        "quality_score",
+        "total_cost",
     ]
 
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=columns)
     writer.writeheader()
     for r in rows:
-        writer.writerow({
-            "call_id": str(r["id"]),
-            "started_at": str(r["started_at"] or ""),
-            "duration_sec": r["duration_seconds"] or 0,
-            "caller_id": sanitize_phone(str(r["caller_id"] or "")),
-            "scenario": r["scenario"] or "",
-            "transferred": r["transferred_to_operator"] or False,
-            "transfer_reason": r["transfer_reason"] or "",
-            "quality_score": r["quality_score"] if r["quality_score"] is not None else "",
-            "total_cost": r["total_cost_usd"] if r["total_cost_usd"] is not None else "",
-        })
+        writer.writerow(
+            {
+                "call_id": str(r["id"]),
+                "started_at": str(r["started_at"] or ""),
+                "duration_sec": r["duration_seconds"] or 0,
+                "caller_id": sanitize_phone(str(r["caller_id"] or "")),
+                "scenario": r["scenario"] or "",
+                "transferred": r["transferred_to_operator"] or False,
+                "transfer_reason": r["transfer_reason"] or "",
+                "quality_score": r["quality_score"] if r["quality_score"] is not None else "",
+                "total_cost": r["total_cost_usd"] if r["total_cost_usd"] is not None else "",
+            }
+        )
 
     with open(output, "w") as f:
         f.write(buf.getvalue())

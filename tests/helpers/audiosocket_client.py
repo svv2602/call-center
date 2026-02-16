@@ -96,15 +96,15 @@ class AudioSocketTestClient:
         payload = b""
         if length > 0:
             try:
-                payload = await asyncio.wait_for(
-                    self._reader.readexactly(length), timeout=timeout
-                )
+                payload = await asyncio.wait_for(self._reader.readexactly(length), timeout=timeout)
             except (TimeoutError, asyncio.IncompleteReadError):
                 return None
 
         return ReceivedPacket(type=ptype, payload=payload)
 
-    async def read_packets(self, timeout: float = 2.0, max_packets: int = 500) -> list[ReceivedPacket]:
+    async def read_packets(
+        self, timeout: float = 2.0, max_packets: int = 500
+    ) -> list[ReceivedPacket]:
         """Read packets until timeout or max_packets reached."""
         packets: list[ReceivedPacket] = []
         for _ in range(max_packets):

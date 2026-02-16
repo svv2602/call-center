@@ -171,7 +171,9 @@ class TestSearchKnowledgeBaseSchema:
         categories = set(props["category"]["enum"])
         # Must include original 4 + 6 extended categories from categories.py
         assert {"brands", "guides", "faq", "comparisons"}.issubset(categories)
-        assert {"policies", "procedures", "returns", "warranty", "delivery", "general"}.issubset(categories)
+        assert {"policies", "procedures", "returns", "warranty", "delivery", "general"}.issubset(
+            categories
+        )
 
     def test_description_mentions_knowledge(self, tool: dict) -> None:
         assert "знань" in tool["description"].lower() or "знан" in tool["description"].lower()

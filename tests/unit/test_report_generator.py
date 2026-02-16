@@ -41,28 +41,30 @@ class TestFetchReportData:
 
     @pytest.mark.asyncio
     async def test_aggregates_totals(self) -> None:
-        engine = _make_mock_engine([
-            {
-                "stat_date": "2026-02-10",
-                "total_calls": 20,
-                "resolved_by_bot": 15,
-                "transferred": 5,
-                "avg_duration_seconds": 100,
-                "avg_quality_score": 0.8,
-                "total_cost_usd": 1.0,
-                "transfer_reasons": '{"complex_request": 3, "no_stock": 2}',
-            },
-            {
-                "stat_date": "2026-02-11",
-                "total_calls": 30,
-                "resolved_by_bot": 25,
-                "transferred": 5,
-                "avg_duration_seconds": 80,
-                "avg_quality_score": 0.9,
-                "total_cost_usd": 1.5,
-                "transfer_reasons": '{"complex_request": 2, "language": 3}',
-            },
-        ])
+        engine = _make_mock_engine(
+            [
+                {
+                    "stat_date": "2026-02-10",
+                    "total_calls": 20,
+                    "resolved_by_bot": 15,
+                    "transferred": 5,
+                    "avg_duration_seconds": 100,
+                    "avg_quality_score": 0.8,
+                    "total_cost_usd": 1.0,
+                    "transfer_reasons": '{"complex_request": 3, "no_stock": 2}',
+                },
+                {
+                    "stat_date": "2026-02-11",
+                    "total_calls": 30,
+                    "resolved_by_bot": 25,
+                    "transferred": 5,
+                    "avg_duration_seconds": 80,
+                    "avg_quality_score": 0.9,
+                    "total_cost_usd": 1.5,
+                    "transfer_reasons": '{"complex_request": 2, "language": 3}',
+                },
+            ]
+        )
 
         data = await _fetch_report_data(engine, "2026-02-10", "2026-02-11")
 
@@ -91,18 +93,20 @@ class TestFetchReportData:
     @pytest.mark.asyncio
     async def test_dict_transfer_reasons(self) -> None:
         """Test when transfer_reasons is already a dict."""
-        engine = _make_mock_engine([
-            {
-                "stat_date": "2026-02-10",
-                "total_calls": 10,
-                "resolved_by_bot": 7,
-                "transferred": 3,
-                "avg_duration_seconds": 60,
-                "avg_quality_score": 0.75,
-                "total_cost_usd": 0.5,
-                "transfer_reasons": {"angry_customer": 2, "language": 1},
-            },
-        ])
+        engine = _make_mock_engine(
+            [
+                {
+                    "stat_date": "2026-02-10",
+                    "total_calls": 10,
+                    "resolved_by_bot": 7,
+                    "transferred": 3,
+                    "avg_duration_seconds": 60,
+                    "avg_quality_score": 0.75,
+                    "total_cost_usd": 0.5,
+                    "transfer_reasons": {"angry_customer": 2, "language": 1},
+                },
+            ]
+        )
 
         data = await _fetch_report_data(engine, "2026-02-10", "2026-02-10")
         assert data["top_transfer_reasons"][0]["name"] == "angry_customer"
@@ -175,18 +179,20 @@ class TestGenerateWeeklyReport:
     async def test_generate_returns_pdf_bytes(self, mock_pdf: MagicMock) -> None:
         from src.reports.generator import generate_weekly_report
 
-        engine = _make_mock_engine([
-            {
-                "stat_date": "2026-02-10",
-                "total_calls": 10,
-                "resolved_by_bot": 8,
-                "transferred": 2,
-                "avg_duration_seconds": 60,
-                "avg_quality_score": 0.8,
-                "total_cost_usd": 0.5,
-                "transfer_reasons": None,
-            },
-        ])
+        engine = _make_mock_engine(
+            [
+                {
+                    "stat_date": "2026-02-10",
+                    "total_calls": 10,
+                    "resolved_by_bot": 8,
+                    "transferred": 2,
+                    "avg_duration_seconds": 60,
+                    "avg_quality_score": 0.8,
+                    "total_cost_usd": 0.5,
+                    "transfer_reasons": None,
+                },
+            ]
+        )
 
         result = await generate_weekly_report("2026-02-10", "2026-02-16", engine=engine)
         assert result == b"%PDF-1.4 mock"

@@ -24,7 +24,9 @@ class TestStatsToday:
             "avg_quality_score": 0.85,
             "total_cost_usd": 1.2345,
         }
-        with patch("src.cli.analytics.asyncio.run", side_effect=lambda coro: mock_fetch.return_value):
+        with patch(
+            "src.cli.analytics.asyncio.run", side_effect=lambda coro: mock_fetch.return_value
+        ):
             result = runner.invoke(app, ["stats", "today"])
         assert result.exit_code == 0
         assert "42" in result.output
@@ -100,9 +102,7 @@ class TestCallsShow:
                 {"tool_name": "search_tires", "success": True, "duration_ms": 150},
             ],
         }
-        result = runner.invoke(
-            app, ["calls", "show", "550e8400-e29b-41d4-a716-446655440000"]
-        )
+        result = runner.invoke(app, ["calls", "show", "550e8400-e29b-41d4-a716-446655440000"])
         assert result.exit_code == 0
         assert "Call Details" in result.output
         assert "Transcription" in result.output

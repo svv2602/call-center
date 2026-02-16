@@ -31,7 +31,21 @@ def get_dialogue_examples() -> list[dict]:
             "phase": "mvp",
             "dialogue": [
                 {"role": "customer", "text": "Мені потрібні зимові шини на Тойоту Камрі 2020 року"},
-                {"role": "agent", "text": "Для Тойоти Камрі 2020 року є такі варіанти зимових шин: 1. Michelin X-Ice North 4 215/55 R17 — 3200 грн/шт, є в наявності 2. Continental IceContact 3 215/55 R17 — 2800 грн/шт, є в наявності", "tool_calls": [{"name": "search_tires", "input": {"vehicle_make": "Toyota", "vehicle_model": "Camry", "vehicle_year": 2020, "season": "winter"}}]},
+                {
+                    "role": "agent",
+                    "text": "Для Тойоти Камрі 2020 року є такі варіанти зимових шин: 1. Michelin X-Ice North 4 215/55 R17 — 3200 грн/шт, є в наявності 2. Continental IceContact 3 215/55 R17 — 2800 грн/шт, є в наявності",
+                    "tool_calls": [
+                        {
+                            "name": "search_tires",
+                            "input": {
+                                "vehicle_make": "Toyota",
+                                "vehicle_model": "Camry",
+                                "vehicle_year": 2020,
+                                "season": "winter",
+                            },
+                        }
+                    ],
+                },
             ],
             "tools_used": ["search_tires"],
             "description": "Клиент ищет зимние шины по марке/модели авто. Агент вызывает search_tires.",
@@ -42,7 +56,16 @@ def get_dialogue_examples() -> list[dict]:
             "phase": "mvp",
             "dialogue": [
                 {"role": "customer", "text": "Чи є в наявності Michelin Pilot Sport 5 225/45 R18?"},
-                {"role": "agent", "text": "Так, Michelin Pilot Sport 5 225/45 R18 є в наявності — 8 штук, ціна 4200 гривень за штуку. Бажаєте оформити замовлення?", "tool_calls": [{"name": "check_availability", "input": {"query": "Michelin Pilot Sport 5 225/45 R18"}}]},
+                {
+                    "role": "agent",
+                    "text": "Так, Michelin Pilot Sport 5 225/45 R18 є в наявності — 8 штук, ціна 4200 гривень за штуку. Бажаєте оформити замовлення?",
+                    "tool_calls": [
+                        {
+                            "name": "check_availability",
+                            "input": {"query": "Michelin Pilot Sport 5 225/45 R18"},
+                        }
+                    ],
+                },
             ],
             "tools_used": ["check_availability"],
             "description": "Клиент проверяет наличие конкретной шины. Агент вызывает check_availability.",
@@ -53,7 +76,19 @@ def get_dialogue_examples() -> list[dict]:
             "phase": "mvp",
             "dialogue": [
                 {"role": "customer", "text": "Переключіть мене на оператора"},
-                {"role": "agent", "text": "Зараз з'єдную вас з оператором. Залишайтесь на лінії.", "tool_calls": [{"name": "transfer_to_operator", "input": {"reason": "customer_request", "summary": "Клієнт просить з'єднати з оператором"}}]},
+                {
+                    "role": "agent",
+                    "text": "Зараз з'єдную вас з оператором. Залишайтесь на лінії.",
+                    "tool_calls": [
+                        {
+                            "name": "transfer_to_operator",
+                            "input": {
+                                "reason": "customer_request",
+                                "summary": "Клієнт просить з'єднати з оператором",
+                            },
+                        }
+                    ],
+                },
             ],
             "tools_used": ["transfer_to_operator"],
             "description": "Клиент просит оператора. Агент немедленно переключает.",
@@ -64,7 +99,13 @@ def get_dialogue_examples() -> list[dict]:
             "phase": "orders",
             "dialogue": [
                 {"role": "customer", "text": "Я хочу дізнатися статус мого замовлення"},
-                {"role": "agent", "text": "За вашим номером телефону знайдено замовлення номер 12345. Зараз воно в доставці, очікувана дата — 15 березня.", "tool_calls": [{"name": "get_order_status", "input": {"phone": "+380XXXXXXXXX"}}]},
+                {
+                    "role": "agent",
+                    "text": "За вашим номером телефону знайдено замовлення номер 12345. Зараз воно в доставці, очікувана дата — 15 березня.",
+                    "tool_calls": [
+                        {"name": "get_order_status", "input": {"phone": "+380XXXXXXXXX"}}
+                    ],
+                },
             ],
             "tools_used": ["get_order_status"],
             "description": "Клиент спрашивает статус заказа. Агент использует CallerID для поиска.",
@@ -76,11 +117,46 @@ def get_dialogue_examples() -> list[dict]:
             "dialogue": [
                 {"role": "agent", "text": "Бажаєте оформити замовлення?"},
                 {"role": "customer", "text": "Так, візьму Michelin X-Ice, 4 штуки"},
-                {"role": "agent", "text": "Замовлення: 4 шини Michelin X-Ice North 4 215/55 R17, сума — 12 800 гривень. Доставка чи самовивіз?", "tool_calls": [{"name": "create_order_draft", "input": {"items": [{"product_id": "...", "quantity": 4}], "customer_phone": "+380XXXXXXXXX"}}]},
+                {
+                    "role": "agent",
+                    "text": "Замовлення: 4 шини Michelin X-Ice North 4 215/55 R17, сума — 12 800 гривень. Доставка чи самовивіз?",
+                    "tool_calls": [
+                        {
+                            "name": "create_order_draft",
+                            "input": {
+                                "items": [{"product_id": "...", "quantity": 4}],
+                                "customer_phone": "+380XXXXXXXXX",
+                            },
+                        }
+                    ],
+                },
                 {"role": "customer", "text": "Доставка, Київ, вулиця Хрещатик 1"},
-                {"role": "agent", "text": "Доставка в Київ — 200 гривень. Разом — 13 000 гривень. Оплата при отриманні чи онлайн?", "tool_calls": [{"name": "update_order_delivery", "input": {"order_id": "...", "delivery_type": "delivery", "city": "Київ", "address": "вулиця Хрещатик 1"}}]},
+                {
+                    "role": "agent",
+                    "text": "Доставка в Київ — 200 гривень. Разом — 13 000 гривень. Оплата при отриманні чи онлайн?",
+                    "tool_calls": [
+                        {
+                            "name": "update_order_delivery",
+                            "input": {
+                                "order_id": "...",
+                                "delivery_type": "delivery",
+                                "city": "Київ",
+                                "address": "вулиця Хрещатик 1",
+                            },
+                        }
+                    ],
+                },
                 {"role": "customer", "text": "При отриманні"},
-                {"role": "agent", "text": "Замовлення номер 12346 оформлено! Очікуйте доставку протягом 2-3 робочих днів.", "tool_calls": [{"name": "confirm_order", "input": {"order_id": "...", "payment_method": "cod"}}]},
+                {
+                    "role": "agent",
+                    "text": "Замовлення номер 12346 оформлено! Очікуйте доставку протягом 2-3 робочих днів.",
+                    "tool_calls": [
+                        {
+                            "name": "confirm_order",
+                            "input": {"order_id": "...", "payment_method": "cod"},
+                        }
+                    ],
+                },
             ],
             "tools_used": ["create_order_draft", "update_order_delivery", "confirm_order"],
             "description": "Полный цикл: создание черновика → доставка → подтверждение.",
@@ -93,11 +169,38 @@ def get_dialogue_examples() -> list[dict]:
                 {"role": "customer", "text": "Хочу записатися на шиномонтаж"},
                 {"role": "agent", "text": "Звичайно! В якому місті вам зручно?"},
                 {"role": "customer", "text": "Київ"},
-                {"role": "agent", "text": "У Києві є 3 точки шиномонтажу: 1. Червоноармійська 15, 2. Перемоги 50, 3. Здолбунівська 7а. Яка зручніша?", "tool_calls": [{"name": "get_fitting_stations", "input": {"city": "Київ"}}]},
+                {
+                    "role": "agent",
+                    "text": "У Києві є 3 точки шиномонтажу: 1. Червоноармійська 15, 2. Перемоги 50, 3. Здолбунівська 7а. Яка зручніша?",
+                    "tool_calls": [{"name": "get_fitting_stations", "input": {"city": "Київ"}}],
+                },
                 {"role": "customer", "text": "Позняки"},
-                {"role": "agent", "text": "На Позняках найближчі вільні дати: Завтра 15 березня — 10:00, 14:00, 16:00", "tool_calls": [{"name": "get_fitting_slots", "input": {"station_id": "3", "date_from": "today"}}]},
+                {
+                    "role": "agent",
+                    "text": "На Позняках найближчі вільні дати: Завтра 15 березня — 10:00, 14:00, 16:00",
+                    "tool_calls": [
+                        {
+                            "name": "get_fitting_slots",
+                            "input": {"station_id": "3", "date_from": "today"},
+                        }
+                    ],
+                },
                 {"role": "customer", "text": "Завтра о 14"},
-                {"role": "agent", "text": "Записав вас на завтра, 15 березня, о 14:00 на Здолбунівській 7а.", "tool_calls": [{"name": "book_fitting", "input": {"station_id": "3", "date": "2025-03-15", "time": "14:00", "customer_phone": "+380XXXXXXXXX"}}]},
+                {
+                    "role": "agent",
+                    "text": "Записав вас на завтра, 15 березня, о 14:00 на Здолбунівській 7а.",
+                    "tool_calls": [
+                        {
+                            "name": "book_fitting",
+                            "input": {
+                                "station_id": "3",
+                                "date": "2025-03-15",
+                                "time": "14:00",
+                                "customer_phone": "+380XXXXXXXXX",
+                            },
+                        }
+                    ],
+                },
             ],
             "tools_used": ["get_fitting_stations", "get_fitting_slots", "book_fitting"],
             "description": "Полный цикл записи на шиномонтаж: город → точка → слот → бронирование.",
@@ -108,7 +211,19 @@ def get_dialogue_examples() -> list[dict]:
             "phase": "services",
             "dialogue": [
                 {"role": "customer", "text": "Що краще — Michelin чи Continental для SUV?"},
-                {"role": "agent", "text": "Для SUV обидва бренди мають відмінні моделі. Michelin відомий довговічністю та комфортом, Continental — чудовим зчепленням на мокрій дорозі. Якщо вам важливий тихий хід — рекомендую Michelin Latitude Sport. Для активної їзди — Continental PremiumContact.", "tool_calls": [{"name": "search_knowledge_base", "input": {"query": "Michelin vs Continental SUV", "category": "comparisons"}}]},
+                {
+                    "role": "agent",
+                    "text": "Для SUV обидва бренди мають відмінні моделі. Michelin відомий довговічністю та комфортом, Continental — чудовим зчепленням на мокрій дорозі. Якщо вам важливий тихий хід — рекомендую Michelin Latitude Sport. Для активної їзди — Continental PremiumContact.",
+                    "tool_calls": [
+                        {
+                            "name": "search_knowledge_base",
+                            "input": {
+                                "query": "Michelin vs Continental SUV",
+                                "category": "comparisons",
+                            },
+                        }
+                    ],
+                },
             ],
             "tools_used": ["search_knowledge_base"],
             "description": "Клиент просит сравнение брендов. Агент использует базу знаний.",
@@ -119,7 +234,20 @@ def get_dialogue_examples() -> list[dict]:
             "phase": "mvp",
             "dialogue": [
                 {"role": "customer", "text": "Мне нужны зимние шины на Камри"},
-                {"role": "agent", "text": "Для Тойоти Камрі є такі варіанти зимових шин...", "tool_calls": [{"name": "search_tires", "input": {"vehicle_make": "Toyota", "vehicle_model": "Camry", "season": "winter"}}]},
+                {
+                    "role": "agent",
+                    "text": "Для Тойоти Камрі є такі варіанти зимових шин...",
+                    "tool_calls": [
+                        {
+                            "name": "search_tires",
+                            "input": {
+                                "vehicle_make": "Toyota",
+                                "vehicle_model": "Camry",
+                                "season": "winter",
+                            },
+                        }
+                    ],
+                },
             ],
             "tools_used": ["search_tires"],
             "description": "Клиент говорит по-русски. Агент понимает и отвечает по-украински.",

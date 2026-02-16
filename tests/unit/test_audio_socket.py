@@ -75,7 +75,7 @@ class TestPacketParsing:
     @pytest.mark.asyncio
     async def test_parse_incomplete_packet_buffers(self) -> None:
         """Test that incomplete data is buffered until full packet arrives."""
-        audio_data = b"\xAB" * 100
+        audio_data = b"\xab" * 100
         raw = _make_packet(PacketType.AUDIO, audio_data)
 
         reader = asyncio.StreamReader()
@@ -107,7 +107,7 @@ class TestBuildAudioPacket:
     """Test outbound audio packet construction."""
 
     def test_build_audio_packet(self) -> None:
-        audio_data = b"\xFF" * 640
+        audio_data = b"\xff" * 640
         packet = build_audio_packet(audio_data)
 
         assert packet[0] == PacketType.AUDIO

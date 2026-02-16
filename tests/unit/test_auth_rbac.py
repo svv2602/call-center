@@ -68,7 +68,9 @@ class TestRequireRole:
     @pytest.mark.asyncio
     @patch("src.api.auth.is_token_blacklisted", new_callable=AsyncMock, return_value=False)
     @patch("src.api.auth.get_settings")
-    async def test_analyst_rejected_for_admin_only(self, mock_settings: MagicMock, _mock_bl: AsyncMock) -> None:
+    async def test_analyst_rejected_for_admin_only(
+        self, mock_settings: MagicMock, _mock_bl: AsyncMock
+    ) -> None:
         mock_settings.return_value.admin.jwt_secret = "test-secret"
         token = create_jwt({"sub": "analyst_user", "role": "analyst"}, "test-secret")
 

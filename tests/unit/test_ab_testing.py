@@ -39,9 +39,7 @@ class TestCalculateSignificance:
 
     def test_zero_standard_error(self) -> None:
         """Edge case: should handle zero SE gracefully."""
-        result = calculate_significance(
-            n_a=100, n_b=100, mean_a=0.5, mean_b=0.5, std_dev=0.0
-        )
+        result = calculate_significance(n_a=100, n_b=100, mean_a=0.5, mean_b=0.5, std_dev=0.0)
         assert result["z_score"] == 0.0
         assert not result["is_significant"]
 

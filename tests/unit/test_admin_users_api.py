@@ -63,10 +63,18 @@ class TestListUsers:
         self, mock_engine_fn: MagicMock, mock_settings: MagicMock, client: TestClient
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = "test-secret"
-        mock_engine, _ = _make_mock_engine([
-            {"id": "1", "username": "admin", "role": "admin", "is_active": True,
-             "created_at": "2026-02-14", "last_login_at": None},
-        ])
+        mock_engine, _ = _make_mock_engine(
+            [
+                {
+                    "id": "1",
+                    "username": "admin",
+                    "role": "admin",
+                    "is_active": True,
+                    "created_at": "2026-02-14",
+                    "last_login_at": None,
+                },
+            ]
+        )
         mock_engine_fn.return_value = mock_engine
 
         response = client.get(
@@ -95,10 +103,17 @@ class TestCreateUser:
         self, mock_engine_fn: MagicMock, mock_settings: MagicMock, client: TestClient
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = "test-secret"
-        mock_engine, _ = _make_mock_engine([
-            {"id": "new-id", "username": "new_user", "role": "analyst",
-             "is_active": True, "created_at": "2026-02-14"},
-        ])
+        mock_engine, _ = _make_mock_engine(
+            [
+                {
+                    "id": "new-id",
+                    "username": "new_user",
+                    "role": "analyst",
+                    "is_active": True,
+                    "created_at": "2026-02-14",
+                },
+            ]
+        )
         mock_engine_fn.return_value = mock_engine
 
         response = client.post(
@@ -130,20 +145,42 @@ class TestGetAuditLog:
         self, mock_engine_fn: MagicMock, mock_settings: MagicMock, client: TestClient
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = "test-secret"
-        mock_engine, mock_conn = _make_mock_engine([
-            {"id": "log-1", "user_id": "1", "username": "admin", "action": "POST",
-             "resource_type": "admin/users", "resource_id": None,
-             "details": None, "ip_address": "127.0.0.1", "created_at": "2026-02-14"},
-        ])
+        mock_engine, mock_conn = _make_mock_engine(
+            [
+                {
+                    "id": "log-1",
+                    "user_id": "1",
+                    "username": "admin",
+                    "action": "POST",
+                    "resource_type": "admin/users",
+                    "resource_id": None,
+                    "details": None,
+                    "ip_address": "127.0.0.1",
+                    "created_at": "2026-02-14",
+                },
+            ]
+        )
         # First call returns count, second returns rows
         count_result = MagicMock()
         count_result.scalar.return_value = 1
         rows_result = MagicMock()
-        rows_result.__iter__ = lambda self: iter([_make_mock_row(
-            {"id": "log-1", "user_id": "1", "username": "admin", "action": "POST",
-             "resource_type": "admin/users", "resource_id": None,
-             "details": None, "ip_address": "127.0.0.1", "created_at": "2026-02-14"},
-        )])
+        rows_result.__iter__ = lambda self: iter(
+            [
+                _make_mock_row(
+                    {
+                        "id": "log-1",
+                        "user_id": "1",
+                        "username": "admin",
+                        "action": "POST",
+                        "resource_type": "admin/users",
+                        "resource_id": None,
+                        "details": None,
+                        "ip_address": "127.0.0.1",
+                        "created_at": "2026-02-14",
+                    },
+                )
+            ]
+        )
         mock_conn.execute = AsyncMock(side_effect=[count_result, rows_result])
         mock_engine_fn.return_value = mock_engine
 

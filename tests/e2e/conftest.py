@@ -39,9 +39,7 @@ async def _mock_handle_call(conn: AudioSocketConnection) -> None:
     agent = MockLLMAgent()
 
     # Step 1: send greeting
-    greeting_audio = await tts.synthesize(
-        "Добрий день! Чим можу допомогти?"
-    )
+    greeting_audio = await tts.synthesize("Добрий день! Чим можу допомогти?")
     await conn.send_audio(greeting_audio)
 
     # Step 2: read audio packets until hangup or EOF

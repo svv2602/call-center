@@ -72,8 +72,11 @@ app.include_router(websocket_router)
 # Middleware order (last added = outermost = runs first):
 # SecurityHeaders → RateLimit → CORS → Audit
 app.add_middleware(AuditMiddleware)
-app.add_middleware(CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",") if os.environ.get("CORS_ALLOWED_ORIGINS") else [],
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
+    if os.environ.get("CORS_ALLOWED_ORIGINS")
+    else [],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
@@ -179,9 +182,7 @@ async def readiness_check() -> dict[str, object]:
     if _onec_client is not None and _onec_client._session is not None:
         try:
             # Lightweight stock request to check 1C connectivity
-            resp = await asyncio.wait_for(
-                _onec_client.get_stock("ProKoleso"), timeout=5.0
-            )
+            resp = await asyncio.wait_for(_onec_client.get_stock("ProKoleso"), timeout=5.0)
             checks["onec_api"] = "reachable" if resp.get("success") else "error"
         except Exception:
             checks["onec_api"] = "unreachable"
@@ -268,11 +269,14 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     active_calls.dec()
     status = "transferred" if session.transferred else "completed"
     calls_total.labels(status=status).inc()
-    await publish_event("call:ended", {
-        "call_id": str(conn.channel_uuid),
-        "status": status,
-        "duration_seconds": session.duration_seconds,
-    })
+    await publish_event(
+        "call:ended",
+        {
+            "call_id": str(conn.channel_uuid),
+            "status": status,
+            "duration_seconds": session.duration_seconds,
+        },
+    )
 
     logger.info(
         "Call ended: %s, duration=%ds, turns=%d",
@@ -413,14 +417,18 @@ async def main() -> None:
                 await _sync_service.full_sync()
                 logger.info("Initial catalog sync completed")
             except Exception:
-                logger.warning("Initial catalog sync failed — will retry periodically", exc_info=True)
+                logger.warning(
+                    "Initial catalog sync failed — will retry periodically", exc_info=True
+                )
 
             # Start periodic incremental sync
             _sync_task = asyncio.create_task(
                 _periodic_sync(_sync_service, settings.onec.sync_interval_minutes)
             )
         except Exception:
-            logger.warning("1C integration init failed — MVP tools will use fallback HTTP", exc_info=True)
+            logger.warning(
+                "1C integration init failed — MVP tools will use fallback HTTP", exc_info=True
+            )
             _onec_client = None
             _db_engine = None
     else:
@@ -443,7 +451,9 @@ async def main() -> None:
         await _tts_engine.initialize()
         logger.info("TTS engine initialized")
     except Exception:
-        logger.warning("TTS engine unavailable (no Google credentials?) — calls will not work, but API is running")
+        logger.warning(
+            "TTS engine unavailable (no Google credentials?) — calls will not work, but API is running"
+        )
         _tts_engine = None
 
     # Start API server (health checks, metrics)

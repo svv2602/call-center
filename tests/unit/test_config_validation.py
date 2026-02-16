@@ -51,9 +51,7 @@ class TestValidateRequired:
         assert "DATABASE_URL" in errors
 
     def test_valid_database_url_with_asyncpg(self) -> None:
-        settings = _make_settings(
-            database=DatabaseSettings(url="postgresql+asyncpg://u:p@host/db")
-        )
+        settings = _make_settings(database=DatabaseSettings(url="postgresql+asyncpg://u:p@host/db"))
         result = settings.validate_required()
         db_errors = [e for e in result.errors if e.field == "DATABASE_URL"]
         assert len(db_errors) == 0
@@ -99,15 +97,11 @@ class TestValidateRequired:
             env.pop("GOOGLE_APPLICATION_CREDENTIALS", None)
             with patch.dict("os.environ", env, clear=True):
                 result = settings.validate_required()
-        cred_errors = [
-            e for e in result.errors if e.field == "GOOGLE_APPLICATION_CREDENTIALS"
-        ]
+        cred_errors = [e for e in result.errors if e.field == "GOOGLE_APPLICATION_CREDENTIALS"]
         assert len(cred_errors) == 0
 
     def test_default_jwt_secret_warns(self) -> None:
-        settings = _make_settings(
-            admin=AdminSettings(jwt_secret="change-me-in-production")
-        )
+        settings = _make_settings(admin=AdminSettings(jwt_secret="change-me-in-production"))
         result = settings.validate_required()
         assert not result.ok
         errors = {e.field for e in result.errors}

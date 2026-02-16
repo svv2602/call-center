@@ -48,7 +48,9 @@ def _dispatch_embedding(article_id: str) -> None:
 
         generate_article_embeddings.delay(article_id)
     except Exception:
-        logger.warning("Could not dispatch embedding task for article %s", article_id, exc_info=True)
+        logger.warning(
+            "Could not dispatch embedding task for article %s", article_id, exc_info=True
+        )
 
 
 class ArticleCreateRequest(BaseModel):
@@ -140,10 +142,12 @@ async def import_articles(
         ext = Path(filename).suffix.lower()
 
         if ext not in SUPPORTED_EXTENSIONS:
-            errors.append({
-                "filename": filename,
-                "error": f"Unsupported file type: {ext}. Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}",
-            })
+            errors.append(
+                {
+                    "filename": filename,
+                    "error": f"Unsupported file type: {ext}. Supported: {', '.join(sorted(SUPPORTED_EXTENSIONS))}",
+                }
+            )
             continue
 
         try:
@@ -247,7 +251,9 @@ async def get_article(article_id: UUID, _: dict[str, Any] = _analyst_dep) -> dic
 
 
 @router.post("/articles")
-async def create_article(request: ArticleCreateRequest, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def create_article(
+    request: ArticleCreateRequest, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
     """Create a new knowledge article."""
     if not is_valid_category(request.category):
         raise HTTPException(status_code=400, detail=f"Invalid category: {request.category}")
@@ -279,7 +285,9 @@ async def create_article(request: ArticleCreateRequest, _: dict[str, Any] = _adm
 
 
 @router.patch("/articles/{article_id}")
-async def update_article(article_id: UUID, request: ArticleUpdateRequest, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def update_article(
+    article_id: UUID, request: ArticleUpdateRequest, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
     """Update a knowledge article."""
     if request.category is not None and not is_valid_category(request.category):
         raise HTTPException(status_code=400, detail=f"Invalid category: {request.category}")

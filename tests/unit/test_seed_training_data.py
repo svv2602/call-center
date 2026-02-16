@@ -30,7 +30,9 @@ class TestGetDialogueExamples:
         from src.api.training_dialogues import SCENARIO_TYPES
 
         for ex in get_dialogue_examples():
-            assert ex["scenario_type"] in SCENARIO_TYPES, f"Invalid scenario_type: {ex['scenario_type']}"
+            assert ex["scenario_type"] in SCENARIO_TYPES, (
+                f"Invalid scenario_type: {ex['scenario_type']}"
+            )
 
     def test_valid_phases(self) -> None:
         from src.api.training_dialogues import PHASES

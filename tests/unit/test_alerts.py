@@ -51,7 +51,9 @@ class TestAlertRules:
         rules = self.config["groups"][0]["rules"]
         for rule in rules:
             assert "summary" in rule["annotations"], f"Alert {rule['alert']} missing summary"
-            assert "description" in rule["annotations"], f"Alert {rule['alert']} missing description"
+            assert "description" in rule["annotations"], (
+                f"Alert {rule['alert']} missing description"
+            )
 
     def test_severity_values_valid(self) -> None:
         rules = self.config["groups"][0]["rules"]

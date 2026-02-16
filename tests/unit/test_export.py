@@ -57,19 +57,21 @@ class TestExportCallsCSV:
 
     @patch("src.api.export._get_engine")
     def test_export_calls_basic(self, mock_engine_fn: MagicMock, client: TestClient) -> None:
-        mock_engine, _ = _make_mock_engine([
-            {
-                "id": "550e8400-e29b-41d4-a716-446655440000",
-                "started_at": "2026-02-14T10:00:00",
-                "duration_seconds": 90,
-                "caller_id": "+380501234567",
-                "scenario": "tire_search",
-                "transferred_to_operator": False,
-                "transfer_reason": None,
-                "quality_score": 0.85,
-                "total_cost_usd": 0.05,
-            },
-        ])
+        mock_engine, _ = _make_mock_engine(
+            [
+                {
+                    "id": "550e8400-e29b-41d4-a716-446655440000",
+                    "started_at": "2026-02-14T10:00:00",
+                    "duration_seconds": 90,
+                    "caller_id": "+380501234567",
+                    "scenario": "tire_search",
+                    "transferred_to_operator": False,
+                    "transfer_reason": None,
+                    "quality_score": 0.85,
+                    "total_cost_usd": 0.05,
+                },
+            ]
+        )
         mock_engine_fn.return_value = mock_engine
 
         response = client.get("/analytics/calls/export?date_from=2026-02-14&date_to=2026-02-14")
@@ -127,19 +129,21 @@ class TestExportCallsCSV:
 
     @patch("src.api.export._get_engine")
     def test_csv_columns_present(self, mock_engine_fn: MagicMock, client: TestClient) -> None:
-        mock_engine, _ = _make_mock_engine([
-            {
-                "id": "test-id",
-                "started_at": "2026-02-14T10:00:00",
-                "duration_seconds": 60,
-                "caller_id": "+380509876543",
-                "scenario": "order",
-                "transferred_to_operator": True,
-                "transfer_reason": "complex_request",
-                "quality_score": None,
-                "total_cost_usd": None,
-            },
-        ])
+        mock_engine, _ = _make_mock_engine(
+            [
+                {
+                    "id": "test-id",
+                    "started_at": "2026-02-14T10:00:00",
+                    "duration_seconds": 60,
+                    "caller_id": "+380509876543",
+                    "scenario": "order",
+                    "transferred_to_operator": True,
+                    "transfer_reason": "complex_request",
+                    "quality_score": None,
+                    "total_cost_usd": None,
+                },
+            ]
+        )
         mock_engine_fn.return_value = mock_engine
 
         response = client.get("/analytics/calls/export")
@@ -147,9 +151,15 @@ class TestExportCallsCSV:
         rows = list(reader)
         assert len(rows) == 1
         expected_cols = {
-            "call_id", "started_at", "duration_sec", "caller_id",
-            "scenario", "transferred", "transfer_reason",
-            "quality_score", "total_cost",
+            "call_id",
+            "started_at",
+            "duration_sec",
+            "caller_id",
+            "scenario",
+            "transferred",
+            "transfer_reason",
+            "quality_score",
+            "total_cost",
         }
         assert set(rows[0].keys()) == expected_cols
         assert rows[0]["transferred"] == "True"
@@ -161,18 +171,20 @@ class TestExportSummaryCSV:
 
     @patch("src.api.export._get_engine")
     def test_export_summary_basic(self, mock_engine_fn: MagicMock, client: TestClient) -> None:
-        mock_engine, _ = _make_mock_engine([
-            {
-                "stat_date": "2026-02-14",
-                "total_calls": 42,
-                "resolved_by_bot": 35,
-                "transferred": 7,
-                "avg_duration_seconds": 120.5,
-                "avg_quality_score": 0.85,
-                "total_cost_usd": 2.1,
-                "scenario_breakdown": '{"tire_search": 30, "order": 12}',
-            },
-        ])
+        mock_engine, _ = _make_mock_engine(
+            [
+                {
+                    "stat_date": "2026-02-14",
+                    "total_calls": 42,
+                    "resolved_by_bot": 35,
+                    "transferred": 7,
+                    "avg_duration_seconds": 120.5,
+                    "avg_quality_score": 0.85,
+                    "total_cost_usd": 2.1,
+                    "scenario_breakdown": '{"tire_search": 30, "order": 12}',
+                },
+            ]
+        )
         mock_engine_fn.return_value = mock_engine
 
         response = client.get("/analytics/summary/export?date_from=2026-02-14&date_to=2026-02-14")
@@ -203,18 +215,20 @@ class TestExportSummaryCSV:
         self, mock_engine_fn: MagicMock, client: TestClient
     ) -> None:
         """Test when scenario_breakdown is already a dict (not JSON string)."""
-        mock_engine, _ = _make_mock_engine([
-            {
-                "stat_date": "2026-02-14",
-                "total_calls": 10,
-                "resolved_by_bot": 8,
-                "transferred": 2,
-                "avg_duration_seconds": 60,
-                "avg_quality_score": 0.7,
-                "total_cost_usd": 0.5,
-                "scenario_breakdown": {"order": 5, "fitting": 5},
-            },
-        ])
+        mock_engine, _ = _make_mock_engine(
+            [
+                {
+                    "stat_date": "2026-02-14",
+                    "total_calls": 10,
+                    "resolved_by_bot": 8,
+                    "transferred": 2,
+                    "avg_duration_seconds": 60,
+                    "avg_quality_score": 0.7,
+                    "total_cost_usd": 0.5,
+                    "scenario_breakdown": {"order": 5, "fitting": 5},
+                },
+            ]
+        )
         mock_engine_fn.return_value = mock_engine
 
         response = client.get("/analytics/summary/export")
@@ -227,26 +241,34 @@ class TestExportSummaryCSV:
 
     @patch("src.api.export._get_engine")
     def test_export_summary_columns(self, mock_engine_fn: MagicMock, client: TestClient) -> None:
-        mock_engine, _ = _make_mock_engine([
-            {
-                "stat_date": "2026-02-13",
-                "total_calls": 5,
-                "resolved_by_bot": 4,
-                "transferred": 1,
-                "avg_duration_seconds": 45,
-                "avg_quality_score": 0.6,
-                "total_cost_usd": 0.3,
-                "scenario_breakdown": None,
-            },
-        ])
+        mock_engine, _ = _make_mock_engine(
+            [
+                {
+                    "stat_date": "2026-02-13",
+                    "total_calls": 5,
+                    "resolved_by_bot": 4,
+                    "transferred": 1,
+                    "avg_duration_seconds": 45,
+                    "avg_quality_score": 0.6,
+                    "total_cost_usd": 0.3,
+                    "scenario_breakdown": None,
+                },
+            ]
+        )
         mock_engine_fn.return_value = mock_engine
 
         response = client.get("/analytics/summary/export")
         reader = csv.DictReader(io.StringIO(response.text))
         rows = list(reader)
         expected_cols = {
-            "date", "total_calls", "resolved_by_bot", "transferred",
-            "avg_duration_sec", "avg_quality", "total_cost", "top_scenario",
+            "date",
+            "total_calls",
+            "resolved_by_bot",
+            "transferred",
+            "avg_duration_sec",
+            "avg_quality",
+            "total_cost",
+            "top_scenario",
         }
         assert set(rows[0].keys()) == expected_cols
         assert rows[0]["top_scenario"] == ""

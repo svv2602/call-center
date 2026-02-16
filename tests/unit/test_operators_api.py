@@ -39,9 +39,7 @@ def _make_mock_engine(
             mock_result.__iter__ = lambda self, r=result_rows: iter(
                 [_make_mock_row(row) for row in r]
             )
-            mock_result.first.return_value = (
-                _make_mock_row(result_rows[0]) if result_rows else None
-            )
+            mock_result.first.return_value = _make_mock_row(result_rows[0]) if result_rows else None
             mock_result.scalar.return_value = len(result_rows)
             results.append(mock_result)
         mock_conn.execute = AsyncMock(side_effect=results)
@@ -189,9 +187,7 @@ class TestUpdateOperator:
         assert response.status_code == 404
 
     @patch("src.api.auth.get_settings")
-    def test_update_no_fields(
-        self, mock_settings: MagicMock, client: TestClient
-    ) -> None:
+    def test_update_no_fields(self, mock_settings: MagicMock, client: TestClient) -> None:
         mock_settings.return_value.admin.jwt_secret = "test-secret"
         response = client.patch(
             "/operators/op-uuid-1",

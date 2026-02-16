@@ -21,7 +21,9 @@ _PHONE_RE = re.compile(
 _NAME_RE = re.compile(r"\b([А-ЯІЇЄҐA-Z][а-яіїєґa-z]{2,})\s+([А-ЯІЇЄҐA-Z][а-яіїєґa-z]{2,})\b")
 
 # Email pattern
-_EMAIL_RE = re.compile(r"\b([a-zA-Z0-9._%+-])([a-zA-Z0-9._%+-]*)@([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})\b")
+_EMAIL_RE = re.compile(
+    r"\b([a-zA-Z0-9._%+-])([a-zA-Z0-9._%+-]*)@([a-zA-Z0-9.-]+)\.([a-zA-Z]{2,})\b"
+)
 
 # Card number patterns (with and without spaces/dashes, 13-19 digits)
 _CARD_RE = re.compile(r"\b(\d{4})[\s-]?(\d{4})[\s-]?(\d{4})[\s-]?(\d{4})\b")
@@ -35,7 +37,9 @@ _ADDRESS_RE = re.compile(
 )
 
 # IBAN pattern (UA + 2 check digits + 25 alphanumeric, with optional spaces)
-_IBAN_RE = re.compile(r"\b(UA\d{2})\s?(\d{4})\s?(\d{4})\s?(\d{4})\s?(\d{4})\s?(\d{4})\s?(\d{5})\s?(\d?)\b")
+_IBAN_RE = re.compile(
+    r"\b(UA\d{2})\s?(\d{4})\s?(\d{4})\s?(\d{4})\s?(\d{4})\s?(\d{4})\s?(\d{5})\s?(\d?)\b"
+)
 
 
 def sanitize_phone(text: str) -> str:

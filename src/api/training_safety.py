@@ -28,8 +28,12 @@ _admin_dep = Depends(require_role("admin"))
 _analyst_dep = Depends(require_role("admin", "analyst"))
 
 RULE_TYPES = [
-    "prompt_injection", "data_validation", "off_topic",
-    "language", "behavioral", "escalation",
+    "prompt_injection",
+    "data_validation",
+    "off_topic",
+    "language",
+    "behavioral",
+    "escalation",
 ]
 SEVERITIES = ["low", "medium", "high", "critical"]
 
@@ -134,12 +138,18 @@ async def get_safety_rule(rule_id: UUID, _: dict[str, Any] = _analyst_dep) -> di
 
 
 @router.post("/")
-async def create_safety_rule(request: SafetyRuleCreateRequest, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def create_safety_rule(
+    request: SafetyRuleCreateRequest, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
     """Create a new safety rule."""
     if request.rule_type not in RULE_TYPES:
-        raise HTTPException(status_code=400, detail=f"Invalid rule_type. Must be one of: {RULE_TYPES}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid rule_type. Must be one of: {RULE_TYPES}"
+        )
     if request.severity not in SEVERITIES:
-        raise HTTPException(status_code=400, detail=f"Invalid severity. Must be one of: {SEVERITIES}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid severity. Must be one of: {SEVERITIES}"
+        )
 
     engine = await _get_engine()
 
@@ -168,12 +178,18 @@ async def create_safety_rule(request: SafetyRuleCreateRequest, _: dict[str, Any]
 
 
 @router.patch("/{rule_id}")
-async def update_safety_rule(rule_id: UUID, request: SafetyRuleUpdateRequest, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def update_safety_rule(
+    rule_id: UUID, request: SafetyRuleUpdateRequest, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
     """Update a safety rule."""
     if request.rule_type is not None and request.rule_type not in RULE_TYPES:
-        raise HTTPException(status_code=400, detail=f"Invalid rule_type. Must be one of: {RULE_TYPES}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid rule_type. Must be one of: {RULE_TYPES}"
+        )
     if request.severity is not None and request.severity not in SEVERITIES:
-        raise HTTPException(status_code=400, detail=f"Invalid severity. Must be one of: {SEVERITIES}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid severity. Must be one of: {SEVERITIES}"
+        )
 
     engine = await _get_engine()
 

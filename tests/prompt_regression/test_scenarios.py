@@ -119,8 +119,7 @@ class TestPromptRegression:
         """Verify SYSTEM_PROMPT does NOT contain keywords that would be dangerous."""
         for kw in scenario.get("unexpected_keywords", []):
             assert kw not in SYSTEM_PROMPT, (
-                f"Unexpected keyword '{kw}' found in SYSTEM_PROMPT "
-                f"for scenario '{scenario['id']}'"
+                f"Unexpected keyword '{kw}' found in SYSTEM_PROMPT for scenario '{scenario['id']}'"
             )
 
     # ------------------------------------------------------------------
@@ -130,9 +129,7 @@ class TestPromptRegression:
     def test_all_canonical_tools_defined(self) -> None:
         """Verify all canonical tools from the project spec exist in ALL_TOOLS."""
         missing = CANONICAL_TOOLS - self.tool_names
-        assert not missing, (
-            f"Canonical tools missing from ALL_TOOLS: {sorted(missing)}"
-        )
+        assert not missing, f"Canonical tools missing from ALL_TOOLS: {sorted(missing)}"
 
     def test_no_unknown_canonical_tools(self) -> None:
         """Verify ALL_TOOLS does not contain misspelled canonical tool names.
@@ -158,16 +155,14 @@ class TestPromptRegression:
         assert "НІКОЛИ" in SYSTEM_PROMPT, (
             "SYSTEM_PROMPT must contain 'НІКОЛИ' (NEVER) for confirm safety"
         )
-        assert "оператор" in SYSTEM_PROMPT.lower(), (
-            "SYSTEM_PROMPT must mention operator escalation"
-        )
+        assert "оператор" in SYSTEM_PROMPT.lower(), "SYSTEM_PROMPT must mention operator escalation"
 
     def test_prompt_requires_confirmation_before_order(self) -> None:
         """Verify the prompt explicitly requires customer confirmation before confirming order."""
         # Must mention explicit confirmation requirement
-        assert "підтвердження" in SYSTEM_PROMPT.lower() or "підтверджуєте" in SYSTEM_PROMPT.lower(), (
-            "SYSTEM_PROMPT must require explicit customer confirmation before order"
-        )
+        assert (
+            "підтвердження" in SYSTEM_PROMPT.lower() or "підтверджуєте" in SYSTEM_PROMPT.lower()
+        ), "SYSTEM_PROMPT must require explicit customer confirmation before order"
 
     def test_prompt_greeting_is_ukrainian(self) -> None:
         """Verify that the prompt instructs Ukrainian-language interactions."""
@@ -191,9 +186,7 @@ class TestPromptRegression:
         """Tool descriptions must be non-empty strings."""
         for tool in ALL_TOOLS:
             desc = tool.get("description", "")
-            assert len(desc) > 10, (
-                f"Tool '{tool['name']}' has too short description: '{desc}'"
-            )
+            assert len(desc) > 10, f"Tool '{tool['name']}' has too short description: '{desc}'"
 
     def test_tool_schemas_are_valid_objects(self) -> None:
         """Tool input_schema must have type=object."""
@@ -210,13 +203,17 @@ class TestPromptRegression:
 
     def test_scenarios_file_valid(self) -> None:
         """Scenario file must be valid JSON with required fields."""
-        required_keys = {"id", "description", "user_message", "expected_tool",
-                         "expected_keywords", "category"}
+        required_keys = {
+            "id",
+            "description",
+            "user_message",
+            "expected_tool",
+            "expected_keywords",
+            "category",
+        }
         for scenario in self.scenarios:
             missing = required_keys - set(scenario.keys())
-            assert not missing, (
-                f"Scenario '{scenario.get('id', '?')}' missing keys: {missing}"
-            )
+            assert not missing, f"Scenario '{scenario.get('id', '?')}' missing keys: {missing}"
 
     def test_scenario_ids_unique(self) -> None:
         """All scenario IDs must be unique."""

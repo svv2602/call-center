@@ -46,10 +46,13 @@ async def test_circuit_breaker_open_raises_store_api_error_503() -> None:
 
     cb_error = _make_circuit_breaker_error()
 
-    with patch(
-        "src.store_client.client._store_breaker.call_async",
-        side_effect=cb_error,
-    ), pytest.raises(StoreAPIError) as exc_info:
+    with (
+        patch(
+            "src.store_client.client._store_breaker.call_async",
+            side_effect=cb_error,
+        ),
+        pytest.raises(StoreAPIError) as exc_info,
+    ):
         await client._request("GET", "/api/v1/tires/search")
 
     assert exc_info.value.status == 503
@@ -78,9 +81,7 @@ async def test_store_api_retries_on_503_then_raises() -> None:
         patch("src.store_client.client.asyncio.sleep", new_callable=AsyncMock),
         pytest.raises(StoreAPIError) as exc_info,
     ):
-        await client._request_with_retry(
-            "GET", "http://store.local/api/v1/tires/search", "req-001"
-        )
+        await client._request_with_retry("GET", "http://store.local/api/v1/tires/search", "req-001")
 
     assert exc_info.value.status == 503
     assert mock_do_request.call_count == _MAX_RETRIES + 1
@@ -108,9 +109,7 @@ async def test_store_api_no_retry_on_500() -> None:
         patch.object(client, "_do_request", mock_do_request),
         pytest.raises(StoreAPIError) as exc_info,
     ):
-        await client._request_with_retry(
-            "GET", "http://store.local/api/v1/tires/search", "req-002"
-        )
+        await client._request_with_retry("GET", "http://store.local/api/v1/tires/search", "req-002")
 
     assert exc_info.value.status == 500
     assert mock_do_request.call_count == 1, "500 must not be retried"

@@ -119,22 +119,30 @@ async def export_calls_csv(
     # Mask PII and format rows
     rows: list[dict[str, Any]] = []
     for r in rows_raw:
-        rows.append({
-            "call_id": str(r["id"]),
-            "started_at": str(r["started_at"] or ""),
-            "duration_sec": r["duration_seconds"] or 0,
-            "caller_id": sanitize_phone(str(r["caller_id"] or "")),
-            "scenario": r["scenario"] or "",
-            "transferred": r["transferred_to_operator"] or False,
-            "transfer_reason": r["transfer_reason"] or "",
-            "quality_score": r["quality_score"] if r["quality_score"] is not None else "",
-            "total_cost": r["total_cost_usd"] if r["total_cost_usd"] is not None else "",
-        })
+        rows.append(
+            {
+                "call_id": str(r["id"]),
+                "started_at": str(r["started_at"] or ""),
+                "duration_sec": r["duration_seconds"] or 0,
+                "caller_id": sanitize_phone(str(r["caller_id"] or "")),
+                "scenario": r["scenario"] or "",
+                "transferred": r["transferred_to_operator"] or False,
+                "transfer_reason": r["transfer_reason"] or "",
+                "quality_score": r["quality_score"] if r["quality_score"] is not None else "",
+                "total_cost": r["total_cost_usd"] if r["total_cost_usd"] is not None else "",
+            }
+        )
 
     columns = [
-        "call_id", "started_at", "duration_sec", "caller_id",
-        "scenario", "transferred", "transfer_reason",
-        "quality_score", "total_cost",
+        "call_id",
+        "started_at",
+        "duration_sec",
+        "caller_id",
+        "scenario",
+        "transferred",
+        "transfer_reason",
+        "quality_score",
+        "total_cost",
     ]
 
     # Build filename from date range
@@ -195,20 +203,28 @@ async def export_summary_csv(
             if isinstance(breakdown, dict) and breakdown:
                 top_scenario = max(breakdown, key=breakdown.get)  # type: ignore[arg-type]
 
-        rows.append({
-            "date": str(r["stat_date"]),
-            "total_calls": r["total_calls"] or 0,
-            "resolved_by_bot": r["resolved_by_bot"] or 0,
-            "transferred": r["transferred"] or 0,
-            "avg_duration_sec": round(float(r["avg_duration_seconds"] or 0), 1),
-            "avg_quality": round(float(r["avg_quality_score"] or 0), 3),
-            "total_cost": round(float(r["total_cost_usd"] or 0), 4),
-            "top_scenario": top_scenario,
-        })
+        rows.append(
+            {
+                "date": str(r["stat_date"]),
+                "total_calls": r["total_calls"] or 0,
+                "resolved_by_bot": r["resolved_by_bot"] or 0,
+                "transferred": r["transferred"] or 0,
+                "avg_duration_sec": round(float(r["avg_duration_seconds"] or 0), 1),
+                "avg_quality": round(float(r["avg_quality_score"] or 0), 3),
+                "total_cost": round(float(r["total_cost_usd"] or 0), 4),
+                "top_scenario": top_scenario,
+            }
+        )
 
     columns = [
-        "date", "total_calls", "resolved_by_bot", "transferred",
-        "avg_duration_sec", "avg_quality", "total_cost", "top_scenario",
+        "date",
+        "total_calls",
+        "resolved_by_bot",
+        "transferred",
+        "avg_duration_sec",
+        "avg_quality",
+        "total_cost",
+        "top_scenario",
     ]
 
     d_from = date_from or "all"

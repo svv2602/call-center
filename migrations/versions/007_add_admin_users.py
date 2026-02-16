@@ -21,14 +21,22 @@ def upgrade() -> None:
     # --- admin_users ---
     op.create_table(
         "admin_users",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True,
-                  server_default=sa.text("gen_random_uuid()")),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
         sa.Column("username", sa.String(100), unique=True, nullable=False),
         sa.Column("password_hash", sa.String(256), nullable=False),
         sa.Column("role", sa.String(20), nullable=False, server_default="operator"),
         sa.Column("is_active", sa.Boolean, nullable=False, server_default="true"),
-        sa.Column("created_at", sa.DateTime(timezone=True),
-                  server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
         sa.Column("last_login_at", sa.DateTime(timezone=True), nullable=True),
     )
 
@@ -37,8 +45,12 @@ def upgrade() -> None:
     # --- admin_audit_log ---
     op.create_table(
         "admin_audit_log",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True,
-                  server_default=sa.text("gen_random_uuid()")),
+        sa.Column(
+            "id",
+            postgresql.UUID(as_uuid=True),
+            primary_key=True,
+            server_default=sa.text("gen_random_uuid()"),
+        ),
         sa.Column("user_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("username", sa.String(100), nullable=True),
         sa.Column("action", sa.String(20), nullable=False),
@@ -46,8 +58,12 @@ def upgrade() -> None:
         sa.Column("resource_id", sa.String(100), nullable=True),
         sa.Column("details", postgresql.JSONB, nullable=True),
         sa.Column("ip_address", postgresql.INET, nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True),
-                  server_default=sa.text("now()"), nullable=False),
+        sa.Column(
+            "created_at",
+            sa.DateTime(timezone=True),
+            server_default=sa.text("now()"),
+            nullable=False,
+        ),
     )
 
     op.create_index("idx_audit_log_user_id", "admin_audit_log", ["user_id"])

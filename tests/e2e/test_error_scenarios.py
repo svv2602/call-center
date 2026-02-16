@@ -19,9 +19,7 @@ class TestConnectionErrors:
     """Test error handling for connection issues."""
 
     @pytest.mark.asyncio
-    async def test_immediate_disconnect(
-        self, audiosocket_host: str, audiosocket_port: int
-    ) -> None:
+    async def test_immediate_disconnect(self, audiosocket_host: str, audiosocket_port: int) -> None:
         """Client connects and immediately disconnects — server should handle gracefully."""
         client = AudioSocketTestClient()
         try:
@@ -48,9 +46,7 @@ class TestConnectionErrors:
             await client.connect("127.0.0.1", 59999)  # unlikely to be in use
 
     @pytest.mark.asyncio
-    async def test_large_audio_burst(
-        self, audiosocket_host: str, audiosocket_port: int
-    ) -> None:
+    async def test_large_audio_burst(self, audiosocket_host: str, audiosocket_port: int) -> None:
         """Send a burst of audio frames rapidly — server should not crash."""
         client = AudioSocketTestClient()
         try:

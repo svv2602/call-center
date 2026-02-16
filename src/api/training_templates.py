@@ -28,8 +28,13 @@ _admin_dep = Depends(require_role("admin"))
 _analyst_dep = Depends(require_role("admin", "analyst"))
 
 TEMPLATE_KEYS = [
-    "greeting", "farewell", "silence_prompt", "transfer",
-    "error", "wait", "order_cancelled",
+    "greeting",
+    "farewell",
+    "silence_prompt",
+    "transfer",
+    "error",
+    "wait",
+    "order_cancelled",
 ]
 
 
@@ -97,10 +102,14 @@ async def get_template(template_id: UUID, _: dict[str, Any] = _analyst_dep) -> d
 
 
 @router.post("/")
-async def create_template(request: TemplateCreateRequest, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def create_template(
+    request: TemplateCreateRequest, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
     """Create a new response template."""
     if request.template_key not in TEMPLATE_KEYS:
-        raise HTTPException(status_code=400, detail=f"Invalid template_key. Must be one of: {TEMPLATE_KEYS}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid template_key. Must be one of: {TEMPLATE_KEYS}"
+        )
 
     engine = await _get_engine()
 
@@ -111,7 +120,9 @@ async def create_template(request: TemplateCreateRequest, _: dict[str, Any] = _a
             {"key": request.template_key},
         )
         if existing.first():
-            raise HTTPException(status_code=409, detail=f"Template with key '{request.template_key}' already exists")
+            raise HTTPException(
+                status_code=409, detail=f"Template with key '{request.template_key}' already exists"
+            )
 
         result = await conn.execute(
             text("""
@@ -135,7 +146,9 @@ async def create_template(request: TemplateCreateRequest, _: dict[str, Any] = _a
 
 
 @router.patch("/{template_id}")
-async def update_template(template_id: UUID, request: TemplateUpdateRequest, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def update_template(
+    template_id: UUID, request: TemplateUpdateRequest, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
     """Update a response template."""
     engine = await _get_engine()
 

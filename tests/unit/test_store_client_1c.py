@@ -61,15 +61,32 @@ class TestBackwardCompat:
 
     @pytest.mark.asyncio
     async def test_search_tires_uses_http(self, store_client_legacy: StoreClient) -> None:
-        mock_data = {"items": [{"id": "1", "name": "Test", "brand": "X", "size": "205/55R16", "season": "summer", "price": 3000, "in_stock": True}], "total": 1}
-        with patch.object(store_client_legacy, "_get", new_callable=AsyncMock, return_value=mock_data):
+        mock_data = {
+            "items": [
+                {
+                    "id": "1",
+                    "name": "Test",
+                    "brand": "X",
+                    "size": "205/55R16",
+                    "season": "summer",
+                    "price": 3000,
+                    "in_stock": True,
+                }
+            ],
+            "total": 1,
+        }
+        with patch.object(
+            store_client_legacy, "_get", new_callable=AsyncMock, return_value=mock_data
+        ):
             result = await store_client_legacy.search_tires(width=205, profile=55, diameter=16)
             assert result["items"][0]["brand"] == "X"
 
     @pytest.mark.asyncio
     async def test_check_availability_uses_http(self, store_client_legacy: StoreClient) -> None:
         mock_data = {"in_stock": True, "quantity": 10, "price": 3000, "delivery_days": 1}
-        with patch.object(store_client_legacy, "_get", new_callable=AsyncMock, return_value=mock_data):
+        with patch.object(
+            store_client_legacy, "_get", new_callable=AsyncMock, return_value=mock_data
+        ):
             result = await store_client_legacy.check_availability(product_id="tire-001")
             assert result["available"] is True
             assert result["quantity"] == 10
@@ -80,12 +97,16 @@ class TestSearchTiresDB:
 
     @pytest.mark.asyncio
     async def test_vehicle_search_returns_message(self, store_client_1c: StoreClient) -> None:
-        result = await store_client_1c.search_tires(vehicle_make="Toyota", vehicle_model="Camry", vehicle_year="2020")
+        result = await store_client_1c.search_tires(
+            vehicle_make="Toyota", vehicle_model="Camry", vehicle_year="2020"
+        )
         assert result["total"] == 0
         assert "недоступний" in result["message"]
 
     @pytest.mark.asyncio
-    async def test_search_by_size(self, store_client_1c: StoreClient, mock_db_engine: MagicMock) -> None:
+    async def test_search_by_size(
+        self, store_client_1c: StoreClient, mock_db_engine: MagicMock
+    ) -> None:
         # Set up mock result
         mock_row = {
             "id": "00000019835",
@@ -111,7 +132,9 @@ class TestSearchTiresDB:
         assert result["items"][0]["in_stock"] is True
 
     @pytest.mark.asyncio
-    async def test_search_empty_result(self, store_client_1c: StoreClient, mock_db_engine: MagicMock) -> None:
+    async def test_search_empty_result(
+        self, store_client_1c: StoreClient, mock_db_engine: MagicMock
+    ) -> None:
         mock_result = MagicMock()
         mock_result.mappings.return_value.all.return_value = []
 
@@ -129,8 +152,12 @@ class TestCheckAvailability1C:
     """Test check_availability with Redis/DB backend."""
 
     @pytest.mark.asyncio
-    async def test_redis_cache_hit(self, store_client_1c: StoreClient, mock_redis: AsyncMock) -> None:
-        stock_data = json.dumps({"price": 1850, "stock": 24, "country": "Сербія", "year_issue": "25-24"})
+    async def test_redis_cache_hit(
+        self, store_client_1c: StoreClient, mock_redis: AsyncMock
+    ) -> None:
+        stock_data = json.dumps(
+            {"price": 1850, "stock": 24, "country": "Сербія", "year_issue": "25-24"}
+        )
         mock_redis.hget = AsyncMock(return_value=stock_data.encode())
 
         result = await store_client_1c.check_availability(product_id="00000019835")
@@ -141,7 +168,9 @@ class TestCheckAvailability1C:
         mock_redis.hget.assert_called()
 
     @pytest.mark.asyncio
-    async def test_redis_miss_db_fallback(self, store_client_1c: StoreClient, mock_redis: AsyncMock, mock_db_engine: MagicMock) -> None:
+    async def test_redis_miss_db_fallback(
+        self, store_client_1c: StoreClient, mock_redis: AsyncMock, mock_db_engine: MagicMock
+    ) -> None:
         mock_redis.hget = AsyncMock(return_value=None)
 
         mock_row = {
@@ -164,7 +193,9 @@ class TestCheckAvailability1C:
         assert result["quantity"] == 24
 
     @pytest.mark.asyncio
-    async def test_not_found_in_db(self, store_client_1c: StoreClient, mock_redis: AsyncMock, mock_db_engine: MagicMock) -> None:
+    async def test_not_found_in_db(
+        self, store_client_1c: StoreClient, mock_redis: AsyncMock, mock_db_engine: MagicMock
+    ) -> None:
         mock_redis.hget = AsyncMock(return_value=None)
 
         mock_result = MagicMock()
@@ -186,7 +217,9 @@ class TestCheckAvailability1C:
 
     @pytest.mark.asyncio
     async def test_out_of_stock(self, store_client_1c: StoreClient, mock_redis: AsyncMock) -> None:
-        stock_data = json.dumps({"price": 1850, "stock": 0, "country": "Сербія", "year_issue": "25-24"})
+        stock_data = json.dumps(
+            {"price": 1850, "stock": 0, "country": "Сербія", "year_issue": "25-24"}
+        )
         mock_redis.hget = AsyncMock(return_value=stock_data.encode())
 
         result = await store_client_1c.check_availability(product_id="00000019835")

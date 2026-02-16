@@ -222,7 +222,9 @@ async def change_operator_status(
     """Change operator status (online/offline/busy/break)."""
     valid_statuses = ("online", "offline", "busy", "break")
     if req.status not in valid_statuses:
-        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}")
+        raise HTTPException(
+            status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
+        )
 
     engine = await _get_engine()
 
@@ -243,10 +245,13 @@ async def change_operator_status(
             {"op_id": operator_id, "status": req.status},
         )
 
-    await publish_event("operator:status_changed", {
-        "operator_id": operator_id,
-        "status": req.status,
-    })
+    await publish_event(
+        "operator:status_changed",
+        {
+            "operator_id": operator_id,
+            "status": req.status,
+        },
+    )
 
     return {"status": req.status, "operator_id": operator_id}
 

@@ -589,9 +589,7 @@ class StoreClient:
             "items": items,
         }
 
-    async def _check_availability_1c(
-        self, product_id: str, query: str
-    ) -> dict[str, Any]:
+    async def _check_availability_1c(self, product_id: str, query: str) -> dict[str, Any]:
         """Check availability via Redis cache → PostgreSQL fallback."""
         from sqlalchemy import text
 

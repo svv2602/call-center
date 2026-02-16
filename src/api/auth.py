@@ -286,7 +286,9 @@ async def login(login_data: LoginRequest, request: Request) -> dict[str, Any]:
         return {"token": token, "token_type": "bearer", "expires_in": ttl_seconds}
 
     # Fallback to env credentials (constant-time comparison)
-    if hmac.compare_digest(login_data.username, settings.admin.username) and hmac.compare_digest(login_data.password, settings.admin.password):
+    if hmac.compare_digest(login_data.username, settings.admin.username) and hmac.compare_digest(
+        login_data.password, settings.admin.password
+    ):
         token = create_jwt(
             {"sub": login_data.username, "role": "admin"},
             settings.admin.jwt_secret,

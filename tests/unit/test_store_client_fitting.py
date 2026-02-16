@@ -121,7 +121,9 @@ class TestBookFitting:
                 "sms_sent": True,
             },
         }
-        with patch.object(client, "_post", new_callable=AsyncMock, return_value=mock_response) as mock_post:
+        with patch.object(
+            client, "_post", new_callable=AsyncMock, return_value=mock_response
+        ) as mock_post:
             result = await client.book_fitting(
                 station_id="fs-001",
                 date="2026-03-15",
@@ -257,7 +259,9 @@ class TestSearchKnowledgeBase:
     @pytest.mark.asyncio
     async def test_limits_to_5_articles(self, client: StoreClient) -> None:
         mock_response = {
-            "data": [{"title": f"Article {i}", "category": "faq", "content": "..."} for i in range(10)],
+            "data": [
+                {"title": f"Article {i}", "category": "faq", "content": "..."} for i in range(10)
+            ],
         }
         with patch.object(client, "_get", new_callable=AsyncMock, return_value=mock_response):
             result = await client.search_knowledge_base(query="test")

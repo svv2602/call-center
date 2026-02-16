@@ -125,11 +125,13 @@ class TestEvaluateCallQualityAsync:
         mock_result_empty = MagicMock()
         mock_result_empty.__iter__ = lambda s: iter([])
 
-        mock_conn.execute = AsyncMock(side_effect=[
-            mock_result_empty,  # turns query
-            mock_result_empty,  # tool_calls query
-            MagicMock(first=lambda: None),  # call metadata
-        ])
+        mock_conn.execute = AsyncMock(
+            side_effect=[
+                mock_result_empty,  # turns query
+                mock_result_empty,  # tool_calls query
+                MagicMock(first=lambda: None),  # call metadata
+            ]
+        )
 
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -153,17 +155,19 @@ class TestEvaluateCallQualityAsync:
     @pytest.mark.asyncio
     async def test_handles_llm_json_parsing(self) -> None:
         """Quality details should be valid JSON."""
-        quality_json = json.dumps({
-            "bot_greeted_properly": 0.9,
-            "bot_understood_intent": 0.8,
-            "bot_used_correct_tool": 1.0,
-            "bot_provided_accurate_info": 0.7,
-            "bot_confirmed_before_action": 1.0,
-            "bot_was_concise": 0.8,
-            "call_resolved_without_human": 1.0,
-            "customer_seemed_satisfied": 0.9,
-            "comment": "Good performance overall",
-        })
+        quality_json = json.dumps(
+            {
+                "bot_greeted_properly": 0.9,
+                "bot_understood_intent": 0.8,
+                "bot_used_correct_tool": 1.0,
+                "bot_provided_accurate_info": 0.7,
+                "bot_confirmed_before_action": 1.0,
+                "bot_was_concise": 0.8,
+                "call_resolved_without_human": 1.0,
+                "customer_seemed_satisfied": 0.9,
+                "comment": "Good performance overall",
+            }
+        )
 
         # Verify JSON parsing
         parsed = json.loads(quality_json)

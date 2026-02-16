@@ -132,7 +132,9 @@ def system_status_cmd() -> None:
     # Check latest backup
     backup_dir = Path(settings.backup.backup_dir)
     if backup_dir.exists():
-        backups = sorted(backup_dir.glob("callcenter_*.sql*"), key=lambda f: f.stat().st_mtime, reverse=True)
+        backups = sorted(
+            backup_dir.glob("callcenter_*.sql*"), key=lambda f: f.stat().st_mtime, reverse=True
+        )
         if backups:
             latest = backups[0]
             size_mb = latest.stat().st_size / (1024 * 1024)

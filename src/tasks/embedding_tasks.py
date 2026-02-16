@@ -156,9 +156,7 @@ def reindex_all_articles(self: Any) -> dict[str, Any]:
     """
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(
-        _reindex_all_articles_async()
-    )
+    return asyncio.get_event_loop().run_until_complete(_reindex_all_articles_async())
 
 
 async def _reindex_all_articles_async() -> dict[str, Any]:

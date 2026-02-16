@@ -78,7 +78,9 @@ class TestToolEndpoints:
         mock_result.__iter__ = lambda self: iter([])
         mock_conn.execute = AsyncMock(return_value=mock_result)
 
-        with patch("src.api.training_tools._get_engine", new_callable=AsyncMock, return_value=mock_engine):
+        with patch(
+            "src.api.training_tools._get_engine", new_callable=AsyncMock, return_value=mock_engine
+        ):
             result = await list_tools({})
             assert len(result["items"]) == len(ALL_TOOLS)
             assert all(item["has_override"] is False for item in result["items"])

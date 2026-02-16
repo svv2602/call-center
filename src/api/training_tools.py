@@ -88,10 +88,14 @@ async def list_tools(_: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
 
 
 @router.patch("/{tool_name}")
-async def update_tool_override(tool_name: str, request: ToolOverrideRequest, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def update_tool_override(
+    tool_name: str, request: ToolOverrideRequest, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
     """Create or update a tool description override."""
     if tool_name not in _TOOL_NAMES:
-        raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found. Valid tools: {_TOOL_NAMES}")
+        raise HTTPException(
+            status_code=404, detail=f"Tool '{tool_name}' not found. Valid tools: {_TOOL_NAMES}"
+        )
 
     import json
 
@@ -112,7 +116,9 @@ async def update_tool_override(tool_name: str, request: ToolOverrideRequest, _: 
             {
                 "tool_name": tool_name,
                 "description": request.description,
-                "input_schema_override": json.dumps(request.input_schema_override) if request.input_schema_override else None,
+                "input_schema_override": json.dumps(request.input_schema_override)
+                if request.input_schema_override
+                else None,
                 "is_active": request.is_active,
             },
         )
@@ -128,7 +134,9 @@ async def update_tool_override(tool_name: str, request: ToolOverrideRequest, _: 
 async def delete_tool_override(tool_name: str, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Remove a tool description override (reset to code default)."""
     if tool_name not in _TOOL_NAMES:
-        raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found. Valid tools: {_TOOL_NAMES}")
+        raise HTTPException(
+            status_code=404, detail=f"Tool '{tool_name}' not found. Valid tools: {_TOOL_NAMES}"
+        )
 
     engine = await _get_engine()
 

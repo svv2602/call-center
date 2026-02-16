@@ -156,16 +156,80 @@ WARES = [
 # In-memory stock data (mimics get_stock response)
 STOCK = {
     "ProKoleso": [
-        {"sku": "00000019835", "price": "1850", "stock": "24", "foreign_product": "1", "price_tshina": "1850", "year_issue": "25-24", "country": "Сербія"},
-        {"sku": "00000035988", "price": "3200", "stock": "12", "foreign_product": "1", "price_tshina": "3200", "year_issue": "25-10", "country": "Франція"},
-        {"sku": "00000035989", "price": "4100", "stock": "8", "foreign_product": "1", "price_tshina": "4100", "year_issue": "25-15", "country": "Франція"},
-        {"sku": "00000042001", "price": "3800", "stock": "16", "foreign_product": "1", "price_tshina": "3800", "year_issue": "25-20", "country": "Фінляндія"},
+        {
+            "sku": "00000019835",
+            "price": "1850",
+            "stock": "24",
+            "foreign_product": "1",
+            "price_tshina": "1850",
+            "year_issue": "25-24",
+            "country": "Сербія",
+        },
+        {
+            "sku": "00000035988",
+            "price": "3200",
+            "stock": "12",
+            "foreign_product": "1",
+            "price_tshina": "3200",
+            "year_issue": "25-10",
+            "country": "Франція",
+        },
+        {
+            "sku": "00000035989",
+            "price": "4100",
+            "stock": "8",
+            "foreign_product": "1",
+            "price_tshina": "4100",
+            "year_issue": "25-15",
+            "country": "Франція",
+        },
+        {
+            "sku": "00000042001",
+            "price": "3800",
+            "stock": "16",
+            "foreign_product": "1",
+            "price_tshina": "3800",
+            "year_issue": "25-20",
+            "country": "Фінляндія",
+        },
     ],
     "Tshina": [
-        {"sku": "00000019835", "price": "1900", "stock": "20", "foreign_product": "1", "price_tshina": "1850", "year_issue": "25-24", "country": "Сербія"},
-        {"sku": "00000035988", "price": "3300", "stock": "6", "foreign_product": "1", "price_tshina": "3200", "year_issue": "25-10", "country": "Франція"},
-        {"sku": "00000035989", "price": "4200", "stock": "4", "foreign_product": "1", "price_tshina": "4100", "year_issue": "25-15", "country": "Франція"},
-        {"sku": "00000042001", "price": "3900", "stock": "10", "foreign_product": "1", "price_tshina": "3800", "year_issue": "25-20", "country": "Фінляндія"},
+        {
+            "sku": "00000019835",
+            "price": "1900",
+            "stock": "20",
+            "foreign_product": "1",
+            "price_tshina": "1850",
+            "year_issue": "25-24",
+            "country": "Сербія",
+        },
+        {
+            "sku": "00000035988",
+            "price": "3300",
+            "stock": "6",
+            "foreign_product": "1",
+            "price_tshina": "3200",
+            "year_issue": "25-10",
+            "country": "Франція",
+        },
+        {
+            "sku": "00000035989",
+            "price": "4200",
+            "stock": "4",
+            "foreign_product": "1",
+            "price_tshina": "4100",
+            "year_issue": "25-15",
+            "country": "Франція",
+        },
+        {
+            "sku": "00000042001",
+            "price": "3900",
+            "stock": "10",
+            "foreign_product": "1",
+            "price_tshina": "3800",
+            "year_issue": "25-20",
+            "country": "Фінляндія",
+        },
     ],
 }
 
@@ -264,12 +328,14 @@ def verify_basic_auth(credentials: Annotated[HTTPBasicCredentials, Depends(secur
 
 # --- Health ---
 
+
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "service": "mock-1c-api"}
 
 
 # --- get_wares ---
+
 
 @app.get("/Trade/hs/site/get_wares/")
 async def get_wares(
@@ -300,7 +366,9 @@ async def get_wares(
     # Incremental by network
     if TradingNetwork is not None:
         if TradingNetwork not in TRADING_NETWORKS:
-            return JSONResponse({"success": False, "data": [], "errors": [f"Unknown network: {TradingNetwork}"]})
+            return JSONResponse(
+                {"success": False, "data": [], "errors": [f"Unknown network: {TradingNetwork}"]}
+            )
 
         # Confirmation of receipt
         if ConfirmationOfReceipt is not None:
@@ -319,6 +387,7 @@ async def get_wares(
 
 # --- get_stock ---
 
+
 @app.get("/Trade/hs/site/get_stock/{network}")
 async def get_stock(
     network: str,
@@ -326,17 +395,25 @@ async def get_stock(
 ) -> JSONResponse:
     if network not in TRADING_NETWORKS:
         return JSONResponse(
-            {"success": False, "TradingNetwork": network, "data": [], "errors": [f"Unknown network: {network}"]},
+            {
+                "success": False,
+                "TradingNetwork": network,
+                "data": [],
+                "errors": [f"Unknown network: {network}"],
+            },
             status_code=404,
         )
-    return JSONResponse({
-        "success": True,
-        "TradingNetwork": network,
-        "data": STOCK.get(network, []),
-    })
+    return JSONResponse(
+        {
+            "success": True,
+            "TradingNetwork": network,
+            "data": STOCK.get(network, []),
+        }
+    )
 
 
 # --- Nova Poshta reference data ---
+
 
 @app.get("/Trade/hs/site/novapost/city")
 async def novapost_cities(

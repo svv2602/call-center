@@ -80,9 +80,7 @@ def ensure_subscriber_started() -> None:
     global _subscriber_task
     if _subscriber_task is None or _subscriber_task.done():
         settings = get_settings()
-        _subscriber_task = asyncio.create_task(
-            _subscribe_and_broadcast(settings.redis.url)
-        )
+        _subscriber_task = asyncio.create_task(_subscribe_and_broadcast(settings.redis.url))
 
 
 @router.websocket("/ws")
@@ -114,9 +112,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
         while True:
             # Wait for client messages (ping/pong or close)
             try:
-                data = await asyncio.wait_for(
-                    websocket.receive_text(), timeout=_PING_INTERVAL
-                )
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=_PING_INTERVAL)
                 # Handle client ping
                 if data == "ping":
                     await websocket.send_text(json.dumps({"type": "pong"}))

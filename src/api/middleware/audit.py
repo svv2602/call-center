@@ -50,9 +50,7 @@ def _extract_resource(path: str) -> tuple[str, str | None]:
 class AuditMiddleware(BaseHTTPMiddleware):
     """Middleware that logs mutating API requests to audit_log."""
 
-    async def dispatch(
-        self, request: Request, call_next: RequestResponseEndpoint
-    ) -> Response:
+    async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         # Skip non-mutating methods and excluded paths
         if request.method not in _AUDIT_METHODS:
             return await call_next(request)

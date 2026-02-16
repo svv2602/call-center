@@ -78,12 +78,14 @@ def discover_articles(base_dir: Path) -> list[dict[str, str]]:
                 logger.warning("Empty article: %s", md_file)
                 continue
 
-            articles.append({
-                "file": str(md_file),
-                "title": title,
-                "category": category,
-                "content": content,
-            })
+            articles.append(
+                {
+                    "file": str(md_file),
+                    "title": title,
+                    "category": category,
+                    "content": content,
+                }
+            )
 
     return articles
 
@@ -162,9 +164,7 @@ async def load_articles(
 
 async def main() -> None:
     """Main entry point."""
-    parser = argparse.ArgumentParser(
-        description="Load knowledge base articles into PostgreSQL"
-    )
+    parser = argparse.ArgumentParser(description="Load knowledge base articles into PostgreSQL")
     parser.add_argument(
         "--dir",
         default="knowledge_base",

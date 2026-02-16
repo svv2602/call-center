@@ -111,9 +111,7 @@ class TestMigrationsStatus:
 
     @patch("src.cli.db.subprocess.run")
     def test_shows_current_revision(self, mock_run: MagicMock) -> None:
-        mock_run.return_value = MagicMock(
-            returncode=0, stdout="abc123 (head)\n", stderr=""
-        )
+        mock_run.return_value = MagicMock(returncode=0, stdout="abc123 (head)\n", stderr="")
         result = runner.invoke(app, ["db", "migrations-status"])
         assert result.exit_code == 0
         assert "abc123" in result.output

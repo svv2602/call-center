@@ -157,7 +157,7 @@ class TestWhisperSTTEngine:
             patch.dict("sys.modules", {"faster_whisper": None}),
             pytest.raises(ImportError),
         ):
-                await engine._ensure_model()
+            await engine._ensure_model()
 
 
 class TestFallbackSTTEngine:
