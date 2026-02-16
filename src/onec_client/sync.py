@@ -8,13 +8,15 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
-from redis.asyncio import Redis
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine
 
-from src.onec_client.client import OneCClient
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
+    from sqlalchemy.ext.asyncio import AsyncEngine
+
+    from src.onec_client.client import OneCClient
 
 logger = logging.getLogger(__name__)
 

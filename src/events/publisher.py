@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
@@ -44,7 +44,7 @@ async def publish_event(event_type: str, data: dict[str, Any] | None = None) -> 
     message = json.dumps({
         "type": event_type,
         "data": data or {},
-        "timestamp": datetime.now(timezone.utc).isoformat(),
+        "timestamp": datetime.now(UTC).isoformat(),
     })
     try:
         r = await _get_redis()

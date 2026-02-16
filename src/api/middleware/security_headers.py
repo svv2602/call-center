@@ -10,9 +10,13 @@ Adds standard security headers to all responses:
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
-from starlette.requests import Request
-from starlette.responses import Response
+
+if TYPE_CHECKING:
+    from starlette.requests import Request
+    from starlette.responses import Response
 
 # CSP allows inline styles/scripts for admin UI (single-page HTML)
 _CSP = (

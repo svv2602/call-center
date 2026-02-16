@@ -14,12 +14,13 @@ from src.monitoring.metrics import (
     stt_whisper_errors_total,
     stt_whisper_fallback_total,
 )
-from src.stt.base import STTConfig, Transcript
 from src.stt.google_stt import GoogleSTTEngine
 from src.stt.whisper_stt import WhisperConfig, WhisperSTTEngine
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+
+    from src.stt.base import STTConfig, Transcript
 
 logger = logging.getLogger(__name__)
 

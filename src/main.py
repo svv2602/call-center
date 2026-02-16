@@ -1,6 +1,7 @@
 """Call Center AI — Application entry point."""
 
 import asyncio
+import contextlib
 import logging
 import os
 import signal
@@ -464,10 +465,8 @@ async def main() -> None:
     # Cancel periodic sync
     if _sync_task is not None:
         _sync_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await _sync_task
-        except asyncio.CancelledError:
-            pass
         logger.info("Periodic sync stopped")
 
     if _store_client is not None:

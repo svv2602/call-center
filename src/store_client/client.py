@@ -521,7 +521,6 @@ class StoreClient:
     async def _search_tires_db(self, **params: Any) -> dict[str, Any]:
         """Search tires in PostgreSQL catalog (synced from 1C)."""
         from sqlalchemy import text
-        from sqlalchemy.ext.asyncio import AsyncEngine
 
         # Vehicle search is not supported via 1C catalog
         if any(k in params for k in ("vehicle_make", "vehicle_model", "vehicle_year")):
@@ -531,7 +530,7 @@ class StoreClient:
                 "message": "Пошук за авто тимчасово недоступний, вкажіть розмір шин",
             }
 
-        engine: AsyncEngine = self._db_engine
+        engine = self._db_engine
 
         # Build WHERE clauses dynamically
         conditions = []
@@ -595,7 +594,6 @@ class StoreClient:
     ) -> dict[str, Any]:
         """Check availability via Redis cache → PostgreSQL fallback."""
         from sqlalchemy import text
-        from sqlalchemy.ext.asyncio import AsyncEngine
 
         sku = product_id
         if not sku and query:
@@ -615,7 +613,7 @@ class StoreClient:
             return stock_data
 
         # 2) Fallback to PostgreSQL (last synced data)
-        engine: AsyncEngine = self._db_engine
+        engine = self._db_engine
         async with engine.connect() as conn:
             result = await conn.execute(
                 text("""
