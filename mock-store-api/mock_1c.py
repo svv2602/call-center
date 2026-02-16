@@ -7,6 +7,7 @@ Run: uvicorn mock-store-api.mock_1c:app --port 8081
 """
 
 import secrets
+from typing import Annotated
 
 from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
@@ -254,7 +255,7 @@ NOVAPOST_BRANCHES = [
 _confirmed: dict[str, bool] = {}
 
 
-def verify_basic_auth(credentials: HTTPBasicCredentials = Depends(security)) -> None:
+def verify_basic_auth(credentials: Annotated[HTTPBasicCredentials, Depends(security)]) -> None:
     correct_username = secrets.compare_digest(credentials.username, VALID_USERNAME)
     correct_password = secrets.compare_digest(credentials.password, VALID_PASSWORD)
     if not (correct_username and correct_password):
@@ -273,9 +274,9 @@ async def health() -> dict:
 @app.get("/Trade/hs/site/get_wares/")
 async def get_wares(
     request: Request,
-    TradingNetwork: str | None = None,
-    UploadingAll: str | None = None,
-    ConfirmationOfReceipt: str | None = None,
+    TradingNetwork: str | None = None,  # noqa: N803
+    UploadingAll: str | None = None,  # noqa: N803
+    ConfirmationOfReceipt: str | None = None,  # noqa: N803
     sku: str | None = None,
     limit: int | None = None,
     _auth: None = Depends(verify_basic_auth),
