@@ -13,8 +13,7 @@ import { initLang, toggleLang, translateStaticDOM } from './i18n.js';
 // Page modules — each registers its page loader via init()
 import { init as initDashboard } from './pages/dashboard.js';
 import { init as initCalls, getCallsOffset } from './pages/calls.js';
-import { init as initPrompts } from './pages/prompts.js';
-import { init as initKnowledge } from './pages/knowledge.js';
+import { init as initTraining } from './pages/training.js';
 import { init as initOperators } from './pages/operators.js';
 import { init as initSettings } from './pages/settings.js';
 import { init as initUsers } from './pages/users.js';
@@ -28,8 +27,7 @@ translateStaticDOM();
 // Initialize all page loaders
 initDashboard();
 initCalls();
-initPrompts();
-initKnowledge();
+initTraining();
 initOperators();
 initSettings();
 initUsers();

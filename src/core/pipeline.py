@@ -21,6 +21,16 @@ from src.agent.prompts import (
     WAIT_TEXT,
 )
 from src.core.audio_socket import AudioSocketConnection, PacketType
+
+# Default template dict (used if no PromptManager or DB unavailable)
+_DEFAULT_TEMPLATES: dict[str, str] = {
+    "greeting": GREETING_TEXT,
+    "farewell": FAREWELL_TEXT,
+    "silence_prompt": SILENCE_PROMPT_TEXT,
+    "transfer": TRANSFER_TEXT,
+    "error": ERROR_TEXT,
+    "wait": WAIT_TEXT,
+}
 from src.core.call_session import SILENCE_TIMEOUT_SEC, CallSession, CallState
 from src.monitoring.metrics import audiosocket_to_stt_ms, tts_delivery_ms
 from src.stt.base import STTConfig, STTEngine, Transcript
@@ -52,6 +62,7 @@ class CallPipeline:
         agent: LLMAgent,
         session: CallSession,
         stt_config: STTConfig | None = None,
+        templates: dict[str, str] | None = None,
     ) -> None:
         self._conn = conn
         self._stt = stt
@@ -59,6 +70,7 @@ class CallPipeline:
         self._agent = agent
         self._session = session
         self._stt_config = stt_config or STTConfig()
+        self._templates = templates or _DEFAULT_TEMPLATES
         self._speaking = False
         self._barge_in_event = asyncio.Event()
 
@@ -93,16 +105,17 @@ class CallPipeline:
             logger.info("Pipeline cancelled: %s", self._session.channel_uuid)
         except Exception:
             logger.exception("Pipeline error: %s", self._session.channel_uuid)
-            await self._speak(ERROR_TEXT)
+            await self._speak(self._templates.get("error", ERROR_TEXT))
         finally:
             await self._stt.stop_stream()
             self._session.transition_to(CallState.ENDED)
 
     async def _play_greeting(self) -> None:
         """Play the greeting message."""
+        greeting = self._templates.get("greeting", GREETING_TEXT)
         self._session.transition_to(CallState.GREETING)
-        await self._speak(GREETING_TEXT)
-        self._session.add_assistant_turn(GREETING_TEXT)
+        await self._speak(greeting)
+        self._session.add_assistant_turn(greeting)
 
     async def _audio_reader_loop(self) -> None:
         """Continuously read audio from AudioSocket and feed to STT."""
@@ -138,10 +151,10 @@ class CallPipeline:
                 # Silence timeout
                 should_end = self._session.record_timeout()
                 if should_end:
-                    await self._speak(FAREWELL_TEXT)
+                    await self._speak(self._templates.get("farewell", FAREWELL_TEXT))
                     break
                 else:
-                    await self._speak(SILENCE_PROMPT_TEXT)
+                    await self._speak(self._templates.get("silence_prompt", SILENCE_PROMPT_TEXT))
                     continue
 
             # Got a final transcript — process it
@@ -153,7 +166,7 @@ class CallPipeline:
 
             # Process through LLM
             self._session.transition_to(CallState.PROCESSING)
-            await self._speak(WAIT_TEXT)  # filler while processing
+            await self._speak(self._templates.get("wait", WAIT_TEXT))  # filler while processing
 
             start = time.monotonic()
             response_text, _ = await self._agent.process_message(
@@ -176,7 +189,7 @@ class CallPipeline:
 
             # Check if transfer was triggered
             if self._session.transferred:
-                await self._speak(TRANSFER_TEXT)
+                await self._speak(self._templates.get("transfer", TRANSFER_TEXT))
                 self._session.transition_to(CallState.TRANSFERRING)
                 break
 

@@ -11,7 +11,17 @@ from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 
-from src.agent.prompts import PROMPT_VERSION, SYSTEM_PROMPT
+from src.agent.prompts import (
+    ERROR_TEXT,
+    FAREWELL_TEXT,
+    GREETING_TEXT,
+    ORDER_CANCELLED_TEXT,
+    PROMPT_VERSION,
+    SILENCE_PROMPT_TEXT,
+    SYSTEM_PROMPT,
+    TRANSFER_TEXT,
+    WAIT_TEXT,
+)
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -125,6 +135,47 @@ class PromptManager:
                 """)
             )
             return [dict(row._mapping) for row in result]
+
+    async def get_active_templates(self) -> dict[str, str]:
+        """Get active response templates from DB.
+
+        Returns:
+            Dict mapping template_key → content.
+            Falls back to hardcoded constants from prompts.py if DB unavailable.
+        """
+        fallback = {
+            "greeting": GREETING_TEXT,
+            "farewell": FAREWELL_TEXT,
+            "silence_prompt": SILENCE_PROMPT_TEXT,
+            "transfer": TRANSFER_TEXT,
+            "error": ERROR_TEXT,
+            "wait": WAIT_TEXT,
+            "order_cancelled": ORDER_CANCELLED_TEXT,
+        }
+
+        try:
+            async with self._engine.begin() as conn:
+                result = await conn.execute(
+                    text("""
+                        SELECT template_key, content
+                        FROM response_templates
+                        WHERE is_active = true
+                    """)
+                )
+                rows = result.fetchall()
+
+            if rows:
+                templates = {row.template_key: row.content for row in rows}
+                # Fill in any missing keys from fallback
+                for key, value in fallback.items():
+                    if key not in templates:
+                        templates[key] = value
+                return templates
+
+        except Exception:
+            logger.warning("Failed to load templates from DB, using hardcoded fallback")
+
+        return fallback
 
     async def get_version(self, version_id: UUID) -> dict[str, Any] | None:
         """Get a specific prompt version by ID."""

@@ -46,8 +46,7 @@
             <div class="flex-1 py-2 overflow-y-auto">
                 <a href="#" onclick="window._app.showPage('dashboard')" class="active flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="dashboard" data-i18n="nav.dashboard">Дашборд</a>
                 <a href="#" onclick="window._app.showPage('calls')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="calls" data-i18n="nav.calls">Журнал звонков</a>
-                <a href="#" onclick="window._app.showPage('prompts')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="prompts" data-i18n="nav.prompts">Промпты</a>
-                <a href="#" onclick="window._app.showPage('knowledge')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="knowledge" data-i18n="nav.knowledge">База знаний</a>
+                <a href="#" onclick="window._app.showPage('training')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="training" data-i18n="nav.training">Обучение агента</a>
                 <a href="#" onclick="window._app.showPage('operators')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="operators" data-i18n="nav.operators">Операторы</a>
                 <a href="#" onclick="window._app.showPage('settings')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="settings" data-i18n="nav.system">Система</a>
                 <a href="#" onclick="window._app.showPage('users')" class="admin-only flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="users" data-i18n="nav.users">Пользователи</a>
@@ -144,38 +143,53 @@
                 </div>
             </div>
 
-            <!-- Prompts -->
-            <div id="page-prompts" style="display:none">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="prompts.breadcrumb">Промпты</span></div>
-                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="prompts.title">Управление промптами</h1>
-                <div class="tab-bar flex border-b border-neutral-200 dark:border-neutral-700 mb-4">
-                    <button class="active px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" onclick="window._pages.prompts.showPromptTab('versions', this)" data-i18n="prompts.versions">Версии</button>
-                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" onclick="window._pages.prompts.showPromptTab('abtests', this)" data-i18n="prompts.abTests">A/B-тесты</button>
+            <!-- Training (unified: Prompts + Knowledge + Templates + Dialogues + Safety + Tools) -->
+            <div id="page-training" style="display:none">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="training.breadcrumb">Обучение агента</span></div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="training.title">Обучение агента</h1>
+                <div class="tab-bar flex border-b border-neutral-200 dark:border-neutral-700 mb-4 flex-wrap">
+                    <button class="active px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="prompts" onclick="window._pages.training.showTab('prompts')" data-i18n="training.tabPrompts">Промпты</button>
+                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="knowledge" onclick="window._pages.training.showTab('knowledge')" data-i18n="training.tabKnowledge">База знаний</button>
+                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="templates" onclick="window._pages.training.showTab('templates')" data-i18n="training.tabTemplates">Шаблоны ответов</button>
+                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="dialogues" onclick="window._pages.training.showTab('dialogues')" data-i18n="training.tabDialogues">Сценарии диалогов</button>
+                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="safety" onclick="window._pages.training.showTab('safety')" data-i18n="training.tabSafety">Правила безопасности</button>
+                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="tools" onclick="window._pages.training.showTab('tools')" data-i18n="training.tabTools">Инструменты</button>
                 </div>
-                <div id="promptVersions" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
-                <div id="promptABTests" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" style="display:none"></div>
-            </div>
 
-            <!-- Knowledge -->
-            <div id="page-knowledge" style="display:none">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="knowledge.breadcrumb">База знаний</span></div>
-                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="knowledge.title">База знаний</h1>
-                <div class="flex flex-wrap items-center gap-2 mb-4">
-                    <select id="kbCategory" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
-                        <option value="" data-i18n="knowledge.allCategories">Все категории</option>
-                    </select>
-                    <input type="text" id="kbSearch" data-i18n-placeholder="knowledge.searchPlaceholder" placeholder="Поиск..."
-                        class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
-                    <button onclick="window._pages.knowledge.loadArticles()"
-                        class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.filter">Фильтровать</button>
-                    <button onclick="window._pages.knowledge.showCreateArticle()"
-                        class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="knowledge.newArticle">+ Новая статья</button>
-                    <button onclick="window._pages.knowledge.reindexAll()"
-                        class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-emerald-600 text-white hover:bg-emerald-700 max-md:w-full" data-i18n="knowledge.reindexAll">Переиндексировать всё</button>
-                    <button onclick="window._pages.knowledge.showImportModal()"
-                        class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-violet-600 text-white hover:bg-violet-700 max-md:w-full" data-i18n="knowledge.importDocuments">Импорт документов</button>
+                <!-- Tab: Prompts -->
+                <div id="trainingContent-prompts" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
+
+                <!-- Tab: Knowledge -->
+                <div id="trainingContent-knowledge" style="display:none">
+                    <div class="flex flex-wrap items-center gap-2 mb-4">
+                        <select id="kbCategory" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                            <option value="" data-i18n="knowledge.allCategories">Все категории</option>
+                        </select>
+                        <input type="text" id="kbSearch" data-i18n-placeholder="knowledge.searchPlaceholder" placeholder="Поиск..."
+                            class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                        <button onclick="window._pages.training.loadArticles()"
+                            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.filter">Фильтровать</button>
+                        <button onclick="window._pages.training.showCreateArticle()"
+                            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="knowledge.newArticle">+ Новая статья</button>
+                        <button onclick="window._pages.training.reindexAll()"
+                            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-emerald-600 text-white hover:bg-emerald-700 max-md:w-full" data-i18n="knowledge.reindexAll">Переиндексировать всё</button>
+                        <button onclick="window._pages.training.showImportModal()"
+                            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-violet-600 text-white hover:bg-violet-700 max-md:w-full" data-i18n="knowledge.importDocuments">Импорт документов</button>
+                    </div>
+                    <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="articlesContainer"></div>
                 </div>
-                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="articlesContainer"></div>
+
+                <!-- Tab: Templates -->
+                <div id="trainingContent-templates" style="display:none" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
+
+                <!-- Tab: Dialogues -->
+                <div id="trainingContent-dialogues" style="display:none" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
+
+                <!-- Tab: Safety Rules -->
+                <div id="trainingContent-safety" style="display:none" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
+
+                <!-- Tab: Tools -->
+                <div id="trainingContent-tools" style="display:none" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
             </div>
 
             <!-- Operators -->
@@ -419,6 +433,157 @@
                 </select>
             </div>
             <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-violet-600 text-white hover:bg-violet-700" onclick="window._pages.knowledge.importDocuments()" data-i18n="knowledge.importBtn">Импортировать</button>
+        </div>
+    </div>
+
+    <!-- Dialogue Example Modal -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="dialogueModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('dialogueModal')">&times;</span>
+            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" id="dialogueModalTitle" data-i18n="training.newDialogue">Новый сценарий</h2>
+            <input type="hidden" id="editDialogueId">
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.dialogueTitle">Название</label>
+                <input type="text" id="dialogueTitle" data-i18n-placeholder="training.dialogueTitlePlaceholder" placeholder="Название сценария"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.scenario">Тип сценария</label>
+                <select id="dialogueScenarioType"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="tire_search">tire_search</option>
+                    <option value="availability_check">availability_check</option>
+                    <option value="order_creation">order_creation</option>
+                    <option value="order_status">order_status</option>
+                    <option value="fitting_booking">fitting_booking</option>
+                    <option value="expert_consultation">expert_consultation</option>
+                    <option value="operator_transfer">operator_transfer</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.phase">Фаза</label>
+                <select id="dialoguePhase"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="mvp">mvp</option>
+                    <option value="orders">orders</option>
+                    <option value="services">services</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.dialogueJSON">Диалог (JSON)</label>
+                <textarea id="dialogueJSON" placeholder='[{"role": "customer", "text": "..."}, ...]'
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-30 font-mono resize-y"></textarea>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.description">Описание</label>
+                <input type="text" id="dialogueDescription"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.training.saveDialogue()" data-i18n="common.save">Сохранить</button>
+        </div>
+    </div>
+
+    <!-- Safety Rule Modal -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="safetyRuleModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('safetyRuleModal')">&times;</span>
+            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" id="safetyRuleModalTitle" data-i18n="training.newSafetyRule">Новое правило</h2>
+            <input type="hidden" id="editSafetyRuleId">
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.ruleTitle">Название</label>
+                <input type="text" id="safetyRuleTitle"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.ruleType">Тип правила</label>
+                <select id="safetyRuleType"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="prompt_injection">prompt_injection</option>
+                    <option value="data_validation">data_validation</option>
+                    <option value="off_topic">off_topic</option>
+                    <option value="language">language</option>
+                    <option value="behavioral">behavioral</option>
+                    <option value="escalation">escalation</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.severity">Серьёзность</label>
+                <select id="safetyRuleSeverity"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="low">low</option>
+                    <option value="medium" selected>medium</option>
+                    <option value="high">high</option>
+                    <option value="critical">critical</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.triggerInput">Триггер (ввод клиента)</label>
+                <textarea id="safetyTriggerInput"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-20 resize-y"></textarea>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.expectedBehavior">Ожидаемое поведение</label>
+                <textarea id="safetyExpectedBehavior"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-20 resize-y"></textarea>
+            </div>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.training.saveSafetyRule()" data-i18n="common.save">Сохранить</button>
+        </div>
+    </div>
+
+    <!-- Response Template Modal -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="responseTemplateModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('responseTemplateModal')">&times;</span>
+            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" id="templateModalTitle" data-i18n="training.newTemplate">Новый шаблон</h2>
+            <input type="hidden" id="editTemplateId">
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.templateKey">Ключ</label>
+                <select id="templateKey"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="greeting">greeting</option>
+                    <option value="farewell">farewell</option>
+                    <option value="silence_prompt">silence_prompt</option>
+                    <option value="transfer">transfer</option>
+                    <option value="error">error</option>
+                    <option value="wait">wait</option>
+                    <option value="order_cancelled">order_cancelled</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.templateTitle">Название</label>
+                <input type="text" id="templateTitle"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.content">Содержание</label>
+                <textarea id="templateContent"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-20 resize-y"></textarea>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.description">Описание</label>
+                <input type="text" id="templateDescription"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.training.saveTemplate()" data-i18n="common.save">Сохранить</button>
+        </div>
+    </div>
+
+    <!-- Tool Override Modal -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="toolOverrideModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('toolOverrideModal')">&times;</span>
+            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" id="toolOverrideModalTitle" data-i18n="training.editTool">Редактирование инструмента</h2>
+            <input type="hidden" id="editToolName">
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.originalDescription">Описание по умолчанию</label>
+                <p class="text-sm text-neutral-500 dark:text-neutral-400 bg-neutral-50 dark:bg-neutral-800 p-3 rounded" id="toolOriginalDescription"></p>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.overrideDescription">Переопределённое описание</label>
+                <textarea id="toolOverrideDescription"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-30 resize-y"></textarea>
+            </div>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.training.saveToolOverride()" data-i18n="common.save">Сохранить</button>
         </div>
     </div>
 
