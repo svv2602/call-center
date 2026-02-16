@@ -1,9 +1,6 @@
 """Tests for partition_manager module."""
 
 from datetime import date
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 from src.tasks.partition_manager import (
     MONTHS_AHEAD,

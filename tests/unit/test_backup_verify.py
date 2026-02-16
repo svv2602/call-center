@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import gzip
-import tempfile
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from src.tasks.backup import verify_backup
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 
 class TestVerifyBackup:

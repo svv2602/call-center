@@ -9,6 +9,7 @@ Audio: 16kHz, 16-bit signed linear PCM, little-endian
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import struct
 import uuid
 from dataclasses import dataclass, field
@@ -86,7 +87,7 @@ class AudioSocketTestClient:
         assert self._reader is not None, "Not connected"
         try:
             header = await asyncio.wait_for(self._reader.readexactly(3), timeout=timeout)
-        except (asyncio.TimeoutError, asyncio.IncompleteReadError):
+        except (TimeoutError, asyncio.IncompleteReadError):
             return None
 
         ptype = header[0]
@@ -98,7 +99,7 @@ class AudioSocketTestClient:
                 payload = await asyncio.wait_for(
                     self._reader.readexactly(length), timeout=timeout
                 )
-            except (asyncio.TimeoutError, asyncio.IncompleteReadError):
+            except (TimeoutError, asyncio.IncompleteReadError):
                 return None
 
         return ReceivedPacket(type=ptype, payload=payload)
@@ -139,9 +140,7 @@ class AudioSocketTestClient:
         """Close the connection."""
         if self._writer is not None:
             self._writer.close()
-            try:
+            with contextlib.suppress(Exception):
                 await self._writer.wait_closed()
-            except Exception:
-                pass
             self._writer = None
             self._reader = None

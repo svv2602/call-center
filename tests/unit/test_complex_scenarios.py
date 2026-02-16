@@ -185,7 +185,7 @@ class TestFullChainScenario:
     async def test_customer_declines_fitting(self, router: ToolRouter) -> None:
         """Test that the chain works even if customer declines fitting."""
         # Search and order
-        tires = await router.execute("search_tires", {"diameter": 16})
+        _tires = await router.execute("search_tires", {"diameter": 16})
         order = await router.execute("create_order_draft", {
             "items": [{"product_id": "tire-1", "quantity": 4}],
             "customer_phone": "+380501234567",
@@ -197,6 +197,6 @@ class TestFullChainScenario:
         assert confirmed["status"] == "confirmed"
         # Customer says "no" to fitting — no book_fitting call needed
         # Just verify order is confirmed without fitting
-        fitting_handler = router._handlers["book_fitting"]
+        _fitting_handler = router._handlers["book_fitting"]
         # book_fitting was only called by previous test (if any)
         # The point: chain doesn't require fitting to complete

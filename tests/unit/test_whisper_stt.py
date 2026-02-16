@@ -36,7 +36,6 @@ class TestWhisperSTTEngine:
     @pytest.mark.asyncio
     async def test_start_stream_loads_model(self) -> None:
         engine = WhisperSTTEngine()
-        mock_model = MagicMock()
 
         with patch.object(engine, "_ensure_model", new_callable=AsyncMock):
             await engine.start_stream(STTConfig())
@@ -154,8 +153,10 @@ class TestWhisperSTTEngine:
     async def test_ensure_model_import_error(self) -> None:
         engine = WhisperSTTEngine()
 
-        with patch.dict("sys.modules", {"faster_whisper": None}):
-            with pytest.raises(ImportError):
+        with (
+            patch.dict("sys.modules", {"faster_whisper": None}),
+            pytest.raises(ImportError),
+        ):
                 await engine._ensure_model()
 
 

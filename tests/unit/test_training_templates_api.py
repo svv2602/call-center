@@ -19,7 +19,7 @@ class TestTemplateKeys:
     def test_template_keys_complete(self) -> None:
         expected = ["greeting", "farewell", "silence_prompt", "transfer",
                      "error", "wait", "order_cancelled"]
-        assert TEMPLATE_KEYS == expected
+        assert expected == TEMPLATE_KEYS
 
     def test_template_keys_count(self) -> None:
         assert len(TEMPLATE_KEYS) == 7

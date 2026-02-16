@@ -90,7 +90,7 @@ class TestCheckLimit:
             return mock_redis
 
         with patch("src.api.middleware.rate_limit._get_redis", _mock_get_redis):
-            blocked, remaining, reset_ts = await _check_limit("test_key", 100, 60)
+            blocked, remaining, _reset_ts = await _check_limit("test_key", 100, 60)
 
         assert blocked is False
         assert remaining == 95
@@ -108,7 +108,7 @@ class TestCheckLimit:
             return mock_redis
 
         with patch("src.api.middleware.rate_limit._get_redis", _mock_get_redis):
-            blocked, remaining, reset_ts = await _check_limit("test_key", 100, 60)
+            blocked, remaining, _reset_ts = await _check_limit("test_key", 100, 60)
 
         assert blocked is True
         assert remaining == 0
@@ -121,7 +121,7 @@ class TestCheckLimit:
             raise Exception("connection refused")
 
         with patch("src.api.middleware.rate_limit._get_redis", _mock_get_redis_fail):
-            blocked, remaining, reset_ts = await _check_limit("test_key", 100, 60)
+            blocked, remaining, _reset_ts = await _check_limit("test_key", 100, 60)
 
         assert blocked is False
         assert remaining == 100

@@ -186,7 +186,7 @@ class TestBackupKnowledgeBase:
 
         with (
             patch("src.tasks.backup.get_settings", return_value=settings),
-            patch("src.tasks.backup.Path") as mock_path_cls,
+            patch("src.tasks.backup.Path") as _mock_path_cls,
         ):
             # We need knowledge_base dir to exist when checked
             import os

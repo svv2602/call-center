@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from scripts.seed_training_data import (
     get_dialogue_examples,
     get_response_templates,

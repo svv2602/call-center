@@ -2,12 +2,10 @@
 
 import uuid
 
-import pytest
-
 from src.core.call_session import (
+    MAX_TIMEOUTS_BEFORE_HANGUP,
     CallSession,
     CallState,
-    MAX_TIMEOUTS_BEFORE_HANGUP,
 )
 
 

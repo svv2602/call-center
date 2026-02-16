@@ -34,7 +34,7 @@ class TestConnectionErrors:
         client2 = AudioSocketTestClient()
         try:
             await client2.connect(audiosocket_host, audiosocket_port)
-            pkt = await client2.read_packet(timeout=3.0)
+            _pkt = await client2.read_packet(timeout=3.0)
             # Server is still alive if we got any response or timeout
             await client2.hangup()
         finally:

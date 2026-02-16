@@ -18,8 +18,10 @@ class TestCeleryHealth:
         mock_inspect.ping.return_value = {"worker1": {"ok": "pong"}}
         mock_inspect.active.return_value = {"worker1": []}
 
-        with patch("src.api.system.celery_health.__module__", "src.api.system"):
-            with patch("src.tasks.celery_app.app") as mock_app:
+        with (
+            patch("src.api.system.celery_health.__module__", "src.api.system"),
+            patch("src.tasks.celery_app.app") as mock_app,
+        ):
                 mock_app.control.inspect.return_value = mock_inspect
                 result = await celery_health()
 

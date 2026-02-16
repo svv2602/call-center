@@ -9,7 +9,6 @@ import pytest
 from src.core.audio_socket import (
     AUDIO_FRAME_BYTES,
     HEADER_SIZE,
-    AudioSocketPacket,
     PacketType,
     build_audio_packet,
     parse_uuid,

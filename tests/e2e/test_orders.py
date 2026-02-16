@@ -8,8 +8,6 @@ Runs against a self-contained AudioSocket server started by the e2e_server fixtu
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from tests.helpers.audiosocket_client import AudioSocketTestClient
@@ -36,7 +34,7 @@ class TestOrderStatusE2E:
             await client.send_silence(duration_ms=1500)
 
             # Read bot response
-            response = await client.read_audio_response(timeout=10.0)
+            _response = await client.read_audio_response(timeout=10.0)
 
             # Hang up
             await client.hangup()
@@ -63,11 +61,11 @@ class TestOrderCreationE2E:
 
             # Turn 2: user speaks
             await client.send_silence(duration_ms=1000)
-            response1 = await client.read_audio_response(timeout=10.0)
+            _response1 = await client.read_audio_response(timeout=10.0)
 
             # Turn 3: user speaks again (follow-up)
             await client.send_silence(duration_ms=1000)
-            response2 = await client.read_audio_response(timeout=10.0)
+            _response2 = await client.read_audio_response(timeout=10.0)
 
             await client.hangup()
         finally:

@@ -79,7 +79,7 @@ async def _simulate_call(host: str, port: int, duration: float) -> dict:
                     frames_received += 1
                 elif header[0] == 0x00:  # server hung up
                     break
-            except (asyncio.TimeoutError, asyncio.IncompleteReadError):
+            except (TimeoutError, asyncio.IncompleteReadError):
                 pass
 
             # Simulate real-time 20ms frame pacing

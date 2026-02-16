@@ -6,7 +6,7 @@ import uuid
 
 import pytest
 
-from src.core.call_session import CallSession, CallState
+from src.core.call_session import CallSession
 from src.stt.base import STTConfig, Transcript
 from tests.unit.mocks.mock_stt import MockSTTEngine
 from tests.unit.mocks.mock_tts import MockTTSEngine

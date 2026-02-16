@@ -8,7 +8,7 @@ silently dropped, and blacklist checks default to "not blacklisted".
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -110,7 +110,7 @@ async def test_rate_limiter_fail_open_on_timeout() -> None:
         raise TimeoutError("Redis operation timed out")
 
     with patch("src.api.middleware.rate_limit._get_redis", _redis_timeout):
-        blocked, remaining, reset_ts = await _check_limit("rl:ip:10.0.0.2", 100, 60)
+        blocked, remaining, _reset_ts = await _check_limit("rl:ip:10.0.0.2", 100, 60)
 
     assert blocked is False
     assert remaining == 100

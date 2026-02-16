@@ -2,13 +2,11 @@
 
 from __future__ import annotations
 
-import json
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
 from src.onec_client.sync import (
-    SEASON_MAP,
     CatalogSyncService,
     _normalize_season,
     _safe_bool,

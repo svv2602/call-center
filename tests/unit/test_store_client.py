@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.store_client.client import StoreAPIError, StoreClient
 
 

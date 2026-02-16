@@ -11,7 +11,7 @@ Verifies that the system degrades gracefully when downstream services fail:
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
@@ -19,14 +19,14 @@ import pytest
 from aiobreaker import CircuitBreakerError
 
 from src.agent.agent import ToolRouter
-from src.store_client.client import StoreAPIError, StoreClient, _MAX_RETRIES
+from src.store_client.client import _MAX_RETRIES, StoreAPIError, StoreClient
 
 
 def _make_circuit_breaker_error() -> CircuitBreakerError:
     """Create a CircuitBreakerError with the required arguments."""
     return CircuitBreakerError(
         "Circuit breaker is open",
-        reopen_time=datetime.now(timezone.utc),
+        reopen_time=datetime.now(UTC),
     )
 
 
@@ -49,9 +49,8 @@ async def test_circuit_breaker_open_raises_store_api_error_503() -> None:
     with patch(
         "src.store_client.client._store_breaker.call_async",
         side_effect=cb_error,
-    ):
-        with pytest.raises(StoreAPIError) as exc_info:
-            await client._request("GET", "/api/v1/tires/search")
+    ), pytest.raises(StoreAPIError) as exc_info:
+        await client._request("GET", "/api/v1/tires/search")
 
     assert exc_info.value.status == 503
     assert "недоступний" in exc_info.value.message.lower() or "503" in str(exc_info.value)
@@ -74,12 +73,14 @@ async def test_store_api_retries_on_503_then_raises() -> None:
         side_effect=StoreAPIError(503, "Service temporarily unavailable"),
     )
 
-    with patch.object(client, "_do_request", mock_do_request):
-        with patch("src.store_client.client.asyncio.sleep", new_callable=AsyncMock):
-            with pytest.raises(StoreAPIError) as exc_info:
-                await client._request_with_retry(
-                    "GET", "http://store.local/api/v1/tires/search", "req-001"
-                )
+    with (
+        patch.object(client, "_do_request", mock_do_request),
+        patch("src.store_client.client.asyncio.sleep", new_callable=AsyncMock),
+        pytest.raises(StoreAPIError) as exc_info,
+    ):
+        await client._request_with_retry(
+            "GET", "http://store.local/api/v1/tires/search", "req-001"
+        )
 
     assert exc_info.value.status == 503
     assert mock_do_request.call_count == _MAX_RETRIES + 1
@@ -103,11 +104,13 @@ async def test_store_api_no_retry_on_500() -> None:
         side_effect=StoreAPIError(500, "Internal server error"),
     )
 
-    with patch.object(client, "_do_request", mock_do_request):
-        with pytest.raises(StoreAPIError) as exc_info:
-            await client._request_with_retry(
-                "GET", "http://store.local/api/v1/tires/search", "req-002"
-            )
+    with (
+        patch.object(client, "_do_request", mock_do_request),
+        pytest.raises(StoreAPIError) as exc_info,
+    ):
+        await client._request_with_retry(
+            "GET", "http://store.local/api/v1/tires/search", "req-002"
+        )
 
     assert exc_info.value.status == 500
     assert mock_do_request.call_count == 1, "500 must not be retried"
@@ -149,7 +152,7 @@ async def test_login_falls_back_to_env_when_db_unavailable() -> None:
 
     This ensures admin access is preserved during DB outages.
     """
-    from src.api.auth import login, LoginRequest
+    from src.api.auth import LoginRequest, login
 
     mock_request = AsyncMock()
     mock_request.client.host = "127.0.0.1"

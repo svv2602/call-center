@@ -4,20 +4,11 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 from src.main import app
 from src.monitoring.metrics import (
-    active_calls,
-    call_cost_usd,
-    call_scenario_total,
-    calls_resolved_by_bot_total,
-    calls_total,
-    fittings_booked_total,
     get_metrics,
-    operator_queue_length,
-    orders_created_total,
 )
 
 

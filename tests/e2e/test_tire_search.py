@@ -9,6 +9,7 @@ Runs against a self-contained AudioSocket server started by the e2e_server fixtu
 from __future__ import annotations
 
 import asyncio
+import contextlib
 
 import pytest
 
@@ -38,10 +39,8 @@ class TestTireSearchE2E:
             # Greeting should produce some audio output
             assert len(audio) > 0, "No greeting audio received from server"
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 await client.hangup()
-            except Exception:
-                pass
             await client.close()
 
     @pytest.mark.asyncio
@@ -67,10 +66,8 @@ class TestTireSearchE2E:
             # Server should respond with some audio
             assert len(response_audio) >= 0, "Expected audio response from server"
         finally:
-            try:
+            with contextlib.suppress(Exception):
                 await client.hangup()
-            except Exception:
-                pass
             await client.close()
 
     @pytest.mark.asyncio

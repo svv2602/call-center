@@ -6,7 +6,7 @@ import pytest
 
 from src.agent.agent import LLMAgent
 from src.agent.prompts import PROMPT_VERSION, SYSTEM_PROMPT
-from src.agent.tools import ALL_TOOLS, ORDER_TOOLS
+from src.agent.tools import ORDER_TOOLS
 
 
 class TestOrderSafetyPrompt:

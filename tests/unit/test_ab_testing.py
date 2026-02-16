@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
-
 from src.agent.ab_testing import calculate_significance
 from src.agent.prompts import PROMPT_VERSION, SYSTEM_PROMPT
 

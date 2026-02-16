@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import re
-from collections.abc import AsyncIterator
+from typing import TYPE_CHECKING
 
-from src.tts.base import TTSConfig
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from src.tts.base import TTSConfig
 
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
