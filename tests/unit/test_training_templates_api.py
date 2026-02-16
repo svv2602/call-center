@@ -98,19 +98,26 @@ class TestTemplateEndpoints:
     @pytest.mark.asyncio
     async def test_create_checks_uniqueness(self) -> None:
         """Duplicate template_key should raise 409."""
+        from contextlib import asynccontextmanager
+
         from fastapi import HTTPException
 
         from src.api.training_templates import create_template
 
-        mock_engine = AsyncMock()
         mock_conn = AsyncMock()
-        mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
-        mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=False)
 
-        # Simulate existing row
+        # Simulate existing row found
         mock_result = AsyncMock()
         mock_result.first.return_value = {"id": "existing-id"}
         mock_conn.execute = AsyncMock(return_value=mock_result)
+
+        mock_engine = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_begin():
+            yield mock_conn
+
+        mock_engine.begin = fake_begin
 
         with patch("src.api.training_templates._get_engine", new_callable=AsyncMock, return_value=mock_engine):
             req = TemplateCreateRequest(
