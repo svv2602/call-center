@@ -101,7 +101,7 @@ class TestSearchTiresDB:
             vehicle_make="Toyota", vehicle_model="Camry", vehicle_year="2020"
         )
         assert result["total"] == 0
-        assert "недоступний" in result["message"]
+        assert "get_vehicle_tire_sizes" in result["message"]
 
     @pytest.mark.asyncio
     async def test_search_by_size(

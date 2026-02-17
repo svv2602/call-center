@@ -14,6 +14,23 @@ from src.knowledge.categories import CATEGORY_VALUES
 # MVP tools — Claude API tool_use format
 MVP_TOOLS: list[dict] = [  # type: ignore[type-arg]
     {
+        "name": "get_vehicle_tire_sizes",
+        "description": (
+            "Отримати заводські розміри шин для автомобіля. "
+            "Використовуй ПЕРЕД search_tires, коли клієнт називає авто. "
+            "Повертає стокові та допустимі розміри шин."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "brand": {"type": "string", "description": "Марка (Kia, Toyota, BMW)"},
+                "model": {"type": "string", "description": "Модель (Sportage, Camry, X5)"},
+                "year": {"type": "integer", "description": "Рік випуску"},
+            },
+            "required": ["brand", "model"],
+        },
+    },
+    {
         "name": "search_tires",
         "description": (
             "Пошук шин у каталозі магазину за параметрами автомобіля або розміром. "

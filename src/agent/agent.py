@@ -5,6 +5,7 @@ Manages conversation flow, tool routing, and context window.
 
 from __future__ import annotations
 
+import datetime
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -220,8 +221,20 @@ class LLMAgent:
         caller_phone: str | None = None,
         order_id: str | None = None,
     ) -> str:
-        """Build system prompt with caller context appended."""
+        """Build system prompt with caller context and season hint appended."""
         parts = [SYSTEM_PROMPT]
+
+        # Dynamic season hint
+        month = datetime.date.today().month
+        if month in (11, 12, 1, 2, 3):
+            hint = "Зараз зимовий сезон — запитай: «Зимові чи всесезонні?»"
+        elif month in (5, 6, 7, 8, 9):
+            hint = "Зараз літній сезон — запитай: «Літні чи всесезонні?»"
+        else:  # April, October
+            hint = "Зараз міжсезоння — запитай: «Літні, зимові чи всесезонні?»"
+
+        parts.append(f"\n## Підказка по сезону\n- {hint}")
+        parts.append("- Якщо клієнт обирає нетиповий сезон — не заперечуй, виконуй запит")
 
         if caller_phone or order_id:
             parts.append("\n## Контекст дзвінка")

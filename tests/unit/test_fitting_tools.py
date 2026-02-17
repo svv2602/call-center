@@ -23,13 +23,14 @@ class TestFittingToolsList:
 
     def test_all_tools_is_combined(self) -> None:
         assert ALL_TOOLS == MVP_TOOLS + ORDER_TOOLS + FITTING_TOOLS
-        assert len(ALL_TOOLS) == 13
+        assert len(ALL_TOOLS) == 14
 
     def test_canonical_tool_names(self) -> None:
         """Tool names must match canonical list from 00-overview.md."""
         all_names = {t["name"] for t in ALL_TOOLS}
         expected = {
             # Phase 1
+            "get_vehicle_tire_sizes",
             "search_tires",
             "check_availability",
             "transfer_to_operator",

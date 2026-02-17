@@ -47,9 +47,14 @@ class TestToolRouter:
 class TestMVPTools:
     """Test MVP tool definitions."""
 
-    def test_all_three_tools_defined(self) -> None:
+    def test_all_mvp_tools_defined(self) -> None:
         tool_names = {t["name"] for t in MVP_TOOLS}
-        assert tool_names == {"search_tires", "check_availability", "transfer_to_operator"}
+        assert tool_names == {
+            "get_vehicle_tire_sizes",
+            "search_tires",
+            "check_availability",
+            "transfer_to_operator",
+        }
 
     def test_search_tires_schema(self) -> None:
         tool = next(t for t in MVP_TOOLS if t["name"] == "search_tires")
@@ -149,4 +154,38 @@ class TestSystemPrompt:
         assert "замовлення" in SYSTEM_PROMPT.lower()
 
     def test_all_tools_count(self) -> None:
-        assert len(ALL_TOOLS) == 13
+        assert len(ALL_TOOLS) == 14
+
+    def test_season_hint_winter(self) -> None:
+        import datetime
+        from unittest.mock import patch
+
+        from src.agent.agent import LLMAgent
+
+        with patch("src.agent.agent.datetime") as mock_dt:
+            mock_dt.date.today.return_value = datetime.date(2025, 1, 15)
+            prompt = LLMAgent._build_system_prompt()
+        assert "зимовий сезон" in prompt
+        assert "Підказка по сезону" in prompt
+
+    def test_season_hint_summer(self) -> None:
+        import datetime
+        from unittest.mock import patch
+
+        from src.agent.agent import LLMAgent
+
+        with patch("src.agent.agent.datetime") as mock_dt:
+            mock_dt.date.today.return_value = datetime.date(2025, 7, 15)
+            prompt = LLMAgent._build_system_prompt()
+        assert "літній сезон" in prompt
+
+    def test_season_hint_transition(self) -> None:
+        import datetime
+        from unittest.mock import patch
+
+        from src.agent.agent import LLMAgent
+
+        with patch("src.agent.agent.datetime") as mock_dt:
+            mock_dt.date.today.return_value = datetime.date(2025, 4, 15)
+            prompt = LLMAgent._build_system_prompt()
+        assert "міжсезоння" in prompt

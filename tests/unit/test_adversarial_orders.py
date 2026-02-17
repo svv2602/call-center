@@ -61,9 +61,10 @@ class TestBuildSystemPromptSecurity:
         prompt = LLMAgent._build_system_prompt(order_id="order-abc")
         assert "order-abc" in prompt
 
-    def test_no_context_returns_base_prompt(self) -> None:
+    def test_no_context_returns_base_prompt_with_season(self) -> None:
         prompt = LLMAgent._build_system_prompt()
-        assert prompt == SYSTEM_PROMPT
+        assert prompt.startswith(SYSTEM_PROMPT)
+        assert "Підказка по сезону" in prompt
 
     def test_prompt_version_updated(self) -> None:
         assert PROMPT_VERSION == "v3.0-services"

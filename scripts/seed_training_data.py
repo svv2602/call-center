@@ -1146,6 +1146,348 @@ def get_dialogue_examples() -> list[dict]:
         # ═══════════════════════════════════════════════════════════
         #  D. ADVERSARIAL / EDGE CASES
         # ═══════════════════════════════════════════════════════════
+        # ═══════════════════════════════════════════════════════════
+        #  E. VEHICLE SIZE LOOKUP + SMART TIRE SELECTION
+        # ═══════════════════════════════════════════════════════════
+        # E1: Vehicle lookup + size disambiguation
+        {
+            "title": "Подбор шин по авто + валидация размера",
+            "scenario_type": "tire_search",
+            "phase": "mvp",
+            "dialogue": [
+                {"role": "customer", "text": "Мені потрібні шини на Кіа Спортейдж 2022 року"},
+                {
+                    "role": "agent",
+                    "text": (
+                        "Для Kia Sportage 2022 є два заводські розміри: "
+                        "235/65 R17 та 235/60 R18. Який розмір стоїть на вашому авто?"
+                    ),
+                    "tool_calls": [
+                        {
+                            "name": "get_vehicle_tire_sizes",
+                            "input": {
+                                "brand": "Kia",
+                                "model": "Sportage",
+                                "year": 2022,
+                            },
+                        }
+                    ],
+                },
+                {"role": "customer", "text": "У мене сімнадцяті диски"},
+                {
+                    "role": "agent",
+                    "text": (
+                        "Добре, 235/65 R17. Літні чи зимові?"
+                    ),
+                },
+                {"role": "customer", "text": "Зимові"},
+                {
+                    "role": "agent",
+                    "text": (
+                        "Для 235/65 R17 є зимові шини: "
+                        "1. Michelin X-Ice Snow SUV — 3800 грн/шт "
+                        "2. Continental IceContact 3 — 3500 грн/шт. "
+                        "Яка модель цікавить?"
+                    ),
+                    "tool_calls": [
+                        {
+                            "name": "search_tires",
+                            "input": {
+                                "width": 235,
+                                "profile": 65,
+                                "diameter": 17,
+                                "season": "winter",
+                            },
+                        }
+                    ],
+                },
+            ],
+            "tools_used": ["get_vehicle_tire_sizes", "search_tires"],
+            "description": "Авто → get_vehicle_tire_sizes → уточнение какой R → search_tires.",
+        },
+        # E2: Vehicle not found — ask for size directly
+        {
+            "title": "Авто не в базе — запрос размера",
+            "scenario_type": "tire_search",
+            "phase": "mvp",
+            "dialogue": [
+                {"role": "customer", "text": "Потрібні шини на Chery Tiggo 8 Pro"},
+                {
+                    "role": "agent",
+                    "text": (
+                        "На жаль, Chery Tiggo 8 Pro поки немає в нашій базі автомобілів. "
+                        "Підкажіть, будь ласка, розмір шин? "
+                        "Він зазначений на боковині шини, наприклад 235/55 R18."
+                    ),
+                    "tool_calls": [
+                        {
+                            "name": "get_vehicle_tire_sizes",
+                            "input": {"brand": "Chery", "model": "Tiggo 8 Pro"},
+                        }
+                    ],
+                },
+                {"role": "customer", "text": "225/55 R18"},
+                {
+                    "role": "agent",
+                    "text": (
+                        "Дякую! Літні чи зимові шини потрібні?"
+                    ),
+                },
+                {"role": "customer", "text": "Літні"},
+                {
+                    "role": "agent",
+                    "text": (
+                        "За розміром 225/55 R18 є: "
+                        "1. Michelin Primacy 4 — 3200 грн "
+                        "2. Continental PremiumContact 6 — 3000 грн"
+                    ),
+                    "tool_calls": [
+                        {
+                            "name": "search_tires",
+                            "input": {
+                                "width": 225,
+                                "profile": 55,
+                                "diameter": 18,
+                                "season": "summer",
+                            },
+                        }
+                    ],
+                },
+            ],
+            "tools_used": ["get_vehicle_tire_sizes", "search_tires"],
+            "description": "Авто не знайдено в базі → агент просить розмір напряму.",
+        },
+        # E3: Wrong size — correction
+        {
+            "title": "Неправильный размер — коррекция по базе",
+            "scenario_type": "tire_search",
+            "phase": "mvp",
+            "dialogue": [
+                {"role": "customer", "text": "Мені потрібні шини 205/55 R16 на BMW X5 2021"},
+                {
+                    "role": "agent",
+                    "text": (
+                        "Зверніть увагу: для BMW X5 2021 заводські розміри — "
+                        "275/45 R20 та 275/40 R21. Розмір 205/55 R16 не підходить для X5. "
+                        "Можливо, ви мали на увазі інший автомобіль? "
+                        "Або підберемо зі стандартних розмірів X5?"
+                    ),
+                    "tool_calls": [
+                        {
+                            "name": "get_vehicle_tire_sizes",
+                            "input": {
+                                "brand": "BMW",
+                                "model": "X5",
+                                "year": 2021,
+                            },
+                        }
+                    ],
+                },
+                {"role": "customer", "text": "Ой, це для іншої машини. На X5 давайте двадцятки"},
+                {
+                    "role": "agent",
+                    "text": (
+                        "Добре, 275/45 R20 для BMW X5. Зимові чи літні?"
+                    ),
+                },
+                {"role": "customer", "text": "Літні"},
+                {
+                    "role": "agent",
+                    "text": (
+                        "Для 275/45 R20 є літні шини: "
+                        "1. Michelin Latitude Sport 3 — 5200 грн "
+                        "2. Continental PremiumContact 6 — 4800 грн"
+                    ),
+                    "tool_calls": [
+                        {
+                            "name": "search_tires",
+                            "input": {
+                                "width": 275,
+                                "profile": 45,
+                                "diameter": 20,
+                                "season": "summer",
+                            },
+                        }
+                    ],
+                },
+            ],
+            "tools_used": ["get_vehicle_tire_sizes", "search_tires"],
+            "description": "Клієнт назвав неправильний розмір для авто. Агент коригує за базою.",
+        },
+        # E4: Season clarification (winter period)
+        {
+            "title": "Уточнение сезона (зимний период)",
+            "scenario_type": "tire_search",
+            "phase": "mvp",
+            "dialogue": [
+                {"role": "customer", "text": "Мені потрібні шини на Тойоту РАВ4 2023"},
+                {
+                    "role": "agent",
+                    "text": (
+                        "Для Toyota RAV4 2023 заводський розмір — 225/65 R17. "
+                        "Зараз зимовий сезон — вам зимові чи всесезонні?"
+                    ),
+                    "tool_calls": [
+                        {
+                            "name": "get_vehicle_tire_sizes",
+                            "input": {
+                                "brand": "Toyota",
+                                "model": "RAV4",
+                                "year": 2023,
+                            },
+                        }
+                    ],
+                },
+                {"role": "customer", "text": "Зимові, шиповані"},
+                {
+                    "role": "agent",
+                    "text": (
+                        "Для 225/65 R17 є зимові шиповані: "
+                        "1. Nokian Hakkapeliitta 10 SUV — 3600 грн "
+                        "2. Continental IceContact 3 — 3400 грн "
+                        "3. Michelin X-Ice North 4 SUV — 3900 грн"
+                    ),
+                    "tool_calls": [
+                        {
+                            "name": "search_tires",
+                            "input": {
+                                "width": 225,
+                                "profile": 65,
+                                "diameter": 17,
+                                "season": "winter",
+                            },
+                        }
+                    ],
+                },
+            ],
+            "tools_used": ["get_vehicle_tire_sizes", "search_tires"],
+            "description": "Клієнт не вказав сезон. Агент рекомендує за поточним місяцем.",
+        },
+        # E5: Preferred brand unavailable — alternatives
+        {
+            "title": "Бренд недоступен — альтернативы",
+            "scenario_type": "tire_search",
+            "phase": "mvp",
+            "dialogue": [
+                {"role": "customer", "text": "Шини Pirelli на Хонду Сівік 2020, літні"},
+                {
+                    "role": "agent",
+                    "text": (
+                        "Для Honda Civic 2020 заводський розмір — 215/55 R16. "
+                        "Шукаю Pirelli..."
+                    ),
+                    "tool_calls": [
+                        {
+                            "name": "get_vehicle_tire_sizes",
+                            "input": {
+                                "brand": "Honda",
+                                "model": "Civic",
+                                "year": 2020,
+                            },
+                        }
+                    ],
+                },
+                {
+                    "role": "agent",
+                    "text": (
+                        "На жаль, Pirelli 215/55 R16 зараз немає в наявності. "
+                        "Але є інші варіанти цього розміру: "
+                        "1. Michelin Primacy 4 — 2900 грн "
+                        "2. Continental PremiumContact 6 — 2700 грн "
+                        "3. Nokian Hakka Green 3 — 2200 грн. "
+                        "Щось із цього цікавить?"
+                    ),
+                    "tool_calls": [
+                        {
+                            "name": "search_tires",
+                            "input": {
+                                "width": 215,
+                                "profile": 55,
+                                "diameter": 16,
+                                "season": "summer",
+                                "brand": "Pirelli",
+                            },
+                        },
+                        {
+                            "name": "search_tires",
+                            "input": {
+                                "width": 215,
+                                "profile": 55,
+                                "diameter": 16,
+                                "season": "summer",
+                            },
+                        },
+                    ],
+                },
+            ],
+            "tools_used": ["get_vehicle_tire_sizes", "search_tires"],
+            "description": "Бренд Pirelli недоступний → повторний search_tires без бренду → альтернативи.",
+        },
+        # E6: Full clarification cycle
+        {
+            "title": "Полный цикл уточнения: авто → сезон → бренд",
+            "scenario_type": "tire_search",
+            "phase": "mvp",
+            "dialogue": [
+                {"role": "customer", "text": "Мені треба шини"},
+                {
+                    "role": "agent",
+                    "text": (
+                        "Звичайно! Підкажіть, будь ласка, марку та модель вашого автомобіля? "
+                        "Або розмір шин, якщо знаєте."
+                    ),
+                },
+                {"role": "customer", "text": "Volkswagen Golf, двадцять перший рік"},
+                {
+                    "role": "agent",
+                    "text": (
+                        "Для Volkswagen Golf 2021 заводський розмір — 205/55 R16. "
+                        "Зараз зимовий сезон — вам зимові чи всесезонні?"
+                    ),
+                    "tool_calls": [
+                        {
+                            "name": "get_vehicle_tire_sizes",
+                            "input": {
+                                "brand": "Volkswagen",
+                                "model": "Golf",
+                                "year": 2021,
+                            },
+                        }
+                    ],
+                },
+                {"role": "customer", "text": "Зимові"},
+                {
+                    "role": "agent",
+                    "text": (
+                        "Є побажання щодо бренду чи бюджету?"
+                    ),
+                },
+                {"role": "customer", "text": "До 3000 за штуку, бренд не важливий"},
+                {
+                    "role": "agent",
+                    "text": (
+                        "У межах бюджету є: "
+                        "1. Nokian Hakkapeliitta 10 205/55 R16 — 2600 грн "
+                        "2. Continental WinterContact TS 870 — 2400 грн "
+                        "3. Kumho WinterCraft WP52 — 1900 грн. "
+                        "Яку модель обираєте?"
+                    ),
+                    "tool_calls": [
+                        {
+                            "name": "search_tires",
+                            "input": {
+                                "width": 205,
+                                "profile": 55,
+                                "diameter": 16,
+                                "season": "winter",
+                            },
+                        }
+                    ],
+                },
+            ],
+            "tools_used": ["get_vehicle_tire_sizes", "search_tires"],
+            "description": "Повний цикл: авто? → get_vehicle_tire_sizes → сезон? → бренд/бюджет? → search_tires.",
+        },
         # D1: Surzyk speaker — multi-turn
         {
             "title": "Суржик — агент отвечает по-украински (multi-turn)",

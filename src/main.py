@@ -303,6 +303,7 @@ def _build_tool_router(session: CallSession) -> ToolRouter:
 
     assert _store_client is not None, "StoreClient must be initialized before handling calls"
 
+    router.register("get_vehicle_tire_sizes", _store_client.get_vehicle_tire_sizes)
     router.register("search_tires", _store_client.search_tires)
     router.register("check_availability", _store_client.check_availability)
     router.register("get_order_status", _store_client.search_orders)

@@ -21,6 +21,20 @@ from aiobreaker import CircuitBreaker, CircuitBreakerError
 
 logger = logging.getLogger(__name__)
 
+
+def _format_tire_size(row: Any) -> str:
+    """Format a tire size row as '235/65 R17' with optional axle suffix."""
+    diameter = row["diameter"]
+    # Show integer diameter when possible (17 not 17.0)
+    d_str = str(int(diameter)) if diameter == int(diameter) else str(diameter)
+    size = f"{row['width']}/{row['height']} R{d_str}"
+    axle = row.get("axle", 0)
+    if axle == 1:
+        size += " (перед)"
+    elif axle == 2:
+        size += " (зад)"
+    return size
+
 # Retry config
 _MAX_RETRIES = 2
 _RETRY_DELAYS = [1.0, 2.0]  # exponential backoff
@@ -516,6 +530,162 @@ class StoreClient:
             ],
         }
 
+    # --- Vehicle tire size lookup ---
+
+    async def get_vehicle_tire_sizes(
+        self, brand: str = "", model: str = "", year: int = 0, **_: Any
+    ) -> dict[str, Any]:
+        """Look up factory tire sizes for a vehicle.
+
+        Uses the vehicle tire size database (migration 014).
+        Falls back gracefully if DB is unavailable.
+        """
+        if self._db_engine is None:
+            return {"found": False, "message": "База авто тимчасово недоступна"}
+
+        from sqlalchemy import text
+
+        engine = self._db_engine
+
+        async with engine.connect() as conn:
+            # 1. Find brand (exact, then fuzzy)
+            brand_row = await self._find_vehicle_brand(conn, brand)
+            if brand_row is None:
+                return {"found": False, "message": f"Марку '{brand}' не знайдено в базі"}
+
+            # 2. Find model
+            model_row = await self._find_vehicle_model(conn, brand_row["id"], model)
+            if model_row is None:
+                return {
+                    "found": False,
+                    "brand": brand_row["name"],
+                    "message": f"Модель '{model}' не знайдено для {brand_row['name']}",
+                }
+
+            # 3. Get available years
+            years_result = await conn.execute(
+                text("""
+                    SELECT DISTINCT k.year FROM vehicle_kits k
+                    WHERE k.model_id = :mid ORDER BY k.year DESC
+                """),
+                {"mid": model_row["id"]},
+            )
+            years = [r[0] for r in years_result]
+
+            # 4. Query tire sizes
+            if year and year in years:
+                selected_year = year
+            elif year:
+                # Year not in DB — use closest available
+                selected_year = min(years, key=lambda y: abs(y - year)) if years else 0
+            else:
+                # No year specified — use most recent
+                selected_year = years[0] if years else 0
+
+            size_params: dict[str, Any] = {"mid": model_row["id"]}
+            year_filter = ""
+            if selected_year:
+                year_filter = "AND k.year = :year"
+                size_params["year"] = selected_year
+
+            sizes_result = await conn.execute(
+                text(f"""
+                    SELECT DISTINCT ts.width, ts.height, ts.diameter, ts.type, ts.axle
+                    FROM vehicle_tire_sizes ts
+                    JOIN vehicle_kits k ON ts.kit_id = k.id
+                    WHERE k.model_id = :mid {year_filter}
+                    ORDER BY ts.type, ts.width
+                """),
+                size_params,
+            )
+            rows = sizes_result.mappings().all()
+
+        if not rows:
+            return {
+                "found": False,
+                "brand": brand_row["name"],
+                "model": model_row["name"],
+                "message": "Розміри шин не знайдено",
+            }
+
+        stock_sizes = []
+        acceptable_sizes = []
+        for row in rows:
+            size_str = _format_tire_size(row)
+            if row["type"] == 1:
+                stock_sizes.append(size_str)
+            else:
+                acceptable_sizes.append(size_str)
+
+        result: dict[str, Any] = {
+            "found": True,
+            "brand": brand_row["name"],
+            "model": model_row["name"],
+            "years": years[:10],
+            "stock_sizes": stock_sizes,
+        }
+        if acceptable_sizes:
+            result["acceptable_sizes"] = acceptable_sizes
+        if selected_year:
+            result["selected_year"] = selected_year
+
+        return result
+
+    @staticmethod
+    async def _find_vehicle_brand(conn: Any, name: str) -> Any:
+        """Find vehicle brand by exact match, then fuzzy."""
+        from sqlalchemy import text
+
+        # Exact (case-insensitive)
+        result = await conn.execute(
+            text("SELECT id, name FROM vehicle_brands WHERE LOWER(name) = LOWER(:name)"),
+            {"name": name},
+        )
+        row = result.mappings().first()
+        if row:
+            return row
+
+        # Fuzzy via pg_trgm
+        result = await conn.execute(
+            text("""
+                SELECT id, name, similarity(LOWER(name), LOWER(:name)) AS sim
+                FROM vehicle_brands
+                WHERE similarity(LOWER(name), LOWER(:name)) > 0.3
+                ORDER BY sim DESC LIMIT 1
+            """),
+            {"name": name},
+        )
+        return result.mappings().first()
+
+    @staticmethod
+    async def _find_vehicle_model(conn: Any, brand_id: int, name: str) -> Any:
+        """Find vehicle model by exact match, then fuzzy."""
+        from sqlalchemy import text
+
+        # Exact
+        result = await conn.execute(
+            text("""
+                SELECT id, name FROM vehicle_models
+                WHERE brand_id = :bid AND LOWER(name) = LOWER(:name)
+            """),
+            {"bid": brand_id, "name": name},
+        )
+        row = result.mappings().first()
+        if row:
+            return row
+
+        # Fuzzy
+        result = await conn.execute(
+            text("""
+                SELECT id, name, similarity(LOWER(name), LOWER(:name)) AS sim
+                FROM vehicle_models
+                WHERE brand_id = :bid AND similarity(LOWER(name), LOWER(:name)) > 0.3
+                ORDER BY sim DESC LIMIT 1
+            """),
+            {"bid": brand_id, "name": name},
+        )
+        return result.mappings().first()
+
     # --- 1C / PostgreSQL / Redis helpers (MVP) ---
 
     async def _search_tires_db(self, **params: Any) -> dict[str, Any]:
@@ -527,7 +697,7 @@ class StoreClient:
             return {
                 "total": 0,
                 "items": [],
-                "message": "Пошук за авто тимчасово недоступний, вкажіть розмір шин",
+                "message": "Для пошуку за авто спочатку виклич get_vehicle_tire_sizes, потім search_tires з розміром",
             }
 
         engine = self._db_engine

@@ -15,7 +15,7 @@ class TestGetDialogueExamples:
     def test_returns_list(self) -> None:
         examples = get_dialogue_examples()
         assert isinstance(examples, list)
-        assert len(examples) >= 28
+        assert len(examples) >= 34
 
     def test_all_have_required_fields(self) -> None:
         for ex in get_dialogue_examples():
