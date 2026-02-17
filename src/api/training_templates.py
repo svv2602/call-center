@@ -1,6 +1,7 @@
 """Training response templates CRUD API endpoints.
 
 Manage pre-defined agent responses (greeting, farewell, etc.).
+Supports multiple variants per template_key for randomized responses.
 """
 
 from __future__ import annotations
@@ -60,16 +61,16 @@ class TemplateUpdateRequest(BaseModel):
 
 @router.get("/")
 async def list_templates(_: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
-    """List all response templates."""
+    """List all response templates, ordered by key and variant."""
     engine = await _get_engine()
 
     async with engine.begin() as conn:
         result = await conn.execute(
             text("""
-                SELECT id, template_key, title, content, description,
+                SELECT id, template_key, variant_number, title, content, description,
                        is_active, created_at, updated_at
                 FROM response_templates
-                ORDER BY template_key
+                ORDER BY template_key, variant_number
             """)
         )
         items = [dict(row._mapping) for row in result]
@@ -85,7 +86,7 @@ async def get_template(template_id: UUID, _: dict[str, Any] = _analyst_dep) -> d
     async with engine.begin() as conn:
         result = await conn.execute(
             text("""
-                SELECT id, template_key, title, content, description,
+                SELECT id, template_key, variant_number, title, content, description,
                        is_active, created_at, updated_at
                 FROM response_templates
                 WHERE id = :id
@@ -103,7 +104,10 @@ async def get_template(template_id: UUID, _: dict[str, Any] = _analyst_dep) -> d
 async def create_template(
     request: TemplateCreateRequest, _: dict[str, Any] = _admin_dep
 ) -> dict[str, Any]:
-    """Create a new response template."""
+    """Create a new response template variant.
+
+    Auto-assigns next variant_number for the given template_key.
+    """
     if request.template_key not in TEMPLATE_KEYS:
         raise HTTPException(
             status_code=400, detail=f"Invalid template_key. Must be one of: {TEMPLATE_KEYS}"
@@ -112,24 +116,28 @@ async def create_template(
     engine = await _get_engine()
 
     async with engine.begin() as conn:
-        # Check uniqueness
-        existing = await conn.execute(
-            text("SELECT id FROM response_templates WHERE template_key = :key"),
+        # Get next variant number
+        max_result = await conn.execute(
+            text("""
+                SELECT COALESCE(MAX(variant_number), 0) AS max_variant
+                FROM response_templates
+                WHERE template_key = :key
+            """),
             {"key": request.template_key},
         )
-        if existing.first():
-            raise HTTPException(
-                status_code=409, detail=f"Template with key '{request.template_key}' already exists"
-            )
+        max_row = max_result.first()
+        next_variant = (max_row.max_variant if max_row else 0) + 1
 
         result = await conn.execute(
             text("""
-                INSERT INTO response_templates (template_key, title, content, description)
-                VALUES (:template_key, :title, :content, :description)
-                RETURNING id, template_key, title, is_active, created_at
+                INSERT INTO response_templates
+                    (template_key, variant_number, title, content, description)
+                VALUES (:template_key, :variant_number, :title, :content, :description)
+                RETURNING id, template_key, variant_number, title, is_active, created_at
             """),
             {
                 "template_key": request.template_key,
+                "variant_number": next_variant,
                 "title": request.title,
                 "content": request.content,
                 "description": request.description,
@@ -178,7 +186,7 @@ async def update_template(
                 UPDATE response_templates
                 SET {set_clause}
                 WHERE id = :id
-                RETURNING id, template_key, title, content, is_active, updated_at
+                RETURNING id, template_key, variant_number, title, content, is_active, updated_at
             """),
             params,
         )
@@ -187,3 +195,45 @@ async def update_template(
             raise HTTPException(status_code=404, detail="Response template not found")
 
     return {"item": dict(row._mapping), "message": "Response template updated"}
+
+
+@router.delete("/{template_id}")
+async def delete_template(template_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+    """Delete a response template variant.
+
+    Only allows deletion if there is more than one variant for the key.
+    """
+    engine = await _get_engine()
+
+    async with engine.begin() as conn:
+        # Get the template to find its key
+        tpl_result = await conn.execute(
+            text("SELECT template_key FROM response_templates WHERE id = :id"),
+            {"id": str(template_id)},
+        )
+        tpl_row = tpl_result.first()
+        if not tpl_row:
+            raise HTTPException(status_code=404, detail="Response template not found")
+
+        # Count variants for this key
+        count_result = await conn.execute(
+            text("""
+                SELECT COUNT(*) AS cnt
+                FROM response_templates
+                WHERE template_key = :key
+            """),
+            {"key": tpl_row.template_key},
+        )
+        count_row = count_result.first()
+        if count_row and count_row.cnt <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot delete the last variant. Each key must have at least one template.",
+            )
+
+        await conn.execute(
+            text("DELETE FROM response_templates WHERE id = :id"),
+            {"id": str(template_id)},
+        )
+
+    return {"message": "Response template variant deleted"}

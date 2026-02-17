@@ -337,12 +337,18 @@ export default {
     // Templates
     'training.newTemplate': '+ New Template',
     'training.editTemplate': 'Edit Template',
+    'training.addVariantTitle': 'Add Response Variant',
     'training.noTemplates': 'No templates found',
     'training.templateKey': 'Key',
     'training.templateTitle': 'Title',
     'training.content': 'Content',
     'training.description': 'Description',
     'training.templateSaved': 'Template saved',
+    'training.addVariant': '+ Variant',
+    'training.variantCount': 'var.',
+    'training.variantsHint': 'Multiple variants per key — agent randomly picks one for each call',
+    'training.deleteVariantConfirm': 'Delete variant "{title}"?',
+    'training.variantDeleted': 'Variant deleted',
     // Dialogues
     'training.newDialogue': '+ New Scenario',
     'training.editDialogue': 'Edit Scenario',

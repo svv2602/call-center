@@ -337,12 +337,18 @@ export default {
     // Templates
     'training.newTemplate': '+ Новый шаблон',
     'training.editTemplate': 'Редактирование шаблона',
+    'training.addVariantTitle': 'Добавить вариант ответа',
     'training.noTemplates': 'Шаблоны не найдены',
     'training.templateKey': 'Ключ',
     'training.templateTitle': 'Название',
     'training.content': 'Содержание',
     'training.description': 'Описание',
     'training.templateSaved': 'Шаблон сохранён',
+    'training.addVariant': '+ Вариант',
+    'training.variantCount': 'вар.',
+    'training.variantsHint': 'Несколько вариантов на ключ — агент выбирает случайный при каждом звонке',
+    'training.deleteVariantConfirm': 'Удалить вариант "{title}"?',
+    'training.variantDeleted': 'Вариант удалён',
     // Dialogues
     'training.newDialogue': '+ Новый сценарий',
     'training.editDialogue': 'Редактирование сценария',

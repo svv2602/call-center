@@ -293,7 +293,7 @@ async function importDocuments() {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  TAB 3: Шаблоны ответов
+//  TAB 3: Шаблоны ответов (with variant support)
 // ═══════════════════════════════════════════════════════════
 async function loadTemplates() {
     const container = document.getElementById('trainingContent-templates');
@@ -307,18 +307,44 @@ async function loadTemplates() {
                 <div class="${tw.emptyState}">${t('training.noTemplates')}</div>`;
             return;
         }
-        container.innerHTML = `
-            <div class="mb-4"><button class="${tw.btnPrimary}" onclick="window._pages.training.showCreateTemplate()">${t('training.newTemplate')}</button></div>
-            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr><th class="${tw.th}">${t('training.templateKey')}</th><th class="${tw.th}">${t('training.templateTitle')}</th><th class="${tw.th}">${t('training.content')}</th><th class="${tw.th}">${t('training.activeCol')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
-            ${items.map(item => `
+
+        // Group by template_key
+        const grouped = {};
+        for (const item of items) {
+            if (!grouped[item.template_key]) grouped[item.template_key] = [];
+            grouped[item.template_key].push(item);
+        }
+
+        let rows = '';
+        for (const [key, variants] of Object.entries(grouped)) {
+            for (let i = 0; i < variants.length; i++) {
+                const item = variants[i];
+                const isFirst = i === 0;
+                const variantCount = variants.length;
+                rows += `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(item.template_key)}</span></td>
+                    ${isFirst ? `<td class="${tw.td}" rowspan="${variantCount}"><span class="${tw.badgeBlue}">${escapeHtml(key)}</span><br><span class="${tw.mutedText} text-xs">${variantCount} ${t('training.variantCount', {count: variantCount})}</span><br><button class="${tw.btnPrimary} ${tw.btnSm} mt-1" onclick="window._pages.training.addVariant('${escapeHtml(key)}')">${t('training.addVariant')}</button></td>` : ''}
+                    <td class="${tw.td}"><span class="${tw.badge}">#${item.variant_number}</span></td>
                     <td class="${tw.td}">${escapeHtml(item.title)}</td>
                     <td class="${tw.td}"><span class="${tw.mutedText}">${escapeHtml((item.content || '').substring(0, 80))}${(item.content || '').length > 80 ? '...' : ''}</span></td>
                     <td class="${tw.td}">${item.is_active !== false ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
-                    <td class="${tw.td}"><button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.editTemplate('${item.id}')">${t('common.edit')}</button></td>
-                </tr>
-            `).join('')}
+                    <td class="${tw.td}">
+                        <div class="flex flex-wrap gap-1">
+                            <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.editTemplate('${item.id}')">${t('common.edit')}</button>
+                            ${variantCount > 1 ? `<button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.training.deleteTemplate('${item.id}', '${escapeHtml(item.title).replace(/'/g, "\\'")}')">${t('common.delete')}</button>` : ''}
+                        </div>
+                    </td>
+                </tr>`;
+            }
+        }
+
+        container.innerHTML = `
+            <div class="mb-4">
+                <button class="${tw.btnPrimary}" onclick="window._pages.training.showCreateTemplate()">${t('training.newTemplate')}</button>
+                <span class="${tw.mutedText} ml-3 text-sm">${t('training.variantsHint')}</span>
+            </div>
+            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr><th class="${tw.th}">${t('training.templateKey')}</th><th class="${tw.th}">#</th><th class="${tw.th}">${t('training.templateTitle')}</th><th class="${tw.th}">${t('training.content')}</th><th class="${tw.th}">${t('training.activeCol')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
+            ${rows}
             </tbody></table></div>`;
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('training.loadFailed', {error: escapeHtml(e.message)})}</div>`;
@@ -330,6 +356,17 @@ function showCreateTemplate() {
     document.getElementById('editTemplateId').value = '';
     document.getElementById('templateKey').value = '';
     document.getElementById('templateKey').disabled = false;
+    document.getElementById('templateTitle').value = '';
+    document.getElementById('templateContent').value = '';
+    document.getElementById('templateDescription').value = '';
+    document.getElementById('responseTemplateModal').classList.add('show');
+}
+
+function addVariant(templateKey) {
+    document.getElementById('templateModalTitle').textContent = t('training.addVariantTitle');
+    document.getElementById('editTemplateId').value = '';
+    document.getElementById('templateKey').value = templateKey;
+    document.getElementById('templateKey').disabled = true;
     document.getElementById('templateTitle').value = '';
     document.getElementById('templateContent').value = '';
     document.getElementById('templateDescription').value = '';
@@ -369,6 +406,15 @@ async function saveTemplate() {
         showToast(t('training.templateSaved'));
         loadTemplates();
     } catch (e) { showToast(t('training.saveFailed', {error: e.message}), 'error'); }
+}
+
+async function deleteTemplate(id, title) {
+    if (!confirm(t('training.deleteVariantConfirm', {title}))) return;
+    try {
+        await api(`/training/templates/${id}`, { method: 'DELETE' });
+        showToast(t('training.variantDeleted'));
+        loadTemplates();
+    } catch (e) { showToast(t('training.deleteFailed', {error: e.message}), 'error'); }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -661,7 +707,7 @@ window._pages.training = {
     toggleArticle, deleteArticle, reindexArticle, reindexAll,
     showImportModal, importDocuments,
     // Templates
-    loadTemplates, showCreateTemplate, editTemplate, saveTemplate,
+    loadTemplates, showCreateTemplate, addVariant, editTemplate, saveTemplate, deleteTemplate,
     // Dialogues
     loadDialogues, showCreateDialogue, editDialogue, saveDialogue, deleteDialogue,
     // Safety

@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from contextlib import asynccontextmanager
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -69,6 +70,19 @@ class TestTemplateUpdateRequest:
         assert req.title is None
 
 
+def _make_engine_and_conn():
+    """Create mock engine + conn with asynccontextmanager for begin()."""
+    mock_conn = AsyncMock()
+    mock_engine = AsyncMock()
+
+    @asynccontextmanager
+    async def fake_begin():
+        yield mock_conn
+
+    mock_engine.begin = fake_begin
+    return mock_engine, mock_conn
+
+
 class TestTemplateEndpoints:
     """Test API endpoint logic."""
 
@@ -103,28 +117,30 @@ class TestTemplateEndpoints:
             assert exc_info.value.status_code == 400
 
     @pytest.mark.asyncio
-    async def test_create_checks_uniqueness(self) -> None:
-        """Duplicate template_key should raise 409."""
-        from contextlib import asynccontextmanager
-
-        from fastapi import HTTPException
-
+    async def test_create_auto_assigns_variant_number(self) -> None:
+        """New template gets next variant_number for its key."""
         from src.api.training_templates import create_template
 
-        mock_conn = AsyncMock()
+        mock_engine, mock_conn = _make_engine_and_conn()
 
-        # Simulate existing row found
-        mock_result = AsyncMock()
-        mock_result.first.return_value = {"id": "existing-id"}
-        mock_conn.execute = AsyncMock(return_value=mock_result)
+        # First call: max variant query returns 2
+        max_result = MagicMock()
+        max_result.first.return_value = MagicMock(max_variant=2)
 
-        mock_engine = AsyncMock()
+        # Second call: INSERT RETURNING
+        insert_result = MagicMock()
+        insert_result.first.return_value = MagicMock(
+            _mapping={
+                "id": "new-id",
+                "template_key": "greeting",
+                "variant_number": 3,
+                "title": "Test",
+                "is_active": True,
+                "created_at": "2026-01-01",
+            }
+        )
 
-        @asynccontextmanager
-        async def fake_begin():
-            yield mock_conn
-
-        mock_engine.begin = fake_begin
+        mock_conn.execute = AsyncMock(side_effect=[max_result, insert_result])
 
         with patch(
             "src.api.training_templates._get_engine",
@@ -134,8 +150,132 @@ class TestTemplateEndpoints:
             req = TemplateCreateRequest(
                 template_key="greeting",
                 title="Test",
-                content="Test",
+                content="Hello!",
             )
+            result = await create_template(req, {})
+            assert result["item"]["variant_number"] == 3
+
+    @pytest.mark.asyncio
+    async def test_delete_prevents_last_variant(self) -> None:
+        """Cannot delete the last variant for a key."""
+        from uuid import uuid4
+
+        from fastapi import HTTPException
+
+        from src.api.training_templates import delete_template
+
+        mock_engine, mock_conn = _make_engine_and_conn()
+
+        # First call: find template
+        tpl_result = MagicMock()
+        tpl_result.first.return_value = MagicMock(template_key="greeting")
+
+        # Second call: count = 1
+        count_result = MagicMock()
+        count_result.first.return_value = MagicMock(cnt=1)
+
+        mock_conn.execute = AsyncMock(side_effect=[tpl_result, count_result])
+
+        with patch(
+            "src.api.training_templates._get_engine",
+            new_callable=AsyncMock,
+            return_value=mock_engine,
+        ):
             with pytest.raises(HTTPException) as exc_info:
-                await create_template(req, {})
-            assert exc_info.value.status_code == 409
+                await delete_template(uuid4(), {})
+            assert exc_info.value.status_code == 400
+            assert "last variant" in exc_info.value.detail
+
+    @pytest.mark.asyncio
+    async def test_delete_allows_when_multiple_variants(self) -> None:
+        """Can delete when more than one variant exists."""
+        from uuid import uuid4
+
+        from src.api.training_templates import delete_template
+
+        mock_engine, mock_conn = _make_engine_and_conn()
+
+        # First call: find template
+        tpl_result = MagicMock()
+        tpl_result.first.return_value = MagicMock(template_key="greeting")
+
+        # Second call: count = 3
+        count_result = MagicMock()
+        count_result.first.return_value = MagicMock(cnt=3)
+
+        # Third call: DELETE
+        delete_result = AsyncMock()
+
+        mock_conn.execute = AsyncMock(side_effect=[tpl_result, count_result, delete_result])
+
+        with patch(
+            "src.api.training_templates._get_engine",
+            new_callable=AsyncMock,
+            return_value=mock_engine,
+        ):
+            result = await delete_template(uuid4(), {})
+            assert "deleted" in result["message"].lower()
+
+    @pytest.mark.asyncio
+    async def test_delete_not_found(self) -> None:
+        """Delete nonexistent template raises 404."""
+        from uuid import uuid4
+
+        from fastapi import HTTPException
+
+        from src.api.training_templates import delete_template
+
+        mock_engine, mock_conn = _make_engine_and_conn()
+
+        tpl_result = MagicMock()
+        tpl_result.first.return_value = None
+
+        mock_conn.execute = AsyncMock(return_value=tpl_result)
+
+        with patch(
+            "src.api.training_templates._get_engine",
+            new_callable=AsyncMock,
+            return_value=mock_engine,
+        ):
+            with pytest.raises(HTTPException) as exc_info:
+                await delete_template(uuid4(), {})
+            assert exc_info.value.status_code == 404
+
+
+class TestPromptManagerRandomVariants:
+    """Test random variant selection in prompt_manager."""
+
+    @pytest.mark.asyncio
+    async def test_random_variant_selection(self) -> None:
+        """get_active_templates picks one variant per key."""
+        from src.agent.prompt_manager import PromptManager
+
+        mock_engine = AsyncMock()
+        mock_conn = AsyncMock()
+
+        @asynccontextmanager
+        async def fake_begin():
+            yield mock_conn
+
+        mock_engine.begin = fake_begin
+
+        # Simulate 2 greeting variants + 1 farewell
+        rows = [
+            MagicMock(template_key="greeting", content="Привіт!"),
+            MagicMock(template_key="greeting", content="Добрий день!"),
+            MagicMock(template_key="farewell", content="До побачення!"),
+        ]
+        mock_result = MagicMock()
+        mock_result.fetchall.return_value = rows
+        mock_conn.execute = AsyncMock(return_value=mock_result)
+
+        pm = PromptManager(mock_engine)
+        templates = await pm.get_active_templates()
+
+        # greeting should be one of the two variants
+        assert templates["greeting"] in ["Привіт!", "Добрий день!"]
+        # farewell has only one variant
+        assert templates["farewell"] == "До побачення!"
+        # Missing keys should fall back to hardcoded
+        assert "silence_prompt" in templates
+        assert "error" in templates

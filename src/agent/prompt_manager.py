@@ -137,12 +137,16 @@ class PromptManager:
             return [dict(row._mapping) for row in result]
 
     async def get_active_templates(self) -> dict[str, str]:
-        """Get active response templates from DB.
+        """Get active response templates from DB with random variant selection.
+
+        For each template_key, randomly picks one active variant.
 
         Returns:
             Dict mapping template_key → content.
             Falls back to hardcoded constants from prompts.py if DB unavailable.
         """
+        import random
+
         fallback = {
             "greeting": GREETING_TEXT,
             "farewell": FAREWELL_TEXT,
@@ -165,7 +169,14 @@ class PromptManager:
                 rows = result.fetchall()
 
             if rows:
-                templates = {row.template_key: row.content for row in rows}
+                # Group variants by key
+                by_key: dict[str, list[str]] = {}
+                for row in rows:
+                    by_key.setdefault(row.template_key, []).append(row.content)
+
+                # Pick one random variant per key
+                templates = {key: random.choice(variants) for key, variants in by_key.items()}
+
                 # Fill in any missing keys from fallback
                 for key, value in fallback.items():
                     if key not in templates:
