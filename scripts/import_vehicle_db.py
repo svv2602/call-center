@@ -41,10 +41,13 @@ def _int_from_csv(value: str) -> int:
 
 
 def _decimal_from_csv(value: str) -> Decimal | None:
-    """Convert CSV numeric string to Decimal, or None if empty."""
+    """Convert CSV numeric string to Decimal, or None if empty/invalid."""
     if not value or value == "NULL":
         return None
-    return Decimal(value)
+    try:
+        return Decimal(value)
+    except Exception:
+        return None
 
 
 def _smallint_or_none(value: str) -> int | None:
