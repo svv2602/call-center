@@ -72,6 +72,61 @@ class TestMVPTools:
         assert "negative_emotion" in reasons
 
 
+class TestLLMAgentInit:
+    """Test LLMAgent initialization with custom tools."""
+
+    def test_defaults_to_all_tools(self) -> None:
+        from src.agent.agent import LLMAgent
+
+        agent = LLMAgent(api_key="test-key")
+        assert agent._tools == list(ALL_TOOLS)
+        assert len(agent._tools) == len(ALL_TOOLS)
+
+    def test_accepts_custom_tools(self) -> None:
+        from src.agent.agent import LLMAgent
+
+        custom = [{"name": "my_tool", "description": "desc", "input_schema": {"type": "object"}}]
+        agent = LLMAgent(api_key="test-key", tools=custom)
+        assert agent._tools == custom
+        assert agent._tools is custom
+
+    def test_custom_tools_not_all_tools(self) -> None:
+        from src.agent.agent import LLMAgent
+
+        custom = [ALL_TOOLS[0]]
+        agent = LLMAgent(api_key="test-key", tools=custom)
+        assert len(agent._tools) == 1
+        assert len(agent._tools) != len(ALL_TOOLS)
+
+    @pytest.mark.asyncio
+    async def test_custom_tools_passed_to_api(self) -> None:
+        """process_message should pass self._tools (not ALL_TOOLS) to Claude API."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.agent.agent import LLMAgent
+
+        custom = [{"name": "test_tool", "description": "t", "input_schema": {"type": "object"}}]
+        agent = LLMAgent(api_key="test-key", tools=custom)
+
+        # Mock API response — end_turn with text
+        mock_response = MagicMock()
+        mock_response.stop_reason = "end_turn"
+        mock_response.usage = MagicMock(input_tokens=10, output_tokens=5)
+        text_block = MagicMock()
+        text_block.type = "text"
+        text_block.text = "Відповідь"
+        mock_response.content = [text_block]
+
+        agent._client = MagicMock()
+        agent._client.messages = MagicMock()
+        agent._client.messages.create = AsyncMock(return_value=mock_response)
+
+        await agent.process_message("Тест", [])
+
+        call_kwargs = agent._client.messages.create.call_args
+        assert call_kwargs.kwargs["tools"] is custom
+
+
 class TestSystemPrompt:
     """Test system prompt content."""
 
