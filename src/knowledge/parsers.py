@@ -118,7 +118,7 @@ def detect_category_from_filename(filename: str) -> str:
     """
     name_lower = filename.lower()
     for cat in CATEGORY_VALUES:
-        if re.search(rf"\b{cat}\b", name_lower):
+        if re.search(rf"(?:^|[\W_]){cat}(?:[\W_]|$)", name_lower):
             return cat
     return "general"
 
