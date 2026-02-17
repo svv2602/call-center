@@ -18,6 +18,8 @@ from fastapi.staticfiles import StaticFiles
 from redis.asyncio import Redis
 
 from src.agent.agent import LLMAgent, ToolRouter
+from src.agent.prompt_manager import PromptManager
+from src.agent.tool_loader import get_tools_with_overrides
 from src.api.admin_users import router as admin_users_router
 from src.api.analytics import router as analytics_router
 from src.api.auth import router as auth_router
@@ -239,6 +241,14 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             alternative_languages=settings.google_stt.alternative_language_list,
         )
 
+        # Load DB templates and tool overrides (if DB is available)
+        templates = None
+        tools = None
+        if _db_engine is not None:
+            pm = PromptManager(_db_engine)
+            templates = await pm.get_active_templates()
+            tools = await get_tools_with_overrides(_db_engine)
+
         # Per-call tool router, PII vault, and LLM agent
         router = _build_tool_router(session)
         vault = PIIVault()
@@ -247,11 +257,12 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             model=settings.anthropic.model,
             tool_router=router,
             pii_vault=vault,
+            tools=tools,
         )
 
         # Run the pipeline (greeting → listen → STT → LLM → TTS loop)
         assert _tts_engine is not None, "TTS engine must be initialized before handling calls"
-        pipeline = CallPipeline(conn, stt, _tts_engine, agent, session, stt_config)
+        pipeline = CallPipeline(conn, stt, _tts_engine, agent, session, stt_config, templates)
         await pipeline.run()
 
     except asyncio.CancelledError:

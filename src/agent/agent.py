@@ -73,11 +73,13 @@ class LLMAgent:
         model: str = "claude-sonnet-4-5-20250929",
         tool_router: ToolRouter | None = None,
         pii_vault: PIIVault | None = None,
+        tools: list[dict[str, Any]] | None = None,
     ) -> None:
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._model = model
         self._tool_router = tool_router or ToolRouter()
         self._pii_vault = pii_vault
+        self._tools = tools or list(ALL_TOOLS)
 
     @property
     def tool_router(self) -> ToolRouter:
@@ -132,7 +134,7 @@ class LLMAgent:
                     model=self._model,
                     max_tokens=300,
                     system=system,
-                    tools=ALL_TOOLS,  # type: ignore[arg-type]
+                    tools=self._tools,  # type: ignore[arg-type]
                     messages=conversation_history,  # type: ignore[arg-type]
                 )
             except anthropic.APIStatusError as exc:
