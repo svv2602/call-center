@@ -6,7 +6,8 @@ CRUD for prompt versions and A/B test management.
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import Any
+from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
@@ -16,9 +17,6 @@ from src.agent.ab_testing import ABTestManager
 from src.agent.prompt_manager import PromptManager
 from src.api.auth import require_role
 from src.config import get_settings
-
-if TYPE_CHECKING:
-    from uuid import UUID
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/prompts", tags=["prompts"])
