@@ -51,6 +51,7 @@
                 <a href="#" onclick="window._app.showPage('settings')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="settings" data-i18n="nav.system">Система</a>
                 <a href="#" onclick="window._app.showPage('users')" class="admin-only flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="users" data-i18n="nav.users">Пользователи</a>
                 <a href="#" onclick="window._app.showPage('audit')" class="admin-only flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="audit" data-i18n="nav.audit">Аудит</a>
+                <a href="#" onclick="window._app.showPage('vehicles')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="vehicles" data-i18n="nav.vehicles">База авто</a>
             </div>
             <div class="border-t border-zinc-800 px-4 py-3 space-y-2">
                 <button onclick="window._app.toggleTheme()" id="themeToggle"
@@ -294,6 +295,28 @@
                     <div class="flex justify-center py-8"><div class="spinner"></div></div>
                 </div>
                 <div class="pagination flex justify-center gap-1 mt-4" id="auditPagination"></div>
+            </div>
+
+            <!-- Vehicles -->
+            <div id="page-vehicles" style="display:none">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3">
+                    <a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> /
+                    <span data-i18n="vehicles.breadcrumb">База авто</span>
+                </div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="vehicles.title">База автомобилей</h1>
+                <div id="vehiclesStats" class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4 mb-6 max-md:grid-cols-2 max-[480px]:grid-cols-1"></div>
+                <div class="flex flex-wrap items-center gap-2 mb-4">
+                    <input type="text" id="vehiclesSearch" placeholder="Поиск по названию..."
+                        class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full"
+                        data-i18n-placeholder="vehicles.searchPlaceholder">
+                    <button onclick="window._pages.vehicles.search()"
+                        class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.search">Поиск</button>
+                </div>
+                <div id="vehiclesBreadcrumb" class="text-xs text-neutral-500 dark:text-neutral-400 mb-3" style="display:none"></div>
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="vehiclesContainer">
+                    <div class="flex justify-center py-8"><div class="spinner"></div></div>
+                </div>
+                <div class="pagination flex justify-center gap-1 mt-4" id="vehiclesPagination"></div>
             </div>
         </div>
     </div>

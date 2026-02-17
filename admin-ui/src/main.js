@@ -18,6 +18,7 @@ import { init as initOperators } from './pages/operators.js';
 import { init as initSettings } from './pages/settings.js';
 import { init as initUsers } from './pages/users.js';
 import { init as initAudit } from './pages/audit.js';
+import { init as initVehicles } from './pages/vehicles.js';
 
 // Initialize language and theme
 initLang();
@@ -32,6 +33,7 @@ initOperators();
 initSettings();
 initUsers();
 initAudit();
+initVehicles();
 
 // WebSocket event handler — dispatches real-time updates to active page
 setWsEventHandler((msg) => {

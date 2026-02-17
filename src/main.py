@@ -35,6 +35,7 @@ from src.api.training_dialogues import router as training_dialogues_router
 from src.api.training_safety import router as training_safety_router
 from src.api.training_templates import router as training_templates_router
 from src.api.training_tools import router as training_tools_router
+from src.api.vehicles import router as vehicles_router
 from src.api.websocket import router as websocket_router
 from src.config import Settings, get_settings
 from src.core.audio_socket import AudioSocketConnection, AudioSocketServer
@@ -70,6 +71,7 @@ app.include_router(training_dialogues_router)
 app.include_router(training_safety_router)
 app.include_router(training_templates_router)
 app.include_router(training_tools_router)
+app.include_router(vehicles_router)
 app.include_router(websocket_router)
 # Middleware order (last added = outermost = runs first):
 # SecurityHeaders → RateLimit → CORS → Audit
