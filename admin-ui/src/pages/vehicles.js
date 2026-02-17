@@ -22,7 +22,7 @@ async function loadStats() {
     const el = document.getElementById('vehiclesStats');
     el.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
     try {
-        const data = await api('/admin/vehicles/stats/');
+        const data = await api('/admin/vehicles/stats');
         el.innerHTML = `
             <div class="${tw.card}"><div class="${tw.statValue}">${data.brand_count ?? 0}</div><div class="${tw.statLabel}">${t('vehicles.brands')}</div></div>
             <div class="${tw.card}"><div class="${tw.statValue}">${data.model_count ?? 0}</div><div class="${tw.statLabel}">${t('vehicles.models')}</div></div>
@@ -70,7 +70,7 @@ async function loadBrands(offset = 0) {
     if (search) params.set('search', search);
 
     try {
-        const data = await api(`/admin/vehicles/brands/?${params}`);
+        const data = await api(`/admin/vehicles/brands?${params}`);
         const items = data.items || [];
 
         if (items.length === 0) {
@@ -118,7 +118,7 @@ async function loadModels(brandId, brandName, offset = 0) {
     if (search) params.set('search', search);
 
     try {
-        const data = await api(`/admin/vehicles/brands/${brandId}/models/?${params}`);
+        const data = await api(`/admin/vehicles/brands/${brandId}/models?${params}`);
         const items = data.items || [];
 
         if (items.length === 0) {
@@ -168,7 +168,7 @@ async function loadKits(modelId, modelName, offset = 0) {
     const params = new URLSearchParams({ limit: PAGE_SIZE, offset });
 
     try {
-        const data = await api(`/admin/vehicles/models/${modelId}/kits/?${params}`);
+        const data = await api(`/admin/vehicles/models/${modelId}/kits?${params}`);
         const items = data.items || [];
 
         if (items.length === 0) {
@@ -234,7 +234,7 @@ async function toggleTireSizes(btn, kitId) {
     cell.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
 
     try {
-        const data = await api(`/admin/vehicles/kits/${kitId}/tire-sizes/`);
+        const data = await api(`/admin/vehicles/kits/${kitId}/tire-sizes`);
         const items = data.items || [];
 
         if (items.length === 0) {
