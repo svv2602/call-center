@@ -87,7 +87,8 @@
                     <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-emerald-600 text-white hover:bg-emerald-700" onclick="window._pages.dashboard.exportStatsCSV()" data-i18n="dashboard.exportCSV">Экспорт CSV</button>
                     <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-violet-600 text-white hover:bg-violet-700" onclick="window._pages.dashboard.downloadPdfReport()" data-i18n="dashboard.downloadPDF">Скачать PDF</button>
                 </div>
-                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
+                <!-- Grafana iframe — hidden until Grafana is configured (Phase 4) -->
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="grafanaBlock" style="display:none">
                     <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="dashboard.grafana">Grafana в реальном времени</h3>
                     <iframe class="w-full h-[600px] max-md:h-[350px] border-none rounded-lg" id="grafanaFrame" src=""></iframe>
                 </div>
