@@ -108,31 +108,61 @@ def read_models(csv_dir: Path, brand_names: set[str]) -> list[dict[str, Any]]:
 
     The source CSV contains ~167 rows where brand names are erroneously
     listed as models (all under brand_id=138/Alpine, with no kits).
-    We detect and skip them: model name matches a brand name AND no kits
-    reference this model (to avoid filtering legitimate models like VW Jetta).
+
+    Two-pass filtering:
+    1. Remove orphan models (no kits) whose name matches a brand name.
+    2. If a brand lost ≥10 orphans in pass 1, remove ALL remaining orphans
+       for that brand — they're part of the same data corruption
+       (catches GAZ, UAZ, VAZ, Citroën encoding variant, etc.).
     """
-    rows = []
-    skipped = 0
     path = csv_dir / "test_table_car2_model.csv"
     brand_names_lower = {n.lower() for n in brand_names}
     brand_names_norm = {_normalize_name(n) for n in brand_names}
     kit_model_ids = _read_kit_model_ids(csv_dir)
+
+    # Pass 1: read all rows, mark orphan brand-name matches
+    all_rows: list[dict[str, Any]] = []
     with open(path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            name = row["name"]
             model_id = int(row["id"])
+            brand_id = int(row["brand"])
+            name = row["name"]
             is_orphan = model_id not in kit_model_ids
-            if is_orphan and _is_brand_name(name, brand_names_lower, brand_names_norm):
-                skipped += 1
-                continue
-            rows.append({
+            is_brand = is_orphan and _is_brand_name(name, brand_names_lower, brand_names_norm)
+            all_rows.append({
                 "id": model_id,
-                "brand_id": int(row["brand"]),
+                "brand_id": brand_id,
                 "name": name,
+                "_orphan": is_orphan,
+                "_brand_match": is_brand,
             })
+
+    # Count brand-name orphans per brand_id
+    brand_match_counts: dict[int, int] = {}
+    for r in all_rows:
+        if r["_brand_match"]:
+            brand_match_counts[r["brand_id"]] = brand_match_counts.get(r["brand_id"], 0) + 1
+
+    # Brands with ≥10 brand-name orphans are corrupted
+    corrupted_brands = {bid for bid, cnt in brand_match_counts.items() if cnt >= 10}
+
+    # Pass 2: filter
+    rows = []
+    skipped = 0
+    for r in all_rows:
+        if r["_brand_match"]:
+            skipped += 1
+            continue
+        if r["_orphan"] and r["brand_id"] in corrupted_brands:
+            skipped += 1
+            continue
+        rows.append({"id": r["id"], "brand_id": r["brand_id"], "name": r["name"]})
+
     if skipped:
-        logger.warning("Skipped %d orphan model rows matching brand names (data quality issue)", skipped)
+        logger.warning(
+            "Skipped %d orphan model rows (brand-name matches + corrupted brand cleanup)", skipped
+        )
     logger.info("Read %d models from %s", len(rows), path.name)
     return rows
 
