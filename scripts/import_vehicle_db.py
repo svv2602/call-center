@@ -69,18 +69,70 @@ def read_brands(csv_dir: Path) -> list[dict[str, Any]]:
     return rows
 
 
-def read_models(csv_dir: Path) -> list[dict[str, Any]]:
-    """Read vehicle models CSV."""
+def _normalize_name(name: str) -> str:
+    """Normalize a name for fuzzy comparison: lowercase, strip spaces/hyphens/punctuation."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
+
+
+def _is_brand_name(name: str, brand_names_lower: set[str], brand_names_norm: set[str]) -> bool:
+    """Check if a model name is actually a brand name (data quality issue).
+
+    Uses exact case-insensitive match, normalized match (strip spaces/hyphens),
+    and substring containment for longer brand names (≥5 chars) to catch
+    variants like "Mercedes-Benz" when brand is "Mercedes".
+    """
+    if not name.strip():
+        return True  # empty names are bogus
+    name_lower = name.lower()
+    if name_lower in brand_names_lower:
+        return True
+    if _normalize_name(name) in brand_names_norm:
+        return True
+    # Substring check: brand name (≥5 chars) contained in model name
+    return any(len(bn) >= 5 and bn in name_lower for bn in brand_names_lower)
+
+
+def _read_kit_model_ids(csv_dir: Path) -> set[int]:
+    """Read kit CSV and return set of model IDs that have at least one kit."""
+    model_ids: set[int] = set()
+    path = csv_dir / "test_table_car2_kit.csv"
+    with open(path, encoding="latin-1") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            model_ids.add(int(row["model"]))
+    return model_ids
+
+
+def read_models(csv_dir: Path, brand_names: set[str]) -> list[dict[str, Any]]:
+    """Read vehicle models CSV, filtering out bogus rows.
+
+    The source CSV contains ~167 rows where brand names are erroneously
+    listed as models (all under brand_id=138/Alpine, with no kits).
+    We detect and skip them: model name matches a brand name AND no kits
+    reference this model (to avoid filtering legitimate models like VW Jetta).
+    """
     rows = []
+    skipped = 0
     path = csv_dir / "test_table_car2_model.csv"
+    brand_names_lower = {n.lower() for n in brand_names}
+    brand_names_norm = {_normalize_name(n) for n in brand_names}
+    kit_model_ids = _read_kit_model_ids(csv_dir)
     with open(path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
+            name = row["name"]
+            model_id = int(row["id"])
+            is_orphan = model_id not in kit_model_ids
+            if is_orphan and _is_brand_name(name, brand_names_lower, brand_names_norm):
+                skipped += 1
+                continue
             rows.append({
-                "id": int(row["id"]),
+                "id": model_id,
                 "brand_id": int(row["brand"]),
-                "name": row["name"],
+                "name": name,
             })
+    if skipped:
+        logger.warning("Skipped %d orphan model rows matching brand names (data quality issue)", skipped)
     logger.info("Read %d models from %s", len(rows), path.name)
     return rows
 
@@ -141,6 +193,7 @@ async def import_data(engine: AsyncEngine, csv_dir: Path) -> None:
 
     # 1. Brands
     brands = read_brands(csv_dir)
+    brand_names = {b["name"] for b in brands}
     async with engine.begin() as conn:
         await conn.execute(
             text("INSERT INTO vehicle_brands (id, name) VALUES (:id, :name)"),
@@ -148,8 +201,8 @@ async def import_data(engine: AsyncEngine, csv_dir: Path) -> None:
         )
     logger.info("Inserted %d brands", len(brands))
 
-    # 2. Models
-    models = read_models(csv_dir)
+    # 2. Models (filter out bogus rows where brand names appear as model names)
+    models = read_models(csv_dir, brand_names)
     async with engine.begin() as conn:
         await conn.execute(
             text("INSERT INTO vehicle_models (id, brand_id, name) VALUES (:id, :brand_id, :name)"),
