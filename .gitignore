@@ -13,8 +13,8 @@ gcp-credentials.json
 __pycache__/
 *.py[cod]
 *.egg-info/
-dist/
-build/
+/dist/
+/build/
 .venv/
 venv/
 .coverage
@@ -42,7 +42,6 @@ redisdata/
 
 # Admin UI (Vite)
 admin-ui/node_modules/
-admin-ui/dist/
 
 # Agent skills (installed via `npx skills add`)
 .agents/
