@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Call Center AI — система автоматизации обработки входящих телефонных звонков для интернет-магазина шин (Украина). ИИ-агент принимает звонки, ведёт диалог на украинском языке, подбирает шины, оформляет заказы, записывает на шиномонтаж.
 
-**Status:** Planning/documentation phase. Source code not yet committed. Documentation is comprehensive and serves as the implementation specification.
+**Status:** Active development. All 4 phases implemented in code (680+ tests, 14 DB migrations, full FastAPI backend, Admin UI). Remaining: Grafana UI integration, Whisper GPU deployment, end-to-end testing with live Asterisk.
 
 ## Language Convention
 
@@ -38,29 +38,33 @@ Single source of truth for LLM agent tools is in `doc/development/00-overview.md
 
 **Important:** The tool is `create_order_draft` (not `create_order`).
 
-## Planned Tech Stack
+## Tech Stack
 
-Python 3.12+, asyncio + FastAPI, Asterisk 20 AudioSocket, Google Cloud STT v2 / TTS Neural2, Claude API (Anthropic), PostgreSQL 16 + pgvector, Redis 7, Prometheus + Grafana.
+Python 3.12+, asyncio + FastAPI, Asterisk 20 AudioSocket, Google Cloud STT v2 / TTS Neural2, Claude API (Anthropic), PostgreSQL 16 + pgvector, Redis 7, Prometheus + Grafana, Celery (background tasks).
 
-## Planned Commands (from documentation)
+## Commands
 
 ```bash
 # Local dev environment
-docker compose -f docker-compose.dev.yml up -d      # PostgreSQL, Redis, test Asterisk
-python3.12 -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev,test]"
-set -a; . ./.env.local; set +a                       # Load env vars (NOT export $(cat...))
-python -m src.main                                    # Run Call Processor
+source .venv/bin/activate
+set -a; . ./.env.local; set +a                       # Load env vars
+python -m src.main                                    # Run backend (port 8080)
+cd admin-ui && npm run dev                            # Admin UI dev server (port 5173)
+cd admin-ui && npm run build                          # Build Admin UI for prod
 
 # Tests
-pytest tests/unit/                                    # Unit tests
-pytest tests/integration/                             # Integration (needs Docker)
+pytest tests/ -x -q                                   # All tests (680+)
+pytest tests/unit/ -x -q                              # Unit tests only
 pytest tests/unit/test_audio_socket.py -v             # Single test file
 pytest tests/ --cov=src --cov-report=html             # With coverage
 
-# Lint
-ruff check src/ && ruff format src/
-mypy src/ --strict
+# Lint & format
+ruff check src/                                       # Lint
+ruff format .                                         # Format
+
+# Database
+alembic upgrade head                                  # Apply migrations (14 total)
+python -m scripts.import_vehicle_db                   # Import vehicle tire DB from CSV
 ```
 
 ## Documentation Structure
@@ -75,10 +79,19 @@ Key entry points: `doc/README.md` (navigation), `doc/development/00-overview.md`
 
 ## Development Phases
 
-1. **MVP** — tire search, availability check, operator transfer
-2. **Orders** — order status, order creation flow (draft → delivery → confirm)
-3. **Services** — fitting booking, RAG knowledge base consultations
-4. **Analytics** — dashboards, quality scoring, A/B prompt testing, self-hosted Whisper
+1. **MVP** — tire search, availability check, operator transfer — **done**
+2. **Orders** — order status, order creation flow (draft → delivery → confirm) — **done**
+3. **Services** — fitting booking, RAG knowledge base consultations — **done**
+4. **Analytics** — dashboards, quality scoring, A/B prompt testing, self-hosted Whisper — **mostly done** (Grafana UI and Whisper GPU deploy pending)
+
+## Project Structure
+
+- `src/` — Python/FastAPI backend (port 8080): `core/` (pipeline, AudioSocket, sessions), `agent/` (LLM, tools, A/B testing), `stt/` + `tts/`, `api/` (14 routers), `store_client/`, `knowledge/` (RAG), `tasks/` (Celery), `monitoring/`
+- `admin-ui/` — Vite SPA: `src/pages/` (dashboard, calls, operators, training, users, vehicles, settings), i18n (ru/en)
+- `migrations/versions/` — 14 Alembic migrations (raw SQL)
+- `tests/` — 680+ tests: `unit/`, `integration/`, `e2e/`, `load/`, `chaos/`, `prompt_regression/`
+- `scripts/` — import scripts (vehicle DB)
+- `k8s/`, `prometheus/`, `grafana/`, `alertmanager/` — infrastructure configs
 
 ## Admin UI — i18n
 
