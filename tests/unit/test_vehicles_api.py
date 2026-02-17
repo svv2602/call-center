@@ -15,6 +15,7 @@ from src.api.vehicles import router
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
+    from pathlib import Path
 
 
 def _make_mock_row(data: dict[str, Any]) -> MagicMock:
@@ -146,9 +147,7 @@ class TestGetStats:
         assert response.status_code == 200
 
     @patch("src.api.auth.get_settings")
-    def test_stats_operator_forbidden(
-        self, mock_settings: MagicMock, client: TestClient
-    ) -> None:
+    def test_stats_operator_forbidden(self, mock_settings: MagicMock, client: TestClient) -> None:
         mock_settings.return_value.admin.jwt_secret = "test-secret"
         response = client.get(
             "/admin/vehicles/stats",
@@ -174,9 +173,7 @@ class TestGetStats:
             "tire_size_count": 800,
         }
         # First query (metadata) returns no rows, second (counts) returns data
-        mock_engine, _ = _make_mock_engine(
-            [], multi_results=[[], [fallback_counts]]
-        )
+        mock_engine, _ = _make_mock_engine([], multi_results=[[], [fallback_counts]])
         mock_engine_fn.return_value = mock_engine
 
         response = client.get(
@@ -196,9 +193,7 @@ class TestListBrands:
         self, mock_engine_fn: MagicMock, mock_settings: MagicMock, client: TestClient
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = "test-secret"
-        mock_engine, _ = _make_mock_engine(
-            [], multi_results=[[_SAMPLE_BRAND], [_SAMPLE_BRAND]]
-        )
+        mock_engine, _ = _make_mock_engine([], multi_results=[[_SAMPLE_BRAND], [_SAMPLE_BRAND]])
         mock_engine_fn.return_value = mock_engine
 
         response = client.get(
@@ -397,3 +392,80 @@ class TestListTireSizes:
             headers={"Authorization": f"Bearer {_admin_token()}"},
         )
         assert response.status_code == 404
+
+
+class TestImportVehicleDb:
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.vehicles._get_engine")
+    @patch("scripts.import_vehicle_db.import_data", new_callable=AsyncMock)
+    def test_import_success(
+        self,
+        mock_import: AsyncMock,
+        mock_engine_fn: MagicMock,
+        mock_settings: MagicMock,
+        client: TestClient,
+        tmp_path: Path,
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = "test-secret"
+
+        # Create expected CSV files in tmp_path
+        for name in [
+            "test_table_car2_brand.csv",
+            "test_table_car2_model.csv",
+            "test_table_car2_kit.csv",
+            "test_table_car2_kit_tyre_size.csv",
+        ]:
+            (tmp_path / name).write_text("id\n1\n")
+
+        meta_row = {
+            "brand_count": 10,
+            "model_count": 50,
+            "kit_count": 200,
+            "tire_size_count": 800,
+            "imported_at": "2026-02-17T12:00:00",
+            "source_path": str(tmp_path),
+        }
+        mock_engine, _ = _make_mock_engine([meta_row])
+        mock_engine_fn.return_value = mock_engine
+
+        response = client.post(
+            "/admin/vehicles/import",
+            json={"csv_dir": str(tmp_path)},
+            headers={"Authorization": f"Bearer {_admin_token()}"},
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["brand_count"] == 10
+        assert data["tire_size_count"] == 800
+        mock_import.assert_awaited_once()
+
+    @patch("src.api.auth.get_settings")
+    def test_import_missing_dir(
+        self,
+        mock_settings: MagicMock,
+        client: TestClient,
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = "test-secret"
+
+        response = client.post(
+            "/admin/vehicles/import",
+            json={"csv_dir": "/nonexistent/path/to/csvs"},
+            headers={"Authorization": f"Bearer {_admin_token()}"},
+        )
+        assert response.status_code == 400
+        assert "not found" in response.json()["detail"].lower()
+
+    @patch("src.api.auth.get_settings")
+    def test_import_operator_forbidden(
+        self,
+        mock_settings: MagicMock,
+        client: TestClient,
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = "test-secret"
+
+        response = client.post(
+            "/admin/vehicles/import",
+            json={"csv_dir": "/some/path"},
+            headers={"Authorization": f"Bearer {_operator_token()}"},
+        )
+        assert response.status_code == 403

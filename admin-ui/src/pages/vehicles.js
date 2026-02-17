@@ -1,5 +1,6 @@
 import { api } from '../api.js';
-import { escapeHtml, formatDate } from '../utils.js';
+import { escapeHtml, formatDate, closeModal } from '../utils.js';
+import { showToast } from '../notifications.js';
 import { registerPageLoader } from '../router.js';
 import { t } from '../i18n.js';
 import * as tw from '../tw.js';
@@ -23,6 +24,7 @@ async function loadStats() {
     el.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
     try {
         const data = await api('/admin/vehicles/stats');
+        if (data.source_path) el.dataset.lastSourcePath = data.source_path;
         el.innerHTML = `
             <div class="${tw.card}"><div class="${tw.statValue}">${data.brand_count ?? 0}</div><div class="${tw.statLabel}">${t('vehicles.brands')}</div></div>
             <div class="${tw.card}"><div class="${tw.statValue}">${data.model_count ?? 0}</div><div class="${tw.statLabel}">${t('vehicles.models')}</div></div>
@@ -318,6 +320,51 @@ function search() {
     else if (currentLevel === 'models') loadModels(currentBrandId, currentBrandName);
 }
 
+// --- Import ---
+
+function openImportModal() {
+    // Pre-fill path from last import's source_path if available
+    const statsEl = document.getElementById('vehiclesStats');
+    const lastPath = statsEl?.dataset?.lastSourcePath;
+    const input = document.getElementById('vehicleImportPath');
+    if (input && lastPath) input.value = lastPath;
+    document.getElementById('vehicleImportModal').classList.add('show');
+}
+
+async function runImport() {
+    const csvDir = document.getElementById('vehicleImportPath').value.trim();
+    if (!csvDir) {
+        showToast(t('vehicles.importPathRequired'), 'error');
+        return;
+    }
+
+    const btn = document.getElementById('vehicleImportBtn');
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = t('common.loading');
+
+    try {
+        const data = await api('/admin/vehicles/import', {
+            method: 'POST',
+            body: JSON.stringify({ csv_dir: csvDir }),
+        });
+        closeModal('vehicleImportModal');
+        showToast(t('vehicles.importSuccess', {
+            brands: data.brand_count ?? 0,
+            models: data.model_count ?? 0,
+            kits: data.kit_count ?? 0,
+            tireSizes: data.tire_size_count ?? 0,
+        }));
+        loadStats();
+        loadBrands();
+    } catch (e) {
+        showToast(t('vehicles.importFailed', { error: escapeHtml(e.message) }), 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = origText;
+    }
+}
+
 // --- Init ---
 
 export function init() {
@@ -340,4 +387,6 @@ window._pages.vehicles = {
     goToModels,
     toggleTireSizes,
     search,
+    openImportModal,
+    runImport,
 };

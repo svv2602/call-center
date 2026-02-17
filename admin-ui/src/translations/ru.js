@@ -418,6 +418,15 @@ export default {
     'vehicles.noData': 'Нет данных',
     'vehicles.failedToLoad': 'Не удалось загрузить: {error}',
     'vehicles.neverImported': 'Импорт не выполнялся',
+    'vehicles.importButton': 'Обновить БД',
+    'vehicles.importTitle': 'Обновление базы автомобилей',
+    'vehicles.importInstructions': 'Разместите 4 CSV-файла в директории на сервере:',
+    'vehicles.importWarning': 'Импорт удалит текущие данные и загрузит новые. Операция занимает ~30-60 секунд.',
+    'vehicles.importPathLabel': 'Путь к директории с CSV',
+    'vehicles.importPathRequired': 'Укажите путь к директории',
+    'vehicles.importBtn': 'Импортировать',
+    'vehicles.importSuccess': 'Импорт завершён: {brands} марок, {models} моделей, {kits} комплектаций, {tireSizes} размеров шин',
+    'vehicles.importFailed': 'Ошибка импорта: {error}',
     'common.search': 'Поиск',
 
     // Audit

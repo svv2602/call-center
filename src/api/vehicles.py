@@ -7,9 +7,11 @@ Read-only endpoints for browsing the vehicle tire database
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -23,6 +25,18 @@ _engine: AsyncEngine | None = None
 
 # Module-level dependencies to satisfy B008 lint rule
 _analyst_dep = Depends(require_role("admin", "analyst"))
+_admin_dep = Depends(require_role("admin"))
+
+EXPECTED_CSV_FILES = [
+    "test_table_car2_brand.csv",
+    "test_table_car2_model.csv",
+    "test_table_car2_kit.csv",
+    "test_table_car2_kit_tyre_size.csv",
+]
+
+
+class VehicleImportRequest(BaseModel):
+    csv_dir: str
 
 
 async def _get_engine() -> AsyncEngine:
@@ -296,3 +310,50 @@ async def list_tire_sizes(
         "kit": dict(kit._mapping),
         "items": tire_sizes,
     }
+
+
+@router.post("/import")
+async def import_vehicle_db(
+    body: VehicleImportRequest,
+    _: dict[str, Any] = _admin_dep,
+) -> dict[str, Any]:
+    """Re-import vehicle DB from CSV files on the server.
+
+    Admin places 4 CSV files in a directory and provides the path.
+    Import truncates existing data and re-inserts from CSVs (~30-60s).
+    """
+    csv_path = Path(body.csv_dir)
+
+    if not csv_path.is_dir():
+        raise HTTPException(status_code=400, detail=f"Directory not found: {body.csv_dir}")
+
+    missing = [f for f in EXPECTED_CSV_FILES if not (csv_path / f).is_file()]
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Missing CSV files: {', '.join(missing)}",
+        )
+
+    from scripts.import_vehicle_db import import_data
+
+    engine = await _get_engine()
+    try:
+        await import_data(engine, csv_path)
+    except Exception as exc:
+        logger.exception("Vehicle DB import failed")
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+    # Read freshly-written metadata
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                SELECT brand_count, model_count, kit_count, tire_size_count,
+                       imported_at, source_path
+                FROM vehicle_db_metadata
+                ORDER BY imported_at DESC
+                LIMIT 1
+            """)
+        )
+        meta = result.first()
+
+    return dict(meta._mapping) if meta else {"status": "ok"}

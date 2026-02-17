@@ -418,6 +418,15 @@ export default {
     'vehicles.noData': 'No data',
     'vehicles.failedToLoad': 'Failed to load: {error}',
     'vehicles.neverImported': 'Never imported',
+    'vehicles.importButton': 'Update DB',
+    'vehicles.importTitle': 'Update Vehicle Database',
+    'vehicles.importInstructions': 'Place 4 CSV files in a directory on the server:',
+    'vehicles.importWarning': 'Import will delete current data and load new. Operation takes ~30-60 seconds.',
+    'vehicles.importPathLabel': 'Path to CSV directory',
+    'vehicles.importPathRequired': 'Please enter the directory path',
+    'vehicles.importBtn': 'Import',
+    'vehicles.importSuccess': 'Import complete: {brands} brands, {models} models, {kits} kits, {tireSizes} tire sizes',
+    'vehicles.importFailed': 'Import failed: {error}',
     'common.search': 'Search',
 
     // Audit
