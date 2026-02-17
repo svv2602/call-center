@@ -339,7 +339,11 @@ def get_safety_rules() -> list[dict]:
 
 
 def get_response_templates() -> list[dict]:
-    """Return response templates from prompts.py constants."""
+    """Return response templates with multiple variants per key.
+
+    Variant 1 for each key uses the hardcoded constants from prompts.py.
+    Additional variants provide natural diversity in agent responses.
+    """
     from src.agent.prompts import (
         ERROR_TEXT,
         FAREWELL_TEXT,
@@ -351,47 +355,241 @@ def get_response_templates() -> list[dict]:
     )
 
     return [
+        # ── greeting ──
         {
             "template_key": "greeting",
+            "variant_number": 1,
             "title": "Приветствие",
             "content": GREETING_TEXT,
             "description": "Приветственное сообщение при начале звонка",
         },
         {
+            "template_key": "greeting",
+            "variant_number": 2,
+            "title": "Привітання (неформальне)",
+            "content": "Привіт! Це автоматична система інтернет-магазину шин. Як можу допомогти?",
+        },
+        {
+            "template_key": "greeting",
+            "variant_number": 3,
+            "title": "Привітання (ввічливе)",
+            "content": (
+                "Доброго дня! Дякуємо, що зателефонували до нашого магазину шин. "
+                "Цей дзвінок обробляє автоматична система. Чим можу бути корисною?"
+            ),
+        },
+        {
+            "template_key": "greeting",
+            "variant_number": 4,
+            "title": "Привітання (швидке)",
+            "content": "Вітаю! Магазин шин, автоматична система. Що вас цікавить?",
+        },
+        {
+            "template_key": "greeting",
+            "variant_number": 5,
+            "title": "Привітання (з акцентом на допомогу)",
+            "content": (
+                "Добрий день! Раді вашому дзвінку. Я автоматична помічниця магазину шин — "
+                "допоможу підібрати шини, перевірити наявність або оформити замовлення."
+            ),
+        },
+        # ── farewell ──
+        {
             "template_key": "farewell",
+            "variant_number": 1,
             "title": "Прощание",
             "content": FAREWELL_TEXT,
             "description": "Прощальное сообщение при завершении звонка",
         },
         {
+            "template_key": "farewell",
+            "variant_number": 2,
+            "title": "Прощання (подяка)",
+            "content": "Дякую, що звернулися до нас! Гарного дня, до побачення!",
+        },
+        {
+            "template_key": "farewell",
+            "variant_number": 3,
+            "title": "Прощання (тепле)",
+            "content": "Була рада допомогти! До побачення, гарного вам дня!",
+        },
+        {
+            "template_key": "farewell",
+            "variant_number": 4,
+            "title": "Прощання (коротке)",
+            "content": "Дякую за дзвінок, до побачення!",
+        },
+        {
+            "template_key": "farewell",
+            "variant_number": 5,
+            "title": "Прощання (з побажанням)",
+            "content": "Дякую за звернення! Бажаю вдалої покупки. До зустрічі!",
+        },
+        # ── silence_prompt ──
+        {
             "template_key": "silence_prompt",
+            "variant_number": 1,
             "title": "Запрос при тишине",
             "content": SILENCE_PROMPT_TEXT,
             "description": "Сообщение при таймауте тишины",
         },
         {
+            "template_key": "silence_prompt",
+            "variant_number": 2,
+            "title": "Тиша (м'яке)",
+            "content": "Алло, ви мене чуєте?",
+        },
+        {
+            "template_key": "silence_prompt",
+            "variant_number": 3,
+            "title": "Тиша (з пропозицією)",
+            "content": "Я вас не чую. Якщо у вас є питання — я на зв'язку.",
+        },
+        {
+            "template_key": "silence_prompt",
+            "variant_number": 4,
+            "title": "Тиша (повторне)",
+            "content": "Схоже, виникли проблеми зі зв'язком. Ви ще тут?",
+        },
+        {
+            "template_key": "silence_prompt",
+            "variant_number": 5,
+            "title": "Тиша (фінальне)",
+            "content": "На жаль, я вас не чую. Якщо потрібна допомога — зателефонуйте ще раз.",
+        },
+        # ── transfer ──
+        {
             "template_key": "transfer",
+            "variant_number": 1,
             "title": "Переключение на оператора",
             "content": TRANSFER_TEXT,
             "description": "Сообщение перед переключением на оператора",
         },
         {
+            "template_key": "transfer",
+            "variant_number": 2,
+            "title": "Переключення (стандартне)",
+            "content": "Зачекайте, будь ласка, з'єдную вас з оператором.",
+        },
+        {
+            "template_key": "transfer",
+            "variant_number": 3,
+            "title": "Переключення (пояснення)",
+            "content": "Для вирішення вашого питання краще поговорити з оператором. Перемикаю, зачекайте.",
+        },
+        {
+            "template_key": "transfer",
+            "variant_number": 4,
+            "title": "Переключення (вибачення)",
+            "content": "Перепрошую, що не змогла допомогти. Зараз переключу на спеціаліста.",
+        },
+        {
+            "template_key": "transfer",
+            "variant_number": 5,
+            "title": "Переключення (швидке)",
+            "content": "Добре, переключаю на оператора. Одну хвилину.",
+        },
+        # ── error ──
+        {
             "template_key": "error",
+            "variant_number": 1,
             "title": "Техническая ошибка",
             "content": ERROR_TEXT,
             "description": "Сообщение при технической ошибке",
         },
         {
+            "template_key": "error",
+            "variant_number": 2,
+            "title": "Помилка (з вибаченням)",
+            "content": "Вибачте, щось пішло не так. Спробую з'єднати з оператором.",
+        },
+        {
+            "template_key": "error",
+            "variant_number": 3,
+            "title": "Помилка (технічна)",
+            "content": "На жаль, виникла технічна проблема. Будь ласка, зачекайте — переключаю на оператора.",
+        },
+        {
+            "template_key": "error",
+            "variant_number": 4,
+            "title": "Помилка (повторення)",
+            "content": "Перепрошую за незручності. Система тимчасово недоступна, з'єдную вас з оператором.",
+        },
+        {
+            "template_key": "error",
+            "variant_number": 5,
+            "title": "Помилка (коротке)",
+            "content": "Вибачте за збій. Переключаю на живого оператора.",
+        },
+        # ── wait ──
+        {
             "template_key": "wait",
+            "variant_number": 1,
             "title": "Ожидание",
             "content": WAIT_TEXT,
             "description": "Сообщение-филлер во время обработки запроса",
         },
         {
+            "template_key": "wait",
+            "variant_number": 2,
+            "title": "Очікування (пошук)",
+            "content": "Одну хвилинку, перевіряю інформацію для вас.",
+        },
+        {
+            "template_key": "wait",
+            "variant_number": 3,
+            "title": "Очікування (коротке)",
+            "content": "Секундочку, шукаю...",
+        },
+        {
+            "template_key": "wait",
+            "variant_number": 4,
+            "title": "Очікування (ввічливе)",
+            "content": "Будь ласка, зачекайте трохи — вже шукаю потрібну інформацію.",
+        },
+        {
+            "template_key": "wait",
+            "variant_number": 5,
+            "title": "Очікування (з поясненням)",
+            "content": "Перевіряю наявність на складах, це займе кілька секунд.",
+        },
+        {
+            "template_key": "wait",
+            "variant_number": 6,
+            "title": "Очікування (підбадьорення)",
+            "content": "Майже готово, ще момент!",
+        },
+        # ── order_cancelled ──
+        {
             "template_key": "order_cancelled",
+            "variant_number": 1,
             "title": "Заказ отменён",
             "content": ORDER_CANCELLED_TEXT,
             "description": "Сообщение при отмене заказа",
+        },
+        {
+            "template_key": "order_cancelled",
+            "variant_number": 2,
+            "title": "Скасування (нейтральне)",
+            "content": "Добре, замовлення скасовано. Можу ще чимось допомогти?",
+        },
+        {
+            "template_key": "order_cancelled",
+            "variant_number": 3,
+            "title": "Скасування (з підтвердженням)",
+            "content": "Замовлення успішно скасовано. Якщо передумаєте — ми завжди раді допомогти.",
+        },
+        {
+            "template_key": "order_cancelled",
+            "variant_number": 4,
+            "title": "Скасування (з пропозицією)",
+            "content": "Замовлення скасовано. Може, допомогти підібрати інший варіант?",
+        },
+        {
+            "template_key": "order_cancelled",
+            "variant_number": 5,
+            "title": "Скасування (з розумінням)",
+            "content": "Зрозуміло, замовлення скасовано. Не хвилюйтесь, якщо потрібно — зателефонуйте ще раз.",
         },
     ]
 
@@ -441,19 +639,21 @@ async def seed(engine: AsyncEngine) -> None:
             )
     logger.info("Safety rules seeded.")
 
-    # 3. Response templates
+    # 3. Response templates (with variants)
     templates = get_response_templates()
-    logger.info("Seeding %d response templates...", len(templates))
+    logger.info("Seeding %d response template variants...", len(templates))
     for tpl in templates:
         async with engine.begin() as conn:
             await conn.execute(
                 text("""
-                    INSERT INTO response_templates (template_key, title, content, description)
-                    VALUES (:template_key, :title, :content, :description)
-                    ON CONFLICT (template_key) DO NOTHING
+                    INSERT INTO response_templates
+                        (template_key, variant_number, title, content, description)
+                    VALUES (:template_key, :variant_number, :title, :content, :description)
+                    ON CONFLICT (template_key, variant_number) DO NOTHING
                 """),
                 {
                     "template_key": tpl["template_key"],
+                    "variant_number": tpl["variant_number"],
                     "title": tpl["title"],
                     "content": tpl["content"],
                     "description": tpl.get("description"),

@@ -98,11 +98,12 @@ class TestGetResponseTemplates:
     def test_returns_list(self) -> None:
         templates = get_response_templates()
         assert isinstance(templates, list)
-        assert len(templates) == 7
+        assert len(templates) == 36  # 7 keys × 5 variants + 1 extra for wait
 
     def test_all_have_required_fields(self) -> None:
         for tpl in get_response_templates():
             assert "template_key" in tpl
+            assert "variant_number" in tpl
             assert "title" in tpl
             assert "content" in tpl
             assert len(tpl["content"]) > 0
@@ -113,11 +114,13 @@ class TestGetResponseTemplates:
         for tpl in get_response_templates():
             assert tpl["template_key"] in TEMPLATE_KEYS, f"Invalid key: {tpl['template_key']}"
 
-    def test_greeting_matches_prompts(self) -> None:
+    def test_greeting_v1_matches_prompts(self) -> None:
         from src.agent.prompts import GREETING_TEXT
 
         templates = get_response_templates()
-        greeting = next(t for t in templates if t["template_key"] == "greeting")
+        greeting = next(
+            t for t in templates if t["template_key"] == "greeting" and t["variant_number"] == 1
+        )
         assert greeting["content"] == GREETING_TEXT
 
     def test_all_keys_covered(self) -> None:
@@ -126,3 +129,21 @@ class TestGetResponseTemplates:
         templates = get_response_templates()
         keys = {t["template_key"] for t in templates}
         assert keys == set(TEMPLATE_KEYS)
+
+    def test_each_key_has_multiple_variants(self) -> None:
+        from collections import Counter
+
+        templates = get_response_templates()
+        counts = Counter(t["template_key"] for t in templates)
+        for key, count in counts.items():
+            assert count >= 4, f"Key '{key}' has only {count} variants, expected >= 4"
+
+    def test_variant_numbers_unique_per_key(self) -> None:
+        from collections import defaultdict
+
+        templates = get_response_templates()
+        by_key: dict[str, list[int]] = defaultdict(list)
+        for tpl in templates:
+            by_key[tpl["template_key"]].append(tpl["variant_number"])
+        for key, variants in by_key.items():
+            assert len(variants) == len(set(variants)), f"Duplicate variant_number in '{key}'"
