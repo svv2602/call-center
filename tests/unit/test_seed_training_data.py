@@ -15,7 +15,7 @@ class TestGetDialogueExamples:
     def test_returns_list(self) -> None:
         examples = get_dialogue_examples()
         assert isinstance(examples, list)
-        assert len(examples) >= 8
+        assert len(examples) >= 28
 
     def test_all_have_required_fields(self) -> None:
         for ex in get_dialogue_examples():
@@ -50,7 +50,21 @@ class TestGetDialogueExamples:
     def test_tools_used_populated(self) -> None:
         examples = get_dialogue_examples()
         with_tools = [ex for ex in examples if ex.get("tools_used")]
-        assert len(with_tools) >= 5
+        assert len(with_tools) >= 20
+
+    def test_all_scenario_types_covered(self) -> None:
+        from src.api.training_dialogues import SCENARIO_TYPES
+
+        examples = get_dialogue_examples()
+        covered = {ex["scenario_type"] for ex in examples}
+        assert covered == set(SCENARIO_TYPES)
+
+    def test_all_phases_covered(self) -> None:
+        from src.api.training_dialogues import PHASES
+
+        examples = get_dialogue_examples()
+        covered = {ex["phase"] for ex in examples}
+        assert covered == set(PHASES)
 
 
 class TestGetSafetyRules:
