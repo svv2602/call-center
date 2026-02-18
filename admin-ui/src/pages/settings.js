@@ -154,6 +154,22 @@ function renderLLMProviders(config, healthMap) {
     container.innerHTML = html;
 }
 
+function _taskTooltip(taskName) {
+    const descKey = `settings.llmTaskDesc_${taskName}`;
+    const recKey = `settings.llmTaskRec_${taskName}`;
+    const desc = t(descKey);
+    const rec = t(recKey);
+    // t() returns the key itself if translation is missing
+    if (desc === descKey) return '';
+    return `<span class="relative group ml-1 cursor-help">
+        <span class="inline-flex items-center justify-center w-4 h-4 rounded-full border border-neutral-400 dark:border-neutral-500 text-neutral-400 dark:text-neutral-500 text-[10px] font-bold leading-none">?</span>
+        <span class="pointer-events-none absolute z-50 left-5 -top-1 w-64 p-2 rounded shadow-lg border text-xs bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-200 border-neutral-200 dark:border-neutral-700 opacity-0 group-hover:opacity-100 transition-opacity">
+            <span class="block font-semibold mb-1">${escapeHtml(desc)}</span>
+            ${rec !== recKey ? `<span class="block text-neutral-500 dark:text-neutral-400">${escapeHtml(rec)}</span>` : ''}
+        </span>
+    </span>`;
+}
+
 function renderLLMTasks(config) {
     const container = document.getElementById('llmTasksContainer');
     const tasks = config.tasks || {};
@@ -211,7 +227,7 @@ function renderLLMTasks(config) {
         fallbackHtml += '</div>';
 
         html += `<tr class="${tw.trHover}">
-            <td class="${tw.td}"><strong>${escapeHtml(taskName)}</strong></td>
+            <td class="${tw.td}"><strong>${escapeHtml(taskName)}</strong>${_taskTooltip(taskName)}</td>
             <td class="${tw.td}"><select class="${tw.selectSm}" onchange="window._pages.settings.updateTaskRoute('${escapeHtml(taskName)}', this.value)">${options}</select></td>
             <td class="${tw.td}">${fallbackHtml}</td>
         </tr>`;
