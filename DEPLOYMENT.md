@@ -265,6 +265,22 @@ CELERY_RESULT_BACKEND=redis://redis:6379/1
 QUALITY_LLM_MODEL=claude-haiku-4-5-20251001
 ```
 
+### Скрапер (автоимпорт статей)
+
+```bash
+SCRAPER_ENABLED=false                         # Включить скрапер
+SCRAPER_AUTO_APPROVE=false                    # false = модерация, true = автопубликация
+SCRAPER_BASE_URL=https://prokoleso.ua         # Базовый URL сайта
+SCRAPER_INFO_PATH=/ua/info/                   # Путь к разделу статей
+SCRAPER_MAX_PAGES=3                           # Кол-во страниц листинга для обхода
+SCRAPER_REQUEST_DELAY=2.0                     # Задержка между запросами (сек)
+SCRAPER_LLM_MODEL=claude-haiku-4-5-20251001   # Модель для обработки статей
+SCRAPER_SCHEDULE_HOUR=6                       # Час запуска (Celery Beat)
+SCRAPER_SCHEDULE_DAY_OF_WEEK=monday           # День запуска
+```
+
+Управление скрапером — через админ-панель: Training → Sources (включение, модерация, ручной запуск).
+
 ### Мониторинг
 
 ```bash
@@ -354,7 +370,7 @@ redis                Up (healthy)        6379/tcp
 store-api            Up (healthy)        0.0.0.0:3002->3000
 prometheus           Up                  0.0.0.0:9090->9090
 grafana              Up                  0.0.0.0:3000->3000
-celery-worker        Up
+celery-worker        Up                  (очереди: celery, scraper)
 celery-beat          Up
 flower               Up                  0.0.0.0:5555->5555
 alertmanager         Up                  0.0.0.0:9093->9093
@@ -707,17 +723,20 @@ cp .env.example .env.local
 # Отредактировать .env.local
 set -a; . ./.env.local; set +a
 
-# Запустить
+# Запустить backend
 python -m src.main
+
+# Запустить Celery worker (в отдельном терминале)
+celery -A src.tasks.celery_app worker -Q celery,scraper -c 1 --loglevel=info
 ```
 
 ### Через start.sh
 
 ```bash
-# Полная разработка (Docker + backend + Vite HMR для фронта)
+# Полная разработка (Docker + backend + Celery + Vite HMR для фронта)
 ./start.sh dev
 
-# Только backend (Docker + Python)
+# Backend + Celery (Docker + Python, без Vite)
 ./start.sh backend
 
 # Только инфраструктура

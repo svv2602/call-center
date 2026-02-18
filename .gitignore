@@ -39,6 +39,7 @@ redisdata/
 
 # Logs
 *.log
+logs/
 
 # Admin UI (Vite)
 admin-ui/node_modules/

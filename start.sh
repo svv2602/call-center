@@ -20,7 +20,7 @@ warn()    { echo -e "  ${YELLOW}!${NC} $1"; }
 
 # --- Helper functions ---
 
-mkdir -p "$PIDS_DIR"
+mkdir -p "$PIDS_DIR" logs
 
 load_env() {
     if [[ -f .env.local ]]; then
@@ -121,6 +121,29 @@ start_vite_dev() {
     success "Vite dev запущен (PID $pid)"
 }
 
+start_celery() {
+    check_venv
+    load_env
+    info "Запуск Celery worker..."
+
+    # Stop previous instance if running
+    if [[ -f "$PIDS_DIR/celery.pid" ]]; then
+        local old_pid
+        old_pid=$(cat "$PIDS_DIR/celery.pid")
+        if kill -0 "$old_pid" 2>/dev/null; then
+            kill "$old_pid" 2>/dev/null || true
+            sleep 2
+        fi
+    fi
+
+    .venv/bin/celery -A src.tasks.celery_app worker \
+        -Q celery,scraper -c 1 -n worker@%h \
+        --loglevel=info > logs/celery-worker.log 2>&1 &
+    local pid=$!
+    echo "$pid" > "$PIDS_DIR/celery.pid"
+    success "Celery worker запущен (PID $pid, лог: logs/celery-worker.log)"
+}
+
 build_admin_ui() {
     check_node_modules
     info "Сборка Admin UI (Vite build)..."
@@ -157,6 +180,7 @@ stop_process() {
 stop_all() {
     info "Остановка всех компонентов..."
     stop_process "vite"
+    stop_process "celery"
     stop_process "backend"
 
     if docker compose -f "$COMPOSE_FILE" ps --quiet 2>/dev/null | grep -q .; then
@@ -174,6 +198,7 @@ cleanup() {
     echo ""
     warn "Получен сигнал завершения, останавливаю процессы..."
     stop_process "vite"
+    stop_process "celery"
     stop_process "backend"
     exit 0
 }
@@ -217,10 +242,10 @@ show_usage() {
     echo "Использование: ./start.sh <команда>"
     echo ""
     echo "Команды:"
-    echo "  dev       Docker + Backend + Vite dev (разработка фронта, HMR)"
-    echo "  backend   Docker + Backend (разработка бэкенда)"
+    echo "  dev       Docker + Backend + Celery + Vite dev (разработка фронта, HMR)"
+    echo "  backend   Docker + Backend + Celery (разработка бэкенда)"
     echo "  docker    Только Docker (инфраструктура)"
-    echo "  build     Docker + Vite build + Backend (продакшн-подобный)"
+    echo "  build     Docker + Vite build + Backend + Celery (продакшн-подобный)"
     echo "  stop      Остановка всех компонентов"
 }
 
@@ -246,6 +271,7 @@ case "$MODE" in
     dev)
         start_docker
         start_backend
+        start_celery
         start_vite_dev
         show_urls dev
         wait_for_children
@@ -253,6 +279,7 @@ case "$MODE" in
     backend)
         start_docker
         start_backend
+        start_celery
         show_urls backend
         wait_for_children
         ;;
@@ -264,6 +291,7 @@ case "$MODE" in
         start_docker
         build_admin_ui
         start_backend
+        start_celery
         show_urls build
         wait_for_children
         ;;
