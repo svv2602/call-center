@@ -253,7 +253,7 @@ class TestGetScraperConfig:
     """Test config loading with new fields."""
 
     @pytest.mark.asyncio
-    async def test_includes_min_date_from_redis(self) -> None:
+    async def test_includes_all_fields_from_redis(self) -> None:
         import json
 
         from src.tasks.scraper_tasks import _get_scraper_config
@@ -264,6 +264,9 @@ class TestGetScraperConfig:
                 "min_date": "2024-01-01",
                 "max_date": "2024-12-31",
                 "dedup_llm_check": True,
+                "schedule_enabled": False,
+                "schedule_hour": 9,
+                "schedule_day_of_week": "friday",
             })
         )
 
@@ -275,6 +278,9 @@ class TestGetScraperConfig:
         mock_settings.scraper.request_delay = 2.0
         mock_settings.scraper.auto_approve = False
         mock_settings.scraper.llm_model = "claude-haiku-4-5-20251001"
+        mock_settings.scraper.schedule_enabled = True
+        mock_settings.scraper.schedule_hour = 6
+        mock_settings.scraper.schedule_day_of_week = "monday"
         mock_settings.scraper.min_date = ""
         mock_settings.scraper.max_date = ""
         mock_settings.scraper.dedup_llm_check = False
@@ -284,6 +290,9 @@ class TestGetScraperConfig:
         assert config["min_date"] == "2024-01-01"
         assert config["max_date"] == "2024-12-31"
         assert config["dedup_llm_check"] is True
+        assert config["schedule_enabled"] is False
+        assert config["schedule_hour"] == 9
+        assert config["schedule_day_of_week"] == "friday"
 
     @pytest.mark.asyncio
     async def test_falls_back_to_env_defaults(self) -> None:
@@ -300,6 +309,9 @@ class TestGetScraperConfig:
         mock_settings.scraper.request_delay = 2.0
         mock_settings.scraper.auto_approve = False
         mock_settings.scraper.llm_model = "claude-haiku-4-5-20251001"
+        mock_settings.scraper.schedule_enabled = True
+        mock_settings.scraper.schedule_hour = 6
+        mock_settings.scraper.schedule_day_of_week = "monday"
         mock_settings.scraper.min_date = ""
         mock_settings.scraper.max_date = ""
         mock_settings.scraper.dedup_llm_check = False
@@ -309,3 +321,6 @@ class TestGetScraperConfig:
         assert config["min_date"] == ""
         assert config["max_date"] == ""
         assert config["dedup_llm_check"] is False
+        assert config["schedule_enabled"] is True
+        assert config["schedule_hour"] == 6
+        assert config["schedule_day_of_week"] == "monday"

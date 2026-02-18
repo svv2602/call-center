@@ -84,7 +84,8 @@ app.conf.beat_schedule = {
     },
     "scrape-prokoleso-articles": {
         "task": "src.tasks.scraper_tasks.run_scraper",
-        "schedule": crontab(hour=6, minute=0, day_of_week="monday"),  # Monday at 06:00 Kyiv time
+        "schedule": crontab(minute=0),  # Every hour; actual day/time filtered inside the task via Redis config
+        "kwargs": {"triggered_by": "beat"},
     },
 }
 

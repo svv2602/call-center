@@ -24,18 +24,24 @@ logger = logging.getLogger(__name__)
     bind=True,
     max_retries=3,
 )  # type: ignore[untyped-decorator]
-def run_scraper(self: Any) -> dict[str, Any]:
+def run_scraper(self: Any, triggered_by: str = "manual") -> dict[str, Any]:
     """Run the article scraper pipeline.
+
+    Args:
+        triggered_by: "beat" for scheduled runs, "manual" for admin-triggered.
+            Beat runs check schedule_enabled/hour/day_of_week before proceeding.
 
     Returns:
         Stats dict with processed, skipped, errors counts.
     """
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(_run_scraper_async(self))
+    return asyncio.get_event_loop().run_until_complete(
+        _run_scraper_async(self, triggered_by=triggered_by)
+    )
 
 
-async def _run_scraper_async(task: Any) -> dict[str, Any]:
+async def _run_scraper_async(task: Any, *, triggered_by: str = "manual") -> dict[str, Any]:
     """Async implementation of the scraper pipeline."""
     import json
 
@@ -57,6 +63,26 @@ async def _run_scraper_async(task: Any) -> dict[str, Any]:
     if not config["enabled"]:
         logger.info("Scraper is disabled, skipping run")
         return {"status": "disabled"}
+
+    # For beat-triggered runs, check schedule config
+    if triggered_by == "beat":
+        if not config.get("schedule_enabled", True):
+            return {"status": "schedule_disabled"}
+        now = datetime.datetime.now(tz=datetime.UTC)
+        # Convert to Kyiv time for schedule check
+        try:
+            import zoneinfo
+
+            kyiv = zoneinfo.ZoneInfo("Europe/Kyiv")
+            now = now.astimezone(kyiv)
+        except Exception:
+            pass  # fallback to UTC
+        current_hour = now.hour
+        current_day = now.strftime("%A").lower()
+        sched_hour = config.get("schedule_hour", 6)
+        sched_day = config.get("schedule_day_of_week", "monday").lower()
+        if current_hour != sched_hour or current_day != sched_day:
+            return {"status": "not_scheduled_time"}
 
     stats = {"processed": 0, "skipped": 0, "errors": 0}
 
@@ -357,6 +383,9 @@ async def _get_scraper_config(redis: Any, settings: Any) -> dict[str, Any]:
         "request_delay": redis_config.get("request_delay", settings.scraper.request_delay),
         "auto_approve": redis_config.get("auto_approve", settings.scraper.auto_approve),
         "llm_model": redis_config.get("llm_model", settings.scraper.llm_model),
+        "schedule_enabled": redis_config.get("schedule_enabled", settings.scraper.schedule_enabled),
+        "schedule_hour": redis_config.get("schedule_hour", settings.scraper.schedule_hour),
+        "schedule_day_of_week": redis_config.get("schedule_day_of_week", settings.scraper.schedule_day_of_week),
         "min_date": redis_config.get("min_date", settings.scraper.min_date),
         "max_date": redis_config.get("max_date", settings.scraper.max_date),
         "dedup_llm_check": redis_config.get("dedup_llm_check", settings.scraper.dedup_llm_check),

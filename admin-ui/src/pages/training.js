@@ -724,8 +724,12 @@ async function loadSources() {
         const configData = await api('/admin/scraper/config');
         const cfg = configData.config || {};
 
+        const days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+        const dayOptions = days.map(d => `<option value="${d}" ${(cfg.schedule_day_of_week || 'monday') === d ? 'selected' : ''}>${t('sources.scheduleDays.' + d)}</option>`).join('');
+        const hourOptions = Array.from({length: 24}, (_, i) => `<option value="${i}" ${(cfg.schedule_hour ?? 6) === i ? 'selected' : ''}>${String(i).padStart(2, '0')}:00</option>`).join('');
+
         configCard.innerHTML = `
-            <div class="flex flex-wrap items-center gap-4">
+            <div class="flex flex-wrap items-center gap-4 mb-2">
                 <label class="flex items-center gap-2 text-sm cursor-pointer">
                     <input type="checkbox" id="scraperEnabled" ${cfg.enabled ? 'checked' : ''} onchange="window._pages.training.toggleScraperEnabled()">
                     <span>${t('sources.enabled')}</span>
@@ -738,6 +742,23 @@ async function loadSources() {
                     <input type="checkbox" id="scraperDedupLlm" ${cfg.dedup_llm_check ? 'checked' : ''} onchange="window._pages.training.toggleDedupLlm()">
                     <span title="${t('sources.dedupLlmCheckHint')}">${t('sources.dedupLlmCheck')}</span>
                 </label>
+                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.runScraperNow()">${t('sources.runNow')}</button>
+            </div>
+            <div class="flex flex-wrap items-center gap-4 mb-2">
+                <label class="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" id="scraperScheduleEnabled" ${cfg.schedule_enabled !== false ? 'checked' : ''} onchange="window._pages.training.updateSchedule()">
+                    <span>${t('sources.scheduleEnabled')}</span>
+                </label>
+                <label class="flex items-center gap-2 text-sm">
+                    <span>${t('sources.scheduleDay')}</span>
+                    <select id="scraperScheduleDay" class="border rounded px-2 py-1 text-sm dark:bg-gray-700 dark:border-gray-600" onchange="window._pages.training.updateSchedule()">${dayOptions}</select>
+                </label>
+                <label class="flex items-center gap-2 text-sm">
+                    <span>${t('sources.scheduleHour')}</span>
+                    <select id="scraperScheduleHour" class="border rounded px-2 py-1 text-sm dark:bg-gray-700 dark:border-gray-600" onchange="window._pages.training.updateSchedule()">${hourOptions}</select>
+                </label>
+            </div>
+            <div class="flex flex-wrap items-center gap-4">
                 <label class="flex items-center gap-2 text-sm">
                     <span>${t('sources.minDate')}</span>
                     <input type="date" id="scraperMinDate" value="${escapeHtml(cfg.min_date || '')}" class="border rounded px-2 py-1 text-sm dark:bg-gray-700 dark:border-gray-600" onchange="window._pages.training.updateMinDate()">
@@ -748,8 +769,6 @@ async function loadSources() {
                     <input type="date" id="scraperMaxDate" value="${escapeHtml(cfg.max_date || '')}" class="border rounded px-2 py-1 text-sm dark:bg-gray-700 dark:border-gray-600" onchange="window._pages.training.updateMaxDate()">
                     <span class="${tw.mutedText} text-xs" title="${t('sources.maxDateHint')}">?</span>
                 </label>
-                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.runScraperNow()">${t('sources.runNow')}</button>
-                <span class="${tw.mutedText} text-xs">${t('sources.schedule')}: ${cfg.schedule_day_of_week} ${cfg.schedule_hour}:00</span>
             </div>`;
     } catch (e) {
         configCard.innerHTML = `<div class="${tw.mutedText}">${t('sources.configLoadFailed', {error: escapeHtml(e.message)})}</div>`;
@@ -808,6 +827,16 @@ async function toggleAutoApprove() {
     const auto_approve = document.getElementById('scraperAutoApprove').checked;
     try {
         await api('/admin/scraper/config', { method: 'PATCH', body: JSON.stringify({ auto_approve }) });
+        showToast(t('sources.configUpdated'));
+    } catch (e) { showToast(t('sources.configUpdateFailed', {error: e.message}), 'error'); }
+}
+
+async function updateSchedule() {
+    const schedule_enabled = document.getElementById('scraperScheduleEnabled').checked;
+    const schedule_day_of_week = document.getElementById('scraperScheduleDay').value;
+    const schedule_hour = parseInt(document.getElementById('scraperScheduleHour').value, 10);
+    try {
+        await api('/admin/scraper/config', { method: 'PATCH', body: JSON.stringify({ schedule_enabled, schedule_day_of_week, schedule_hour }) });
         showToast(t('sources.configUpdated'));
     } catch (e) { showToast(t('sources.configUpdateFailed', {error: e.message}), 'error'); }
 }
@@ -896,6 +925,6 @@ window._pages.training = {
     // Tools
     loadTools, editToolOverride, saveToolOverride, resetToolOverride,
     // Sources (scraper)
-    loadSources, toggleScraperEnabled, toggleAutoApprove, toggleDedupLlm, updateMinDate, updateMaxDate,
+    loadSources, toggleScraperEnabled, toggleAutoApprove, toggleDedupLlm, updateSchedule, updateMinDate, updateMaxDate,
     runScraperNow, approveSource, rejectSource, viewSourceArticle,
 };

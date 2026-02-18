@@ -186,6 +186,7 @@ class ScraperSettings(BaseSettings):
     request_delay: float = 2.0
     auto_approve: bool = False
     llm_model: str = "claude-haiku-4-5-20251001"
+    schedule_enabled: bool = True
     schedule_hour: int = 6
     schedule_day_of_week: str = "monday"
     min_date: str = ""  # "YYYY-MM-DD" or empty; empty in scheduled mode = last 14 days

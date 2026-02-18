@@ -54,6 +54,9 @@ class ScraperConfigUpdate(BaseModel):
     min_date: str | None = None
     max_date: str | None = None
     dedup_llm_check: bool | None = None
+    schedule_enabled: bool | None = None
+    schedule_hour: int | None = None
+    schedule_day_of_week: str | None = None
 
 
 @router.get("/config")
@@ -74,8 +77,9 @@ async def get_scraper_config(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
             "max_pages": redis_config.get("max_pages", settings.scraper.max_pages),
             "request_delay": redis_config.get("request_delay", settings.scraper.request_delay),
             "llm_model": redis_config.get("llm_model", settings.scraper.llm_model),
-            "schedule_hour": settings.scraper.schedule_hour,
-            "schedule_day_of_week": settings.scraper.schedule_day_of_week,
+            "schedule_enabled": redis_config.get("schedule_enabled", settings.scraper.schedule_enabled),
+            "schedule_hour": redis_config.get("schedule_hour", settings.scraper.schedule_hour),
+            "schedule_day_of_week": redis_config.get("schedule_day_of_week", settings.scraper.schedule_day_of_week),
             "min_date": redis_config.get("min_date", settings.scraper.min_date),
             "max_date": redis_config.get("max_date", settings.scraper.max_date),
             "dedup_llm_check": redis_config.get("dedup_llm_check", settings.scraper.dedup_llm_check),
@@ -107,6 +111,12 @@ async def update_scraper_config(
         config["max_date"] = request.max_date
     if request.dedup_llm_check is not None:
         config["dedup_llm_check"] = request.dedup_llm_check
+    if request.schedule_enabled is not None:
+        config["schedule_enabled"] = request.schedule_enabled
+    if request.schedule_hour is not None:
+        config["schedule_hour"] = request.schedule_hour
+    if request.schedule_day_of_week is not None:
+        config["schedule_day_of_week"] = request.schedule_day_of_week
 
     await redis.set("scraper:config", json.dumps(config))
     logger.info("Scraper config updated: %s", config)
