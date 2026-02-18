@@ -261,6 +261,34 @@ stt_provider_accuracy = Histogram(
 )
 
 
+# --- LLM multi-provider routing metrics ---
+
+llm_requests_total = Counter(
+    "callcenter_llm_requests_total",
+    "Total LLM requests by provider and task",
+    ["provider", "task"],
+)
+
+llm_errors_total = Counter(
+    "callcenter_llm_errors_total",
+    "Total LLM errors by provider and task",
+    ["provider", "task"],
+)
+
+llm_provider_latency_ms = Histogram(
+    "callcenter_llm_provider_latency_ms",
+    "LLM response latency per provider in milliseconds",
+    ["provider"],
+    buckets=[100, 300, 500, 800, 1000, 1500, 2000, 3000, 5000],
+)
+
+llm_fallbacks_total = Counter(
+    "callcenter_llm_fallbacks_total",
+    "LLM fallback activations (primary failed, using alternative)",
+    ["from_provider", "to_provider", "task"],
+)
+
+
 def get_metrics() -> bytes:
     """Generate Prometheus metrics output."""
     return generate_latest()

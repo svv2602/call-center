@@ -19,6 +19,21 @@ from src.tasks.celery_app import app
 
 logger = logging.getLogger(__name__)
 
+# Shared LLM router reference (set from main.py when FF_LLM_ROUTING_ENABLED=true)
+_llm_router_ref: object | None = None
+
+
+def set_llm_router(router: object | None) -> None:
+    """Set the shared LLM router for prompt optimization tasks."""
+    global _llm_router_ref
+    _llm_router_ref = router
+
+
+def _get_llm_router() -> object | None:
+    """Get the shared LLM router (or None if not configured)."""
+    return _llm_router_ref
+
+
 ANALYSIS_PROMPT = """\
 You are a prompt engineer analyzing failed AI call center dialogues.
 The call center sells tires in Ukraine. The bot speaks Ukrainian.
@@ -119,18 +134,28 @@ async def _analyze_failed_calls_async(days: int, max_calls: int) -> dict[str, An
 
         combined_text = "\n\n".join(transcriptions)
 
-        # Analyze with Claude
-        client = anthropic.Anthropic(api_key=settings.anthropic.api_key)
-        response = client.messages.create(
-            model=settings.quality.llm_model,
-            max_tokens=1024,
-            messages=[
-                {"role": "user", "content": ANALYSIS_PROMPT + combined_text},
-            ],
-        )
+        # Analyze with LLM (router or direct Anthropic)
+        messages = [{"role": "user", "content": ANALYSIS_PROMPT + combined_text}]
 
-        content_block = response.content[0]
-        response_text = content_block.text.strip() if hasattr(content_block, "text") else ""
+        llm_router = _get_llm_router()
+        if llm_router is not None:
+            from src.llm.models import LLMTask
+
+            llm_response = await llm_router.complete(  # type: ignore[union-attr]
+                LLMTask.PROMPT_OPTIMIZER,
+                messages,
+                max_tokens=1024,
+            )
+            response_text = llm_response.text.strip()
+        else:
+            client = anthropic.Anthropic(api_key=settings.anthropic.api_key)
+            response = client.messages.create(
+                model=settings.quality.llm_model,
+                max_tokens=1024,
+                messages=messages,
+            )
+            content_block = response.content[0]
+            response_text = content_block.text.strip() if hasattr(content_block, "text") else ""
         if response_text.startswith("```"):
             response_text = response_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
 

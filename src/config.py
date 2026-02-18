@@ -166,6 +166,18 @@ class BackupSettings(BaseSettings):
     model_config = {"env_prefix": "BACKUP_"}
 
 
+class DeepSeekSettings(BaseSettings):
+    api_key: str = ""
+
+    model_config = {"env_prefix": "DEEPSEEK_"}
+
+
+class GeminiSettings(BaseSettings):
+    api_key: str = ""
+
+    model_config = {"env_prefix": "GEMINI_"}
+
+
 class ScraperSettings(BaseSettings):
     enabled: bool = False
     base_url: str = "https://prokoleso.ua"
@@ -224,6 +236,8 @@ class Settings(BaseSettings):
     feature_flags: FeatureFlagSettings = FeatureFlagSettings()
     smtp: SMTPSettings = SMTPSettings()
     backup: BackupSettings = BackupSettings()
+    deepseek: DeepSeekSettings = DeepSeekSettings()
+    gemini: GeminiSettings = GeminiSettings()
     scraper: ScraperSettings = ScraperSettings()
     prometheus_port: int = 8080
 

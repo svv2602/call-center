@@ -25,6 +25,7 @@ from src.api.analytics import router as analytics_router
 from src.api.auth import router as auth_router
 from src.api.export import router as export_router
 from src.api.knowledge import router as knowledge_router
+from src.api.llm_config import router as llm_config_router
 from src.api.middleware.audit import AuditMiddleware
 from src.api.middleware.rate_limit import RateLimitMiddleware
 from src.api.middleware.security_headers import SecurityHeadersMiddleware
@@ -65,6 +66,7 @@ app.include_router(analytics_router)
 app.include_router(auth_router)
 app.include_router(export_router)
 app.include_router(knowledge_router)
+app.include_router(llm_config_router)
 app.include_router(operators_router)
 app.include_router(prompts_router)
 app.include_router(scraper_router)
@@ -115,6 +117,7 @@ _onec_client: OneCClient | None = None
 _sync_service: CatalogSyncService | None = None
 _sync_task: asyncio.Task | None = None  # type: ignore[type-arg]
 _db_engine: Any = None
+_llm_router: Any = None  # LLMRouter when FF_LLM_ROUTING_ENABLED=true
 
 
 @app.get("/health")
@@ -262,6 +265,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             tool_router=router,
             pii_vault=vault,
             tools=tools,
+            llm_router=_llm_router,
         )
 
         # Run the pipeline (greeting → listen → STT → LLM → TTS loop)
@@ -358,7 +362,7 @@ async def _periodic_sync(sync_service: CatalogSyncService, interval_minutes: int
 async def main() -> None:
     """Main application entry point."""
     global _audio_server, _redis, _store_client, _tts_engine
-    global _onec_client, _sync_service, _sync_task, _db_engine
+    global _onec_client, _sync_service, _sync_task, _db_engine, _llm_router
 
     settings = get_settings()
 
@@ -385,6 +389,27 @@ async def main() -> None:
         logger.warning("Redis unavailable — sessions will be in-memory only")
         await _redis.aclose()
         _redis = None
+
+    # Initialize LLM Router (when feature flag is enabled)
+    if settings.feature_flags.llm_routing_enabled:
+        try:
+            from src.llm.router import LLMRouter
+
+            _llm_router = LLMRouter()
+            await _llm_router.initialize(redis=_redis)
+            logger.info("LLM router initialized (multi-provider routing enabled)")
+
+            # Share router with Celery tasks
+            from src.tasks.prompt_optimizer import set_llm_router as set_optimizer_router
+            from src.tasks.quality_evaluator import set_llm_router as set_evaluator_router
+
+            set_evaluator_router(_llm_router)
+            set_optimizer_router(_llm_router)
+        except Exception:
+            logger.warning("LLM router init failed — falling back to direct Anthropic", exc_info=True)
+            _llm_router = None
+    else:
+        logger.info("LLM routing disabled (FF_LLM_ROUTING_ENABLED=false)")
 
     # Start AudioSocket server
     _audio_server = AudioSocketServer(
@@ -494,6 +519,10 @@ async def main() -> None:
         with contextlib.suppress(asyncio.CancelledError):
             await _sync_task
         logger.info("Periodic sync stopped")
+
+    if _llm_router is not None:
+        await _llm_router.close()
+        logger.info("LLM router closed")
 
     if _store_client is not None:
         await _store_client.close()

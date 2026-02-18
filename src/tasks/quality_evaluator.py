@@ -19,6 +19,21 @@ from src.tasks.celery_app import app
 
 logger = logging.getLogger(__name__)
 
+# Shared LLM router reference (set from main.py when FF_LLM_ROUTING_ENABLED=true)
+_llm_router_ref: object | None = None
+
+
+def set_llm_router(router: object | None) -> None:
+    """Set the shared LLM router for quality evaluation tasks."""
+    global _llm_router_ref
+    _llm_router_ref = router
+
+
+def _get_llm_router() -> object | None:
+    """Get the shared LLM router (or None if not configured)."""
+    return _llm_router_ref
+
+
 QUALITY_CRITERIA = [
     "bot_greeted_properly",
     "bot_understood_intent",
@@ -165,18 +180,28 @@ async def _evaluate_call_quality_async(task: Any, call_id: str) -> dict[str, Any
             if context_parts:
                 transcription = "\n".join(context_parts) + "\n\n" + transcription
 
-        # Call Claude Haiku for evaluation
-        client = anthropic.Anthropic(api_key=settings.anthropic.api_key)
-        response = client.messages.create(
-            model=settings.quality.llm_model,
-            max_tokens=512,
-            messages=[
-                {"role": "user", "content": EVALUATION_PROMPT + transcription},
-            ],
-        )
+        # Call LLM for evaluation (router or direct Anthropic)
+        messages = [{"role": "user", "content": EVALUATION_PROMPT + transcription}]
 
-        content_block = response.content[0]
-        response_text = content_block.text.strip() if hasattr(content_block, "text") else ""
+        llm_router = _get_llm_router()
+        if llm_router is not None:
+            from src.llm.models import LLMTask
+
+            llm_response = await llm_router.complete(
+                LLMTask.QUALITY_SCORING,
+                messages,
+                max_tokens=512,
+            )
+            response_text = llm_response.text.strip()
+        else:
+            client = anthropic.Anthropic(api_key=settings.anthropic.api_key)
+            response = client.messages.create(
+                model=settings.quality.llm_model,
+                max_tokens=512,
+                messages=messages,
+            )
+            content_block = response.content[0]
+            response_text = content_block.text.strip() if hasattr(content_block, "text") else ""
 
         # Parse JSON response
         # Handle markdown code blocks if present

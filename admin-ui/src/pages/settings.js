@@ -72,9 +72,145 @@ async function reloadConfig() {
     } catch (e) { showToast(t('settings.reloadFailed', {error: e.message}), 'error'); }
 }
 
+// --- LLM Routing ---
+
+let _llmConfig = null;
+
+async function loadLLMConfig() {
+    const provContainer = document.getElementById('llmProvidersContainer');
+    const taskContainer = document.getElementById('llmTasksContainer');
+    provContainer.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+    taskContainer.innerHTML = '';
+    try {
+        const [configData, providersData] = await Promise.all([
+            api('/admin/llm/config'),
+            api('/admin/llm/providers'),
+        ]);
+        _llmConfig = configData.config;
+        const healthMap = {};
+        for (const p of providersData.providers) {
+            healthMap[p.key] = p;
+        }
+        renderLLMProviders(_llmConfig, healthMap);
+        renderLLMTasks(_llmConfig);
+    } catch (e) {
+        provContainer.innerHTML = `<div class="${tw.emptyState}">${t('settings.llmLoadFailed', {error: escapeHtml(e.message)})}</div>`;
+    }
+}
+
+function renderLLMProviders(config, healthMap) {
+    const container = document.getElementById('llmProvidersContainer');
+    const providers = config.providers || {};
+    let html = `<div class="overflow-x-auto"><table class="${tw.table}">
+        <thead><tr>
+            <th class="${tw.th}">${t('settings.llmProvider')}</th>
+            <th class="${tw.th}">${t('settings.llmType')}</th>
+            <th class="${tw.th}">${t('settings.llmModel')}</th>
+            <th class="${tw.th}">${t('settings.llmApiKey')}</th>
+            <th class="${tw.th}">${t('settings.llmEnabled')}</th>
+            <th class="${tw.th}">${t('settings.llmHealth')}</th>
+            <th class="${tw.th}">${t('settings.llmActions')}</th>
+        </tr></thead><tbody>`;
+
+    for (const [key, cfg] of Object.entries(providers)) {
+        const health = healthMap[key] || {};
+        const enabledChecked = cfg.enabled ? 'checked' : '';
+        const healthBadge = health.healthy === true
+            ? `<span class="${tw.badgeGreen}">OK</span>`
+            : health.healthy === false
+                ? `<span class="${tw.badgeRed}">DOWN</span>`
+                : `<span class="${tw.badge}">—</span>`;
+        const keyBadge = cfg.api_key_set
+            ? `<span class="${tw.badgeGreen}">set</span>`
+            : `<span class="${tw.badgeYellow}">missing</span>`;
+
+        html += `<tr class="${tw.trHover}">
+            <td class="${tw.td}"><strong>${escapeHtml(key)}</strong></td>
+            <td class="${tw.td}">${escapeHtml(cfg.type || '')}</td>
+            <td class="${tw.td}"><code class="text-xs">${escapeHtml(cfg.model || '')}</code></td>
+            <td class="${tw.td}">${keyBadge}</td>
+            <td class="${tw.td}"><input type="checkbox" ${enabledChecked} onchange="window._pages.settings.toggleLLMProvider('${escapeHtml(key)}', this.checked)"></td>
+            <td class="${tw.td}">${healthBadge}</td>
+            <td class="${tw.td}"><button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.settings.testLLMProvider('${escapeHtml(key)}')">${t('settings.llmTest')}</button></td>
+        </tr>`;
+    }
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+function renderLLMTasks(config) {
+    const container = document.getElementById('llmTasksContainer');
+    const tasks = config.tasks || {};
+    const providerKeys = Object.keys(config.providers || {});
+
+    let html = `<h4 class="${tw.sectionTitle}">${t('settings.llmTaskRouting')}</h4>`;
+    html += `<div class="overflow-x-auto"><table class="${tw.table}">
+        <thead><tr>
+            <th class="${tw.th}">${t('settings.llmTask')}</th>
+            <th class="${tw.th}">${t('settings.llmPrimary')}</th>
+            <th class="${tw.th}">${t('settings.llmFallbacks')}</th>
+        </tr></thead><tbody>`;
+
+    for (const [taskName, taskCfg] of Object.entries(tasks)) {
+        const options = providerKeys.map(k =>
+            `<option value="${escapeHtml(k)}" ${k === taskCfg.primary ? 'selected' : ''}>${escapeHtml(k)}</option>`
+        ).join('');
+        const fallbackStr = (taskCfg.fallbacks || []).join(', ') || '—';
+        html += `<tr class="${tw.trHover}">
+            <td class="${tw.td}"><strong>${escapeHtml(taskName)}</strong></td>
+            <td class="${tw.td}"><select class="${tw.selectSm}" onchange="window._pages.settings.updateTaskRoute('${escapeHtml(taskName)}', this.value)">${options}</select></td>
+            <td class="${tw.td}"><span class="text-xs text-neutral-500">${escapeHtml(fallbackStr)}</span></td>
+        </tr>`;
+    }
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+async function toggleLLMProvider(key, enabled) {
+    try {
+        await api('/admin/llm/config', {
+            method: 'PATCH',
+            body: JSON.stringify({ providers: { [key]: { enabled } } }),
+        });
+        showToast(t('settings.llmProviderToggled', {key, state: enabled ? 'ON' : 'OFF'}), 'success');
+    } catch (e) {
+        showToast(t('settings.llmConfigFailed', {error: e.message}), 'error');
+        loadLLMConfig();
+    }
+}
+
+async function updateTaskRoute(taskName, primary) {
+    try {
+        await api('/admin/llm/config', {
+            method: 'PATCH',
+            body: JSON.stringify({ tasks: { [taskName]: { primary } } }),
+        });
+        showToast(t('settings.llmRouteUpdated', {task: taskName, provider: primary}), 'success');
+    } catch (e) {
+        showToast(t('settings.llmConfigFailed', {error: e.message}), 'error');
+    }
+}
+
+async function testLLMProvider(key) {
+    showToast(t('settings.llmTesting', {key}), 'info');
+    try {
+        const result = await api(`/admin/llm/providers/${encodeURIComponent(key)}/test`, { method: 'POST' });
+        if (result.success) {
+            showToast(t('settings.llmTestSuccess', {key, latency: result.latency_ms}), 'success');
+        } else {
+            showToast(t('settings.llmTestFailed', {key, error: result.error || 'Unknown'}), 'error');
+        }
+    } catch (e) {
+        showToast(t('settings.llmTestFailed', {key, error: e.message}), 'error');
+    }
+}
+
 export function init() {
     registerPageLoader('settings', () => loadSettings());
 }
 
 window._pages = window._pages || {};
-window._pages.settings = { loadSettings, loadSystemStatus, reloadConfig };
+window._pages.settings = {
+    loadSettings, loadSystemStatus, reloadConfig,
+    loadLLMConfig, toggleLLMProvider, updateTaskRoute, testLLMProvider,
+};

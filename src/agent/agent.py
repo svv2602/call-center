@@ -16,6 +16,7 @@ from src.agent.prompts import PROMPT_VERSION, SYSTEM_PROMPT
 from src.agent.tools import ALL_TOOLS
 
 if TYPE_CHECKING:
+    from src.llm.router import LLMRouter
     from src.logging.pii_vault import PIIVault
 
 logger = logging.getLogger(__name__)
@@ -75,12 +76,14 @@ class LLMAgent:
         tool_router: ToolRouter | None = None,
         pii_vault: PIIVault | None = None,
         tools: list[dict[str, Any]] | None = None,
+        llm_router: LLMRouter | None = None,
     ) -> None:
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._model = model
         self._tool_router = tool_router or ToolRouter()
         self._pii_vault = pii_vault
         self._tools = tools or list(ALL_TOOLS)
+        self._llm_router = llm_router
 
     @property
     def tool_router(self) -> ToolRouter:
@@ -130,51 +133,91 @@ class LLMAgent:
         while tool_call_count <= MAX_TOOL_CALLS_PER_TURN:
             start = time.monotonic()
 
-            try:
-                response = await self._client.messages.create(
-                    model=self._model,
-                    max_tokens=300,
-                    system=system,
-                    tools=self._tools,  # type: ignore[arg-type]
-                    messages=conversation_history,  # type: ignore[arg-type]
-                )
-            except anthropic.APIStatusError as exc:
-                logger.error("Claude API error: %s", exc)
-                return "", conversation_history
-
-            latency_ms = int((time.monotonic() - start) * 1000)
-            logger.info(
-                "Claude response: stop=%s, latency=%dms, tokens_in=%d, tokens_out=%d",
-                response.stop_reason,
-                latency_ms,
-                response.usage.input_tokens,
-                response.usage.output_tokens,
-            )
-
             # Process response content blocks
             assistant_content: list[dict[str, Any]] = []
             tool_uses: list[dict[str, Any]] = []
 
-            for block in response.content:
-                if block.type == "text":
-                    response_text += block.text
-                    assistant_content.append({"type": "text", "text": block.text})
-                elif block.type == "tool_use":
-                    tool_uses.append(
-                        {
-                            "id": block.id,
-                            "name": block.name,
-                            "input": block.input,
-                        }
+            if self._llm_router is not None:
+                # Router path: multi-provider with fallback
+                try:
+                    from src.llm.format_converter import llm_response_to_anthropic_blocks
+                    from src.llm.models import LLMTask
+
+                    llm_response = await self._llm_router.complete(
+                        LLMTask.AGENT,
+                        conversation_history,
+                        system=system,
+                        tools=self._tools,
+                        max_tokens=300,
                     )
-                    assistant_content.append(
-                        {
-                            "type": "tool_use",
-                            "id": block.id,
-                            "name": block.name,
-                            "input": block.input,
-                        }
+
+                    latency_ms = int((time.monotonic() - start) * 1000)
+                    logger.info(
+                        "LLM response: provider=%s, stop=%s, latency=%dms, tokens_in=%d, tokens_out=%d",
+                        llm_response.provider,
+                        llm_response.stop_reason,
+                        latency_ms,
+                        llm_response.usage.input_tokens,
+                        llm_response.usage.output_tokens,
                     )
+
+                    if llm_response.text:
+                        response_text += llm_response.text
+
+                    # Convert LLMResponse to Anthropic content blocks for history
+                    assistant_content = llm_response_to_anthropic_blocks(llm_response)
+                    for tc in llm_response.tool_calls:
+                        tool_uses.append({
+                            "id": tc.id,
+                            "name": tc.name,
+                            "input": tc.arguments,
+                        })
+                except Exception as exc:
+                    logger.error("LLM router error: %s", exc)
+                    return "", conversation_history
+            else:
+                # Legacy path: direct Anthropic SDK
+                try:
+                    response = await self._client.messages.create(
+                        model=self._model,
+                        max_tokens=300,
+                        system=system,
+                        tools=self._tools,  # type: ignore[arg-type]
+                        messages=conversation_history,  # type: ignore[arg-type]
+                    )
+                except anthropic.APIStatusError as exc:
+                    logger.error("Claude API error: %s", exc)
+                    return "", conversation_history
+
+                latency_ms = int((time.monotonic() - start) * 1000)
+                logger.info(
+                    "Claude response: stop=%s, latency=%dms, tokens_in=%d, tokens_out=%d",
+                    response.stop_reason,
+                    latency_ms,
+                    response.usage.input_tokens,
+                    response.usage.output_tokens,
+                )
+
+                for block in response.content:
+                    if block.type == "text":
+                        response_text += block.text
+                        assistant_content.append({"type": "text", "text": block.text})
+                    elif block.type == "tool_use":
+                        tool_uses.append(
+                            {
+                                "id": block.id,
+                                "name": block.name,
+                                "input": block.input,
+                            }
+                        )
+                        assistant_content.append(
+                            {
+                                "type": "tool_use",
+                                "id": block.id,
+                                "name": block.name,
+                                "input": block.input,
+                            }
+                        )
 
             # Add assistant response to history
             conversation_history.append({"role": "assistant", "content": assistant_content})

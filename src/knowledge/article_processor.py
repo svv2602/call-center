@@ -56,6 +56,7 @@ async def process_article(
     source_url: str,
     api_key: str,
     model: str = "claude-haiku-4-5-20251001",
+    llm_router: object | None = None,
 ) -> ProcessedArticle:
     """Process a scraped article through LLM for cleanup and classification.
 
@@ -65,6 +66,7 @@ async def process_article(
         source_url: Source URL for context.
         api_key: Anthropic API key.
         model: Model to use (default: Haiku for cost efficiency).
+        llm_router: Optional LLMRouter for multi-provider routing.
 
     Returns:
         ProcessedArticle with cleaned content and classification.
@@ -80,17 +82,28 @@ Title: {title}
 Content:
 {truncated}"""
 
-    client = anthropic.AsyncAnthropic(api_key=api_key)
+    messages = [{"role": "user", "content": user_message}]
 
     try:
-        response = await client.messages.create(
-            model=model,
-            max_tokens=4096,
-            system=_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": user_message}],
-        )
+        if llm_router is not None:
+            from src.llm.models import LLMTask
 
-        raw_text = response.content[0].text.strip()
+            llm_response = await llm_router.complete(  # type: ignore[union-attr]
+                LLMTask.ARTICLE_PROCESSOR,
+                messages,
+                system=_SYSTEM_PROMPT,
+                max_tokens=4096,
+            )
+            raw_text = llm_response.text.strip()
+        else:
+            client = anthropic.AsyncAnthropic(api_key=api_key)
+            response = await client.messages.create(
+                model=model,
+                max_tokens=4096,
+                system=_SYSTEM_PROMPT,
+                messages=messages,
+            )
+            raw_text = response.content[0].text.strip()
 
         # Strip markdown code fences if present
         if raw_text.startswith("```"):
