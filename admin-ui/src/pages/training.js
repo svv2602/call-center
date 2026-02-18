@@ -3,6 +3,7 @@ import { showToast } from '../notifications.js';
 import { formatDate, escapeHtml, closeModal } from '../utils.js';
 import { registerPageLoader } from '../router.js';
 import { t } from '../i18n.js';
+import { makeSortable } from '../sorting.js';
 import * as tw from '../tw.js';
 
 // ─── State ───────────────────────────────────────────────────
@@ -42,16 +43,18 @@ async function loadPromptVersions() {
         }
         container.innerHTML = `
             <div class="mb-4"><button class="${tw.btnPrimary}" onclick="window._pages.training.showCreatePrompt()">${t('prompts.newVersion')}</button></div>
-            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr><th class="${tw.th}">${t('prompts.name')}</th><th class="${tw.th}">${t('prompts.active')}</th><th class="${tw.th}">${t('prompts.created')}</th><th class="${tw.th}">${t('prompts.action')}</th></tr></thead><tbody>
+            <div class="overflow-x-auto"><table class="${tw.table}" id="promptsTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('prompts.name')}</th><th class="${tw.thSortable}" data-sortable>${t('prompts.active')}</th><th class="${tw.thSortable}" data-sortable>${t('prompts.created')}</th><th class="${tw.th}">${t('prompts.action')}</th></tr></thead><tbody>
             ${versions.map(v => `
                 <tr class="${tw.trHover}">
                     <td class="${tw.td}">${escapeHtml(v.name)}</td>
                     <td class="${tw.td}">${v.is_active ? `<span class="${tw.badgeGreen}">${t('prompts.activeLabel')}</span>` : ''}</td>
-                    <td class="${tw.td}">${formatDate(v.created_at)}</td>
+                    <td class="${tw.td}" data-sort-value="${v.created_at || ''}">${formatDate(v.created_at)}</td>
                     <td class="${tw.td}">${!v.is_active ? `<button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.activatePrompt('${v.id}')">${t('prompts.activateBtn')}</button>` : ''}</td>
                 </tr>
             `).join('')}
             </tbody></table></div>`;
+
+        makeSortable('promptsTable');
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('prompts.failedToLoad', {error: escapeHtml(e.message)})}
             <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.training.loadPromptVersions()">${t('common.retry')}</button></div>`;
@@ -158,14 +161,14 @@ async function loadArticles() {
             return;
         }
         container.innerHTML = `
-            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr><th class="${tw.th}">${t('knowledge.articleTitle')}</th><th class="${tw.th}">${t('knowledge.category')}</th><th class="${tw.th}">${t('knowledge.embedding')}</th><th class="${tw.th}">${t('knowledge.activeCol')}</th><th class="${tw.th}">${t('knowledge.updated')}</th><th class="${tw.th}">${t('knowledge.actions')}</th></tr></thead><tbody>
+            <div class="overflow-x-auto"><table class="${tw.table}" id="articlesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('knowledge.articleTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.category')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.embedding')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.activeCol')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.updated')}</th><th class="${tw.th}">${t('knowledge.actions')}</th></tr></thead><tbody>
             ${articles.map(a => `
                 <tr class="${tw.trHover}">
                     <td class="${tw.td}">${escapeHtml(a.title)}</td>
                     <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(a.category)}</span></td>
                     <td class="${tw.td}">${embeddingBadge(a.embedding_status)}</td>
                     <td class="${tw.td}">${a.active !== false ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
-                    <td class="${tw.td}">${formatDate(a.updated_at || a.created_at)}</td>
+                    <td class="${tw.td}" data-sort-value="${a.updated_at || a.created_at || ''}">${formatDate(a.updated_at || a.created_at)}</td>
                     <td class="${tw.td}">
                         <div class="flex flex-wrap gap-1">
                             <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.editArticle('${a.id}')">${t('knowledge.editBtn')}</button>
@@ -178,6 +181,8 @@ async function loadArticles() {
             `).join('')}
             </tbody></table></div>
             <p class="${tw.mutedText} mt-2">${t('knowledge.total', {count: data.total})}</p>`;
+
+        makeSortable('articlesTable');
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('knowledge.failedToLoad', {error: escapeHtml(e.message)})}
             <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.training.loadArticles()">${t('common.retry')}</button></div>`;
@@ -434,7 +439,7 @@ async function loadDialogues() {
         }
         container.innerHTML = `
             <div class="mb-4"><button class="${tw.btnPrimary}" onclick="window._pages.training.showCreateDialogue()">${t('training.newDialogue')}</button></div>
-            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr><th class="${tw.th}">${t('training.dialogueTitle')}</th><th class="${tw.th}">${t('training.scenario')}</th><th class="${tw.th}">${t('training.phase')}</th><th class="${tw.th}">${t('training.tools')}</th><th class="${tw.th}">${t('training.activeCol')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
+            <div class="overflow-x-auto"><table class="${tw.table}" id="dialoguesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('training.dialogueTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('training.scenario')}</th><th class="${tw.thSortable}" data-sortable>${t('training.phase')}</th><th class="${tw.th}">${t('training.tools')}</th><th class="${tw.thSortable}" data-sortable>${t('training.activeCol')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
             ${items.map(item => `
                 <tr class="${tw.trHover}">
                     <td class="${tw.td}">${escapeHtml(item.title)}</td>
@@ -451,6 +456,8 @@ async function loadDialogues() {
                 </tr>
             `).join('')}
             </tbody></table></div>`;
+
+        makeSortable('dialoguesTable');
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('training.loadFailed', {error: escapeHtml(e.message)})}</div>`;
     }
@@ -519,6 +526,8 @@ async function deleteDialogue(id, title) {
 // ═══════════════════════════════════════════════════════════
 //  TAB 5: Правила безопасности
 // ═══════════════════════════════════════════════════════════
+const SEVERITY_WEIGHT = { critical: 4, high: 3, medium: 2, low: 1 };
+
 function severityBadge(sev) {
     switch (sev) {
         case 'critical': return `<span class="${tw.badgeRed}">${escapeHtml(sev)}</span>`;
@@ -542,12 +551,12 @@ async function loadSafetyRules() {
         }
         container.innerHTML = `
             <div class="mb-4"><button class="${tw.btnPrimary}" onclick="window._pages.training.showCreateSafetyRule()">${t('training.newSafetyRule')}</button></div>
-            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr><th class="${tw.th}">${t('training.ruleTitle')}</th><th class="${tw.th}">${t('training.ruleType')}</th><th class="${tw.th}">${t('training.severity')}</th><th class="${tw.th}">${t('training.triggerInput')}</th><th class="${tw.th}">${t('training.activeCol')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
+            <div class="overflow-x-auto"><table class="${tw.table}" id="safetyRulesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('training.ruleTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('training.ruleType')}</th><th class="${tw.thSortable}" data-sortable>${t('training.severity')}</th><th class="${tw.th}">${t('training.triggerInput')}</th><th class="${tw.thSortable}" data-sortable>${t('training.activeCol')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
             ${items.map(item => `
                 <tr class="${tw.trHover}">
                     <td class="${tw.td}">${escapeHtml(item.title)}</td>
                     <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(item.rule_type)}</span></td>
-                    <td class="${tw.td}">${severityBadge(item.severity)}</td>
+                    <td class="${tw.td}" data-sort-value="${SEVERITY_WEIGHT[item.severity] || 0}">${severityBadge(item.severity)}</td>
                     <td class="${tw.td}"><span class="${tw.mutedText}">${escapeHtml((item.trigger_input || '').substring(0, 60))}${(item.trigger_input || '').length > 60 ? '...' : ''}</span></td>
                     <td class="${tw.td}">${item.is_active !== false ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
                     <td class="${tw.td}">
@@ -559,6 +568,8 @@ async function loadSafetyRules() {
                 </tr>
             `).join('')}
             </tbody></table></div>`;
+
+        makeSortable('safetyRulesTable');
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('training.loadFailed', {error: escapeHtml(e.message)})}</div>`;
     }
@@ -631,7 +642,7 @@ async function loadTools() {
         const data = await api('/training/tools/');
         const items = data.items || [];
         container.innerHTML = `
-            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr><th class="${tw.th}">${t('training.toolName')}</th><th class="${tw.th}">${t('training.description')}</th><th class="${tw.th}">${t('training.override')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
+            <div class="overflow-x-auto"><table class="${tw.table}" id="toolsTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('training.toolName')}</th><th class="${tw.th}">${t('training.description')}</th><th class="${tw.thSortable}" data-sortable>${t('training.override')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
             ${items.map(item => `
                 <tr class="${tw.trHover}">
                     <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(item.name)}</span></td>
@@ -646,6 +657,8 @@ async function loadTools() {
                 </tr>
             `).join('')}
             </tbody></table></div>`;
+
+        makeSortable('toolsTable');
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('training.loadFailed', {error: escapeHtml(e.message)})}</div>`;
     }
@@ -739,13 +752,13 @@ async function loadSources() {
             return;
         }
         container.innerHTML = `
-            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr><th class="${tw.th}">${t('sources.url')}</th><th class="${tw.th}">${t('sources.originalTitle')}</th><th class="${tw.th}">${t('sources.status')}</th><th class="${tw.th}">${t('sources.date')}</th><th class="${tw.th}">${t('sources.actions')}</th></tr></thead><tbody>
+            <div class="overflow-x-auto"><table class="${tw.table}" id="sourcesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('sources.url')}</th><th class="${tw.thSortable}" data-sortable>${t('sources.originalTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('sources.status')}</th><th class="${tw.thSortable}" data-sortable>${t('sources.date')}</th><th class="${tw.th}">${t('sources.actions')}</th></tr></thead><tbody>
             ${sources.map(s => `
                 <tr class="${tw.trHover}">
                     <td class="${tw.td}"><a href="${escapeHtml(s.url)}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline text-xs">${escapeHtml((s.url || '').replace(/^https?:\/\//, '').substring(0, 50))}${(s.url || '').length > 60 ? '...' : ''}</a></td>
                     <td class="${tw.td}">${escapeHtml(s.original_title || '-')}</td>
-                    <td class="${tw.td}">${sourceStatusBadge(s.status)}${s.skip_reason ? `<br><span class="${tw.mutedText} text-xs">${escapeHtml(s.skip_reason)}</span>` : ''}</td>
-                    <td class="${tw.td}">${formatDate(s.created_at)}</td>
+                    <td class="${tw.td}" data-sort-value="${escapeHtml(s.status || '')}">${sourceStatusBadge(s.status)}${s.skip_reason ? `<br><span class="${tw.mutedText} text-xs">${escapeHtml(s.skip_reason)}</span>` : ''}</td>
+                    <td class="${tw.td}" data-sort-value="${s.created_at || ''}">${formatDate(s.created_at)}</td>
                     <td class="${tw.td}">
                         <div class="flex flex-wrap gap-1">
                             ${s.status === 'processed' && s.article_id ? `
@@ -759,6 +772,8 @@ async function loadSources() {
             `).join('')}
             </tbody></table></div>
             <p class="${tw.mutedText} mt-2">${t('sources.total', {count: data.total})}</p>`;
+
+        makeSortable('sourcesTable');
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('sources.failedToLoad', {error: escapeHtml(e.message)})}
             <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.training.loadSources()">${t('common.retry')}</button></div>`;

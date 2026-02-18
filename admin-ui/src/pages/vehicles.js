@@ -3,6 +3,7 @@ import { escapeHtml, formatDate, closeModal } from '../utils.js';
 import { showToast } from '../notifications.js';
 import { registerPageLoader } from '../router.js';
 import { t } from '../i18n.js';
+import { makeSortable } from '../sorting.js';
 import * as tw from '../tw.js';
 
 // State
@@ -82,10 +83,10 @@ async function loadBrands(offset = 0) {
         }
 
         container.innerHTML = `
-            <div class="overflow-x-auto"><table class="${tw.table}">
+            <div class="overflow-x-auto"><table class="${tw.table}" id="brandsTable">
             <thead><tr>
-                <th class="${tw.th}">${t('vehicles.brand')}</th>
-                <th class="${tw.th}">${t('vehicles.models')}</th>
+                <th class="${tw.thSortable}" data-sortable>${t('vehicles.brand')}</th>
+                <th class="${tw.thSortable}" data-sortable>${t('vehicles.models')}</th>
             </tr></thead>
             <tbody>
             ${items.map(b => `
@@ -97,6 +98,7 @@ async function loadBrands(offset = 0) {
             </tbody></table></div>
         `;
 
+        makeSortable('brandsTable');
         renderPagination(data.total, offset, 'loadBrands');
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('vehicles.failedToLoad', { error: escapeHtml(e.message) })}</div>`;
@@ -134,10 +136,10 @@ async function loadModels(brandId, brandName, offset = 0) {
 
         container.innerHTML = `
             <button class="${tw.btnSecondary} mb-3" onclick="window._pages.vehicles.goToBrands()">${t('vehicles.back')}</button>
-            <div class="overflow-x-auto"><table class="${tw.table}">
+            <div class="overflow-x-auto"><table class="${tw.table}" id="modelsTable">
             <thead><tr>
-                <th class="${tw.th}">${t('vehicles.model')}</th>
-                <th class="${tw.th}">${t('vehicles.kits')}</th>
+                <th class="${tw.thSortable}" data-sortable>${t('vehicles.model')}</th>
+                <th class="${tw.thSortable}" data-sortable>${t('vehicles.kits')}</th>
             </tr></thead>
             <tbody>
             ${items.map(m => `
@@ -149,6 +151,7 @@ async function loadModels(brandId, brandName, offset = 0) {
             </tbody></table></div>
         `;
 
+        makeSortable('modelsTable');
         renderPagination(data.total, offset, 'loadModelsPage');
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('vehicles.failedToLoad', { error: escapeHtml(e.message) })}</div>`;
@@ -184,14 +187,14 @@ async function loadKits(modelId, modelName, offset = 0) {
 
         container.innerHTML = `
             <button class="${tw.btnSecondary} mb-3" onclick="window._pages.vehicles.goToModels()">${t('vehicles.back')}</button>
-            <div class="overflow-x-auto"><table class="${tw.table}">
+            <div class="overflow-x-auto"><table class="${tw.table}" id="kitsTable">
             <thead><tr>
-                <th class="${tw.th}">${t('vehicles.year')}</th>
-                <th class="${tw.th}">${t('vehicles.trim')}</th>
-                <th class="${tw.th}">${t('vehicles.pcd')}</th>
-                <th class="${tw.th}">${t('vehicles.bolts')}</th>
-                <th class="${tw.th}">${t('vehicles.dia')}</th>
-                <th class="${tw.th}">${t('vehicles.tireSizes')}</th>
+                <th class="${tw.thSortable}" data-sortable>${t('vehicles.year')}</th>
+                <th class="${tw.thSortable}" data-sortable>${t('vehicles.trim')}</th>
+                <th class="${tw.thSortable}" data-sortable>${t('vehicles.pcd')}</th>
+                <th class="${tw.thSortable}" data-sortable>${t('vehicles.bolts')}</th>
+                <th class="${tw.thSortable}" data-sortable>${t('vehicles.dia')}</th>
+                <th class="${tw.thSortable}" data-sortable>${t('vehicles.tireSizes')}</th>
                 <th class="${tw.th}"></th>
             </tr></thead>
             <tbody>
@@ -200,7 +203,7 @@ async function loadKits(modelId, modelName, offset = 0) {
                     <td class="${tw.td}">${k.year}</td>
                     <td class="${tw.td}">${escapeHtml(k.name || '-')}</td>
                     <td class="${tw.td}">${k.pcd ?? '-'}</td>
-                    <td class="${tw.td}">${k.bolt_count ?? '-'}${k.bolt_size ? ' / ' + escapeHtml(k.bolt_size) : ''}</td>
+                    <td class="${tw.td}" data-sort-value="${k.bolt_count ?? 0}">${k.bolt_count ?? '-'}${k.bolt_size ? ' / ' + escapeHtml(k.bolt_size) : ''}</td>
                     <td class="${tw.td}">${k.dia ?? '-'}</td>
                     <td class="${tw.td}">${k.tire_size_count}</td>
                     <td class="${tw.td}">
@@ -214,6 +217,7 @@ async function loadKits(modelId, modelName, offset = 0) {
             </tbody></table></div>
         `;
 
+        makeSortable('kitsTable');
         renderPagination(data.total, offset, 'loadKitsPage');
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('vehicles.failedToLoad', { error: escapeHtml(e.message) })}</div>`;

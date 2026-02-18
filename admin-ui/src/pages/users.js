@@ -3,6 +3,7 @@ import { showToast } from '../notifications.js';
 import { formatDate, escapeHtml, closeModal } from '../utils.js';
 import { registerPageLoader } from '../router.js';
 import { t } from '../i18n.js';
+import { makeSortable } from '../sorting.js';
 import * as tw from '../tw.js';
 
 async function loadUsers() {
@@ -16,13 +17,13 @@ async function loadUsers() {
             return;
         }
         container.innerHTML = `
-            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr><th class="${tw.th}">${t('users.username')}</th><th class="${tw.th}">${t('users.role')}</th><th class="${tw.th}">${t('users.activeCol')}</th><th class="${tw.th}">${t('users.lastLogin')}</th><th class="${tw.th}">${t('users.actionsCol')}</th></tr></thead><tbody>
+            <div class="overflow-x-auto"><table class="${tw.table}" id="usersTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('users.username')}</th><th class="${tw.thSortable}" data-sortable>${t('users.role')}</th><th class="${tw.thSortable}" data-sortable>${t('users.activeCol')}</th><th class="${tw.thSortable}" data-sortable>${t('users.lastLogin')}</th><th class="${tw.th}">${t('users.actionsCol')}</th></tr></thead><tbody>
             ${users.map(u => `
                 <tr class="${tw.trHover}">
                     <td class="${tw.td}">${escapeHtml(u.username)}</td>
                     <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(u.role)}</span></td>
                     <td class="${tw.td}">${u.is_active ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
-                    <td class="${tw.td}">${formatDate(u.last_login_at)}</td>
+                    <td class="${tw.td}" data-sort-value="${u.last_login_at || ''}">${formatDate(u.last_login_at)}</td>
                     <td class="${tw.td}">
                         <div class="flex flex-wrap items-center gap-1">
                             <select onchange="window._pages.users.changeRole('${u.id}', this.value)" class="${tw.selectSm}">
@@ -39,6 +40,8 @@ async function loadUsers() {
             `).join('')}
             </tbody></table></div>
         `;
+
+        makeSortable('usersTable');
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('users.failedToLoad', {error: escapeHtml(e.message)})}</div>`;
     }

@@ -3,6 +3,7 @@ import { showToast } from '../notifications.js';
 import { qualityBadge, formatDate, escapeHtml, downloadBlob } from '../utils.js';
 import { registerPageLoader } from '../router.js';
 import { t } from '../i18n.js';
+import { makeSortable } from '../sorting.js';
 import * as tw from '../tw.js';
 
 let callsOffset = 0;
@@ -39,7 +40,7 @@ async function loadCalls(offset = 0) {
 
         tbody.innerHTML = data.calls.map(c => `
             <tr class="${tw.trHover} cursor-pointer" onclick="window._pages.calls.showCallDetail('${c.id}')">
-                <td class="${tw.td}">${formatDate(c.started_at)}</td>
+                <td class="${tw.td}" data-sort-value="${c.started_at || ''}">${formatDate(c.started_at)}</td>
                 <td class="${tw.td}">${escapeHtml(c.caller_id) || '-'}</td>
                 <td class="${tw.td}">${escapeHtml(c.scenario) || '-'}</td>
                 <td class="${tw.td}">${c.duration_seconds || 0}s</td>
@@ -54,6 +55,8 @@ async function loadCalls(offset = 0) {
         document.getElementById('callsPagination').innerHTML = Array.from({length: Math.min(pages, 10)}, (_, i) =>
             `<button class="${tw.pageBtn}${i === current ? ' active' : ''}" onclick="window._pages.calls.loadCalls(${i * 20})">${i + 1}</button>`
         ).join('');
+
+        makeSortable('callsTable');
     } catch (e) {
         loading.style.display = 'none';
         tbody.innerHTML = `<tr><td colspan="7" class="${tw.emptyState}">${t('calls.failedToLoad', {error: escapeHtml(e.message)})}

@@ -27,6 +27,7 @@ export const statLabel = 'text-xs text-neutral-500 dark:text-neutral-400 mt-1';
 // --- Tables ---
 export const table = 'w-full text-sm';
 export const th = 'px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700';
+export const thSortable = `${th} cursor-pointer select-none hover:text-neutral-700 dark:hover:text-neutral-300`;
 export const td = 'px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300';
 export const trHover = 'hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors';
 

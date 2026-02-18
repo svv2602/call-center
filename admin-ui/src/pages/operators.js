@@ -3,6 +3,7 @@ import { showToast } from '../notifications.js';
 import { escapeHtml, statusBadge, closeModal } from '../utils.js';
 import { registerPageLoader, setRefreshTimer } from '../router.js';
 import { t } from '../i18n.js';
+import { makeSortable } from '../sorting.js';
 import * as tw from '../tw.js';
 
 async function loadOperators() {
@@ -41,6 +42,8 @@ async function loadOperators() {
                 </td>
             </tr>
         `).join('');
+
+        makeSortable('operatorsTable');
     } catch (e) {
         loading.style.display = 'none';
         tbody.innerHTML = `<tr><td colspan="7" class="${tw.emptyState}">${t('operators.failedToLoad', {error: escapeHtml(e.message)})}
