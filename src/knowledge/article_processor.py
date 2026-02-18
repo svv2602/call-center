@@ -19,7 +19,7 @@ logger = logging.getLogger(__name__)
 
 _MAX_CONTENT_CHARS = 8000
 
-_SYSTEM_PROMPT = """You are a content processor for a tire shop knowledge base.
+_SYSTEM_PROMPT = """You are a content processor for a Ukrainian tire shop knowledge base.
 Your task is to clean up a scraped article and decide if it's useful for customer service agents.
 
 Rules:
@@ -27,14 +27,15 @@ Rules:
 2. Keep factual tire knowledge: comparisons, specifications, tables, maintenance tips, guides
 3. Preserve headings (##), lists (-), and tables (| ... |)
 4. If the article is purely promotional or has no useful factual content, mark it as not useful
+5. IMPORTANT: Keep the article in Ukrainian (українською мовою). Do NOT translate to English or any other language. The knowledge base serves Ukrainian-speaking customers.
 
 Respond ONLY with valid JSON (no markdown fences):
 {
   "is_useful": true/false,
   "skip_reason": "reason if not useful, null otherwise",
-  "title": "cleaned article title",
+  "title": "cleaned article title in Ukrainian",
   "category": "one of: brands, guides, faq, comparisons, policies, procedures, returns, warranty, delivery, general",
-  "content": "cleaned article content in markdown"
+  "content": "cleaned article content in Ukrainian markdown"
 }"""
 
 
