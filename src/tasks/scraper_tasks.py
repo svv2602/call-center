@@ -614,7 +614,7 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
                     stats["unchanged"] += 1
                     continue
 
-                # Content changed — process through LLM
+                # Content changed — process through LLM (watched pages are admin-added, always include)
                 logger.info("Watched page %s content changed, processing", page_url)
                 processed = await process_article(
                     title=scraped.title,
@@ -622,6 +622,7 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
                     source_url=page_url,
                     api_key=settings.anthropic.api_key,
                     model=config["llm_model"],
+                    is_shop_info=True,
                 )
 
                 if not processed.is_useful:
@@ -874,7 +875,7 @@ async def _handle_discovery_page(
                 stats["unchanged"] += 1
                 continue
 
-            # Content changed — process through LLM
+            # Content changed — process through LLM (children of discovery pages are promotions)
             logger.info("Child page %s content changed, processing", child_url)
             processed = await process_article(
                 title=scraped.title,
@@ -882,6 +883,7 @@ async def _handle_discovery_page(
                 source_url=child_url,
                 api_key=settings.anthropic.api_key,
                 model=config["llm_model"],
+                is_promotion=True,
             )
 
             if not processed.is_useful:

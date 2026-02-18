@@ -45,6 +45,47 @@ Respond ONLY with valid JSON (no markdown fences):
   "content": "cleaned article content in Ukrainian markdown"
 }"""
 
+_PROMOTION_SYSTEM_PROMPT = """You are a content processor for a Ukrainian tire shop knowledge base.
+Your task is to clean up a scraped PROMOTION page from the shop's own website.
+This is the shop's current active promotion — the customer service agent MUST know about it to inform callers.
+
+Rules:
+1. This IS useful content — promotions from our own shop are always useful for the agent
+2. Extract the key facts: what is the offer, which products/brands, discount amount, conditions, duration
+3. Remove product catalog listings (individual SKUs, prices, "add to cart"), keep only the summary of what's on offer
+4. Remove navigation, sorting controls, pagination
+5. Preserve headings (##), lists (-), and tables (| ... |)
+6. IMPORTANT: Keep the article in Ukrainian (українською мовою)
+
+Respond ONLY with valid JSON (no markdown fences):
+{
+  "is_useful": true,
+  "skip_reason": null,
+  "title": "short descriptive title of the promotion in Ukrainian",
+  "category": "policies",
+  "content": "cleaned promotion summary in Ukrainian markdown"
+}"""
+
+_SHOP_INFO_SYSTEM_PROMPT = """You are a content processor for a Ukrainian tire shop knowledge base.
+Your task is to clean up a page from the shop's own website. This page was explicitly added by the administrator
+as important reference information for the customer service agent.
+
+Rules:
+1. This IS useful content — the admin added this page deliberately, so it must always be included
+2. Clean up navigation elements, headers/footers, cookie notices, and other UI chrome
+3. Preserve all factual content: contact details, addresses, phone numbers, working hours, legal terms, policies, procedures
+4. Preserve headings (##), lists (-), and tables (| ... |)
+5. IMPORTANT: Keep the article in Ukrainian (українською мовою). Do NOT translate to English or any other language.
+
+Respond ONLY with valid JSON (no markdown fences):
+{
+  "is_useful": true,
+  "skip_reason": null,
+  "title": "cleaned article title in Ukrainian",
+  "category": "one of: brands, guides, faq, comparisons, policies, procedures, returns, warranty, delivery, general",
+  "content": "cleaned article content in Ukrainian markdown"
+}"""
+
 _TRANSLATION_ADDENDUM = """
 6. The source article is in {language_name}. Translate ALL content to Ukrainian (українською мовою). Preserve technical tire terminology (sizes, specifications). Keep brand names in their original form."""
 
@@ -68,6 +109,8 @@ async def process_article(
     model: str = "claude-haiku-4-5-20251001",
     llm_router: object | None = None,
     source_language: str = "uk",
+    is_promotion: bool = False,
+    is_shop_info: bool = False,
 ) -> ProcessedArticle:
     """Process a scraped article through LLM for cleanup and classification.
 
@@ -80,6 +123,8 @@ async def process_article(
         llm_router: Optional LLMRouter for multi-provider routing.
         source_language: ISO language code of the source article (e.g. 'uk', 'de', 'en').
             When not 'uk', adds translation instructions to the prompt.
+        is_promotion: If True, use promotion-specific prompt that always marks content as useful.
+        is_shop_info: If True, use shop-info prompt (admin-added pages, always useful).
 
     Returns:
         ProcessedArticle with cleaned content and classification.
@@ -89,9 +134,14 @@ async def process_article(
     if len(content) > _MAX_CONTENT_CHARS:
         truncated += "\n\n[... content truncated ...]"
 
-    # Build system prompt with optional translation addendum
-    system_prompt = _SYSTEM_PROMPT
-    if source_language and source_language != "uk":
+    # Build system prompt
+    if is_promotion:
+        system_prompt = _PROMOTION_SYSTEM_PROMPT
+    elif is_shop_info:
+        system_prompt = _SHOP_INFO_SYSTEM_PROMPT
+    else:
+        system_prompt = _SYSTEM_PROMPT
+    if not is_promotion and not is_shop_info and source_language and source_language != "uk":
         language_name = _LANGUAGE_NAMES.get(source_language, source_language)
         system_prompt += _TRANSLATION_ADDENDUM.format(language_name=language_name)
 

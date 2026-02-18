@@ -779,13 +779,14 @@ async def scrape_watched_page_now(
         if old_hash and new_hash == old_hash:
             return {"status": "unchanged", "message": "Content has not changed"}
 
-        # LLM processing
+        # LLM processing (watched pages are admin-added, always include)
         processed = await process_article(
             title=scraped.title,
             content=scraped.content,
             source_url=page_url,
             api_key=settings.anthropic.api_key,
             model=llm_model,
+            is_shop_info=True,
         )
 
         if not processed.is_useful:
@@ -982,6 +983,7 @@ async def _scrape_discovery_page_inline(
                 source_url=child_url,
                 api_key=settings.anthropic.api_key,
                 model=llm_model,
+                is_promotion=True,
             )
 
             if not processed.is_useful:
