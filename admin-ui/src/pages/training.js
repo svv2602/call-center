@@ -12,7 +12,7 @@ let _activeTab = 'prompts';
 // ─── Tab switching ───────────────────────────────────────────
 function showTab(tab) {
     _activeTab = tab;
-    const tabs = ['prompts', 'knowledge', 'templates', 'dialogues', 'safety', 'tools'];
+    const tabs = ['prompts', 'knowledge', 'templates', 'dialogues', 'safety', 'tools', 'sources'];
     tabs.forEach(t => {
         const el = document.getElementById(`trainingContent-${t}`);
         if (el) el.style.display = t === tab ? 'block' : 'none';
@@ -22,7 +22,7 @@ function showTab(tab) {
     if (activeBtn) activeBtn.classList.add('active');
 
     // Load data for the tab
-    const loaders = { prompts: loadPromptVersions, knowledge: loadKnowledge, templates: loadTemplates, dialogues: loadDialogues, safety: loadSafetyRules, tools: loadTools };
+    const loaders = { prompts: loadPromptVersions, knowledge: loadKnowledge, templates: loadTemplates, dialogues: loadDialogues, safety: loadSafetyRules, tools: loadTools, sources: loadSources };
     if (loaders[tab]) loaders[tab]();
 }
 
@@ -687,6 +687,132 @@ async function resetToolOverride(toolName) {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  TAB 7: Источники (scraper sources)
+// ═══════════════════════════════════════════════════════════
+function sourceStatusBadge(status) {
+    switch (status) {
+        case 'processed': return `<span class="${tw.badgeGreen}">${escapeHtml(status)}</span>`;
+        case 'processing': return `<span class="${tw.badgeBlue}">${escapeHtml(status)}</span>`;
+        case 'new': return `<span class="${tw.badgeYellow}">${escapeHtml(status)}</span>`;
+        case 'skipped': return `<span class="${tw.badge}">${escapeHtml(status)}</span>`;
+        case 'error': return `<span class="${tw.badgeRed}">${escapeHtml(status)}</span>`;
+        default: return `<span class="${tw.badge}">${escapeHtml(status || 'unknown')}</span>`;
+    }
+}
+
+async function loadSources() {
+    const configCard = document.getElementById('scraperConfigCard');
+    const container = document.getElementById('sourcesContainer');
+    container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+
+    try {
+        const configData = await api('/admin/scraper/config');
+        const cfg = configData.config || {};
+
+        configCard.innerHTML = `
+            <div class="flex flex-wrap items-center gap-4">
+                <label class="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" id="scraperEnabled" ${cfg.enabled ? 'checked' : ''} onchange="window._pages.training.toggleScraperEnabled()">
+                    <span>${t('sources.enabled')}</span>
+                </label>
+                <label class="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" id="scraperAutoApprove" ${cfg.auto_approve ? 'checked' : ''} onchange="window._pages.training.toggleAutoApprove()">
+                    <span>${t('sources.autoApprove')}</span>
+                </label>
+                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.runScraperNow()">${t('sources.runNow')}</button>
+                <span class="${tw.mutedText} text-xs">${t('sources.schedule')}: ${cfg.schedule_day_of_week} ${cfg.schedule_hour}:00</span>
+            </div>`;
+    } catch (e) {
+        configCard.innerHTML = `<div class="${tw.mutedText}">${t('sources.configLoadFailed', {error: escapeHtml(e.message)})}</div>`;
+    }
+
+    // Load sources list
+    const params = new URLSearchParams();
+    const statusFilter = document.getElementById('sourcesStatusFilter')?.value;
+    if (statusFilter) params.set('status', statusFilter);
+
+    try {
+        const data = await api(`/admin/scraper/sources?${params}`);
+        const sources = data.sources || [];
+        if (sources.length === 0) {
+            container.innerHTML = `<div class="${tw.emptyState}">${t('sources.noSources')}</div>`;
+            return;
+        }
+        container.innerHTML = `
+            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr><th class="${tw.th}">${t('sources.url')}</th><th class="${tw.th}">${t('sources.originalTitle')}</th><th class="${tw.th}">${t('sources.status')}</th><th class="${tw.th}">${t('sources.date')}</th><th class="${tw.th}">${t('sources.actions')}</th></tr></thead><tbody>
+            ${sources.map(s => `
+                <tr class="${tw.trHover}">
+                    <td class="${tw.td}"><a href="${escapeHtml(s.url)}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline text-xs">${escapeHtml((s.url || '').replace(/^https?:\/\//, '').substring(0, 50))}${(s.url || '').length > 60 ? '...' : ''}</a></td>
+                    <td class="${tw.td}">${escapeHtml(s.original_title || '-')}</td>
+                    <td class="${tw.td}">${sourceStatusBadge(s.status)}${s.skip_reason ? `<br><span class="${tw.mutedText} text-xs">${escapeHtml(s.skip_reason)}</span>` : ''}</td>
+                    <td class="${tw.td}">${formatDate(s.created_at)}</td>
+                    <td class="${tw.td}">
+                        <div class="flex flex-wrap gap-1">
+                            ${s.status === 'processed' && s.article_id ? `
+                                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.viewSourceArticle('${s.article_id}')">${t('sources.viewArticle')}</button>
+                                ${s.article_active === false ? `<button class="${tw.btnGreen} ${tw.btnSm}" onclick="window._pages.training.approveSource('${s.id}')">${t('sources.approve')}</button>` : ''}
+                                <button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.training.rejectSource('${s.id}')">${t('sources.reject')}</button>
+                            ` : ''}
+                        </div>
+                    </td>
+                </tr>
+            `).join('')}
+            </tbody></table></div>
+            <p class="${tw.mutedText} mt-2">${t('sources.total', {count: data.total})}</p>`;
+    } catch (e) {
+        container.innerHTML = `<div class="${tw.emptyState}">${t('sources.failedToLoad', {error: escapeHtml(e.message)})}
+            <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.training.loadSources()">${t('common.retry')}</button></div>`;
+    }
+}
+
+async function toggleScraperEnabled() {
+    const enabled = document.getElementById('scraperEnabled').checked;
+    try {
+        await api('/admin/scraper/config', { method: 'PATCH', body: JSON.stringify({ enabled }) });
+        showToast(t('sources.configUpdated'));
+    } catch (e) { showToast(t('sources.configUpdateFailed', {error: e.message}), 'error'); }
+}
+
+async function toggleAutoApprove() {
+    const auto_approve = document.getElementById('scraperAutoApprove').checked;
+    try {
+        await api('/admin/scraper/config', { method: 'PATCH', body: JSON.stringify({ auto_approve }) });
+        showToast(t('sources.configUpdated'));
+    } catch (e) { showToast(t('sources.configUpdateFailed', {error: e.message}), 'error'); }
+}
+
+async function runScraperNow() {
+    try {
+        await api('/admin/scraper/run', { method: 'POST' });
+        showToast(t('sources.runDispatched'));
+    } catch (e) { showToast(t('sources.runFailed', {error: e.message}), 'error'); }
+}
+
+async function approveSource(id) {
+    try {
+        await api(`/admin/scraper/sources/${id}/approve`, { method: 'POST' });
+        showToast(t('sources.approved'));
+        loadSources();
+    } catch (e) { showToast(t('sources.approveFailed', {error: e.message}), 'error'); }
+}
+
+async function rejectSource(id) {
+    if (!confirm(t('sources.rejectConfirm'))) return;
+    try {
+        await api(`/admin/scraper/sources/${id}/reject`, { method: 'POST' });
+        showToast(t('sources.rejected'));
+        loadSources();
+    } catch (e) { showToast(t('sources.rejectFailed', {error: e.message}), 'error'); }
+}
+
+function viewSourceArticle(articleId) {
+    _activeTab = 'knowledge';
+    showTab('knowledge');
+    // After knowledge tab loads, open the article editor
+    setTimeout(() => editArticle(articleId), 500);
+}
+
+// ═══════════════════════════════════════════════════════════
 //  Init & exports
 // ═══════════════════════════════════════════════════════════
 export function init() {
@@ -714,4 +840,7 @@ window._pages.training = {
     loadSafetyRules, showCreateSafetyRule, editSafetyRule, saveSafetyRule, deleteSafetyRule,
     // Tools
     loadTools, editToolOverride, saveToolOverride, resetToolOverride,
+    // Sources (scraper)
+    loadSources, toggleScraperEnabled, toggleAutoApprove,
+    runScraperNow, approveSource, rejectSource, viewSourceArticle,
 };

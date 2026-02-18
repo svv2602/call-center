@@ -166,6 +166,20 @@ class BackupSettings(BaseSettings):
     model_config = {"env_prefix": "BACKUP_"}
 
 
+class ScraperSettings(BaseSettings):
+    enabled: bool = False
+    base_url: str = "https://prokoleso.ua"
+    info_path: str = "/ua/info/"
+    max_pages: int = 3
+    request_delay: float = 2.0
+    auto_approve: bool = False
+    llm_model: str = "claude-haiku-4-5-20251001"
+    schedule_hour: int = 6
+    schedule_day_of_week: str = "monday"
+
+    model_config = {"env_prefix": "SCRAPER_"}
+
+
 @dataclass
 class ValidationError:
     """A single config validation error."""
@@ -210,6 +224,7 @@ class Settings(BaseSettings):
     feature_flags: FeatureFlagSettings = FeatureFlagSettings()
     smtp: SMTPSettings = SMTPSettings()
     backup: BackupSettings = BackupSettings()
+    scraper: ScraperSettings = ScraperSettings()
     prometheus_port: int = 8080
 
     model_config = {"env_prefix": ""}

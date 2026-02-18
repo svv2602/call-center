@@ -30,6 +30,7 @@ from src.api.middleware.rate_limit import RateLimitMiddleware
 from src.api.middleware.security_headers import SecurityHeadersMiddleware
 from src.api.operators import router as operators_router
 from src.api.prompts import router as prompts_router
+from src.api.scraper import router as scraper_router
 from src.api.system import router as system_router
 from src.api.training_dialogues import router as training_dialogues_router
 from src.api.training_safety import router as training_safety_router
@@ -66,6 +67,7 @@ app.include_router(export_router)
 app.include_router(knowledge_router)
 app.include_router(operators_router)
 app.include_router(prompts_router)
+app.include_router(scraper_router)
 app.include_router(system_router)
 app.include_router(training_dialogues_router)
 app.include_router(training_safety_router)

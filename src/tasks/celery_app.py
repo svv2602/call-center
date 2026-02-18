@@ -35,6 +35,7 @@ app.conf.update(
         "src.tasks.backup.*": {"queue": "stats"},
         "src.tasks.email_report.*": {"queue": "stats"},
         "src.tasks.embedding_tasks.*": {"queue": "embeddings"},
+        "src.tasks.scraper_tasks.*": {"queue": "scraper"},
     },
 )
 
@@ -70,6 +71,10 @@ app.conf.beat_schedule = {
     "send-weekly-report": {
         "task": "src.tasks.email_report.send_weekly_report",
         "schedule": crontab(hour=9, minute=0, day_of_week="monday"),  # Monday at 09:00 Kyiv time
+    },
+    "scrape-prokoleso-articles": {
+        "task": "src.tasks.scraper_tasks.run_scraper",
+        "schedule": crontab(hour=6, minute=0, day_of_week="monday"),  # Monday at 06:00 Kyiv time
     },
 }
 
