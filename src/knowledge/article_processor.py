@@ -137,7 +137,9 @@ _VALID_CATEGORIES = {
 }
 
 
-def _validate_category(category: str) -> str:
+def _validate_category(category: str | None) -> str:
     """Validate and normalize category value."""
+    if not category:
+        return "general"
     cat = category.lower().strip()
     return cat if cat in _VALID_CATEGORIES else "general"

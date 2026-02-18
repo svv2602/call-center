@@ -41,6 +41,9 @@ class TestValidateCategory:
         assert _validate_category("") == "general"
         assert _validate_category("tyres") == "general"
 
+    def test_none_defaults_to_general(self) -> None:
+        assert _validate_category(None) == "general"
+
 
 # ─── LLM response parsing ────────────────────────────────────
 

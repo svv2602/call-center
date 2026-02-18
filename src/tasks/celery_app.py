@@ -16,6 +16,16 @@ app = Celery(
     "call_center",
     broker=settings.celery.broker_url,
     backend=settings.celery.result_backend,
+    include=[
+        "src.tasks.quality_evaluator",
+        "src.tasks.daily_stats",
+        "src.tasks.data_retention",
+        "src.tasks.partition_manager",
+        "src.tasks.backup",
+        "src.tasks.email_report",
+        "src.tasks.embedding_tasks",
+        "src.tasks.scraper_tasks",
+    ],
 )
 
 app.conf.update(
@@ -78,4 +88,5 @@ app.conf.beat_schedule = {
     },
 }
 
-app.autodiscover_tasks(["src.tasks"])
+# Note: autodiscover_tasks(["src.tasks"]) looks for src/tasks/tasks.py which doesn't exist.
+# Task modules are explicitly listed in the Celery `include` parameter above.
