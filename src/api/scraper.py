@@ -699,28 +699,384 @@ async def delete_watched_page(page_id: UUID, _: dict[str, Any] = _admin_dep) -> 
 async def scrape_watched_page_now(
     page_id: UUID, _: dict[str, Any] = _admin_dep
 ) -> dict[str, Any]:
-    """Trigger immediate rescraping of a single watched page."""
-    engine = await _get_engine()
+    """Scrape a single watched page immediately (inline, no Celery needed)."""
+    from src.knowledge.article_processor import process_article
+    from src.knowledge.scraper import ProKolesoScraper, content_hash
 
+    engine = await _get_engine()
+    settings = get_settings()
+
+    # Load page info
     async with engine.begin() as conn:
         result = await conn.execute(
             text("""
-                UPDATE knowledge_sources
-                SET next_scrape_at = now()
+                SELECT id, url, article_id, content_hash, rescrape_interval_hours,
+                       COALESCE(is_discovery, false) AS is_discovery
+                FROM knowledge_sources
                 WHERE id = :id AND source_type = 'watched_page'
-                RETURNING id
             """),
             {"id": str(page_id)},
         )
-        if not result.first():
+        row = result.first()
+        if not row:
             raise HTTPException(status_code=404, detail="Watched page not found")
 
-    # Trigger rescrape task
-    try:
-        from src.tasks.scraper_tasks import rescrape_watched_pages
+    page = dict(row._mapping)
+    page_url = page["url"]
+    source_id = str(page["id"])
+    interval = page["rescrape_interval_hours"] or 168
 
-        result = rescrape_watched_pages.delay()
-        return {"message": "Rescrape triggered", "task_id": str(result.id)}
-    except Exception as exc:
-        logger.exception("Failed to dispatch rescrape task")
-        raise HTTPException(status_code=500, detail="Failed to dispatch rescrape task") from exc
+    # Read scraper config
+    redis = await _get_redis()
+    config_json = await redis.get("scraper:config")
+    redis_config = json.loads(config_json) if config_json else {}
+    llm_model = redis_config.get("llm_model", settings.scraper.llm_model)
+    request_delay = redis_config.get("request_delay", settings.scraper.request_delay)
+
+    scraper = ProKolesoScraper(
+        base_url=redis_config.get("base_url", settings.scraper.base_url),
+        request_delay=request_delay,
+    )
+    await scraper.open()
+
+    try:
+        # Discovery mode: discover children and scrape each
+        if page.get("is_discovery"):
+            return await _scrape_discovery_page_inline(
+                scraper, engine, settings, llm_model, request_delay, page
+            )
+
+        # Regular page: fetch, compare hash, process
+        scraped = await scraper.fetch_article(page_url)
+        if scraped is None:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text("""
+                        UPDATE knowledge_sources
+                        SET fetched_at = now(),
+                            next_scrape_at = now() + make_interval(hours => :interval)
+                        WHERE id = :id::uuid
+                    """),
+                    {"id": source_id, "interval": interval},
+                )
+            raise HTTPException(status_code=422, detail="Failed to fetch page content")
+
+        new_hash = content_hash(scraped.content)
+        old_hash = page["content_hash"]
+
+        # Update fetch time
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("""
+                    UPDATE knowledge_sources
+                    SET fetched_at = now(),
+                        next_scrape_at = now() + make_interval(hours => :interval)
+                    WHERE id = :id::uuid
+                """),
+                {"id": source_id, "interval": interval},
+            )
+
+        if old_hash and new_hash == old_hash:
+            return {"status": "unchanged", "message": "Content has not changed"}
+
+        # LLM processing
+        processed = await process_article(
+            title=scraped.title,
+            content=scraped.content,
+            source_url=page_url,
+            api_key=settings.anthropic.api_key,
+            model=llm_model,
+        )
+
+        if not processed.is_useful:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text("""
+                        UPDATE knowledge_sources
+                        SET content_hash = :hash, processed_at = now()
+                        WHERE id = :id::uuid
+                    """),
+                    {"id": source_id, "hash": new_hash},
+                )
+            return {"status": "skipped", "message": processed.skip_reason or "Not useful"}
+
+        article_id = page["article_id"]
+
+        if article_id:
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text("""
+                        UPDATE knowledge_articles
+                        SET title = :title, category = :category, content = :content,
+                            embedding_status = 'pending', updated_at = now()
+                        WHERE id = :article_id::uuid
+                    """),
+                    {
+                        "article_id": str(article_id),
+                        "title": processed.title,
+                        "category": processed.category,
+                        "content": processed.content,
+                    },
+                )
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text("""
+                        UPDATE knowledge_sources
+                        SET content_hash = :hash, status = 'processed', processed_at = now()
+                        WHERE id = :id::uuid
+                    """),
+                    {"id": source_id, "hash": new_hash},
+                )
+            _dispatch_embedding_best_effort(str(article_id))
+            return {"status": "updated", "article_id": str(article_id)}
+        else:
+            async with engine.begin() as conn:
+                result = await conn.execute(
+                    text("""
+                        INSERT INTO knowledge_articles
+                            (title, category, content, active, embedding_status)
+                        VALUES (:title, :category, :content, true, 'pending')
+                        RETURNING id
+                    """),
+                    {
+                        "title": processed.title,
+                        "category": processed.category,
+                        "content": processed.content,
+                    },
+                )
+                article_row = result.first()
+                new_article_id = str(article_row.id) if article_row else None
+
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text("""
+                        UPDATE knowledge_sources
+                        SET article_id = :article_id::uuid, content_hash = :hash,
+                            status = 'processed', processed_at = now()
+                        WHERE id = :id::uuid
+                    """),
+                    {"id": source_id, "article_id": new_article_id, "hash": new_hash},
+                )
+
+            if new_article_id:
+                _dispatch_embedding_best_effort(new_article_id)
+            return {"status": "created", "article_id": new_article_id}
+
+    finally:
+        await scraper.close()
+
+
+async def _scrape_discovery_page_inline(
+    scraper: Any,
+    engine: Any,
+    settings: Any,
+    llm_model: str,
+    request_delay: float,
+    page: dict[str, Any],
+) -> dict[str, Any]:
+    """Inline scrape of a discovery page: discover children, scrape each."""
+    import asyncio
+
+    from src.knowledge.article_processor import process_article
+    from src.knowledge.scraper import content_hash
+
+    page_url = page["url"]
+    source_id = str(page["id"])
+    interval = page["rescrape_interval_hours"] or 168
+
+    discovered_links = await scraper.discover_page_links(page_url)
+
+    # Update parent timestamps
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("""
+                UPDATE knowledge_sources
+                SET fetched_at = now(),
+                    next_scrape_at = now() + make_interval(hours => :interval)
+                WHERE id = :id::uuid
+            """),
+            {"id": source_id, "interval": interval},
+        )
+
+    # Get existing children
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("SELECT id, url FROM knowledge_sources WHERE parent_id = :pid::uuid"),
+            {"pid": source_id},
+        )
+        existing_urls = {row.url for row in result}
+
+    # Create new children
+    new_urls = set(discovered_links) - existing_urls
+    for child_url in new_urls:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("""
+                    INSERT INTO knowledge_sources
+                        (url, source_site, source_type, status, rescrape_interval_hours,
+                         original_title, parent_id, next_scrape_at)
+                    VALUES (:url, 'prokoleso.ua', 'watched_page', 'new',
+                            :interval, :url, :parent_id::uuid, now())
+                    ON CONFLICT (url) DO NOTHING
+                """),
+                {"url": child_url, "interval": interval, "parent_id": source_id},
+            )
+
+    # Remove stale
+    stale_urls = existing_urls - set(discovered_links)
+    if stale_urls:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("""
+                    DELETE FROM knowledge_sources
+                    WHERE parent_id = :pid::uuid AND url = ANY(:urls)
+                """),
+                {"pid": source_id, "urls": list(stale_urls)},
+            )
+
+    # Scrape all children
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                SELECT id, url, article_id, content_hash, rescrape_interval_hours
+                FROM knowledge_sources WHERE parent_id = :pid::uuid
+            """),
+            {"pid": source_id},
+        )
+        children = [dict(row._mapping) for row in result]
+
+    stats: dict[str, int] = {"created": 0, "updated": 0, "unchanged": 0, "errors": 0}
+
+    for child in children:
+        child_url = child["url"]
+        child_id = str(child["id"])
+        child_interval = child["rescrape_interval_hours"] or interval
+
+        try:
+            scraped = await scraper.fetch_article(child_url)
+            if scraped is None:
+                stats["errors"] += 1
+                continue
+
+            new_hash = content_hash(scraped.content)
+            old_hash = child["content_hash"]
+
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text("""
+                        UPDATE knowledge_sources
+                        SET fetched_at = now(),
+                            next_scrape_at = now() + make_interval(hours => :interval)
+                        WHERE id = :id::uuid
+                    """),
+                    {"id": child_id, "interval": child_interval},
+                )
+
+            if old_hash and new_hash == old_hash:
+                stats["unchanged"] += 1
+                continue
+
+            processed = await process_article(
+                title=scraped.title,
+                content=scraped.content,
+                source_url=child_url,
+                api_key=settings.anthropic.api_key,
+                model=llm_model,
+            )
+
+            if not processed.is_useful:
+                async with engine.begin() as conn:
+                    await conn.execute(
+                        text("""
+                            UPDATE knowledge_sources
+                            SET content_hash = :hash, processed_at = now()
+                            WHERE id = :id::uuid
+                        """),
+                        {"id": child_id, "hash": new_hash},
+                    )
+                stats["unchanged"] += 1
+                continue
+
+            article_id = child["article_id"]
+            if article_id:
+                async with engine.begin() as conn:
+                    await conn.execute(
+                        text("""
+                            UPDATE knowledge_articles
+                            SET title = :title, category = :category, content = :content,
+                                embedding_status = 'pending', updated_at = now()
+                            WHERE id = :article_id::uuid
+                        """),
+                        {
+                            "article_id": str(article_id),
+                            "title": processed.title,
+                            "category": processed.category,
+                            "content": processed.content,
+                        },
+                    )
+                async with engine.begin() as conn:
+                    await conn.execute(
+                        text("""
+                            UPDATE knowledge_sources
+                            SET content_hash = :hash, status = 'processed', processed_at = now()
+                            WHERE id = :id::uuid
+                        """),
+                        {"id": child_id, "hash": new_hash},
+                    )
+                _dispatch_embedding_best_effort(str(article_id))
+                stats["updated"] += 1
+            else:
+                async with engine.begin() as conn:
+                    result = await conn.execute(
+                        text("""
+                            INSERT INTO knowledge_articles
+                                (title, category, content, active, embedding_status)
+                            VALUES (:title, :category, :content, true, 'pending')
+                            RETURNING id
+                        """),
+                        {
+                            "title": processed.title,
+                            "category": processed.category,
+                            "content": processed.content,
+                        },
+                    )
+                    article_row = result.first()
+                    new_article_id = str(article_row.id) if article_row else None
+
+                async with engine.begin() as conn:
+                    await conn.execute(
+                        text("""
+                            UPDATE knowledge_sources
+                            SET article_id = :article_id::uuid, content_hash = :hash,
+                                status = 'processed', processed_at = now()
+                            WHERE id = :id::uuid
+                        """),
+                        {"id": child_id, "article_id": new_article_id, "hash": new_hash},
+                    )
+                if new_article_id:
+                    _dispatch_embedding_best_effort(new_article_id)
+                stats["created"] += 1
+
+        except Exception:
+            logger.exception("Error scraping child %s", child_url)
+            stats["errors"] += 1
+
+        await asyncio.sleep(request_delay)
+
+    return {
+        "status": "ok",
+        "discovered": len(discovered_links),
+        "new_children": len(new_urls),
+        "removed_stale": len(stale_urls),
+        **stats,
+    }
+
+
+def _dispatch_embedding_best_effort(article_id: str) -> None:
+    """Dispatch embedding generation (ignore failures — Celery may not be running)."""
+    try:
+        from src.tasks.embedding_tasks import generate_article_embeddings
+
+        generate_article_embeddings.delay(article_id)
+    except Exception:
+        logger.debug("Could not dispatch embedding task for %s (Celery not running?)", article_id)

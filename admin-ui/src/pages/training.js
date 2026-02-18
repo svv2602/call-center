@@ -1115,15 +1115,16 @@ async function loadWatchedPages() {
         const pages = data.pages || [];
 
         // Build add form
-        const categoryOptions = (_categories.length ? _categories : [
+        const cats = _categories.length ? _categories : [
             { value: 'delivery', label: 'delivery' }, { value: 'warranty', label: 'warranty' },
             { value: 'returns', label: 'returns' }, { value: 'policies', label: 'policies' },
             { value: 'general', label: 'general' },
-        ]).map(c => `<option value="${c.value}">${escapeHtml(c.label)}</option>`).join('');
+        ];
+        const categoryOptions = `<option value="" disabled selected>${t('common.select')}</option>`
+            + cats.map(c => `<option value="${c.value}">${escapeHtml(c.label)}</option>`).join('');
 
-        const intervalOptions = INTERVAL_OPTIONS.map(o =>
-            `<option value="${o.value}" ${o.value === 168 ? 'selected' : ''}>${o.label()}</option>`
-        ).join('');
+        const intervalOptions = `<option value="" disabled selected>${t('common.select')}</option>`
+            + INTERVAL_OPTIONS.map(o => `<option value="${o.value}">${o.label()}</option>`).join('');
 
         let html = `
             <div class="flex flex-wrap items-end gap-2 mb-4">
@@ -1140,9 +1141,10 @@ async function loadWatchedPages() {
                     <select id="watchedPageInterval" class="border rounded px-2 py-1.5 text-sm dark:bg-gray-700 dark:border-gray-600">${intervalOptions}</select>
                 </div>
                 <div>
-                    <label class="flex items-center gap-1.5 text-sm cursor-pointer pt-4" title="${t('sources.discoveryHint')}">
+                    <label class="flex items-center gap-1.5 text-sm cursor-pointer pt-4">
                         <input type="checkbox" id="watchedPageDiscovery">
-                        <span>${t('sources.discovery')}</span>
+                        <span>${t('sources.discoveryLabel')}</span>
+                        <span class="${tw.mutedText} text-xs cursor-help" title="${t('sources.discoveryHint')}">(?)</span>
                     </label>
                 </div>
                 <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.addWatchedPage()">${t('sources.addWatchedPage')}</button>
@@ -1235,9 +1237,12 @@ async function loadWatchedPages() {
 async function addWatchedPage() {
     const url = document.getElementById('watchedPageUrl')?.value?.trim();
     const category = document.getElementById('watchedPageCategory')?.value;
-    const interval = parseInt(document.getElementById('watchedPageInterval')?.value, 10);
+    const intervalRaw = document.getElementById('watchedPageInterval')?.value;
+    const interval = parseInt(intervalRaw, 10);
     const is_discovery = document.getElementById('watchedPageDiscovery')?.checked || false;
     if (!url) { showToast(t('sources.urlRequired'), 'error'); return; }
+    if (!category) { showToast(t('sources.categoryRequired'), 'error'); return; }
+    if (!intervalRaw) { showToast(t('sources.intervalRequired'), 'error'); return; }
 
     try {
         await api('/admin/scraper/watched-pages', {
@@ -1262,9 +1267,18 @@ async function updateWatchedInterval(pageId, interval) {
 
 async function scrapeWatchedNow(pageId) {
     try {
-        await api(`/admin/scraper/watched-pages/${pageId}/scrape-now`, { method: 'POST' });
-        showToast(t('sources.scrapeNowDispatched'));
-        setTimeout(() => loadWatchedPages(), 2000);
+        showToast(t('sources.scrapeNowRunning'), 'info');
+        const result = await api(`/admin/scraper/watched-pages/${pageId}/scrape-now`, { method: 'POST' });
+        // Show result summary
+        if (result.status === 'unchanged') {
+            showToast(t('sources.scrapeNowUnchanged'));
+        } else if (result.status === 'ok' && result.discovered !== undefined) {
+            // Discovery page result
+            showToast(t('sources.scrapeNowDiscoveryDone', {discovered: result.discovered, created: result.created || 0, updated: result.updated || 0}));
+        } else {
+            showToast(t('sources.scrapeNowDone', {status: result.status || 'ok'}));
+        }
+        loadWatchedPages();
     } catch (e) { showToast(t('sources.scrapeNowFailed', {error: e.message}), 'error'); }
 }
 
