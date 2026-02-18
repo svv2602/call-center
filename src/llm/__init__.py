@@ -1,7 +1,14 @@
 """Multi-provider LLM router with fallback and circuit breakers."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from src.llm.models import LLMResponse, LLMTask, ProviderType, ToolCall, Usage
 from src.llm.router import LLMRouter
+
+if TYPE_CHECKING:
+    pass
 
 __all__ = [
     "LLMResponse",
@@ -10,4 +17,20 @@ __all__ = [
     "ProviderType",
     "ToolCall",
     "Usage",
+    "get_router",
+    "set_router",
 ]
+
+# Shared router reference — avoids __main__ vs src.main module identity issue.
+_router_instance: LLMRouter | None = None
+
+
+def set_router(router: LLMRouter | None) -> None:
+    """Set the global LLM router instance (called from main at startup)."""
+    global _router_instance
+    _router_instance = router
+
+
+def get_router() -> LLMRouter | None:
+    """Get the global LLM router instance."""
+    return _router_instance

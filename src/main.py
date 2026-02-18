@@ -399,6 +399,11 @@ async def main() -> None:
             await _llm_router.initialize(redis=_redis)
             logger.info("LLM router initialized (multi-provider routing enabled)")
 
+            # Share router globally (avoids __main__ vs src.main module issue)
+            from src.llm import set_router
+
+            set_router(_llm_router)
+
             # Share router with Celery tasks
             from src.tasks.prompt_optimizer import set_llm_router as set_optimizer_router
             from src.tasks.quality_evaluator import set_llm_router as set_evaluator_router
@@ -522,6 +527,9 @@ async def main() -> None:
 
     if _llm_router is not None:
         await _llm_router.close()
+        from src.llm import set_router
+
+        set_router(None)
         logger.info("LLM router closed")
 
     if _store_client is not None:

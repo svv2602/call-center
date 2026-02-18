@@ -63,6 +63,9 @@
 |---|---|---|
 | Google Cloud | Service Account + JSON-ключ | [console.cloud.google.com](https://console.cloud.google.com) |
 | Anthropic | API-ключ | [console.anthropic.com](https://console.anthropic.com) |
+| OpenAI (опц.) | API-ключ | [platform.openai.com](https://platform.openai.com) |
+| DeepSeek (опц.) | API-ключ | [platform.deepseek.com](https://platform.deepseek.com) |
+| Google Gemini (опц.) | API-ключ | [aistudio.google.com](https://aistudio.google.com) |
 | Telegram | Bot token + Chat ID | Для алертов через Alertmanager |
 
 ---
@@ -281,6 +284,45 @@ SCRAPER_SCHEDULE_DAY_OF_WEEK=monday           # День запуска
 
 Управление скрапером — через админ-панель: Training → Sources (включение, модерация, ручной запуск).
 
+### LLM-роутинг (мультипровайдерный)
+
+Роутер позволяет направлять LLM-задачи на разные провайдеры (Anthropic, OpenAI, DeepSeek, Gemini) с автоматическим fallback при недоступности. Управление — через админ-панель: Система → Маршрутизация LLM.
+
+```bash
+FF_LLM_ROUTING_ENABLED=false            # Мастер-переключатель (false = прямой вызов Anthropic)
+
+# Дополнительные провайдеры (опционально, включаются в админке)
+# OPENAI_API_KEY=sk-...                 # Для GPT-4o / GPT-4o-mini
+# DEEPSEEK_API_KEY=sk-...               # Для DeepSeek Chat
+# GEMINI_API_KEY=AI...                   # Для Gemini Flash
+```
+
+**Как работает:**
+- При `FF_LLM_ROUTING_ENABLED=false` — все вызовы идут напрямую в Anthropic (как раньше)
+- При `FF_LLM_ROUTING_ENABLED=true` — роутер читает конфиг из Redis (`llm:routing_config`), маршрутизирует задачи по провайдерам, при отказе переключается на fallback
+- API-ключи **не хранятся в Redis** — только названия переменных окружения
+- Конфиг Redis задаётся через админ-панель или API: `PATCH /admin/llm/config`
+
+**4 типа задач:**
+
+| Задача | По умолчанию | Описание |
+|---|---|---|
+| `agent` | anthropic-sonnet | Основной диалог с клиентом |
+| `article_processor` | anthropic-haiku | Обработка статей скрапера |
+| `quality_scoring` | anthropic-haiku | Оценка качества звонков |
+| `prompt_optimizer` | anthropic-haiku | Анализ неудачных звонков |
+
+**6 провайдеров:**
+
+| Ключ | Тип | Модель | Env для ключа |
+|---|---|---|---|
+| `anthropic-sonnet` | anthropic | claude-sonnet-4-5 | `ANTHROPIC_API_KEY` |
+| `anthropic-haiku` | anthropic | claude-haiku-4-5 | `ANTHROPIC_API_KEY` |
+| `openai-gpt4o` | openai | gpt-4o | `OPENAI_API_KEY` |
+| `openai-gpt4o-mini` | openai | gpt-4o-mini | `OPENAI_API_KEY` |
+| `deepseek-chat` | deepseek | deepseek-chat | `DEEPSEEK_API_KEY` |
+| `gemini-flash` | gemini | gemini-2.0-flash | `GEMINI_API_KEY` |
+
 ### Мониторинг
 
 ```bash
@@ -329,8 +371,12 @@ BACKUP_RETENTION_DAYS=7
 
 # Feature flags
 # FF_STT_PROVIDER=google           # google | whisper
-# FF_LLM_ROUTING_ENABLED=false
+# FF_LLM_ROUTING_ENABLED=false     # true = мультипровайдерный LLM-роутинг (см. раздел выше)
 # FF_WHISPER_ROLLOUT_PERCENT=0
+
+# Дополнительные LLM-провайдеры (при FF_LLM_ROUTING_ENABLED=true)
+# DEEPSEEK_API_KEY=sk-...
+# GEMINI_API_KEY=AI...
 ```
 
 ### Генерация секретов
@@ -635,7 +681,7 @@ AudioSocket передаёт аудио в открытом виде (TCP без
 | Секрет | Периодичность |
 |---|---|
 | ARI-пароль | каждые 180 дней |
-| API-ключи (Anthropic, Google) | при компрометации |
+| API-ключи (Anthropic, Google, OpenAI, DeepSeek, Gemini) | при компрометации |
 | JWT-секрет | при компрометации |
 | Пароль PostgreSQL | каждые 365 дней |
 
@@ -907,7 +953,7 @@ asterisk -rx "dialplan show incoming"
 |---|---|---|
 | AudioSocket → STT | < 50ms | `callcenter_audiosocket_to_stt_ms` |
 | STT распознавание | 200–500ms | `callcenter_stt_latency_ms` |
-| LLM (TTFT) | 500–1000ms | `callcenter_llm_latency_ms` |
+| LLM (TTFT) | 500–1000ms | `callcenter_llm_latency_ms` / `callcenter_llm_provider_latency_ms` |
 | TTS синтез | 300–500ms | `callcenter_tts_latency_ms` |
 | TTS → AudioSocket | < 50ms | `callcenter_tts_delivery_ms` |
 | **Итого** | **< 2000ms** | `callcenter_total_response_latency_ms` |

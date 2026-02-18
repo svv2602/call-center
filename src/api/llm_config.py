@@ -111,13 +111,23 @@ async def update_llm_config(
     await redis.set(REDIS_CONFIG_KEY, json.dumps(config))
     logger.info("LLM routing config updated: %s", config)
 
+    # Hot-reload router if active
+    from src.llm import get_router
+
+    llm_router = get_router()
+    if llm_router is not None:
+        await llm_router.reload_config(redis=redis)
+        logger.info("LLM router reloaded with updated config")
+
     return {"message": "Config updated", "config": _merge_config(config)}
 
 
 @router.get("/providers")
 async def get_providers_health(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Get all providers with health status."""
-    from src.main import _llm_router
+    from src.llm import get_router as _get_llm_router
+
+    _llm_router = _get_llm_router()
 
     config = _merge_config({})
 
@@ -150,13 +160,25 @@ async def get_providers_health(_: dict[str, Any] = _admin_dep) -> dict[str, Any]
 @router.post("/providers/{key}/test")
 async def test_provider(key: str, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Send a test prompt to a specific provider and return latency."""
-    from src.main import _llm_router
+    from src.llm import get_router as _get_llm_router
+
+    _llm_router = _get_llm_router()
 
     if _llm_router is None:
-        raise HTTPException(status_code=400, detail="LLM routing is not enabled")
+        return {
+            "key": key,
+            "success": False,
+            "latency_ms": 0,
+            "error": "LLM routing is disabled (FF_LLM_ROUTING_ENABLED=false)",
+        }
 
     if key not in _llm_router.providers:
-        raise HTTPException(status_code=404, detail=f"Provider '{key}' not found or not enabled")
+        return {
+            "key": key,
+            "success": False,
+            "latency_ms": 0,
+            "error": f"Provider '{key}' not active — check API key and enabled flag",
+        }
 
     provider = _llm_router.providers[key]
 

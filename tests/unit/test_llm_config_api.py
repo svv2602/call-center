@@ -154,7 +154,7 @@ class TestGetProvidersHealth:
     async def test_returns_providers(self, app: Any) -> None:
         with (
             patch("src.api.auth.require_admin", _fake_require_admin),
-            patch("src.main._llm_router", None),
+            patch("src.llm._router_instance", None),
             patch.dict("os.environ", {"ANTHROPIC_API_KEY": "sk-test"}),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -176,13 +176,15 @@ class TestTestProvider:
     async def test_router_not_enabled(self, app: Any) -> None:
         with (
             patch("src.api.auth.require_admin", _fake_require_admin),
-            patch("src.main._llm_router", None),
+            patch("src.llm._router_instance", None),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.post("/admin/llm/providers/anthropic-sonnet/test")
 
-        assert response.status_code == 400
-        assert "not enabled" in response.json()["detail"]
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is False
+        assert "disabled" in data["error"]
 
     @pytest.mark.asyncio()
     async def test_provider_not_found(self, app: Any) -> None:
@@ -191,9 +193,12 @@ class TestTestProvider:
 
         with (
             patch("src.api.auth.require_admin", _fake_require_admin),
-            patch("src.main._llm_router", mock_router),
+            patch("src.llm._router_instance", mock_router),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.post("/admin/llm/providers/nonexistent/test")
 
-        assert response.status_code == 404
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is False
+        assert "not active" in data["error"]
