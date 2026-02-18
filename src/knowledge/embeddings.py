@@ -223,3 +223,89 @@ async def process_article(
         len(embeddings),
     )
     return len(chunks)
+
+
+async def generate_embeddings_inline(article_id: str) -> dict[str, Any]:
+    """Generate embeddings for a single article inline (no Celery needed).
+
+    Creates its own DB pool and embedding generator, suitable for calling
+    from API endpoints or scripts.
+
+    Returns:
+        Result dict with article_id, chunks count, and status.
+    """
+    import asyncpg
+
+    from src.config import get_settings
+
+    settings = get_settings()
+    api_key = settings.openai.api_key
+    if not api_key:
+        logger.warning("No OpenAI API key configured, skipping embeddings for %s", article_id)
+        return {"article_id": article_id, "status": "skipped", "reason": "no_api_key"}
+
+    model = settings.openai.embedding_model
+    dimensions = settings.openai.embedding_dimensions
+
+    db_url = settings.database.url.replace("+asyncpg", "")
+    pool = await asyncpg.create_pool(db_url)
+
+    try:
+        # Fetch article
+        async with pool.acquire() as conn:
+            row = await conn.fetchrow(
+                "SELECT id, title, content FROM knowledge_articles "
+                "WHERE id = $1 AND active = true",
+                uuid.UUID(article_id),
+            )
+
+        if not row:
+            logger.warning("Article %s not found or inactive, skipping embedding", article_id)
+            return {"article_id": article_id, "status": "skipped", "reason": "not_found"}
+
+        # Update status to processing
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE knowledge_articles SET embedding_status = 'processing' WHERE id = $1",
+                uuid.UUID(article_id),
+            )
+
+        generator = EmbeddingGenerator(api_key=api_key, model=model, dimensions=dimensions)
+        await generator.open()
+
+        try:
+            chunks_count = await process_article(
+                article_id=str(row["id"]),
+                title=row["title"],
+                content=row["content"],
+                pool=pool,
+                generator=generator,
+            )
+        finally:
+            await generator.close()
+
+        # Set status to indexed
+        async with pool.acquire() as conn:
+            await conn.execute(
+                "UPDATE knowledge_articles SET embedding_status = 'indexed' WHERE id = $1",
+                uuid.UUID(article_id),
+            )
+
+        logger.info("Inline embeddings for article %s: %d chunks", article_id, chunks_count)
+        return {"article_id": article_id, "chunks": chunks_count, "status": "indexed"}
+
+    except Exception:
+        # Set status to error
+        try:
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE knowledge_articles SET embedding_status = 'error' WHERE id = $1",
+                    uuid.UUID(article_id),
+                )
+        except Exception:
+            logger.exception("Failed to set error status for article %s", article_id)
+
+        logger.exception("Inline embedding generation failed for article %s", article_id)
+        return {"article_id": article_id, "status": "error"}
+    finally:
+        await pool.close()

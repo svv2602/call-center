@@ -380,7 +380,7 @@ async def create_source_config(
                     VALUES (:name, :source_type, :source_url, :language, :enabled,
                             :auto_approve, :request_delay, :max_articles_per_run,
                             :schedule_enabled, :schedule_hour, :schedule_day_of_week,
-                            :settings::jsonb)
+                            CAST(:settings AS jsonb))
                     RETURNING id
                 """),
                 {
@@ -444,7 +444,7 @@ async def update_source_config(
             params[field_name] = value
 
     if request.settings is not None:
-        updates.append("settings = :settings::jsonb")
+        updates.append("settings = CAST(:settings AS jsonb)")
         params["settings"] = json.dumps(request.settings)
 
     if not updates:
@@ -828,7 +828,7 @@ async def scrape_watched_page_now(
                     """),
                     {"id": source_id, "hash": new_hash},
                 )
-            _dispatch_embedding_best_effort(str(article_id))
+            await _generate_embedding_inline(str(article_id))
             return {"status": "updated", "article_id": str(article_id)}
         else:
             async with engine.begin() as conn:
@@ -860,7 +860,7 @@ async def scrape_watched_page_now(
                 )
 
             if new_article_id:
-                _dispatch_embedding_best_effort(new_article_id)
+                await _generate_embedding_inline(new_article_id)
             return {"status": "created", "article_id": new_article_id}
 
     finally:
@@ -1025,7 +1025,7 @@ async def _scrape_discovery_page_inline(
                         """),
                         {"id": child_id, "hash": new_hash},
                     )
-                _dispatch_embedding_best_effort(str(article_id))
+                await _generate_embedding_inline(str(article_id))
                 stats["updated"] += 1
             else:
                 async with engine.begin() as conn:
@@ -1056,7 +1056,7 @@ async def _scrape_discovery_page_inline(
                         {"id": child_id, "article_id": new_article_id, "hash": new_hash},
                     )
                 if new_article_id:
-                    _dispatch_embedding_best_effort(new_article_id)
+                    await _generate_embedding_inline(new_article_id)
                 stats["created"] += 1
 
         except Exception:
@@ -1074,11 +1074,12 @@ async def _scrape_discovery_page_inline(
     }
 
 
-def _dispatch_embedding_best_effort(article_id: str) -> None:
-    """Dispatch embedding generation (ignore failures — Celery may not be running)."""
+async def _generate_embedding_inline(article_id: str) -> dict[str, Any]:
+    """Generate embeddings inline (no Celery needed)."""
     try:
-        from src.tasks.embedding_tasks import generate_article_embeddings
+        from src.knowledge.embeddings import generate_embeddings_inline
 
-        generate_article_embeddings.delay(article_id)
+        return await generate_embeddings_inline(article_id)
     except Exception:
-        logger.debug("Could not dispatch embedding task for %s (Celery not running?)", article_id)
+        logger.warning("Inline embedding generation failed for %s", article_id, exc_info=True)
+        return {"article_id": article_id, "status": "error"}

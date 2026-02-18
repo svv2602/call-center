@@ -1332,7 +1332,7 @@ async def _update_source_config_run(
                     UPDATE content_source_configs
                     SET last_run_at = now(),
                         last_run_status = :status,
-                        last_run_stats = :stats::jsonb,
+                        last_run_stats = CAST(:stats AS jsonb),
                         updated_at = now()
                     WHERE id = :id
                 """),

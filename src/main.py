@@ -16,6 +16,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from redis.asyncio import Redis
+from sqlalchemy import text
 
 from src.agent.agent import LLMAgent, ToolRouter
 from src.agent.prompt_manager import PromptManager
@@ -116,6 +117,7 @@ _tts_engine: GoogleTTSEngine | None = None
 _onec_client: OneCClient | None = None
 _sync_service: CatalogSyncService | None = None
 _sync_task: asyncio.Task | None = None  # type: ignore[type-arg]
+_embedding_task: asyncio.Task | None = None  # type: ignore[type-arg]
 _db_engine: Any = None
 _llm_router: Any = None  # LLMRouter when FF_LLM_ROUTING_ENABLED=true
 
@@ -359,10 +361,61 @@ async def _periodic_sync(sync_service: CatalogSyncService, interval_minutes: int
             logger.exception("Periodic catalog sync failed")
 
 
+async def _periodic_embedding_check(interval_minutes: int = 5) -> None:
+    """Periodically check for articles with pending embeddings and generate them.
+
+    Runs inside the FastAPI process — no Celery worker needed.
+    """
+    from src.knowledge.embeddings import generate_embeddings_inline
+
+    # Wait a bit before first check (let the server start up)
+    await asyncio.sleep(30)
+
+    while True:
+        try:
+            from sqlalchemy.ext.asyncio import create_async_engine
+
+            settings = get_settings()
+            engine = create_async_engine(settings.database.url)
+
+            try:
+                async with engine.begin() as conn:
+                    result = await conn.execute(
+                        text("""
+                            SELECT id, title FROM knowledge_articles
+                            WHERE embedding_status = 'pending' AND active = true
+                            ORDER BY updated_at NULLS FIRST
+                            LIMIT 20
+                        """)
+                    )
+                    pending = [(str(row.id), row.title) for row in result]
+            finally:
+                await engine.dispose()
+
+            if pending:
+                logger.info("Embedding check: %d pending articles found", len(pending))
+                for article_id, title in pending:
+                    try:
+                        result = await generate_embeddings_inline(article_id)
+                        logger.info(
+                            "Embedding generated: %s (%s, %s chunks)",
+                            title, result["status"], result.get("chunks", "?"),
+                        )
+                    except Exception:
+                        logger.exception("Embedding failed for article %s", article_id)
+
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Periodic embedding check failed")
+
+        await asyncio.sleep(interval_minutes * 60)
+
+
 async def main() -> None:
     """Main application entry point."""
     global _audio_server, _redis, _store_client, _tts_engine
-    global _onec_client, _sync_service, _sync_task, _db_engine, _llm_router
+    global _onec_client, _sync_service, _sync_task, _embedding_task, _db_engine, _llm_router
 
     settings = get_settings()
 
@@ -505,6 +558,10 @@ async def main() -> None:
     # Start API server (health checks, metrics)
     api_task = asyncio.create_task(start_api_server(settings))
 
+    # Start periodic embedding check (generates embeddings for pending articles)
+    _embedding_task = asyncio.create_task(_periodic_embedding_check(interval_minutes=5))
+    logger.info("Periodic embedding check started (every 5 min)")
+
     logger.info(
         "Call Center AI started — AudioSocket:%d, API:%d",
         settings.audio_socket.port,
@@ -518,7 +575,13 @@ async def main() -> None:
     await _audio_server.stop()
     api_task.cancel()
 
-    # Cancel periodic sync
+    # Cancel periodic tasks
+    if _embedding_task is not None:
+        _embedding_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _embedding_task
+        logger.info("Periodic embedding check stopped")
+
     if _sync_task is not None:
         _sync_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
