@@ -260,7 +260,11 @@ class TestGetScraperConfig:
 
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(
-            return_value=json.dumps({"min_date": "2024-01-01", "dedup_llm_check": True})
+            return_value=json.dumps({
+                "min_date": "2024-01-01",
+                "max_date": "2024-12-31",
+                "dedup_llm_check": True,
+            })
         )
 
         mock_settings = MagicMock()
@@ -272,11 +276,13 @@ class TestGetScraperConfig:
         mock_settings.scraper.auto_approve = False
         mock_settings.scraper.llm_model = "claude-haiku-4-5-20251001"
         mock_settings.scraper.min_date = ""
+        mock_settings.scraper.max_date = ""
         mock_settings.scraper.dedup_llm_check = False
 
         config = await _get_scraper_config(mock_redis, mock_settings)
 
         assert config["min_date"] == "2024-01-01"
+        assert config["max_date"] == "2024-12-31"
         assert config["dedup_llm_check"] is True
 
     @pytest.mark.asyncio
@@ -295,9 +301,11 @@ class TestGetScraperConfig:
         mock_settings.scraper.auto_approve = False
         mock_settings.scraper.llm_model = "claude-haiku-4-5-20251001"
         mock_settings.scraper.min_date = ""
+        mock_settings.scraper.max_date = ""
         mock_settings.scraper.dedup_llm_check = False
 
         config = await _get_scraper_config(mock_redis, mock_settings)
 
         assert config["min_date"] == ""
+        assert config["max_date"] == ""
         assert config["dedup_llm_check"] is False

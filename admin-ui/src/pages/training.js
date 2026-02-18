@@ -743,6 +743,11 @@ async function loadSources() {
                     <input type="date" id="scraperMinDate" value="${escapeHtml(cfg.min_date || '')}" class="border rounded px-2 py-1 text-sm dark:bg-gray-700 dark:border-gray-600" onchange="window._pages.training.updateMinDate()">
                     <span class="${tw.mutedText} text-xs" title="${t('sources.minDateHint')}">?</span>
                 </label>
+                <label class="flex items-center gap-2 text-sm">
+                    <span>${t('sources.maxDate')}</span>
+                    <input type="date" id="scraperMaxDate" value="${escapeHtml(cfg.max_date || '')}" class="border rounded px-2 py-1 text-sm dark:bg-gray-700 dark:border-gray-600" onchange="window._pages.training.updateMaxDate()">
+                    <span class="${tw.mutedText} text-xs" title="${t('sources.maxDateHint')}">?</span>
+                </label>
                 <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.runScraperNow()">${t('sources.runNow')}</button>
                 <span class="${tw.mutedText} text-xs">${t('sources.schedule')}: ${cfg.schedule_day_of_week} ${cfg.schedule_hour}:00</span>
             </div>`;
@@ -823,6 +828,14 @@ async function updateMinDate() {
     } catch (e) { showToast(t('sources.configUpdateFailed', {error: e.message}), 'error'); }
 }
 
+async function updateMaxDate() {
+    const max_date = document.getElementById('scraperMaxDate').value || '';
+    try {
+        await api('/admin/scraper/config', { method: 'PATCH', body: JSON.stringify({ max_date }) });
+        showToast(t('sources.configUpdated'));
+    } catch (e) { showToast(t('sources.configUpdateFailed', {error: e.message}), 'error'); }
+}
+
 async function runScraperNow() {
     try {
         await api('/admin/scraper/run', { method: 'POST' });
@@ -883,6 +896,6 @@ window._pages.training = {
     // Tools
     loadTools, editToolOverride, saveToolOverride, resetToolOverride,
     // Sources (scraper)
-    loadSources, toggleScraperEnabled, toggleAutoApprove, toggleDedupLlm, updateMinDate,
+    loadSources, toggleScraperEnabled, toggleAutoApprove, toggleDedupLlm, updateMinDate, updateMaxDate,
     runScraperNow, approveSource, rejectSource, viewSourceArticle,
 };

@@ -189,6 +189,7 @@ class ScraperSettings(BaseSettings):
     schedule_hour: int = 6
     schedule_day_of_week: str = "monday"
     min_date: str = ""  # "YYYY-MM-DD" or empty; empty in scheduled mode = last 14 days
+    max_date: str = ""  # "YYYY-MM-DD" or empty; empty = today
     dedup_llm_check: bool = False  # Use LLM for borderline duplicate detection (0.80-0.90 sim)
 
     model_config = {"env_prefix": "SCRAPER_"}

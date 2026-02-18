@@ -483,7 +483,7 @@ class TestExtractArticleLinksWithDates:
         assert results[0]["published"] == ""
 
 
-# ─── min_date filtering ──────────────────────────────────────
+# ─── date range filtering ─────────────────────────────────────
 
 
 class TestDiscoverWithMinDate:
@@ -569,6 +569,70 @@ class TestDiscoverWithMinDate:
 
         results = await scraper.discover_article_urls(max_pages=1, min_date=None)
         assert len(results) == 1
+
+    @pytest.mark.asyncio
+    async def test_max_date_filters_newer_articles(self) -> None:
+        html = """<div>
+            <a href="/ua/info/new-article/" class="article-card">
+                <div class="article-date">10.02.2026</div>
+                <h2>Нова стаття — тестування</h2>
+            </a>
+            <a href="/ua/info/old-article/" class="article-card">
+                <div class="article-date">15.06.2024</div>
+                <h2>Стаття з 2024 року тест</h2>
+            </a>
+        </div>"""
+
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.text = AsyncMock(return_value=html)
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=AsyncContextManagerMock(mock_resp))
+
+        scraper = ProKolesoScraper(request_delay=0)
+        scraper._session = mock_session
+
+        results = await scraper.discover_article_urls(
+            max_pages=1, max_date=datetime.date(2024, 12, 31)
+        )
+        assert len(results) == 1
+        assert "old-article" in results[0]["url"]
+
+    @pytest.mark.asyncio
+    async def test_date_range_filters_both_ends(self) -> None:
+        html = """<div>
+            <a href="/ua/info/too-new/" class="article-card">
+                <div class="article-date">10.02.2026</div>
+                <h2>Занадто нова стаття тест</h2>
+            </a>
+            <a href="/ua/info/in-range/" class="article-card">
+                <div class="article-date">15.06.2024</div>
+                <h2>Стаття в діапазоні тест</h2>
+            </a>
+            <a href="/ua/info/too-old/" class="article-card">
+                <div class="article-date">01.01.2023</div>
+                <h2>Занадто стара стаття тест</h2>
+            </a>
+        </div>"""
+
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.text = AsyncMock(return_value=html)
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=AsyncContextManagerMock(mock_resp))
+
+        scraper = ProKolesoScraper(request_delay=0)
+        scraper._session = mock_session
+
+        results = await scraper.discover_article_urls(
+            max_pages=1,
+            min_date=datetime.date(2024, 1, 1),
+            max_date=datetime.date(2024, 12, 31),
+        )
+        assert len(results) == 1
+        assert "in-range" in results[0]["url"]
 
 
 # ─── Pagination URL fix ──────────────────────────────────────

@@ -52,6 +52,7 @@ class ScraperConfigUpdate(BaseModel):
     max_pages: int | None = None
     request_delay: float | None = None
     min_date: str | None = None
+    max_date: str | None = None
     dedup_llm_check: bool | None = None
 
 
@@ -76,6 +77,7 @@ async def get_scraper_config(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
             "schedule_hour": settings.scraper.schedule_hour,
             "schedule_day_of_week": settings.scraper.schedule_day_of_week,
             "min_date": redis_config.get("min_date", settings.scraper.min_date),
+            "max_date": redis_config.get("max_date", settings.scraper.max_date),
             "dedup_llm_check": redis_config.get("dedup_llm_check", settings.scraper.dedup_llm_check),
         }
     }
@@ -101,6 +103,8 @@ async def update_scraper_config(
         config["request_delay"] = request.request_delay
     if request.min_date is not None:
         config["min_date"] = request.min_date
+    if request.max_date is not None:
+        config["max_date"] = request.max_date
     if request.dedup_llm_check is not None:
         config["dedup_llm_check"] = request.dedup_llm_check
 

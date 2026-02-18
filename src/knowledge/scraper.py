@@ -106,6 +106,7 @@ class ProKolesoScraper:
         info_path: str = "/ua/info/",
         max_pages: int = 3,
         min_date: datetime.date | None = None,
+        max_date: datetime.date | None = None,
     ) -> list[dict[str, str]]:
         """Crawl listing pages and extract article URLs.
 
@@ -114,6 +115,7 @@ class ProKolesoScraper:
             max_pages: Maximum number of pages to crawl.
             min_date: If set, skip articles older than this date.
                 When all articles on a page are older, stop early.
+            max_date: If set, skip articles newer than this date.
 
         Returns list of {url, title, published} dicts.
         """
@@ -148,17 +150,22 @@ class ProKolesoScraper:
                 logger.info("No articles found on page %d, stopping", page)
                 break
 
-            # Apply min_date filter if set
+            # Apply date range filter if set
             all_too_old = True
             for item in page_articles:
                 url = item["url"]
                 if url in seen_urls:
                     continue
 
-                if min_date and item.get("published"):
+                pub_str = item.get("published")
+                if pub_str and (min_date or max_date):
                     try:
-                        pub = datetime.date.fromisoformat(item["published"])
-                        if pub < min_date:
+                        pub = datetime.date.fromisoformat(pub_str)
+                        if min_date and pub < min_date:
+                            continue
+                        if max_date and pub > max_date:
+                            # Too new — skip but don't trigger early-stop
+                            all_too_old = False
                             continue
                         all_too_old = False
                     except ValueError:

@@ -67,7 +67,7 @@ async def _run_scraper_async(task: Any) -> dict[str, Any]:
     await scraper.open()
 
     try:
-        # 1. Compute min_date
+        # 1. Compute date range
         min_date_str = config.get("min_date", "")
         min_date = None
         if min_date_str:
@@ -79,11 +79,21 @@ async def _run_scraper_async(task: Any) -> dict[str, Any]:
             # Scheduled mode: empty min_date → last 14 days
             min_date = datetime.date.today() - datetime.timedelta(days=14)
 
+        max_date_str = config.get("max_date", "")
+        max_date = None
+        if max_date_str:
+            try:
+                max_date = datetime.date.fromisoformat(max_date_str)
+            except ValueError:
+                logger.warning("Invalid max_date %r, ignoring", max_date_str)
+        # empty max_date → no upper limit (today by default via listing order)
+
         # 2. Discover article URLs
         discovered = await scraper.discover_article_urls(
             info_path=config["info_path"],
             max_pages=config["max_pages"],
             min_date=min_date,
+            max_date=max_date,
         )
         logger.info("Discovered %d article URLs", len(discovered))
 
@@ -348,6 +358,7 @@ async def _get_scraper_config(redis: Any, settings: Any) -> dict[str, Any]:
         "auto_approve": redis_config.get("auto_approve", settings.scraper.auto_approve),
         "llm_model": redis_config.get("llm_model", settings.scraper.llm_model),
         "min_date": redis_config.get("min_date", settings.scraper.min_date),
+        "max_date": redis_config.get("max_date", settings.scraper.max_date),
         "dedup_llm_check": redis_config.get("dedup_llm_check", settings.scraper.dedup_llm_check),
     }
 
