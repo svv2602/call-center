@@ -538,11 +538,13 @@ class WatchedPageCreate(BaseModel):
     url: str
     category: str = "general"
     rescrape_interval_hours: int = 168  # default: weekly
+    is_discovery: bool = False
 
 
 class WatchedPageUpdate(BaseModel):
     category: str | None = None
     rescrape_interval_hours: int | None = None
+    is_discovery: bool | None = None
 
 
 @router.get("/watched-pages")
@@ -555,13 +557,17 @@ async def list_watched_pages(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
             text("""
                 SELECT ks.id, ks.url, ks.article_id, ks.status,
                        ks.content_hash, ks.rescrape_interval_hours,
+                       COALESCE(ks.is_discovery, false) AS is_discovery,
+                       ks.parent_id,
                        ks.fetched_at, ks.next_scrape_at, ks.created_at,
                        ka.title AS article_title, ka.category AS article_category,
-                       ka.active AS article_active
+                       ka.active AS article_active,
+                       (SELECT COUNT(*) FROM knowledge_sources ch
+                        WHERE ch.parent_id = ks.id) AS child_count
                 FROM knowledge_sources ks
                 LEFT JOIN knowledge_articles ka ON ka.id = ks.article_id
                 WHERE ks.source_type = 'watched_page'
-                ORDER BY ks.created_at
+                ORDER BY ks.parent_id NULLS FIRST, ks.created_at
             """)
         )
         pages = [dict(row._mapping) for row in result]
@@ -594,12 +600,12 @@ async def add_watched_page(
                 text("""
                     INSERT INTO knowledge_sources
                         (url, source_site, source_type, status, rescrape_interval_hours,
-                         original_title, next_scrape_at)
+                         original_title, next_scrape_at, is_discovery)
                     VALUES (:url, 'prokoleso.ua', 'watched_page', 'new',
-                            :interval, :url, now())
+                            :interval, :url, now(), :is_discovery)
                     RETURNING id
                 """),
-                {"url": url, "interval": interval},
+                {"url": url, "interval": interval, "is_discovery": request.is_discovery},
             )
             row = result.first()
             page_id = str(row.id) if row else None
@@ -642,6 +648,16 @@ async def update_watched_page(
                 {"id": str(page_id), "interval": request.rescrape_interval_hours},
             )
 
+        if request.is_discovery is not None:
+            await conn.execute(
+                text("""
+                    UPDATE knowledge_sources
+                    SET is_discovery = :is_discovery
+                    WHERE id = :id
+                """),
+                {"id": str(page_id), "is_discovery": request.is_discovery},
+            )
+
         if request.category is not None:
             category = request.category.strip().lower()
             if category not in _VALID_CATEGORIES:
@@ -661,7 +677,7 @@ async def update_watched_page(
 
 @router.delete("/watched-pages/{page_id}")
 async def delete_watched_page(page_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
-    """Remove a watched page. Linked article is kept but no longer auto-updated."""
+    """Remove a watched page. Children are cascade-deleted (FK). Linked articles are kept."""
     engine = await _get_engine()
 
     async with engine.begin() as conn:

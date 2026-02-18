@@ -1139,25 +1139,38 @@ async function loadWatchedPages() {
                     <label class="block text-xs ${tw.mutedText} mb-1">${t('sources.watchedInterval')}</label>
                     <select id="watchedPageInterval" class="border rounded px-2 py-1.5 text-sm dark:bg-gray-700 dark:border-gray-600">${intervalOptions}</select>
                 </div>
+                <div>
+                    <label class="flex items-center gap-1.5 text-sm cursor-pointer pt-4" title="${t('sources.discoveryHint')}">
+                        <input type="checkbox" id="watchedPageDiscovery">
+                        <span>${t('sources.discovery')}</span>
+                    </label>
+                </div>
                 <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.addWatchedPage()">${t('sources.addWatchedPage')}</button>
             </div>`;
 
         if (pages.length === 0) {
             html += `<div class="${tw.emptyState}">${t('sources.noWatchedPages')}</div>`;
         } else {
-            html += `
-            <div class="overflow-x-auto"><table class="${tw.table}" id="watchedPagesTable"><thead><tr>
-                <th class="${tw.th}">${t('sources.watchedUrl')}</th>
-                <th class="${tw.th}">${t('sources.watchedCategory')}</th>
-                <th class="${tw.th}">${t('sources.watchedInterval')}</th>
-                <th class="${tw.th}">${t('sources.watchedStatus')}</th>
-                <th class="${tw.th}">${t('sources.watchedLastScraped')}</th>
-                <th class="${tw.th}">${t('sources.watchedNextScrape')}</th>
-                <th class="${tw.th}">${t('sources.watchedActions')}</th>
-            </tr></thead><tbody>
-            ${pages.map(p => `
+            // Separate parent and child pages
+            const parentPages = pages.filter(p => !p.parent_id);
+            const childPages = pages.filter(p => p.parent_id);
+            const childrenByParent = {};
+            for (const c of childPages) {
+                const pid = c.parent_id;
+                if (!childrenByParent[pid]) childrenByParent[pid] = [];
+                childrenByParent[pid].push(c);
+            }
+
+            let rows = '';
+            for (const p of parentPages) {
+                const isDiscovery = p.is_discovery;
+                const children = childrenByParent[p.id] || [];
+                rows += `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}"><a href="${escapeHtml(p.url)}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline text-xs">${escapeHtml((p.url || '').replace(/^https?:\/\//, '').substring(0, 50))}</a></td>
+                    <td class="${tw.td}">
+                        <a href="${escapeHtml(p.url)}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline text-xs">${escapeHtml((p.url || '').replace(/^https?:\/\//, '').substring(0, 50))}</a>
+                        ${isDiscovery ? `<br><span class="${tw.badgeYellow} text-xs">${t('sources.discoveryBadge')}</span> <span class="${tw.mutedText} text-xs">${t('sources.childCount', {count: p.child_count || 0})}</span>` : ''}
+                    </td>
                     <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(p.article_category || '-')}</span></td>
                     <td class="${tw.td}">
                         <select class="border rounded px-1 py-0.5 text-xs dark:bg-gray-700 dark:border-gray-600"
@@ -1170,13 +1183,45 @@ async function loadWatchedPages() {
                     <td class="${tw.td}">${p.next_scrape_at ? formatDate(p.next_scrape_at) : '-'}</td>
                     <td class="${tw.td}">
                         <div class="flex flex-wrap gap-1">
-                            ${p.article_id ? `<button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.viewSourceArticle('${p.article_id}')">${t('sources.watchedArticle')}</button>` : ''}
+                            ${!isDiscovery && p.article_id ? `<button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.viewSourceArticle('${p.article_id}')">${t('sources.watchedArticle')}</button>` : ''}
                             <button class="${tw.btnGreen} ${tw.btnSm}" onclick="window._pages.training.scrapeWatchedNow('${p.id}')">${t('sources.scrapeNow')}</button>
                             <button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.training.deleteWatchedPage('${p.id}')">${t('sources.deleteWatched')}</button>
                         </div>
                     </td>
-                </tr>
-            `).join('')}
+                </tr>`;
+                // Render children indented
+                for (const c of children) {
+                    rows += `
+                    <tr class="${tw.trHover} opacity-80">
+                        <td class="${tw.td} pl-8">
+                            <span class="${tw.mutedText}">↳</span>
+                            <a href="${escapeHtml(c.url)}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline text-xs">${escapeHtml((c.url || '').replace(/^https?:\/\//, '').substring(0, 50))}</a>
+                        </td>
+                        <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(c.article_category || '-')}</span></td>
+                        <td class="${tw.td}"><span class="text-xs">${intervalLabel(c.rescrape_interval_hours)}</span></td>
+                        <td class="${tw.td}">${sourceStatusBadge(c.status)}</td>
+                        <td class="${tw.td}">${c.fetched_at ? formatDate(c.fetched_at) : `<span class="${tw.mutedText} text-xs">${t('sources.neverScraped')}</span>`}</td>
+                        <td class="${tw.td}">${c.next_scrape_at ? formatDate(c.next_scrape_at) : '-'}</td>
+                        <td class="${tw.td}">
+                            <div class="flex flex-wrap gap-1">
+                                ${c.article_id ? `<button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.viewSourceArticle('${c.article_id}')">${t('sources.watchedArticle')}</button>` : ''}
+                            </div>
+                        </td>
+                    </tr>`;
+                }
+            }
+
+            html += `
+            <div class="overflow-x-auto"><table class="${tw.table}" id="watchedPagesTable"><thead><tr>
+                <th class="${tw.th}">${t('sources.watchedUrl')}</th>
+                <th class="${tw.th}">${t('sources.watchedCategory')}</th>
+                <th class="${tw.th}">${t('sources.watchedInterval')}</th>
+                <th class="${tw.th}">${t('sources.watchedStatus')}</th>
+                <th class="${tw.th}">${t('sources.watchedLastScraped')}</th>
+                <th class="${tw.th}">${t('sources.watchedNextScrape')}</th>
+                <th class="${tw.th}">${t('sources.watchedActions')}</th>
+            </tr></thead><tbody>
+            ${rows}
             </tbody></table></div>`;
         }
 
@@ -1191,12 +1236,13 @@ async function addWatchedPage() {
     const url = document.getElementById('watchedPageUrl')?.value?.trim();
     const category = document.getElementById('watchedPageCategory')?.value;
     const interval = parseInt(document.getElementById('watchedPageInterval')?.value, 10);
+    const is_discovery = document.getElementById('watchedPageDiscovery')?.checked || false;
     if (!url) { showToast(t('sources.urlRequired'), 'error'); return; }
 
     try {
         await api('/admin/scraper/watched-pages', {
             method: 'POST',
-            body: JSON.stringify({ url, category, rescrape_interval_hours: interval }),
+            body: JSON.stringify({ url, category, rescrape_interval_hours: interval, is_discovery }),
         });
         showToast(t('sources.watchedPageAdded'));
         document.getElementById('watchedPageUrl').value = '';

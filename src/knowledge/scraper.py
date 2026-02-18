@@ -250,6 +250,54 @@ class ProKolesoScraper:
 
         return results
 
+    async def discover_page_links(self, url: str) -> list[str]:
+        """Discover sub-page links from a listing/discovery page.
+
+        Fetches the page and extracts all internal links that are sub-paths
+        of the given URL (e.g. /promotions/ → /promotions/some-promo/).
+
+        Returns list of absolute URLs.
+        """
+        assert self._session is not None, "Call open() before using the scraper"
+
+        try:
+            async with self._session.get(url) as resp:
+                if resp.status != 200:
+                    logger.warning("Discovery page %s returned %d", url, resp.status)
+                    return []
+                html = await resp.text()
+        except Exception:
+            logger.exception("Failed to fetch discovery page %s", url)
+            return []
+
+        soup = BeautifulSoup(html, "lxml")
+        # Look for content in main or body
+        content_el = soup.find("main") or soup.find("body")
+        if content_el is None:
+            return []
+
+        # Normalize base path for matching
+        base_path = url.rstrip("/")
+        links: list[str] = []
+        seen: set[str] = set()
+
+        for a_tag in content_el.find_all("a", href=True):
+            href = a_tag["href"]
+            # Build absolute URL
+            abs_url = href if href.startswith("http") else urljoin(self._base_url, href)
+            abs_url = abs_url.rstrip("/")
+
+            # Must be a sub-path of the discovery page (not the page itself)
+            if abs_url == base_path or not abs_url.startswith(base_path + "/"):
+                continue
+            if abs_url in seen:
+                continue
+            seen.add(abs_url)
+            links.append(abs_url + "/")
+
+        logger.info("Discovery page %s: found %d sub-page links", url, len(links))
+        return links
+
     async def fetch_article(self, url: str, published: str | None = None) -> ScrapedArticle | None:
         """Fetch and parse a single article page."""
         assert self._session is not None, "Call open() before using the scraper"
@@ -287,12 +335,13 @@ class ProKolesoScraper:
         for tag in soup.find_all(["script", "style", "nav", "footer", "iframe", "noscript"]):
             tag.decompose()
 
-        # Try to find the main content area
+        # Try to find the main content area (order matters: specific → generic)
         content_el = (
             soup.find(id="article-content")
+            or soup.find(id="page-content")
             or soup.find("article")
-            or soup.find(class_=re.compile(r"article|post|content|entry", re.IGNORECASE))
             or soup.find("main")
+            or soup.find(class_=re.compile(r"article|post|content|entry", re.IGNORECASE))
         )
 
         # Extract title
@@ -313,14 +362,25 @@ class ProKolesoScraper:
         ):
             promo.decompose()
 
-        # Remove product cards/links
+        # Remove product cards/links (specific patterns to avoid removing useful content)
         for product in content_el.find_all(
-            class_=re.compile(r"product|buy|cart|price|shop", re.IGNORECASE)
+            class_=re.compile(
+                r"product-card|add-to-cart|shopping-cart|buy-button|price-tag|shop-widget",
+                re.IGNORECASE,
+            )
         ):
             product.decompose()
 
         # Convert to markdown-like text
         text = self._html_to_markdown(content_el)
+
+        # Fallback: if markdown extraction yields too little but raw text is substantial,
+        # use plain text extraction (handles div-heavy pages like promotions)
+        if len(text.strip()) < 100:
+            raw_text = content_el.get_text(separator="\n", strip=True)
+            if len(raw_text) >= 100:
+                text = raw_text
+
         return title, text
 
     def _html_to_markdown(self, el: BeautifulSoup) -> str:

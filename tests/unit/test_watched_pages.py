@@ -307,3 +307,120 @@ class TestRescrapeWatchedPages:
 
         assert result["unchanged"] == 1
         assert result["updated"] == 0
+
+
+# ─── Discovery page tests ──────────────────────────────────
+
+
+class TestDiscoverPageLinks:
+    """Test the discover_page_links method."""
+
+    @pytest.mark.asyncio
+    async def test_discover_sub_page_links(self) -> None:
+        """discover_page_links should find sub-path links."""
+        from src.knowledge.scraper import ProKolesoScraper
+
+        html = """
+        <html><body><main>
+            <a href="/ua/promotions/promo-1/">Promo 1</a>
+            <a href="/ua/promotions/promo-2/">Promo 2</a>
+            <a href="/ua/promotions/">Self link</a>
+            <a href="/ua/other/">Other section</a>
+        </main></body></html>
+        """
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.text = AsyncMock(return_value=html)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=mock_response)
+
+        scraper = ProKolesoScraper(base_url="https://prokoleso.ua")
+        scraper._session = mock_session
+
+        links = await scraper.discover_page_links("https://prokoleso.ua/ua/promotions/")
+        assert len(links) == 2
+        assert "https://prokoleso.ua/ua/promotions/promo-1/" in links
+        assert "https://prokoleso.ua/ua/promotions/promo-2/" in links
+
+    @pytest.mark.asyncio
+    async def test_discover_empty_page(self) -> None:
+        """discover_page_links with no sub-links returns empty list."""
+        from src.knowledge.scraper import ProKolesoScraper
+
+        html = "<html><body><main><p>No links here</p></main></body></html>"
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.text = AsyncMock(return_value=html)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=mock_response)
+
+        scraper = ProKolesoScraper(base_url="https://prokoleso.ua")
+        scraper._session = mock_session
+
+        links = await scraper.discover_page_links("https://prokoleso.ua/ua/promotions/")
+        assert links == []
+
+    @pytest.mark.asyncio
+    async def test_discover_deduplicates(self) -> None:
+        """discover_page_links should deduplicate links."""
+        from src.knowledge.scraper import ProKolesoScraper
+
+        html = """
+        <html><body><main>
+            <a href="/ua/promotions/promo-1/">Link 1</a>
+            <a href="/ua/promotions/promo-1/">Link 1 again</a>
+            <a href="/ua/promotions/promo-1">Without trailing slash</a>
+        </main></body></html>
+        """
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.text = AsyncMock(return_value=html)
+        mock_response.__aenter__ = AsyncMock(return_value=mock_response)
+        mock_response.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(return_value=mock_response)
+
+        scraper = ProKolesoScraper(base_url="https://prokoleso.ua")
+        scraper._session = mock_session
+
+        links = await scraper.discover_page_links("https://prokoleso.ua/ua/promotions/")
+        # All three resolve to same abs_url after rstrip("/")
+        assert len(links) == 1
+
+
+class TestDiscoveryModeAPI:
+    """Test API model support for discovery mode."""
+
+    def test_watched_page_create_discovery_default(self) -> None:
+        from src.api.scraper import WatchedPageCreate
+
+        request = WatchedPageCreate(url="https://example.com")
+        assert request.is_discovery is False
+
+    def test_watched_page_create_with_discovery(self) -> None:
+        from src.api.scraper import WatchedPageCreate
+
+        request = WatchedPageCreate(url="https://example.com", is_discovery=True)
+        assert request.is_discovery is True
+
+    def test_watched_page_update_discovery(self) -> None:
+        from src.api.scraper import WatchedPageUpdate
+
+        update = WatchedPageUpdate(is_discovery=True)
+        assert update.is_discovery is True
+
+    def test_watched_page_update_no_discovery(self) -> None:
+        from src.api.scraper import WatchedPageUpdate
+
+        update = WatchedPageUpdate(category="general")
+        assert update.is_discovery is None

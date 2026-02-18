@@ -530,13 +530,15 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
 
     stats: dict[str, int] = {"checked": 0, "updated": 0, "unchanged": 0, "errors": 0}
 
-    # Find watched pages due for rescraping
+    # Find watched pages due for rescraping (exclude children of discovery pages — they are handled by parent)
     async with engine.begin() as conn:
         result = await conn.execute(
             text("""
-                SELECT id, url, article_id, content_hash, rescrape_interval_hours
+                SELECT id, url, article_id, content_hash, rescrape_interval_hours,
+                       COALESCE(is_discovery, false) AS is_discovery
                 FROM knowledge_sources
                 WHERE source_type = 'watched_page'
+                  AND parent_id IS NULL
                   AND (next_scrape_at IS NULL OR next_scrape_at <= now())
                 ORDER BY next_scrape_at NULLS FIRST
             """)
@@ -562,6 +564,17 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
             page_url = page["url"]
             source_id = str(page["id"])
             interval = page["rescrape_interval_hours"] or 168
+
+            # Discovery pages: discover child links and process each as a separate watched page
+            if page.get("is_discovery"):
+                try:
+                    await _handle_discovery_page(
+                        scraper, engine, settings, config, page, stats
+                    )
+                except Exception:
+                    logger.exception("Error processing discovery page %s", page_url)
+                    stats["errors"] += 1
+                continue
 
             try:
                 scraped = await scraper.fetch_article(page_url)
@@ -706,6 +719,256 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
 
     logger.info("Watched pages rescrape finished: %s", stats)
     return {"status": "ok", **stats}
+
+
+# ─── Discovery page helper ──────────────────────────────────
+
+
+async def _handle_discovery_page(
+    scraper: Any,
+    engine: Any,
+    settings: Any,
+    config: dict[str, Any],
+    page: dict[str, Any],
+    stats: dict[str, int],
+) -> None:
+    """Handle a discovery-mode watched page.
+
+    Discovers child page links, creates watched page entries for new ones,
+    removes stale children (links no longer on the parent), then scrapes each child.
+    """
+    import asyncio
+
+    from src.knowledge.article_processor import process_article
+    from src.knowledge.scraper import content_hash
+
+    page_url = page["url"]
+    source_id = str(page["id"])
+    interval = page["rescrape_interval_hours"] or 168
+
+    logger.info("Discovery page %s: discovering child links", page_url)
+    discovered_links = await scraper.discover_page_links(page_url)
+    logger.info("Discovery page %s: found %d child links", page_url, len(discovered_links))
+
+    # Update parent's next_scrape_at and fetched_at
+    async with engine.begin() as conn:
+        await conn.execute(
+            text("""
+                UPDATE knowledge_sources
+                SET fetched_at = now(),
+                    next_scrape_at = now() + make_interval(hours => :interval)
+                WHERE id = :id::uuid
+            """),
+            {"id": source_id, "interval": interval},
+        )
+
+    # Get existing children
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                SELECT id, url, article_id, content_hash, rescrape_interval_hours
+                FROM knowledge_sources
+                WHERE parent_id = :parent_id::uuid
+            """),
+            {"parent_id": source_id},
+        )
+        existing_children = {row.url: dict(row._mapping) for row in result}
+
+    # Normalize discovered URLs for comparison
+    discovered_set = set(discovered_links)
+
+    # Remove stale children (no longer on parent page)
+    stale_urls = set(existing_children.keys()) - discovered_set
+    for stale_url in stale_urls:
+        child = existing_children[stale_url]
+        logger.info("Discovery page %s: removing stale child %s", page_url, stale_url)
+        async with engine.begin() as conn:
+            # Deactivate the linked article if any
+            if child["article_id"]:
+                await conn.execute(
+                    text("""
+                        UPDATE knowledge_articles
+                        SET active = false, updated_at = now()
+                        WHERE id = :article_id::uuid
+                    """),
+                    {"article_id": str(child["article_id"])},
+                )
+            await conn.execute(
+                text("DELETE FROM knowledge_sources WHERE id = :id::uuid"),
+                {"id": str(child["id"])},
+            )
+
+    # Create new children
+    new_urls = discovered_set - set(existing_children.keys())
+    for child_url in new_urls:
+        logger.info("Discovery page %s: adding new child %s", page_url, child_url)
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("""
+                    INSERT INTO knowledge_sources
+                        (url, source_site, source_type, status, rescrape_interval_hours,
+                         original_title, parent_id, next_scrape_at)
+                    VALUES (:url, 'prokoleso.ua', 'watched_page', 'new',
+                            :interval, :url, :parent_id::uuid, now())
+                    ON CONFLICT (url) DO NOTHING
+                """),
+                {"url": child_url, "interval": interval, "parent_id": source_id},
+            )
+
+    # Now scrape all current children (new + existing that are due)
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                SELECT id, url, article_id, content_hash, rescrape_interval_hours
+                FROM knowledge_sources
+                WHERE parent_id = :parent_id::uuid
+                  AND (next_scrape_at IS NULL OR next_scrape_at <= now())
+            """),
+            {"parent_id": source_id},
+        )
+        children_to_scrape = [dict(row._mapping) for row in result]
+
+    logger.info(
+        "Discovery page %s: %d children to scrape", page_url, len(children_to_scrape)
+    )
+
+    for child in children_to_scrape:
+        child_url = child["url"]
+        child_id = str(child["id"])
+        child_interval = child["rescrape_interval_hours"] or interval
+
+        try:
+            scraped = await scraper.fetch_article(child_url)
+            if scraped is None:
+                logger.warning("Failed to fetch child page %s", child_url)
+                async with engine.begin() as conn:
+                    await conn.execute(
+                        text("""
+                            UPDATE knowledge_sources
+                            SET next_scrape_at = now() + make_interval(hours => :interval),
+                                fetched_at = now()
+                            WHERE id = :id::uuid
+                        """),
+                        {"id": child_id, "interval": child_interval},
+                    )
+                stats["errors"] += 1
+                continue
+
+            new_hash = content_hash(scraped.content)
+            old_hash = child["content_hash"]
+
+            # Update fetch timestamp and schedule
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text("""
+                        UPDATE knowledge_sources
+                        SET fetched_at = now(),
+                            next_scrape_at = now() + make_interval(hours => :interval)
+                        WHERE id = :id::uuid
+                    """),
+                    {"id": child_id, "interval": child_interval},
+                )
+
+            if old_hash and new_hash == old_hash:
+                logger.info("Child page %s unchanged (hash match)", child_url)
+                stats["unchanged"] += 1
+                continue
+
+            # Content changed — process through LLM
+            logger.info("Child page %s content changed, processing", child_url)
+            processed = await process_article(
+                title=scraped.title,
+                content=scraped.content,
+                source_url=child_url,
+                api_key=settings.anthropic.api_key,
+                model=config["llm_model"],
+            )
+
+            if not processed.is_useful:
+                logger.info("Child page %s not useful: %s", child_url, processed.skip_reason)
+                async with engine.begin() as conn:
+                    await conn.execute(
+                        text("""
+                            UPDATE knowledge_sources
+                            SET content_hash = :hash, processed_at = now()
+                            WHERE id = :id::uuid
+                        """),
+                        {"id": child_id, "hash": new_hash},
+                    )
+                stats["unchanged"] += 1
+                continue
+
+            article_id = child["article_id"]
+
+            if article_id:
+                # Update existing article
+                async with engine.begin() as conn:
+                    await conn.execute(
+                        text("""
+                            UPDATE knowledge_articles
+                            SET title = :title, category = :category, content = :content,
+                                embedding_status = 'pending', updated_at = now()
+                            WHERE id = :article_id::uuid
+                        """),
+                        {
+                            "article_id": str(article_id),
+                            "title": processed.title,
+                            "category": processed.category,
+                            "content": processed.content,
+                        },
+                    )
+                async with engine.begin() as conn:
+                    await conn.execute(
+                        text("""
+                            UPDATE knowledge_sources
+                            SET content_hash = :hash, status = 'processed', processed_at = now()
+                            WHERE id = :id::uuid
+                        """),
+                        {"id": child_id, "hash": new_hash},
+                    )
+                _dispatch_embedding(str(article_id))
+            else:
+                # Create new article
+                async with engine.begin() as conn:
+                    result = await conn.execute(
+                        text("""
+                            INSERT INTO knowledge_articles
+                                (title, category, content, active, embedding_status)
+                            VALUES (:title, :category, :content, true, 'pending')
+                            RETURNING id
+                        """),
+                        {
+                            "title": processed.title,
+                            "category": processed.category,
+                            "content": processed.content,
+                        },
+                    )
+                    article_row = result.first()
+                    new_article_id = str(article_row.id) if article_row else None
+
+                async with engine.begin() as conn:
+                    await conn.execute(
+                        text("""
+                            UPDATE knowledge_sources
+                            SET article_id = :article_id::uuid, content_hash = :hash,
+                                status = 'processed', processed_at = now()
+                            WHERE id = :id::uuid
+                        """),
+                        {"id": child_id, "article_id": new_article_id, "hash": new_hash},
+                    )
+
+                if new_article_id:
+                    _dispatch_embedding(new_article_id)
+
+            stats["updated"] += 1
+            logger.info("Processed child page: %s", child_url)
+
+        except Exception:
+            logger.exception("Error scraping child page %s", child_url)
+            stats["errors"] += 1
+
+        # Be polite between child page fetches
+        await asyncio.sleep(config.get("request_delay", 2.0))
 
 
 # ─── Multi-source scraping ───────────────────────────────────
