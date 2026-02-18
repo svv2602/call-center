@@ -6,6 +6,7 @@ Supports both scheduled (Celery Beat) and manual trigger from admin UI.
 
 from __future__ import annotations
 
+import datetime
 import logging
 from typing import Any
 
@@ -66,10 +67,23 @@ async def _run_scraper_async(task: Any) -> dict[str, Any]:
     await scraper.open()
 
     try:
-        # 1. Discover article URLs
+        # 1. Compute min_date
+        min_date_str = config.get("min_date", "")
+        min_date = None
+        if min_date_str:
+            try:
+                min_date = datetime.date.fromisoformat(min_date_str)
+            except ValueError:
+                logger.warning("Invalid min_date %r, ignoring", min_date_str)
+        elif not min_date_str:
+            # Scheduled mode: empty min_date → last 14 days
+            min_date = datetime.date.today() - datetime.timedelta(days=14)
+
+        # 2. Discover article URLs
         discovered = await scraper.discover_article_urls(
             info_path=config["info_path"],
             max_pages=config["max_pages"],
+            min_date=min_date,
         )
         logger.info("Discovered %d article URLs", len(discovered))
 
@@ -109,7 +123,7 @@ async def _run_scraper_async(task: Any) -> dict[str, Any]:
                     )
 
                 # Fetch article
-                scraped = await scraper.fetch_article(url)
+                scraped = await scraper.fetch_article(url, published=item.get("published"))
                 if scraped is None:
                     await _update_source_status(engine, url, "error", skip_reason="Fetch failed")
                     stats["errors"] += 1
@@ -144,6 +158,36 @@ async def _run_scraper_async(task: Any) -> dict[str, Any]:
                     )
                     stats["skipped"] += 1
                     logger.info("Skipped article %s: %s", url, processed.skip_reason)
+                    continue
+
+                # Semantic dedup check
+                dedup_result = await _check_duplicate(
+                    engine,
+                    processed.content,
+                    settings,
+                    dedup_llm_check=config.get("dedup_llm_check", False),
+                )
+                if dedup_result["status"] == "duplicate":
+                    await _update_source_status(
+                        engine,
+                        url,
+                        "duplicate",
+                        skip_reason=f"Duplicate of: {dedup_result.get('similar_title', 'unknown')} "
+                        f"(sim={dedup_result.get('similarity', 0):.2f})",
+                    )
+                    stats["skipped"] += 1
+                    logger.info("Duplicate article %s (sim=%.2f)", url, dedup_result.get("similarity", 0))
+                    continue
+                if dedup_result["status"] == "suspect":
+                    await _update_source_status(
+                        engine,
+                        url,
+                        "duplicate_suspect",
+                        skip_reason=f"Possible duplicate of: {dedup_result.get('similar_title', 'unknown')} "
+                        f"(sim={dedup_result.get('similarity', 0):.2f})",
+                    )
+                    stats["skipped"] += 1
+                    logger.info("Suspect duplicate %s (sim=%.2f)", url, dedup_result.get("similarity", 0))
                     continue
 
                 # Insert into knowledge_articles
@@ -303,6 +347,8 @@ async def _get_scraper_config(redis: Any, settings: Any) -> dict[str, Any]:
         "request_delay": redis_config.get("request_delay", settings.scraper.request_delay),
         "auto_approve": redis_config.get("auto_approve", settings.scraper.auto_approve),
         "llm_model": redis_config.get("llm_model", settings.scraper.llm_model),
+        "min_date": redis_config.get("min_date", settings.scraper.min_date),
+        "dedup_llm_check": redis_config.get("dedup_llm_check", settings.scraper.dedup_llm_check),
     }
 
 
@@ -319,6 +365,81 @@ async def _update_source_status(
             """),
             {"url": url, "status": status, "skip_reason": skip_reason},
         )
+
+
+async def _check_duplicate(
+    engine: Any,
+    content: str,
+    settings: Any,
+    *,
+    dedup_llm_check: bool = False,
+) -> dict[str, Any]:
+    """Check if content is a semantic duplicate of existing articles.
+
+    Uses pgvector cosine similarity on article embeddings.
+
+    Returns:
+        {"status": "new"} — not a duplicate
+        {"status": "duplicate", "similar_title": ..., "similarity": ...} — auto-skip
+        {"status": "suspect", "similar_title": ..., "similarity": ...} — needs review
+    """
+    try:
+        from src.knowledge.embeddings import EmbeddingGenerator
+
+        api_key = settings.openai.api_key
+        if not api_key:
+            return {"status": "new"}
+
+        model = settings.openai.embedding_model
+        dimensions = settings.openai.embedding_dimensions
+
+        generator = EmbeddingGenerator(api_key=api_key, model=model, dimensions=dimensions)
+        await generator.open()
+        try:
+            vectors = await generator.generate([content[:2000]])  # First 2000 chars
+            if not vectors or not vectors[0]:
+                return {"status": "new"}
+            embedding = vectors[0]
+        finally:
+            await generator.close()
+
+        # Query pgvector for most similar article
+        vec_str = "[" + ",".join(str(v) for v in embedding) + "]"
+
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                text("""
+                    SELECT ka.title, 1 - (ke.embedding <=> :vec::vector) AS similarity
+                    FROM knowledge_embeddings ke
+                    JOIN knowledge_articles ka ON ka.id = ke.article_id
+                    WHERE ka.active = true
+                    ORDER BY ke.embedding <=> :vec::vector
+                    LIMIT 1
+                """),
+                {"vec": vec_str},
+            )
+            row = result.first()
+
+        if not row:
+            return {"status": "new"}
+
+        sim = float(row.similarity)
+        similar_title = row.title
+
+        if sim > 0.90:
+            return {"status": "duplicate", "similar_title": similar_title, "similarity": sim}
+        if sim >= 0.80:
+            if dedup_llm_check:
+                # Could invoke LLM for borderline cases, but for now mark as suspect
+                # LLM check can be added later if needed
+                logger.info("Borderline sim=%.2f for '%s', marking as suspect", sim, similar_title)
+            return {"status": "suspect", "similar_title": similar_title, "similarity": sim}
+
+        return {"status": "new"}
+
+    except Exception:
+        logger.warning("Dedup check failed, treating as new article", exc_info=True)
+        return {"status": "new"}
 
 
 def _dispatch_embedding(article_id: str) -> None:

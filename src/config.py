@@ -188,6 +188,8 @@ class ScraperSettings(BaseSettings):
     llm_model: str = "claude-haiku-4-5-20251001"
     schedule_hour: int = 6
     schedule_day_of_week: str = "monday"
+    min_date: str = ""  # "YYYY-MM-DD" or empty; empty in scheduled mode = last 14 days
+    dedup_llm_check: bool = False  # Use LLM for borderline duplicate detection (0.80-0.90 sim)
 
     model_config = {"env_prefix": "SCRAPER_"}
 

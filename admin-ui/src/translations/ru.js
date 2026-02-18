@@ -458,6 +458,12 @@ export default {
     'sources.rejectFailed': 'Ошибка отклонения: {error}',
     'sources.rejectConfirm': 'Отклонить этот источник?',
     'sources.failedToLoad': 'Не удалось загрузить источники: {error}',
+    'sources.minDate': 'Мин. дата',
+    'sources.minDateHint': 'Пусто = последние 14 дней (авторежим)',
+    'sources.dedupLlmCheck': 'LLM-проверка дубликатов',
+    'sources.dedupLlmCheckHint': 'Использовать LLM для пограничных случаев (0.80–0.90 сходство)',
+    'sources.duplicate': 'дубликат',
+    'sources.duplicateSuspect': 'возможный дубликат',
 
     // Vehicles
     'nav.vehicles': 'База авто',

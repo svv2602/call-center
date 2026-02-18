@@ -709,6 +709,8 @@ function sourceStatusBadge(status) {
         case 'new': return `<span class="${tw.badgeYellow}">${escapeHtml(status)}</span>`;
         case 'skipped': return `<span class="${tw.badge}">${escapeHtml(status)}</span>`;
         case 'error': return `<span class="${tw.badgeRed}">${escapeHtml(status)}</span>`;
+        case 'duplicate': return `<span class="${tw.badge}">${t('sources.duplicate')}</span>`;
+        case 'duplicate_suspect': return `<span class="${tw.badgeYellow}">${t('sources.duplicateSuspect')}</span>`;
         default: return `<span class="${tw.badge}">${escapeHtml(status || 'unknown')}</span>`;
     }
 }
@@ -731,6 +733,15 @@ async function loadSources() {
                 <label class="flex items-center gap-2 text-sm cursor-pointer">
                     <input type="checkbox" id="scraperAutoApprove" ${cfg.auto_approve ? 'checked' : ''} onchange="window._pages.training.toggleAutoApprove()">
                     <span>${t('sources.autoApprove')}</span>
+                </label>
+                <label class="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" id="scraperDedupLlm" ${cfg.dedup_llm_check ? 'checked' : ''} onchange="window._pages.training.toggleDedupLlm()">
+                    <span title="${t('sources.dedupLlmCheckHint')}">${t('sources.dedupLlmCheck')}</span>
+                </label>
+                <label class="flex items-center gap-2 text-sm">
+                    <span>${t('sources.minDate')}</span>
+                    <input type="date" id="scraperMinDate" value="${escapeHtml(cfg.min_date || '')}" class="border rounded px-2 py-1 text-sm dark:bg-gray-700 dark:border-gray-600" onchange="window._pages.training.updateMinDate()">
+                    <span class="${tw.mutedText} text-xs" title="${t('sources.minDateHint')}">?</span>
                 </label>
                 <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.runScraperNow()">${t('sources.runNow')}</button>
                 <span class="${tw.mutedText} text-xs">${t('sources.schedule')}: ${cfg.schedule_day_of_week} ${cfg.schedule_hour}:00</span>
@@ -796,6 +807,22 @@ async function toggleAutoApprove() {
     } catch (e) { showToast(t('sources.configUpdateFailed', {error: e.message}), 'error'); }
 }
 
+async function toggleDedupLlm() {
+    const dedup_llm_check = document.getElementById('scraperDedupLlm').checked;
+    try {
+        await api('/admin/scraper/config', { method: 'PATCH', body: JSON.stringify({ dedup_llm_check }) });
+        showToast(t('sources.configUpdated'));
+    } catch (e) { showToast(t('sources.configUpdateFailed', {error: e.message}), 'error'); }
+}
+
+async function updateMinDate() {
+    const min_date = document.getElementById('scraperMinDate').value || '';
+    try {
+        await api('/admin/scraper/config', { method: 'PATCH', body: JSON.stringify({ min_date }) });
+        showToast(t('sources.configUpdated'));
+    } catch (e) { showToast(t('sources.configUpdateFailed', {error: e.message}), 'error'); }
+}
+
 async function runScraperNow() {
     try {
         await api('/admin/scraper/run', { method: 'POST' });
@@ -856,6 +883,6 @@ window._pages.training = {
     // Tools
     loadTools, editToolOverride, saveToolOverride, resetToolOverride,
     // Sources (scraper)
-    loadSources, toggleScraperEnabled, toggleAutoApprove,
+    loadSources, toggleScraperEnabled, toggleAutoApprove, toggleDedupLlm, updateMinDate,
     runScraperNow, approveSource, rejectSource, viewSourceArticle,
 };

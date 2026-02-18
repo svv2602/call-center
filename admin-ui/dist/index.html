@@ -13,8 +13,8 @@
             }
         })();
     </script>
-  <script type="module" crossorigin src="/assets/index-B7d3i-CX.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-C4fL3Nzy.css">
+  <script type="module" crossorigin src="/assets/index-D8jNrbh_.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-Dz-SoyjC.css">
 </head>
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-50 font-sans antialiased">
     <!-- Toast container -->
@@ -266,6 +266,13 @@
                     <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.configuration">Конфигурация</h3>
                     <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="settings.configDescription">Перезагрузить безопасные параметры конфигурации (качество, фича-флаги, логирование) без перезапуска.</p>
                     <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.settings.reloadConfig()" data-i18n="settings.reloadConfig">Перезагрузить конфиг</button>
+                </div>
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
+                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.llmRouting">Маршрутизация LLM</h3>
+                    <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="settings.llmRoutingDesc">Мультипровайдерный роутинг LLM: управление провайдерами, задачами и fallback-цепочками.</p>
+                    <div id="llmProvidersContainer"><div class="text-center py-4 text-neutral-400 dark:text-neutral-500 text-sm" data-i18n="settings.clickToLoad">Нажмите для загрузки</div></div>
+                    <div id="llmTasksContainer" class="mt-4"></div>
+                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.settings.loadLLMConfig()" data-i18n="settings.llmLoadConfig">Загрузить конфигурацию</button>
                 </div>
                 <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
                     <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.externalTools">Внешние инструменты</h3>

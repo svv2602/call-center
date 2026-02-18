@@ -458,6 +458,12 @@ export default {
     'sources.rejectFailed': 'Rejection failed: {error}',
     'sources.rejectConfirm': 'Reject this source?',
     'sources.failedToLoad': 'Failed to load sources: {error}',
+    'sources.minDate': 'Min date',
+    'sources.minDateHint': 'Empty = last 14 days (auto mode)',
+    'sources.dedupLlmCheck': 'LLM dedup check',
+    'sources.dedupLlmCheckHint': 'Use LLM for borderline duplicates (0.80–0.90 similarity)',
+    'sources.duplicate': 'duplicate',
+    'sources.duplicateSuspect': 'possible duplicate',
 
     // Vehicles
     'nav.vehicles': 'Vehicles',

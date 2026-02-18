@@ -7,9 +7,10 @@ Follows polite crawling conventions: User-Agent, request delay, timeouts.
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from urllib.parse import urljoin
 
 import aiohttp
@@ -33,6 +34,31 @@ _DEFAULT_CATEGORY = "general"
 _USER_AGENT = "CallCenterAI-Scraper/1.0 (+https://github.com/call-center-ai; polite bot)"
 
 
+def _parse_date_text(text: str) -> str:
+    """Parse date text like '20.09.2024' or '2024-09-20' → ISO format 'YYYY-MM-DD'.
+
+    Returns empty string if parsing fails.
+    """
+    text = text.strip()
+    # DD.MM.YYYY format (common on Ukrainian sites)
+    m = re.match(r"(\d{1,2})\.(\d{1,2})\.(\d{4})", text)
+    if m:
+        day, month, year = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        try:
+            return datetime.date(year, month, day).isoformat()
+        except ValueError:
+            return ""
+    # Already ISO format
+    m = re.match(r"\d{4}-\d{2}-\d{2}", text)
+    if m:
+        try:
+            datetime.date.fromisoformat(m.group(0))
+            return m.group(0)
+        except ValueError:
+            return ""
+    return ""
+
+
 @dataclass
 class ScrapedArticle:
     """Raw scraped article data."""
@@ -41,6 +67,7 @@ class ScrapedArticle:
     title: str
     content: str
     category: str
+    published: str | None = field(default=None)
 
 
 class ProKolesoScraper:
@@ -75,11 +102,20 @@ class ProKolesoScraper:
             self._session = None
 
     async def discover_article_urls(
-        self, info_path: str = "/ua/info/", max_pages: int = 3
+        self,
+        info_path: str = "/ua/info/",
+        max_pages: int = 3,
+        min_date: datetime.date | None = None,
     ) -> list[dict[str, str]]:
         """Crawl listing pages and extract article URLs.
 
-        Returns list of {url, title} dicts.
+        Args:
+            info_path: Listing path on the site.
+            max_pages: Maximum number of pages to crawl.
+            min_date: If set, skip articles older than this date.
+                When all articles on a page are older, stop early.
+
+        Returns list of {url, title, published} dicts.
         """
         assert self._session is not None, "Call open() before using the scraper"
 
@@ -89,7 +125,7 @@ class ProKolesoScraper:
         for page in range(1, max_pages + 1):
             page_url = urljoin(self._base_url, info_path)
             if page > 1:
-                page_url = page_url.rstrip("/") + f"/page/{page}/"
+                page_url = page_url.rstrip("/") + f"?page={page}"
 
             try:
                 async with self._session.get(page_url) as resp:
@@ -112,11 +148,26 @@ class ProKolesoScraper:
                 logger.info("No articles found on page %d, stopping", page)
                 break
 
+            # Apply min_date filter if set
+            all_too_old = True
             for item in page_articles:
                 url = item["url"]
-                if url not in seen_urls:
-                    seen_urls.add(url)
-                    articles.append(item)
+                if url in seen_urls:
+                    continue
+
+                if min_date and item.get("published"):
+                    try:
+                        pub = datetime.date.fromisoformat(item["published"])
+                        if pub < min_date:
+                            continue
+                        all_too_old = False
+                    except ValueError:
+                        all_too_old = False  # can't parse → include it
+                else:
+                    all_too_old = False
+
+                seen_urls.add(url)
+                articles.append(item)
 
             logger.info(
                 "Page %d: found %d articles (total: %d)",
@@ -125,13 +176,26 @@ class ProKolesoScraper:
                 len(articles),
             )
 
+            # Listing is newest-first: if all articles on page are too old, stop
+            if min_date and all_too_old:
+                logger.info(
+                    "All articles on page %d are older than %s, stopping",
+                    page,
+                    min_date.isoformat(),
+                )
+                break
+
             if page < max_pages:
                 await asyncio.sleep(self._request_delay)
 
         return articles
 
     def _extract_article_links(self, soup: BeautifulSoup) -> list[dict[str, str]]:
-        """Extract article links from a listing page."""
+        """Extract article links from a listing page.
+
+        Returns list of {url, title, published} dicts.
+        ``published`` is ISO date string (YYYY-MM-DD) or empty string.
+        """
         results: list[dict[str, str]] = []
 
         # prokoleso.ua uses article cards with links — try common patterns
@@ -146,12 +210,21 @@ class ProKolesoScraper:
             title_el = link.find(["h2", "h3", "h4"])
             title = title_el.get_text(strip=True) if title_el else link.get_text(strip=True)
 
+            # Extract date from article-date element (inside the card or nearby)
+            published = ""
+            date_el = link.select_one(".article-date")
+            if date_el is None:
+                # Also look for .date class
+                date_el = link.select_one(".date")
+            if date_el:
+                published = _parse_date_text(date_el.get_text(strip=True))
+
             if title and len(title) > 5:
-                results.append({"url": url, "title": title})
+                results.append({"url": url, "title": title, "published": published})
 
         return results
 
-    async def fetch_article(self, url: str) -> ScrapedArticle | None:
+    async def fetch_article(self, url: str, published: str | None = None) -> ScrapedArticle | None:
         """Fetch and parse a single article page."""
         assert self._session is not None, "Call open() before using the scraper"
 
@@ -177,6 +250,7 @@ class ProKolesoScraper:
             title=title,
             content=content,
             category=category,
+            published=published or None,
         )
 
     def _parse_article_content(self, html: str) -> tuple[str, str]:

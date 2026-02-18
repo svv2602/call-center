@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import datetime
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
-from src.knowledge.scraper import ProKolesoScraper, ScrapedArticle
+from src.knowledge.scraper import ProKolesoScraper, ScrapedArticle, _parse_date_text
 
 
 class AsyncContextManagerMock:
@@ -198,6 +199,7 @@ class TestExtractArticleLinks:
         assert len(results) == 2
         assert results[0]["title"] == "Гайд по шинах"
         assert results[0]["url"].endswith("/ua/info/vse-o-shinah/tire-guide/")
+        assert "published" in results[0]  # published field always present
 
     def test_skips_listing_page_link(self, scraper: ProKolesoScraper) -> None:
         from bs4 import BeautifulSoup
@@ -416,6 +418,202 @@ class TestFetchArticle:
 
         result = await scraper.fetch_article("https://prokoleso.ua/ua/info/unreachable/")
         assert result is None
+
+
+# ─── Date parsing ─────────────────────────────────────────────
+
+
+class TestParseDateText:
+    """Test date text parsing utility."""
+
+    def test_dd_mm_yyyy_format(self) -> None:
+        assert _parse_date_text("20.09.2024") == "2024-09-20"
+
+    def test_single_digit_day_month(self) -> None:
+        assert _parse_date_text("1.2.2024") == "2024-02-01"
+
+    def test_iso_format_passthrough(self) -> None:
+        assert _parse_date_text("2024-09-20") == "2024-09-20"
+
+    def test_invalid_date_returns_empty(self) -> None:
+        assert _parse_date_text("32.13.2024") == ""
+
+    def test_empty_string(self) -> None:
+        assert _parse_date_text("") == ""
+
+    def test_garbage_text(self) -> None:
+        assert _parse_date_text("no date here") == ""
+
+    def test_whitespace_stripped(self) -> None:
+        assert _parse_date_text("  10.02.2026  ") == "2026-02-10"
+
+
+class TestExtractArticleLinksWithDates:
+    """Test date extraction from article cards."""
+
+    @pytest.fixture
+    def scraper(self) -> ProKolesoScraper:
+        return ProKolesoScraper()
+
+    def test_extracts_date_from_article_card(self, scraper: ProKolesoScraper) -> None:
+        from bs4 import BeautifulSoup
+
+        html = """<div>
+            <a href="/ua/info/article-1/" class="article-card">
+                <div class="article-date date">10.02.2026</div>
+                <div class="article-title"><h2>Стаття з датою</h2></div>
+            </a>
+        </div>"""
+        soup = BeautifulSoup(html, "lxml")
+        results = scraper._extract_article_links(soup)
+        assert len(results) == 1
+        assert results[0]["published"] == "2026-02-10"
+
+    def test_no_date_returns_empty(self, scraper: ProKolesoScraper) -> None:
+        from bs4 import BeautifulSoup
+
+        html = """<div>
+            <a href="/ua/info/article-1/">
+                <h2>Стаття без дати</h2>
+            </a>
+        </div>"""
+        soup = BeautifulSoup(html, "lxml")
+        results = scraper._extract_article_links(soup)
+        assert len(results) == 1
+        assert results[0]["published"] == ""
+
+
+# ─── min_date filtering ──────────────────────────────────────
+
+
+class TestDiscoverWithMinDate:
+    """Test date-based filtering in discover_article_urls."""
+
+    @pytest.mark.asyncio
+    async def test_filters_old_articles(self) -> None:
+        html = """<div>
+            <a href="/ua/info/new-article/" class="article-card">
+                <div class="article-date">10.02.2026</div>
+                <h2>Нова стаття тест шин</h2>
+            </a>
+            <a href="/ua/info/old-article/" class="article-card">
+                <div class="article-date">15.06.2023</div>
+                <h2>Стара стаття шини</h2>
+            </a>
+        </div>"""
+
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.text = AsyncMock(return_value=html)
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=AsyncContextManagerMock(mock_resp))
+
+        scraper = ProKolesoScraper(request_delay=0)
+        scraper._session = mock_session
+
+        results = await scraper.discover_article_urls(
+            max_pages=1, min_date=datetime.date(2025, 1, 1)
+        )
+        assert len(results) == 1
+        assert "new-article" in results[0]["url"]
+
+    @pytest.mark.asyncio
+    async def test_stops_when_all_too_old(self) -> None:
+        html = """<div>
+            <a href="/ua/info/old-1/" class="article-card">
+                <div class="article-date">15.06.2020</div>
+                <h2>Старша стаття номер один</h2>
+            </a>
+            <a href="/ua/info/old-2/" class="article-card">
+                <div class="article-date">10.03.2020</div>
+                <h2>Старша стаття номер два</h2>
+            </a>
+        </div>"""
+
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.text = AsyncMock(return_value=html)
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=AsyncContextManagerMock(mock_resp))
+
+        scraper = ProKolesoScraper(request_delay=0)
+        scraper._session = mock_session
+
+        results = await scraper.discover_article_urls(
+            max_pages=5, min_date=datetime.date(2024, 1, 1)
+        )
+        assert len(results) == 0
+        # Should stop after page 1 since all articles are too old
+        assert mock_session.get.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_no_min_date_returns_all(self) -> None:
+        html = """<div>
+            <a href="/ua/info/article-1/" class="article-card">
+                <div class="article-date">15.06.2020</div>
+                <h2>Стаття без фільтру дати</h2>
+            </a>
+        </div>"""
+
+        mock_resp = AsyncMock()
+        mock_resp.status = 200
+        mock_resp.text = AsyncMock(return_value=html)
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(return_value=AsyncContextManagerMock(mock_resp))
+
+        scraper = ProKolesoScraper(request_delay=0)
+        scraper._session = mock_session
+
+        results = await scraper.discover_article_urls(max_pages=1, min_date=None)
+        assert len(results) == 1
+
+
+# ─── Pagination URL fix ──────────────────────────────────────
+
+
+class TestPaginationUrl:
+    """Test that pagination uses ?page=N format."""
+
+    @pytest.mark.asyncio
+    async def test_page_2_uses_query_param(self) -> None:
+        """Page 2+ should use ?page=N, not /page/N/."""
+        html_with_articles = """<div>
+            <a href="/ua/info/article-a/"><h2>Стаття A — тестування шин</h2></a>
+        </div>"""
+        html_empty = "<div>No articles here</div>"
+
+        call_count = 0
+        captured_urls: list[str] = []
+
+        def mock_get(url: str, **kwargs: object) -> AsyncContextManagerMock:
+            nonlocal call_count
+            call_count += 1
+            captured_urls.append(url)
+            mock_resp = AsyncMock()
+            mock_resp.status = 200
+            mock_resp.text = AsyncMock(
+                return_value=html_with_articles if call_count <= 2 else html_empty
+            )
+            return AsyncContextManagerMock(mock_resp)
+
+        mock_session = AsyncMock()
+        mock_session.get = MagicMock(side_effect=mock_get)
+
+        scraper = ProKolesoScraper(request_delay=0)
+        scraper._session = mock_session
+
+        await scraper.discover_article_urls(max_pages=3)
+
+        # Page 1: no query param; Page 2+: ?page=N
+        assert "?page=" not in captured_urls[0]
+        assert captured_urls[1].endswith("?page=2")
+        assert captured_urls[2].endswith("?page=3")
+        # Must NOT use /page/N/ format
+        for url in captured_urls:
+            assert "/page/" not in url
 
 
 # ─── Open/close lifecycle ────────────────────────────────────
