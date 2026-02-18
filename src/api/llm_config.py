@@ -11,7 +11,7 @@ import os
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from redis.asyncio import Redis
 
@@ -40,6 +40,9 @@ async def _get_redis() -> Redis:
 class ProviderUpdate(BaseModel):
     enabled: bool | None = None
     model: str | None = None
+    type: str | None = None
+    api_key_env: str | None = None
+    base_url: str | None = None
 
 
 class TaskRouteUpdate(BaseModel):
@@ -96,6 +99,12 @@ async def update_llm_config(
                 config["providers"][key]["enabled"] = update.enabled
             if update.model is not None:
                 config["providers"][key]["model"] = update.model
+            if update.type is not None:
+                config["providers"][key]["type"] = update.type
+            if update.api_key_env is not None:
+                config["providers"][key]["api_key_env"] = update.api_key_env
+            if update.base_url is not None:
+                config["providers"][key]["base_url"] = update.base_url
 
     if request.tasks:
         if "tasks" not in config:

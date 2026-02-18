@@ -127,14 +127,30 @@ function renderLLMProviders(config, healthMap) {
         html += `<tr class="${tw.trHover}">
             <td class="${tw.td}"><strong>${escapeHtml(key)}</strong></td>
             <td class="${tw.td}">${escapeHtml(cfg.type || '')}</td>
-            <td class="${tw.td}"><code class="text-xs">${escapeHtml(cfg.model || '')}</code></td>
+            <td class="${tw.td}"><input type="text" value="${escapeHtml(cfg.model || '')}" class="text-xs font-mono bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-1.5 py-0.5 w-48 focus:outline-none focus:border-blue-500" onchange="window._pages.settings.updateLLMModel('${escapeHtml(key)}', this.value)"></td>
             <td class="${tw.td}">${keyBadge}</td>
             <td class="${tw.td}"><input type="checkbox" ${enabledChecked} onchange="window._pages.settings.toggleLLMProvider('${escapeHtml(key)}', this.checked)"></td>
             <td class="${tw.td}">${healthBadge}</td>
             <td class="${tw.td}"><button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.settings.testLLMProvider('${escapeHtml(key)}')">${t('settings.llmTest')}</button></td>
         </tr>`;
     }
+    html += `<tr id="llm-add-row" style="display:none" class="${tw.trHover}">
+            <td class="${tw.td}"><span id="llm-add-key-preview" class="text-xs font-mono text-neutral-400">—</span></td>
+            <td class="${tw.td}"><select id="llm-add-type" class="${tw.selectSm}" onchange="window._pages.settings.onAddTypeChange(this.value)">
+                <option value="anthropic">anthropic</option>
+                <option value="openai">openai</option>
+                <option value="deepseek">deepseek</option>
+                <option value="gemini">gemini</option>
+            </select></td>
+            <td class="${tw.td}"><input id="llm-add-model" type="text" placeholder="claude-opus-4-20250115" class="text-xs font-mono bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-1.5 py-0.5 w-48 focus:outline-none focus:border-blue-500" oninput="window._pages.settings.onAddModelInput()"></td>
+            <td class="${tw.td}"><span id="llm-add-env-preview" class="text-xs font-mono text-neutral-500">ANTHROPIC_API_KEY</span></td>
+            <td colspan="3" class="${tw.td}">
+                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.settings.saveNewProvider()">${t('common.save')}</button>
+                <button class="${tw.btnSm} ml-1 text-neutral-500" onclick="document.getElementById('llm-add-row').style.display='none'">${t('common.cancel')}</button>
+            </td>
+        </tr>`;
     html += '</tbody></table></div>';
+    html += `<button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="document.getElementById('llm-add-row').style.display=''">${t('settings.llmAddProvider')}</button>`;
     container.innerHTML = html;
 }
 
@@ -152,18 +168,124 @@ function renderLLMTasks(config) {
         </tr></thead><tbody>`;
 
     for (const [taskName, taskCfg] of Object.entries(tasks)) {
+        const currentPrimary = taskCfg.primary || '';
+        const currentFallbacks = taskCfg.fallbacks || [];
         const options = providerKeys.map(k =>
-            `<option value="${escapeHtml(k)}" ${k === taskCfg.primary ? 'selected' : ''}>${escapeHtml(k)}</option>`
+            `<option value="${escapeHtml(k)}" ${k === currentPrimary ? 'selected' : ''}>${escapeHtml(k)}</option>`
         ).join('');
-        const fallbackStr = (taskCfg.fallbacks || []).join(', ') || '—';
+
+        // Ordered fallback list with up/down/remove controls
+        let fallbackHtml = '<div class="space-y-1">';
+        if (currentFallbacks.length > 0) {
+            fallbackHtml += '<ol class="list-none p-0 m-0 space-y-1">';
+            currentFallbacks.forEach((fb, idx) => {
+                const isFirst = idx === 0;
+                const isLast = idx === currentFallbacks.length - 1;
+                fallbackHtml += `<li class="flex items-center gap-1 text-xs">
+                    <span class="inline-flex items-center justify-center w-4 h-4 rounded-full bg-blue-100 dark:bg-blue-900 text-blue-700 dark:text-blue-300 text-[10px] font-bold flex-shrink-0">${idx + 1}</span>
+                    <span class="font-mono text-neutral-700 dark:text-neutral-300">${escapeHtml(fb)}</span>
+                    <span class="inline-flex gap-0.5 ml-auto flex-shrink-0">
+                        <button class="px-0.5 text-neutral-400 hover:text-blue-600 disabled:opacity-30 disabled:cursor-default" ${isFirst ? 'disabled' : ''} onclick="window._pages.settings.moveFallback('${escapeHtml(taskName)}', ${idx}, -1)" title="${t('settings.llmFbMoveUp')}">&#9650;</button>
+                        <button class="px-0.5 text-neutral-400 hover:text-blue-600 disabled:opacity-30 disabled:cursor-default" ${isLast ? 'disabled' : ''} onclick="window._pages.settings.moveFallback('${escapeHtml(taskName)}', ${idx}, 1)" title="${t('settings.llmFbMoveDown')}">&#9660;</button>
+                        <button class="px-0.5 text-neutral-400 hover:text-red-600" onclick="window._pages.settings.removeFallback('${escapeHtml(taskName)}', '${escapeHtml(fb)}')" title="${t('common.delete')}">&#10005;</button>
+                    </span>
+                </li>`;
+            });
+            fallbackHtml += '</ol>';
+        }
+
+        // Dropdown to add new fallback
+        const availableForFallback = providerKeys.filter(k => k !== currentPrimary && !currentFallbacks.includes(k));
+        if (availableForFallback.length > 0) {
+            const addOptions = availableForFallback.map(k =>
+                `<option value="${escapeHtml(k)}">${escapeHtml(k)}</option>`
+            ).join('');
+            fallbackHtml += `<div class="flex items-center gap-1 mt-1">
+                <select id="fb-add-${escapeHtml(taskName)}" class="text-xs bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-300 dark:border-neutral-600 rounded px-1 py-0.5">
+                    <option value="" disabled selected>${t('settings.llmFbSelect')}</option>
+                    ${addOptions}
+                </select>
+                <button class="text-xs text-blue-600 hover:text-blue-800 dark:text-blue-400" onclick="window._pages.settings.addFallback('${escapeHtml(taskName)}')">+ ${t('common.add')}</button>
+            </div>`;
+        }
+        fallbackHtml += '</div>';
+
         html += `<tr class="${tw.trHover}">
             <td class="${tw.td}"><strong>${escapeHtml(taskName)}</strong></td>
             <td class="${tw.td}"><select class="${tw.selectSm}" onchange="window._pages.settings.updateTaskRoute('${escapeHtml(taskName)}', this.value)">${options}</select></td>
-            <td class="${tw.td}"><span class="text-xs text-neutral-500">${escapeHtml(fallbackStr)}</span></td>
+            <td class="${tw.td}">${fallbackHtml}</td>
         </tr>`;
     }
     html += '</tbody></table></div>';
     container.innerHTML = html;
+}
+
+const _providerDefaults = {
+    anthropic: { api_key_env: 'ANTHROPIC_API_KEY' },
+    openai: { api_key_env: 'OPENAI_API_KEY', base_url: 'https://api.openai.com/v1' },
+    deepseek: { api_key_env: 'DEEPSEEK_API_KEY', base_url: 'https://api.deepseek.com/v1' },
+    gemini: { api_key_env: 'GEMINI_API_KEY', base_url: 'https://generativelanguage.googleapis.com/v1beta/openai' },
+};
+
+function _buildProviderKey() {
+    const type = document.getElementById('llm-add-type').value;
+    const model = document.getElementById('llm-add-model').value.trim();
+    if (!model) return '';
+    // "claude-sonnet-4-5-20250929" → "sonnet", "gpt-4o" → "gpt4o", "deepseek-chat" → "chat"
+    const short = model.replace(/^claude-/, '').replace(/^gpt-/, 'gpt').split('-')[0] || model;
+    return `${type}-${short}`;
+}
+
+function _updateAddPreview() {
+    const key = _buildProviderKey();
+    const type = document.getElementById('llm-add-type').value;
+    const defaults = _providerDefaults[type] || {};
+    document.getElementById('llm-add-key-preview').textContent = key || '—';
+    document.getElementById('llm-add-env-preview').textContent = defaults.api_key_env || '';
+}
+
+function onAddTypeChange() { _updateAddPreview(); }
+function onAddModelInput() { _updateAddPreview(); }
+
+async function saveNewProvider() {
+    const type = document.getElementById('llm-add-type').value;
+    const model = document.getElementById('llm-add-model').value.trim();
+    const key = _buildProviderKey();
+    const apiKeyEnv = _providerDefaults[type]?.api_key_env || '';
+
+    if (!model) {
+        showToast(t('settings.llmAddFillRequired'), 'error');
+        return;
+    }
+
+    const provider = { type, model, api_key_env: apiKeyEnv, enabled: false };
+    const defaults = _providerDefaults[type];
+    if (defaults?.base_url) provider.base_url = defaults.base_url;
+
+    try {
+        await api('/admin/llm/config', {
+            method: 'PATCH',
+            body: JSON.stringify({ providers: { [key]: provider } }),
+        });
+        showToast(t('settings.llmProviderAdded', {key}), 'success');
+        loadLLMConfig();
+    } catch (e) {
+        showToast(t('settings.llmConfigFailed', {error: e.message}), 'error');
+    }
+}
+
+async function updateLLMModel(key, model) {
+    if (!model.trim()) return;
+    try {
+        await api('/admin/llm/config', {
+            method: 'PATCH',
+            body: JSON.stringify({ providers: { [key]: { model: model.trim() } } }),
+        });
+        showToast(t('settings.llmModelUpdated', {key, model: model.trim()}), 'success');
+    } catch (e) {
+        showToast(t('settings.llmConfigFailed', {error: e.message}), 'error');
+        loadLLMConfig();
+    }
 }
 
 async function toggleLLMProvider(key, enabled) {
@@ -183,12 +305,56 @@ async function updateTaskRoute(taskName, primary) {
     try {
         await api('/admin/llm/config', {
             method: 'PATCH',
-            body: JSON.stringify({ tasks: { [taskName]: { primary } } }),
+            body: JSON.stringify({ tasks: { [taskName]: { primary, fallbacks: [] } } }),
         });
         showToast(t('settings.llmRouteUpdated', {task: taskName, provider: primary}), 'success');
+        loadLLMConfig(); // re-render to update fallback checkboxes
     } catch (e) {
         showToast(t('settings.llmConfigFailed', {error: e.message}), 'error');
     }
+}
+
+async function _saveFallbacks(taskName, fallbacks) {
+    try {
+        await api('/admin/llm/config', {
+            method: 'PATCH',
+            body: JSON.stringify({ tasks: { [taskName]: { fallbacks } } }),
+        });
+        // Update local config and re-render
+        if (_llmConfig && _llmConfig.tasks && _llmConfig.tasks[taskName]) {
+            _llmConfig.tasks[taskName].fallbacks = fallbacks;
+        }
+        renderLLMTasks(_llmConfig);
+        showToast(t('settings.llmFallbacksUpdated', {task: taskName, count: fallbacks.length}), 'success');
+    } catch (e) {
+        showToast(t('settings.llmConfigFailed', {error: e.message}), 'error');
+    }
+}
+
+async function addFallback(taskName) {
+    const select = document.getElementById(`fb-add-${taskName}`);
+    if (!select) return;
+    const key = select.value;
+    if (!key) return;
+    const current = (_llmConfig?.tasks?.[taskName]?.fallbacks || []).slice();
+    if (!current.includes(key)) {
+        current.push(key);
+        await _saveFallbacks(taskName, current);
+    }
+}
+
+async function removeFallback(taskName, key) {
+    const current = (_llmConfig?.tasks?.[taskName]?.fallbacks || []).filter(k => k !== key);
+    await _saveFallbacks(taskName, current);
+}
+
+async function moveFallback(taskName, index, direction) {
+    const current = (_llmConfig?.tasks?.[taskName]?.fallbacks || []).slice();
+    const newIndex = index + direction;
+    if (newIndex < 0 || newIndex >= current.length) return;
+    // Swap
+    [current[index], current[newIndex]] = [current[newIndex], current[index]];
+    await _saveFallbacks(taskName, current);
 }
 
 async function testLLMProvider(key) {
@@ -212,5 +378,5 @@ export function init() {
 window._pages = window._pages || {};
 window._pages.settings = {
     loadSettings, loadSystemStatus, reloadConfig,
-    loadLLMConfig, toggleLLMProvider, updateTaskRoute, testLLMProvider,
+    loadLLMConfig, toggleLLMProvider, updateLLMModel, onAddTypeChange, onAddModelInput, saveNewProvider, updateTaskRoute, addFallback, removeFallback, moveFallback, testLLMProvider,
 };
