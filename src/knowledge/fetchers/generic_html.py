@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import asyncio
-import datetime
+import datetime  # noqa: TC003 - used at runtime in method signatures
 import logging
 from urllib.parse import urljoin, urlparse
 

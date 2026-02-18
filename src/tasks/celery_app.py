@@ -91,6 +91,11 @@ app.conf.beat_schedule = {
         "task": "src.tasks.scraper_tasks.rescrape_watched_pages",
         "schedule": crontab(minute=30),  # Every hour at :30; actual timing per-page via next_scrape_at
     },
+    "run-all-content-sources": {
+        "task": "src.tasks.scraper_tasks.run_all_sources",
+        "schedule": crontab(minute=15),  # Every hour at :15; actual day/time per-source in DB
+        "kwargs": {"triggered_by": "beat"},
+    },
 }
 
 # Note: autodiscover_tasks(["src.tasks"]) looks for src/tasks/tasks.py which doesn't exist.

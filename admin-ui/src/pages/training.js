@@ -716,8 +716,196 @@ function sourceStatusBadge(status) {
 }
 
 function loadSourcesAndWatched() {
+    loadSourceConfigs();
     loadSources();
     loadWatchedPages();
+}
+
+// ─── Source Configs ───────────────────────────────────────
+function sourceTypeBadge(type) {
+    switch (type) {
+        case 'prokoleso': return `<span class="${tw.badgeBlue}">ProKoleso</span>`;
+        case 'rss': return `<span class="${tw.badgeYellow}">RSS</span>`;
+        case 'generic_html': return `<span class="${tw.badge}">HTML</span>`;
+        default: return `<span class="${tw.badge}">${escapeHtml(type)}</span>`;
+    }
+}
+
+function langBadge(lang) {
+    const labels = { uk: '🇺🇦 UK', de: '🇩🇪 DE', en: '🇬🇧 EN', fr: '🇫🇷 FR' };
+    return `<span class="${tw.badge}">${labels[lang] || lang}</span>`;
+}
+
+function runStatusBadge(status) {
+    if (!status) return `<span class="${tw.mutedText} text-xs">—</span>`;
+    switch (status) {
+        case 'ok': return `<span class="${tw.badgeGreen}">ok</span>`;
+        case 'error': return `<span class="${tw.badgeRed}">error</span>`;
+        case 'disabled': return `<span class="${tw.badge}">disabled</span>`;
+        default: return `<span class="${tw.badge}">${escapeHtml(status)}</span>`;
+    }
+}
+
+async function loadSourceConfigs() {
+    const container = document.getElementById('sourceConfigsContainer');
+    if (!container) return;
+    container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+
+    try {
+        const data = await api('/admin/scraper/source-configs');
+        const configs = data.configs || [];
+
+        let html = `
+            <div class="mb-4">
+                <button class="${tw.btnPrimary}" onclick="window._pages.training.showAddSourceConfig()">${t('sources.addSource')}</button>
+            </div>`;
+
+        if (configs.length === 0) {
+            html += `<div class="${tw.emptyState}">${t('sources.noSourceConfigs')}</div>`;
+        } else {
+            const days = { monday: t('sources.scheduleDays.monday'), tuesday: t('sources.scheduleDays.tuesday'), wednesday: t('sources.scheduleDays.wednesday'), thursday: t('sources.scheduleDays.thursday'), friday: t('sources.scheduleDays.friday'), saturday: t('sources.scheduleDays.saturday'), sunday: t('sources.scheduleDays.sunday') };
+
+            html += `
+            <div class="overflow-x-auto"><table class="${tw.table}" id="sourceConfigsTable"><thead><tr>
+                <th class="${tw.thSortable}" data-sortable>${t('sources.sourceName')}</th>
+                <th class="${tw.th}">${t('sources.sourceType')}</th>
+                <th class="${tw.th}">${t('sources.sourceLanguage')}</th>
+                <th class="${tw.thSortable}" data-sortable>${t('sources.enabled')}</th>
+                <th class="${tw.th}">${t('sources.schedule')}</th>
+                <th class="${tw.thSortable}" data-sortable>${t('sources.lastRun')}</th>
+                <th class="${tw.th}">${t('sources.actions')}</th>
+            </tr></thead><tbody>
+            ${configs.map(c => {
+                const schedText = c.schedule_enabled ? `${days[c.schedule_day_of_week] || c.schedule_day_of_week} ${String(c.schedule_hour).padStart(2,'0')}:00` : t('common.no');
+                const statsText = c.last_run_stats ? `${t('sources.processed')}: ${c.last_run_stats.processed || 0}` : '';
+                return `
+                <tr class="${tw.trHover}">
+                    <td class="${tw.td}">
+                        <div>${escapeHtml(c.name)}</div>
+                        <div class="${tw.mutedText} text-xs">${escapeHtml((c.source_url || '').replace(/^https?:\/\//, '').substring(0, 40))}</div>
+                    </td>
+                    <td class="${tw.td}">${sourceTypeBadge(c.source_type)}</td>
+                    <td class="${tw.td}">${langBadge(c.language)}</td>
+                    <td class="${tw.td}" data-sort-value="${c.enabled ? 1 : 0}">
+                        <label class="inline-flex items-center cursor-pointer">
+                            <input type="checkbox" ${c.enabled ? 'checked' : ''} onchange="window._pages.training.toggleSourceConfigEnabled('${c.id}', this.checked)">
+                        </label>
+                    </td>
+                    <td class="${tw.td}"><span class="text-xs">${escapeHtml(schedText)}</span></td>
+                    <td class="${tw.td}" data-sort-value="${c.last_run_at || ''}">
+                        ${runStatusBadge(c.last_run_status)}
+                        ${c.last_run_at ? `<br><span class="${tw.mutedText} text-xs">${formatDate(c.last_run_at)}</span>` : ''}
+                        ${statsText ? `<br><span class="${tw.mutedText} text-xs">${statsText}</span>` : ''}
+                    </td>
+                    <td class="${tw.td}">
+                        <div class="flex flex-wrap gap-1">
+                            <button class="${tw.btnGreen} ${tw.btnSm}" onclick="window._pages.training.runSourceConfig('${c.id}')">${t('sources.runSource')}</button>
+                            <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.editSourceConfig('${c.id}')">${t('common.edit')}</button>
+                            <button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.training.deleteSourceConfig('${c.id}', '${escapeHtml(c.name).replace(/'/g, "\\'")}')">${t('common.delete')}</button>
+                        </div>
+                    </td>
+                </tr>`;
+            }).join('')}
+            </tbody></table></div>`;
+        }
+
+        container.innerHTML = html;
+        makeSortable('sourceConfigsTable');
+    } catch (e) {
+        container.innerHTML = `<div class="${tw.emptyState}">${t('sources.failedToLoad', {error: escapeHtml(e.message)})}
+            <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.training.loadSourceConfigs()">${t('common.retry')}</button></div>`;
+    }
+}
+
+function showAddSourceConfig() {
+    document.getElementById('sourceConfigModalTitle').textContent = t('sources.addSource');
+    document.getElementById('editSourceConfigId').value = '';
+    document.getElementById('sourceConfigName').value = '';
+    document.getElementById('sourceConfigType').value = 'generic_html';
+    document.getElementById('sourceConfigLanguage').value = 'de';
+    document.getElementById('sourceConfigUrl').value = '';
+    document.getElementById('sourceConfigMaxArticles').value = '20';
+    document.getElementById('sourceConfigDay').value = 'monday';
+    document.getElementById('sourceConfigHour').value = '6';
+    document.getElementById('sourceConfigEnabled').checked = false;
+    document.getElementById('sourceConfigAutoApprove').checked = false;
+    document.getElementById('sourceConfigSettings').value = '{}';
+    document.getElementById('sourceConfigModal').classList.add('show');
+}
+
+async function editSourceConfig(id) {
+    try {
+        const data = await api('/admin/scraper/source-configs');
+        const cfg = (data.configs || []).find(c => c.id === id);
+        if (!cfg) { showToast(t('sources.configLoadFailed', {error: 'Not found'}), 'error'); return; }
+
+        document.getElementById('sourceConfigModalTitle').textContent = t('sources.editSource');
+        document.getElementById('editSourceConfigId').value = id;
+        document.getElementById('sourceConfigName').value = cfg.name || '';
+        document.getElementById('sourceConfigType').value = cfg.source_type || 'generic_html';
+        document.getElementById('sourceConfigLanguage').value = cfg.language || 'uk';
+        document.getElementById('sourceConfigUrl').value = cfg.source_url || '';
+        document.getElementById('sourceConfigMaxArticles').value = String(cfg.max_articles_per_run || 20);
+        document.getElementById('sourceConfigDay').value = cfg.schedule_day_of_week || 'monday';
+        document.getElementById('sourceConfigHour').value = String(cfg.schedule_hour ?? 6);
+        document.getElementById('sourceConfigEnabled').checked = !!cfg.enabled;
+        document.getElementById('sourceConfigAutoApprove').checked = !!cfg.auto_approve;
+        document.getElementById('sourceConfigSettings').value = JSON.stringify(cfg.settings || {}, null, 2);
+        document.getElementById('sourceConfigModal').classList.add('show');
+    } catch (e) { showToast(t('sources.configLoadFailed', {error: e.message}), 'error'); }
+}
+
+async function saveSourceConfig() {
+    const id = document.getElementById('editSourceConfigId').value;
+    const name = document.getElementById('sourceConfigName').value.trim();
+    const source_type = document.getElementById('sourceConfigType').value;
+    const language = document.getElementById('sourceConfigLanguage').value;
+    const source_url = document.getElementById('sourceConfigUrl').value.trim();
+    const max_articles_per_run = parseInt(document.getElementById('sourceConfigMaxArticles').value, 10);
+    const schedule_day_of_week = document.getElementById('sourceConfigDay').value;
+    const schedule_hour = parseInt(document.getElementById('sourceConfigHour').value, 10);
+    const enabled = document.getElementById('sourceConfigEnabled').checked;
+    const auto_approve = document.getElementById('sourceConfigAutoApprove').checked;
+    let settings;
+    try { settings = JSON.parse(document.getElementById('sourceConfigSettings').value); } catch { showToast(t('sources.invalidSettingsJson'), 'error'); return; }
+
+    if (!name || !source_url) { showToast(t('sources.nameUrlRequired'), 'error'); return; }
+
+    const body = { name, source_type, source_url, language, max_articles_per_run, schedule_day_of_week, schedule_hour, enabled, auto_approve, settings };
+
+    try {
+        if (id) {
+            await api(`/admin/scraper/source-configs/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
+        } else {
+            await api('/admin/scraper/source-configs', { method: 'POST', body: JSON.stringify(body) });
+        }
+        closeModal('sourceConfigModal');
+        showToast(t('sources.sourceConfigSaved'));
+        loadSourceConfigs();
+    } catch (e) { showToast(t('sources.sourceConfigSaveFailed', {error: e.message}), 'error'); }
+}
+
+async function toggleSourceConfigEnabled(id, enabled) {
+    try {
+        await api(`/admin/scraper/source-configs/${id}`, { method: 'PATCH', body: JSON.stringify({ enabled }) });
+        showToast(t('sources.configUpdated'));
+    } catch (e) { showToast(t('sources.configUpdateFailed', {error: e.message}), 'error'); loadSourceConfigs(); }
+}
+
+async function runSourceConfig(id) {
+    try {
+        await api(`/admin/scraper/source-configs/${id}/run`, { method: 'POST' });
+        showToast(t('sources.runDispatched'));
+    } catch (e) { showToast(t('sources.runFailed', {error: e.message}), 'error'); }
+}
+
+async function deleteSourceConfig(id, name) {
+    if (!confirm(t('sources.deleteSourceConfirm', {name}))) return;
+    try {
+        await api(`/admin/scraper/source-configs/${id}`, { method: 'DELETE' });
+        showToast(t('sources.sourceConfigDeleted'));
+        loadSourceConfigs();
+    } catch (e) { showToast(t('sources.sourceConfigDeleteFailed', {error: e.message}), 'error'); }
 }
 
 async function loadSources() {
@@ -1071,6 +1259,9 @@ window._pages.training = {
     loadSafetyRules, showCreateSafetyRule, editSafetyRule, saveSafetyRule, deleteSafetyRule,
     // Tools
     loadTools, editToolOverride, saveToolOverride, resetToolOverride,
+    // Source configs (multi-source)
+    loadSourceConfigs, showAddSourceConfig, editSourceConfig, saveSourceConfig,
+    toggleSourceConfigEnabled, runSourceConfig, deleteSourceConfig,
     // Sources (scraper)
     loadSources, toggleScraperEnabled, toggleAutoApprove, toggleDedupLlm, updateSchedule, updateMinDate, updateMaxDate,
     runScraperNow, approveSource, rejectSource, viewSourceArticle,

@@ -199,6 +199,13 @@
 
                 <!-- Tab: Sources (scraper) -->
                 <div id="trainingContent-sources" style="display:none">
+                    <!-- Source Configs section -->
+                    <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-3" data-i18n="sources.sourceConfigsTitle">Источники контента</h3>
+                    <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="sources.sourceConfigsHint">Внешние сайты для сбора статей в базу знаний.</p>
+                    <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="sourceConfigsContainer"></div>
+
+                    <!-- ProKoleso Scraper Config (legacy) -->
+                    <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mt-6 mb-3" data-i18n="sources.scraperConfigTitle">ProKoleso — скрапер (устаревший)</h3>
                     <div id="scraperConfigCard" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
                     <div class="flex flex-wrap items-center gap-2 mb-4">
                         <select id="sourcesStatusFilter" onchange="window._pages.training.loadSources()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
@@ -670,6 +677,73 @@
                     class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-30 resize-y"></textarea>
             </div>
             <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.training.saveToolOverride()" data-i18n="common.save">Сохранить</button>
+        </div>
+    </div>
+
+    <!-- Source Config Modal -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sourceConfigModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sourceConfigModal')">&times;</span>
+            <h2 id="sourceConfigModalTitle" class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sources.addSource">Добавить источник</h2>
+            <input type="hidden" id="editSourceConfigId">
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sources.sourceName">Название</label>
+                <input type="text" id="sourceConfigName" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="ADAC Reifentest">
+            </div>
+            <div class="grid grid-cols-2 gap-3 mb-3">
+                <div>
+                    <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sources.sourceType">Тип</label>
+                    <select id="sourceConfigType" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="generic_html">HTML</option>
+                        <option value="rss">RSS</option>
+                        <option value="prokoleso">ProKoleso</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sources.sourceLanguage">Язык</label>
+                    <select id="sourceConfigLanguage" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="uk">Українська</option>
+                        <option value="de">Deutsch</option>
+                        <option value="en">English</option>
+                        <option value="fr">Français</option>
+                    </select>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sources.sourceUrl">URL</label>
+                <input type="text" id="sourceConfigUrl" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500" placeholder="https://example.com">
+            </div>
+            <div class="grid grid-cols-3 gap-3 mb-3">
+                <div>
+                    <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sources.maxArticles">Макс. статей</label>
+                    <input type="number" id="sourceConfigMaxArticles" value="20" min="1" max="100" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sources.scheduleDay">День</label>
+                    <select id="sourceConfigDay" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="monday">Пн</option><option value="tuesday">Вт</option><option value="wednesday">Ср</option><option value="thursday">Чт</option><option value="friday">Пт</option><option value="saturday">Сб</option><option value="sunday">Вс</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sources.scheduleHour">Час</label>
+                    <input type="number" id="sourceConfigHour" value="6" min="0" max="23" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+            </div>
+            <div class="flex gap-4 mb-3">
+                <label class="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" id="sourceConfigEnabled">
+                    <span data-i18n="sources.enabled">Включён</span>
+                </label>
+                <label class="flex items-center gap-2 text-sm cursor-pointer">
+                    <input type="checkbox" id="sourceConfigAutoApprove">
+                    <span data-i18n="sources.autoApprove">Авто-публикация</span>
+                </label>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sources.settingsJson">Настройки (JSON)</label>
+                <textarea id="sourceConfigSettings" rows="3" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono resize-y">{}</textarea>
+            </div>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.training.saveSourceConfig()" data-i18n="common.save">Сохранить</button>
         </div>
     </div>
 

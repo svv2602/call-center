@@ -59,6 +59,41 @@ class ScraperConfigUpdate(BaseModel):
     schedule_day_of_week: str | None = None
 
 
+# ─── Source Config models ──────────────────────────────────
+_VALID_SOURCE_TYPES = {"prokoleso", "rss", "generic_html"}
+_VALID_LANGUAGES = {"uk", "de", "en", "fr", "pl"}
+
+
+class SourceConfigCreate(BaseModel):
+    name: str
+    source_type: str
+    source_url: str
+    language: str = "uk"
+    enabled: bool = False
+    auto_approve: bool = False
+    request_delay: float = 2.0
+    max_articles_per_run: int = 20
+    schedule_enabled: bool = True
+    schedule_hour: int = 6
+    schedule_day_of_week: str = "monday"
+    settings: dict[str, Any] = {}
+
+
+class SourceConfigUpdate(BaseModel):
+    name: str | None = None
+    source_type: str | None = None
+    source_url: str | None = None
+    language: str | None = None
+    enabled: bool | None = None
+    auto_approve: bool | None = None
+    request_delay: float | None = None
+    max_articles_per_run: int | None = None
+    schedule_enabled: bool | None = None
+    schedule_hour: int | None = None
+    schedule_day_of_week: str | None = None
+    settings: dict[str, Any] | None = None
+
+
 @router.get("/config")
 async def get_scraper_config(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Get current scraper configuration (Redis + env fallback)."""
@@ -140,11 +175,12 @@ async def trigger_scraper_run(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
 @router.get("/sources")
 async def list_sources(
     status: str | None = Query(None),
+    source_config_id: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     _: dict[str, Any] = _admin_dep,
 ) -> dict[str, Any]:
-    """List scraped sources with optional status filter."""
+    """List scraped sources with optional status/source_config_id filter."""
     engine = await _get_engine()
 
     conditions = ["1=1"]
@@ -153,6 +189,9 @@ async def list_sources(
     if status:
         conditions.append("ks.status = :status")
         params["status"] = status
+    if source_config_id:
+        conditions.append("ks.source_config_id = :source_config_id::uuid")
+        params["source_config_id"] = source_config_id
 
     where_clause = " AND ".join(conditions)
 
@@ -278,6 +317,211 @@ async def reject_source(source_id: UUID, _: dict[str, Any] = _admin_dep) -> dict
             )
 
     return {"message": "Source rejected"}
+
+
+# ═══════════════════════════════════════════════════════════
+#  Content Source Configs
+# ═══════════════════════════════════════════════════════════
+
+
+@router.get("/source-configs")
+async def list_source_configs(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+    """List all content source configurations."""
+    engine = await _get_engine()
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                SELECT id, name, source_type, source_url, language,
+                       enabled, auto_approve, request_delay,
+                       max_articles_per_run, schedule_enabled,
+                       schedule_hour, schedule_day_of_week, settings,
+                       last_run_at, last_run_status, last_run_stats,
+                       created_at, updated_at
+                FROM content_source_configs
+                ORDER BY created_at
+            """)
+        )
+        configs = [dict(row._mapping) for row in result]
+
+    return {"configs": configs}
+
+
+@router.post("/source-configs")
+async def create_source_config(
+    request: SourceConfigCreate, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
+    """Create a new content source configuration."""
+    if request.source_type not in _VALID_SOURCE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid source_type: {request.source_type}. "
+            f"Must be one of: {', '.join(sorted(_VALID_SOURCE_TYPES))}",
+        )
+    if request.language not in _VALID_LANGUAGES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid language: {request.language}. "
+            f"Must be one of: {', '.join(sorted(_VALID_LANGUAGES))}",
+        )
+    if not request.source_url.startswith("http"):
+        raise HTTPException(status_code=400, detail="source_url must start with http")
+
+    engine = await _get_engine()
+
+    try:
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                text("""
+                    INSERT INTO content_source_configs
+                        (name, source_type, source_url, language, enabled, auto_approve,
+                         request_delay, max_articles_per_run, schedule_enabled,
+                         schedule_hour, schedule_day_of_week, settings)
+                    VALUES (:name, :source_type, :source_url, :language, :enabled,
+                            :auto_approve, :request_delay, :max_articles_per_run,
+                            :schedule_enabled, :schedule_hour, :schedule_day_of_week,
+                            :settings::jsonb)
+                    RETURNING id
+                """),
+                {
+                    "name": request.name,
+                    "source_type": request.source_type,
+                    "source_url": request.source_url,
+                    "language": request.language,
+                    "enabled": request.enabled,
+                    "auto_approve": request.auto_approve,
+                    "request_delay": request.request_delay,
+                    "max_articles_per_run": request.max_articles_per_run,
+                    "schedule_enabled": request.schedule_enabled,
+                    "schedule_hour": request.schedule_hour,
+                    "schedule_day_of_week": request.schedule_day_of_week,
+                    "settings": json.dumps(request.settings),
+                },
+            )
+            row = result.first()
+            config_id = str(row.id) if row else None
+    except Exception as exc:
+        if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
+            raise HTTPException(
+                status_code=409, detail="Source with this URL already exists"
+            ) from exc
+        raise
+
+    logger.info("Created source config: %s (%s)", request.name, config_id)
+    return {"message": "Source config created", "id": config_id}
+
+
+@router.patch("/source-configs/{config_id}")
+async def update_source_config(
+    config_id: UUID, request: SourceConfigUpdate, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
+    """Update a content source configuration."""
+    if request.source_type is not None and request.source_type not in _VALID_SOURCE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid source_type: {request.source_type}",
+        )
+    if request.language is not None and request.language not in _VALID_LANGUAGES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid language: {request.language}",
+        )
+
+    engine = await _get_engine()
+
+    # Build dynamic SET clause
+    updates: list[str] = []
+    params: dict[str, Any] = {"id": str(config_id)}
+
+    for field_name in (
+        "name", "source_type", "source_url", "language", "enabled",
+        "auto_approve", "request_delay", "max_articles_per_run",
+        "schedule_enabled", "schedule_hour", "schedule_day_of_week",
+    ):
+        value = getattr(request, field_name, None)
+        if value is not None:
+            updates.append(f"{field_name} = :{field_name}")
+            params[field_name] = value
+
+    if request.settings is not None:
+        updates.append("settings = :settings::jsonb")
+        params["settings"] = json.dumps(request.settings)
+
+    if not updates:
+        return {"message": "No changes"}
+
+    updates.append("updated_at = now()")
+    set_clause = ", ".join(updates)
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(f"""
+                UPDATE content_source_configs
+                SET {set_clause}
+                WHERE id = :id
+                RETURNING id
+            """),
+            params,
+        )
+        if not result.first():
+            raise HTTPException(status_code=404, detail="Source config not found")
+
+    logger.info("Updated source config %s", config_id)
+    return {"message": "Source config updated"}
+
+
+@router.delete("/source-configs/{config_id}")
+async def delete_source_config(
+    config_id: UUID, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
+    """Delete a content source configuration."""
+    engine = await _get_engine()
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                DELETE FROM content_source_configs
+                WHERE id = :id
+                RETURNING id
+            """),
+            {"id": str(config_id)},
+        )
+        if not result.first():
+            raise HTTPException(status_code=404, detail="Source config not found")
+
+    logger.info("Deleted source config %s", config_id)
+    return {"message": "Source config deleted"}
+
+
+@router.post("/source-configs/{config_id}/run")
+async def trigger_source_run(
+    config_id: UUID, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
+    """Trigger a manual scraper run for a single source."""
+    engine = await _get_engine()
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("SELECT id, name FROM content_source_configs WHERE id = :id"),
+            {"id": str(config_id)},
+        )
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Source config not found")
+
+    try:
+        from src.tasks.scraper_tasks import run_source
+
+        result = run_source.delay(str(config_id))
+        return {
+            "message": f"Source run dispatched for {row.name}",
+            "task_id": str(result.id),
+        }
+    except Exception as exc:
+        logger.exception("Failed to dispatch source task for %s", config_id)
+        raise HTTPException(
+            status_code=500, detail="Failed to dispatch source task"
+        ) from exc
 
 
 # ═══════════════════════════════════════════════════════════

@@ -706,3 +706,374 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
 
     logger.info("Watched pages rescrape finished: %s", stats)
     return {"status": "ok", **stats}
+
+
+# ─── Multi-source scraping ───────────────────────────────────
+
+
+@app.task(
+    name="src.tasks.scraper_tasks.run_all_sources",
+    bind=True,
+    max_retries=2,
+)  # type: ignore[untyped-decorator]
+def run_all_sources(self: Any, triggered_by: str = "manual") -> dict[str, Any]:
+    """Dispatch per-source scraping tasks for all enabled content sources.
+
+    Args:
+        triggered_by: "beat" for scheduled runs (checks per-source schedule),
+                      "manual" for admin-triggered (runs all enabled sources).
+
+    Returns:
+        Dict with dispatched source count.
+    """
+    import asyncio
+
+    return asyncio.get_event_loop().run_until_complete(
+        _run_all_sources_async(self, triggered_by=triggered_by)
+    )
+
+
+async def _run_all_sources_async(
+    task: Any, *, triggered_by: str = "manual"
+) -> dict[str, Any]:
+    """Async implementation of run_all_sources."""
+    settings = get_settings()
+    engine = create_async_engine(settings.database.url)
+
+    try:
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                text("""
+                    SELECT id, name, schedule_enabled, schedule_hour, schedule_day_of_week
+                    FROM content_source_configs
+                    WHERE enabled = true
+                """)
+            )
+            configs = [dict(row._mapping) for row in result]
+    finally:
+        await engine.dispose()
+
+    if not configs:
+        logger.info("No enabled content sources found")
+        return {"status": "ok", "dispatched": 0}
+
+    dispatched = 0
+    for cfg in configs:
+        # For beat-triggered runs, check per-source schedule
+        if triggered_by == "beat":
+            if not cfg.get("schedule_enabled", True):
+                continue
+            now = datetime.datetime.now(tz=datetime.UTC)
+            try:
+                import zoneinfo
+
+                kyiv = zoneinfo.ZoneInfo("Europe/Kyiv")
+                now = now.astimezone(kyiv)
+            except Exception:
+                pass
+            current_hour = now.hour
+            current_day = now.strftime("%A").lower()
+            sched_hour = cfg.get("schedule_hour", 6)
+            sched_day = (cfg.get("schedule_day_of_week") or "monday").lower()
+            if current_hour != sched_hour or current_day != sched_day:
+                continue
+
+        run_source.delay(str(cfg["id"]), triggered_by=triggered_by)
+        dispatched += 1
+        logger.info("Dispatched run_source for %s (%s)", cfg["name"], cfg["id"])
+
+    logger.info("run_all_sources dispatched %d sources", dispatched)
+    return {"status": "ok", "dispatched": dispatched}
+
+
+@app.task(
+    name="src.tasks.scraper_tasks.run_source",
+    bind=True,
+    max_retries=3,
+)  # type: ignore[untyped-decorator]
+def run_source(
+    self: Any, source_config_id: str, triggered_by: str = "manual"
+) -> dict[str, Any]:
+    """Run the scraper pipeline for a single content source.
+
+    Args:
+        source_config_id: UUID of the content_source_configs row.
+        triggered_by: "beat" or "manual".
+
+    Returns:
+        Stats dict with processed, skipped, errors counts.
+    """
+    import asyncio
+
+    return asyncio.get_event_loop().run_until_complete(
+        _run_source_async(self, source_config_id, triggered_by=triggered_by)
+    )
+
+
+async def _run_source_async(
+    task: Any,
+    source_config_id: str,
+    *,
+    triggered_by: str = "manual",
+) -> dict[str, Any]:
+    """Async implementation of run_source."""
+    import json
+
+    from src.knowledge.article_processor import process_article
+    from src.knowledge.fetchers import create_fetcher
+
+    settings = get_settings()
+    engine = create_async_engine(settings.database.url)
+
+    # Load source config from DB
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                SELECT id, name, source_type, source_url, language,
+                       enabled, auto_approve, request_delay,
+                       max_articles_per_run, settings
+                FROM content_source_configs
+                WHERE id = :id
+            """),
+            {"id": source_config_id},
+        )
+        row = result.first()
+
+    if not row:
+        logger.error("Source config %s not found", source_config_id)
+        await engine.dispose()
+        return {"status": "error", "reason": "config_not_found"}
+
+    config = dict(row._mapping)
+    # Parse settings JSONB
+    if isinstance(config["settings"], str):
+        config["settings"] = json.loads(config["settings"])
+
+    if not config["enabled"]:
+        logger.info("Source %s is disabled, skipping", config["name"])
+        await engine.dispose()
+        return {"status": "disabled"}
+
+    stats: dict[str, int] = {"processed": 0, "skipped": 0, "errors": 0, "discovered": 0}
+
+    fetcher = create_fetcher(config)
+    await fetcher.open()
+
+    try:
+        # Default min_date: last 14 days
+        min_date = datetime.date.today() - datetime.timedelta(days=14)
+
+        discovered = await fetcher.discover_articles(
+            max_articles=config["max_articles_per_run"],
+            min_date=min_date,
+        )
+        stats["discovered"] = len(discovered)
+        logger.info(
+            "Source %s: discovered %d articles", config["name"], len(discovered)
+        )
+
+        if not discovered:
+            await _update_source_config_run(
+                engine, source_config_id, "ok", stats
+            )
+            await engine.dispose()
+            return {"status": "ok", **stats}
+
+        # Filter against known URLs
+        urls = [item["url"] for item in discovered]
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                text("SELECT url FROM knowledge_sources WHERE url = ANY(:urls)"),
+                {"urls": urls},
+            )
+            known_urls = {r.url for r in result}
+
+        new_articles = [item for item in discovered if item["url"] not in known_urls]
+        logger.info(
+            "Source %s: %d new articles (filtered %d known)",
+            config["name"],
+            len(new_articles),
+            len(known_urls),
+        )
+
+        # Process each new article
+        source_site = config["name"]
+        source_language = config.get("language", "uk")
+
+        for item in new_articles:
+            url = item["url"]
+            try:
+                # Insert source record
+                async with engine.begin() as conn:
+                    await conn.execute(
+                        text("""
+                            INSERT INTO knowledge_sources
+                                (url, source_site, original_title, status, source_config_id)
+                            VALUES (:url, :site, :title, 'processing', :config_id::uuid)
+                            ON CONFLICT (url) DO NOTHING
+                        """),
+                        {
+                            "url": url,
+                            "site": source_site,
+                            "title": item.get("title", ""),
+                            "config_id": source_config_id,
+                        },
+                    )
+
+                # Fetch article
+                scraped = await fetcher.fetch_article(
+                    url, published=item.get("published")
+                )
+                if scraped is None:
+                    await _update_source_status(
+                        engine, url, "error", skip_reason="Fetch failed"
+                    )
+                    stats["errors"] += 1
+                    continue
+
+                # Update fetched_at
+                async with engine.begin() as conn:
+                    await conn.execute(
+                        text("""
+                            UPDATE knowledge_sources
+                            SET fetched_at = now()
+                            WHERE url = :url
+                        """),
+                        {"url": url},
+                    )
+
+                # LLM processing (with translation for non-Ukrainian sources)
+                processed = await process_article(
+                    title=scraped.title,
+                    content=scraped.content,
+                    source_url=url,
+                    api_key=settings.anthropic.api_key,
+                    source_language=source_language,
+                )
+
+                if not processed.is_useful:
+                    await _update_source_status(
+                        engine,
+                        url,
+                        "skipped",
+                        skip_reason=processed.skip_reason or "Not useful",
+                    )
+                    stats["skipped"] += 1
+                    continue
+
+                # Semantic dedup check
+                dedup_result = await _check_duplicate(engine, processed.content, settings)
+                if dedup_result["status"] == "duplicate":
+                    await _update_source_status(
+                        engine,
+                        url,
+                        "duplicate",
+                        skip_reason=f"Duplicate of: {dedup_result.get('similar_title', 'unknown')} "
+                        f"(sim={dedup_result.get('similarity', 0):.2f})",
+                    )
+                    stats["skipped"] += 1
+                    continue
+                if dedup_result["status"] == "suspect":
+                    await _update_source_status(
+                        engine,
+                        url,
+                        "duplicate_suspect",
+                        skip_reason=f"Possible duplicate of: {dedup_result.get('similar_title', 'unknown')} "
+                        f"(sim={dedup_result.get('similarity', 0):.2f})",
+                    )
+                    stats["skipped"] += 1
+                    continue
+
+                # Insert into knowledge_articles
+                active = config["auto_approve"]
+                embedding_status = "pending" if active else "none"
+
+                async with engine.begin() as conn:
+                    result = await conn.execute(
+                        text("""
+                            INSERT INTO knowledge_articles
+                                (title, category, content, active, embedding_status)
+                            VALUES (:title, :category, :content, :active, :embedding_status)
+                            RETURNING id
+                        """),
+                        {
+                            "title": processed.title,
+                            "category": processed.category,
+                            "content": processed.content,
+                            "active": active,
+                            "embedding_status": embedding_status,
+                        },
+                    )
+                    article_row = result.first()
+                    article_id = str(article_row.id) if article_row else None
+
+                # Link source → article
+                async with engine.begin() as conn:
+                    await conn.execute(
+                        text("""
+                            UPDATE knowledge_sources
+                            SET status = 'processed', article_id = :article_id, processed_at = now()
+                            WHERE url = :url
+                        """),
+                        {"url": url, "article_id": article_id},
+                    )
+
+                if active and article_id:
+                    _dispatch_embedding(article_id)
+
+                stats["processed"] += 1
+                logger.info(
+                    "Source %s: processed %s → %s", config["name"], url, article_id
+                )
+
+            except Exception:
+                logger.exception(
+                    "Source %s: error processing %s", config["name"], url
+                )
+                await _update_source_status(
+                    engine, url, "error", skip_reason="Processing error"
+                )
+                stats["errors"] += 1
+
+        await _update_source_config_run(engine, source_config_id, "ok", stats)
+
+    except Exception as exc:
+        logger.exception("Source %s pipeline failed", config["name"])
+        await _update_source_config_run(
+            engine, source_config_id, "error", stats
+        )
+        raise task.retry(countdown=300) from exc
+    finally:
+        await fetcher.close()
+        await engine.dispose()
+
+    logger.info("Source %s finished: %s", config["name"], json.dumps(stats))
+    return {"status": "ok", **stats}
+
+
+async def _update_source_config_run(
+    engine: Any,
+    config_id: str,
+    status: str,
+    stats: dict[str, int],
+) -> None:
+    """Update last_run_* fields on a content_source_configs row."""
+    import json
+
+    try:
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("""
+                    UPDATE content_source_configs
+                    SET last_run_at = now(),
+                        last_run_status = :status,
+                        last_run_stats = :stats::jsonb,
+                        updated_at = now()
+                    WHERE id = :id
+                """),
+                {"id": config_id, "status": status, "stats": json.dumps(stats)},
+            )
+    except Exception:
+        logger.warning(
+            "Failed to update run status for config %s", config_id, exc_info=True
+        )

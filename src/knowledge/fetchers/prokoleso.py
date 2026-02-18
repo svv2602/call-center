@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import datetime
+import datetime  # noqa: TC003 - used at runtime in method signatures
 
 from src.knowledge.scraper import ProKolesoScraper, ScrapedArticle
 
