@@ -23,7 +23,7 @@ function showTab(tab) {
     if (activeBtn) activeBtn.classList.add('active');
 
     // Load data for the tab
-    const loaders = { prompts: loadPromptVersions, knowledge: loadKnowledge, templates: loadTemplates, dialogues: loadDialogues, safety: loadSafetyRules, tools: loadTools, sources: loadSources };
+    const loaders = { prompts: loadPromptVersions, knowledge: loadKnowledge, templates: loadTemplates, dialogues: loadDialogues, safety: loadSafetyRules, tools: loadTools, sources: loadSourcesAndWatched };
     if (loaders[tab]) loaders[tab]();
 }
 
@@ -715,6 +715,11 @@ function sourceStatusBadge(status) {
     }
 }
 
+function loadSourcesAndWatched() {
+    loadSources();
+    loadWatchedPages();
+}
+
 async function loadSources() {
     const configCard = document.getElementById('scraperConfigCard');
     const container = document.getElementById('sourcesContainer');
@@ -897,6 +902,148 @@ function viewSourceArticle(articleId) {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  Watched Pages (part of Sources tab)
+// ═══════════════════════════════════════════════════════════
+
+const INTERVAL_OPTIONS = [
+    { value: 6, label: () => t('sources.intervalHours.6') },
+    { value: 12, label: () => t('sources.intervalHours.12') },
+    { value: 24, label: () => t('sources.intervalHours.24') },
+    { value: 168, label: () => t('sources.intervalHours.168') },
+];
+
+function intervalLabel(hours) {
+    const opt = INTERVAL_OPTIONS.find(o => o.value === hours);
+    return opt ? opt.label() : `${hours}h`;
+}
+
+async function loadWatchedPages() {
+    const container = document.getElementById('watchedPagesContainer');
+    if (!container) return;
+    container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+
+    try {
+        const data = await api('/admin/scraper/watched-pages');
+        const pages = data.pages || [];
+
+        // Build add form
+        const categoryOptions = (_categories.length ? _categories : [
+            { value: 'delivery', label: 'delivery' }, { value: 'warranty', label: 'warranty' },
+            { value: 'returns', label: 'returns' }, { value: 'policies', label: 'policies' },
+            { value: 'general', label: 'general' },
+        ]).map(c => `<option value="${c.value}">${escapeHtml(c.label)}</option>`).join('');
+
+        const intervalOptions = INTERVAL_OPTIONS.map(o =>
+            `<option value="${o.value}" ${o.value === 168 ? 'selected' : ''}>${o.label()}</option>`
+        ).join('');
+
+        let html = `
+            <div class="flex flex-wrap items-end gap-2 mb-4">
+                <div class="flex-1 min-w-[250px]">
+                    <label class="block text-xs ${tw.mutedText} mb-1">${t('sources.watchedUrl')}</label>
+                    <input type="text" id="watchedPageUrl" placeholder="${t('sources.urlPlaceholder')}" class="w-full border rounded px-2 py-1.5 text-sm dark:bg-gray-700 dark:border-gray-600">
+                </div>
+                <div>
+                    <label class="block text-xs ${tw.mutedText} mb-1">${t('sources.watchedCategory')}</label>
+                    <select id="watchedPageCategory" class="border rounded px-2 py-1.5 text-sm dark:bg-gray-700 dark:border-gray-600">${categoryOptions}</select>
+                </div>
+                <div>
+                    <label class="block text-xs ${tw.mutedText} mb-1">${t('sources.watchedInterval')}</label>
+                    <select id="watchedPageInterval" class="border rounded px-2 py-1.5 text-sm dark:bg-gray-700 dark:border-gray-600">${intervalOptions}</select>
+                </div>
+                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.addWatchedPage()">${t('sources.addWatchedPage')}</button>
+            </div>`;
+
+        if (pages.length === 0) {
+            html += `<div class="${tw.emptyState}">${t('sources.noWatchedPages')}</div>`;
+        } else {
+            html += `
+            <div class="overflow-x-auto"><table class="${tw.table}" id="watchedPagesTable"><thead><tr>
+                <th class="${tw.th}">${t('sources.watchedUrl')}</th>
+                <th class="${tw.th}">${t('sources.watchedCategory')}</th>
+                <th class="${tw.th}">${t('sources.watchedInterval')}</th>
+                <th class="${tw.th}">${t('sources.watchedStatus')}</th>
+                <th class="${tw.th}">${t('sources.watchedLastScraped')}</th>
+                <th class="${tw.th}">${t('sources.watchedNextScrape')}</th>
+                <th class="${tw.th}">${t('sources.watchedActions')}</th>
+            </tr></thead><tbody>
+            ${pages.map(p => `
+                <tr class="${tw.trHover}">
+                    <td class="${tw.td}"><a href="${escapeHtml(p.url)}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline text-xs">${escapeHtml((p.url || '').replace(/^https?:\/\//, '').substring(0, 50))}</a></td>
+                    <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(p.article_category || '-')}</span></td>
+                    <td class="${tw.td}">
+                        <select class="border rounded px-1 py-0.5 text-xs dark:bg-gray-700 dark:border-gray-600"
+                            onchange="window._pages.training.updateWatchedInterval('${p.id}', parseInt(this.value))">
+                            ${INTERVAL_OPTIONS.map(o => `<option value="${o.value}" ${o.value === p.rescrape_interval_hours ? 'selected' : ''}>${o.label()}</option>`).join('')}
+                        </select>
+                    </td>
+                    <td class="${tw.td}">${sourceStatusBadge(p.status)}</td>
+                    <td class="${tw.td}">${p.fetched_at ? formatDate(p.fetched_at) : `<span class="${tw.mutedText} text-xs">${t('sources.neverScraped')}</span>`}</td>
+                    <td class="${tw.td}">${p.next_scrape_at ? formatDate(p.next_scrape_at) : '-'}</td>
+                    <td class="${tw.td}">
+                        <div class="flex flex-wrap gap-1">
+                            ${p.article_id ? `<button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.viewSourceArticle('${p.article_id}')">${t('sources.watchedArticle')}</button>` : ''}
+                            <button class="${tw.btnGreen} ${tw.btnSm}" onclick="window._pages.training.scrapeWatchedNow('${p.id}')">${t('sources.scrapeNow')}</button>
+                            <button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.training.deleteWatchedPage('${p.id}')">${t('sources.deleteWatched')}</button>
+                        </div>
+                    </td>
+                </tr>
+            `).join('')}
+            </tbody></table></div>`;
+        }
+
+        container.innerHTML = html;
+    } catch (e) {
+        container.innerHTML = `<div class="${tw.emptyState}">${t('sources.watchedFailedToLoad', {error: escapeHtml(e.message)})}
+            <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.training.loadWatchedPages()">${t('common.retry')}</button></div>`;
+    }
+}
+
+async function addWatchedPage() {
+    const url = document.getElementById('watchedPageUrl')?.value?.trim();
+    const category = document.getElementById('watchedPageCategory')?.value;
+    const interval = parseInt(document.getElementById('watchedPageInterval')?.value, 10);
+    if (!url) { showToast(t('sources.urlRequired'), 'error'); return; }
+
+    try {
+        await api('/admin/scraper/watched-pages', {
+            method: 'POST',
+            body: JSON.stringify({ url, category, rescrape_interval_hours: interval }),
+        });
+        showToast(t('sources.watchedPageAdded'));
+        document.getElementById('watchedPageUrl').value = '';
+        loadWatchedPages();
+    } catch (e) { showToast(t('sources.watchedPageAddFailed', {error: e.message}), 'error'); }
+}
+
+async function updateWatchedInterval(pageId, interval) {
+    try {
+        await api(`/admin/scraper/watched-pages/${pageId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ rescrape_interval_hours: interval }),
+        });
+        showToast(t('sources.watchedPageUpdated'));
+    } catch (e) { showToast(t('sources.watchedPageUpdateFailed', {error: e.message}), 'error'); }
+}
+
+async function scrapeWatchedNow(pageId) {
+    try {
+        await api(`/admin/scraper/watched-pages/${pageId}/scrape-now`, { method: 'POST' });
+        showToast(t('sources.scrapeNowDispatched'));
+        setTimeout(() => loadWatchedPages(), 2000);
+    } catch (e) { showToast(t('sources.scrapeNowFailed', {error: e.message}), 'error'); }
+}
+
+async function deleteWatchedPage(pageId) {
+    if (!confirm(t('sources.watchedPageDeleteConfirm'))) return;
+    try {
+        await api(`/admin/scraper/watched-pages/${pageId}`, { method: 'DELETE' });
+        showToast(t('sources.watchedPageDeleted'));
+        loadWatchedPages();
+    } catch (e) { showToast(t('sources.watchedPageDeleteFailed', {error: e.message}), 'error'); }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  Init & exports
 // ═══════════════════════════════════════════════════════════
 export function init() {
@@ -927,4 +1074,6 @@ window._pages.training = {
     // Sources (scraper)
     loadSources, toggleScraperEnabled, toggleAutoApprove, toggleDedupLlm, updateSchedule, updateMinDate, updateMaxDate,
     runScraperNow, approveSource, rejectSource, viewSourceArticle,
+    // Watched pages
+    loadWatchedPages, addWatchedPage, updateWatchedInterval, scrapeWatchedNow, deleteWatchedPage,
 };

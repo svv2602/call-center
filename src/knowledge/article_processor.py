@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 
 _MAX_CONTENT_CHARS = 8000
 
+_LANGUAGE_NAMES: dict[str, str] = {
+    "de": "German (Deutsch)",
+    "en": "English",
+    "fr": "French (Français)",
+    "pl": "Polish (Polski)",
+}
+
 _SYSTEM_PROMPT = """You are a content processor for a Ukrainian tire shop knowledge base.
 Your task is to clean up a scraped article and decide if it's useful for customer service agents.
 
@@ -37,6 +44,9 @@ Respond ONLY with valid JSON (no markdown fences):
   "category": "one of: brands, guides, faq, comparisons, policies, procedures, returns, warranty, delivery, general",
   "content": "cleaned article content in Ukrainian markdown"
 }"""
+
+_TRANSLATION_ADDENDUM = """
+6. The source article is in {language_name}. Translate ALL content to Ukrainian (українською мовою). Preserve technical tire terminology (sizes, specifications). Keep brand names in their original form."""
 
 
 @dataclass
@@ -57,6 +67,7 @@ async def process_article(
     api_key: str,
     model: str = "claude-haiku-4-5-20251001",
     llm_router: object | None = None,
+    source_language: str = "uk",
 ) -> ProcessedArticle:
     """Process a scraped article through LLM for cleanup and classification.
 
@@ -67,6 +78,8 @@ async def process_article(
         api_key: Anthropic API key.
         model: Model to use (default: Haiku for cost efficiency).
         llm_router: Optional LLMRouter for multi-provider routing.
+        source_language: ISO language code of the source article (e.g. 'uk', 'de', 'en').
+            When not 'uk', adds translation instructions to the prompt.
 
     Returns:
         ProcessedArticle with cleaned content and classification.
@@ -75,6 +88,12 @@ async def process_article(
     truncated = content[:_MAX_CONTENT_CHARS]
     if len(content) > _MAX_CONTENT_CHARS:
         truncated += "\n\n[... content truncated ...]"
+
+    # Build system prompt with optional translation addendum
+    system_prompt = _SYSTEM_PROMPT
+    if source_language and source_language != "uk":
+        language_name = _LANGUAGE_NAMES.get(source_language, source_language)
+        system_prompt += _TRANSLATION_ADDENDUM.format(language_name=language_name)
 
     user_message = f"""Article URL: {source_url}
 Title: {title}
@@ -91,7 +110,7 @@ Content:
             llm_response = await llm_router.complete(  # type: ignore[union-attr]
                 LLMTask.ARTICLE_PROCESSOR,
                 messages,
-                system=_SYSTEM_PROMPT,
+                system=system_prompt,
                 max_tokens=4096,
             )
             raw_text = llm_response.text.strip()
@@ -100,7 +119,7 @@ Content:
             response = await client.messages.create(
                 model=model,
                 max_tokens=4096,
-                system=_SYSTEM_PROMPT,
+                system=system_prompt,
                 messages=messages,
             )
             raw_text = response.content[0].text.strip()

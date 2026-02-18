@@ -278,3 +278,189 @@ async def reject_source(source_id: UUID, _: dict[str, Any] = _admin_dep) -> dict
             )
 
     return {"message": "Source rejected"}
+
+
+# ═══════════════════════════════════════════════════════════
+#  Watched pages
+# ═══════════════════════════════════════════════════════════
+
+_VALID_CATEGORIES = {
+    "brands", "guides", "faq", "comparisons", "general",
+    "policies", "procedures", "returns", "warranty", "delivery",
+}
+
+
+class WatchedPageCreate(BaseModel):
+    url: str
+    category: str = "general"
+    rescrape_interval_hours: int = 168  # default: weekly
+
+
+class WatchedPageUpdate(BaseModel):
+    category: str | None = None
+    rescrape_interval_hours: int | None = None
+
+
+@router.get("/watched-pages")
+async def list_watched_pages(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+    """List all watched pages with their status."""
+    engine = await _get_engine()
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                SELECT ks.id, ks.url, ks.article_id, ks.status,
+                       ks.content_hash, ks.rescrape_interval_hours,
+                       ks.fetched_at, ks.next_scrape_at, ks.created_at,
+                       ka.title AS article_title, ka.category AS article_category,
+                       ka.active AS article_active
+                FROM knowledge_sources ks
+                LEFT JOIN knowledge_articles ka ON ka.id = ks.article_id
+                WHERE ks.source_type = 'watched_page'
+                ORDER BY ks.created_at
+            """)
+        )
+        pages = [dict(row._mapping) for row in result]
+
+    return {"pages": pages}
+
+
+@router.post("/watched-pages")
+async def add_watched_page(
+    request: WatchedPageCreate, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
+    """Add a new watched page for periodic rescraping."""
+    url = request.url.strip()
+    if not url.startswith("http"):
+        raise HTTPException(status_code=400, detail="URL must start with http:// or https://")
+
+    category = request.category.strip().lower()
+    if category not in _VALID_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"Invalid category: {category}")
+
+    interval = request.rescrape_interval_hours
+    if interval < 1 or interval > 8760:
+        raise HTTPException(status_code=400, detail="Interval must be between 1 and 8760 hours")
+
+    engine = await _get_engine()
+
+    try:
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                text("""
+                    INSERT INTO knowledge_sources
+                        (url, source_site, source_type, status, rescrape_interval_hours,
+                         original_title, next_scrape_at)
+                    VALUES (:url, 'prokoleso.ua', 'watched_page', 'new',
+                            :interval, :url, now())
+                    RETURNING id
+                """),
+                {"url": url, "interval": interval},
+            )
+            row = result.first()
+            page_id = str(row.id) if row else None
+    except Exception as exc:
+        if "unique" in str(exc).lower() or "duplicate" in str(exc).lower():
+            raise HTTPException(status_code=409, detail="URL already exists") from exc
+        raise
+
+    return {"message": "Watched page added", "id": page_id}
+
+
+@router.patch("/watched-pages/{page_id}")
+async def update_watched_page(
+    page_id: UUID, request: WatchedPageUpdate, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
+    """Update a watched page's category or rescrape interval."""
+    engine = await _get_engine()
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                SELECT id, article_id FROM knowledge_sources
+                WHERE id = :id AND source_type = 'watched_page'
+            """),
+            {"id": str(page_id)},
+        )
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Watched page not found")
+
+        if request.rescrape_interval_hours is not None:
+            if request.rescrape_interval_hours < 1 or request.rescrape_interval_hours > 8760:
+                raise HTTPException(status_code=400, detail="Interval must be between 1 and 8760 hours")
+            await conn.execute(
+                text("""
+                    UPDATE knowledge_sources
+                    SET rescrape_interval_hours = :interval
+                    WHERE id = :id
+                """),
+                {"id": str(page_id), "interval": request.rescrape_interval_hours},
+            )
+
+        if request.category is not None:
+            category = request.category.strip().lower()
+            if category not in _VALID_CATEGORIES:
+                raise HTTPException(status_code=400, detail=f"Invalid category: {category}")
+            # Update article category if linked
+            if row.article_id:
+                await conn.execute(
+                    text("""
+                        UPDATE knowledge_articles SET category = :category, updated_at = now()
+                        WHERE id = :article_id
+                    """),
+                    {"article_id": str(row.article_id), "category": category},
+                )
+
+    return {"message": "Watched page updated"}
+
+
+@router.delete("/watched-pages/{page_id}")
+async def delete_watched_page(page_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+    """Remove a watched page. Linked article is kept but no longer auto-updated."""
+    engine = await _get_engine()
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                DELETE FROM knowledge_sources
+                WHERE id = :id AND source_type = 'watched_page'
+                RETURNING id
+            """),
+            {"id": str(page_id)},
+        )
+        if not result.first():
+            raise HTTPException(status_code=404, detail="Watched page not found")
+
+    return {"message": "Watched page removed"}
+
+
+@router.post("/watched-pages/{page_id}/scrape-now")
+async def scrape_watched_page_now(
+    page_id: UUID, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
+    """Trigger immediate rescraping of a single watched page."""
+    engine = await _get_engine()
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                UPDATE knowledge_sources
+                SET next_scrape_at = now()
+                WHERE id = :id AND source_type = 'watched_page'
+                RETURNING id
+            """),
+            {"id": str(page_id)},
+        )
+        if not result.first():
+            raise HTTPException(status_code=404, detail="Watched page not found")
+
+    # Trigger rescrape task
+    try:
+        from src.tasks.scraper_tasks import rescrape_watched_pages
+
+        result = rescrape_watched_pages.delay()
+        return {"message": "Rescrape triggered", "task_id": str(result.id)}
+    except Exception as exc:
+        logger.exception("Failed to dispatch rescrape task")
+        raise HTTPException(status_code=500, detail="Failed to dispatch rescrape task") from exc

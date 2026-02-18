@@ -87,6 +87,10 @@ app.conf.beat_schedule = {
         "schedule": crontab(minute=0),  # Every hour; actual day/time filtered inside the task via Redis config
         "kwargs": {"triggered_by": "beat"},
     },
+    "rescrape-watched-pages": {
+        "task": "src.tasks.scraper_tasks.rescrape_watched_pages",
+        "schedule": crontab(minute=30),  # Every hour at :30; actual timing per-page via next_scrape_at
+    },
 }
 
 # Note: autodiscover_tasks(["src.tasks"]) looks for src/tasks/tasks.py which doesn't exist.

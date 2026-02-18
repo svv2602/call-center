@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import datetime
+import hashlib
 import logging
 import re
 from dataclasses import dataclass, field
@@ -29,7 +30,25 @@ _SLUG_CATEGORY_MAP: dict[str, str] = {
     "pokupatelu": "faq",
 }
 
+# Static page URL patterns → KB category mapping
+_STATIC_PAGE_CATEGORY_MAP: dict[str, str] = {
+    "oplata-i-dostavka": "delivery",
+    "dostavka": "delivery",
+    "oplata": "delivery",
+    "garantiya": "warranty",
+    "vozvrat": "returns",
+    "promotions": "policies",
+    "akcii": "policies",
+    "polzovatelskoe-soglashenie": "policies",
+    "kontakty": "general",
+}
+
 _DEFAULT_CATEGORY = "general"
+
+
+def content_hash(text: str) -> str:
+    """Compute SHA-256 hash of content for change detection."""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 _USER_AGENT = "CallCenterAI-Scraper/1.0 (+https://github.com/call-center-ai; polite bot)"
 
@@ -334,7 +353,11 @@ class ProKolesoScraper:
 
     def _extract_category(self, url: str) -> str:
         """Map URL slug to KB category."""
+        url_lower = url.lower()
         for slug, category in _SLUG_CATEGORY_MAP.items():
-            if slug in url.lower():
+            if slug in url_lower:
+                return category
+        for slug, category in _STATIC_PAGE_CATEGORY_MAP.items():
+            if slug in url_lower:
                 return category
         return _DEFAULT_CATEGORY
