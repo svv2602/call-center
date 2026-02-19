@@ -4,7 +4,7 @@ import './styles/main.css';
 // Core modules
 import { getToken } from './api.js';
 import { login, logout, checkTokenExpiry, applyRoleVisibility } from './auth.js';
-import { showPage } from './router.js';
+import { showPage, toggleSidebarGroup } from './router.js';
 import { connectWebSocket, setWsEventHandler, refreshWsStatus } from './websocket.js';
 import { closeModal } from './utils.js';
 import { initTheme, toggleTheme, refreshThemeLabel } from './theme.js';
@@ -13,9 +13,14 @@ import { initLang, toggleLang, translateStaticDOM } from './i18n.js';
 // Page modules — each registers its page loader via init()
 import { init as initDashboard } from './pages/dashboard.js';
 import { init as initCalls, getCallsOffset } from './pages/calls.js';
-import { init as initTraining } from './pages/training.js';
+import { init as initPrompts } from './pages/prompts.js';
+import { init as initKnowledge } from './pages/knowledge.js';
+import { init as initScenarios } from './pages/scenarios.js';
+import { init as initTools } from './pages/tools-config.js';
 import { init as initOperators } from './pages/operators.js';
-import { init as initSettings } from './pages/settings.js';
+import { init as initMonitoring } from './pages/monitoring.js';
+import { init as initConfiguration } from './pages/configuration.js';
+import { init as initNotifications } from './pages/notifications-page.js';
 import { init as initUsers } from './pages/users.js';
 import { init as initAudit } from './pages/audit.js';
 import { init as initVehicles } from './pages/vehicles.js';
@@ -28,9 +33,14 @@ translateStaticDOM();
 // Initialize all page loaders
 initDashboard();
 initCalls();
-initTraining();
+initPrompts();
+initKnowledge();
+initScenarios();
+initTools();
 initOperators();
-initSettings();
+initMonitoring();
+initConfiguration();
+initNotifications();
 initUsers();
 initAudit();
 initVehicles();
@@ -57,6 +67,11 @@ setWsEventHandler((msg) => {
 // Periodic token expiry check
 setInterval(checkTokenExpiry, 60000);
 
+// localStorage migration for old page names
+let savedPage = localStorage.getItem('admin_active_page');
+if (savedPage === 'training') { savedPage = 'prompts'; localStorage.setItem('admin_active_page', savedPage); }
+if (savedPage === 'settings') { savedPage = 'monitoring'; localStorage.setItem('admin_active_page', savedPage); }
+
 // App initialization — restore session if token exists
 if (getToken()) {
     checkTokenExpiry();
@@ -65,8 +80,7 @@ if (getToken()) {
         document.getElementById('app').style.display = 'block';
         applyRoleVisibility();
         connectWebSocket();
-        const savedPage = localStorage.getItem('admin_active_page') || 'dashboard';
-        showPage(savedPage);
+        showPage(savedPage || 'dashboard');
     }
 }
 
@@ -103,4 +117,4 @@ window.addEventListener('langchange', () => {
 });
 
 // Expose globals for onclick handlers in HTML
-window._app = { login, logout, showPage, closeModal, toggleSidebar, toggleTheme, toggleLang };
+window._app = { login, logout, showPage, closeModal, toggleSidebar, toggleTheme, toggleLang, toggleSidebarGroup };

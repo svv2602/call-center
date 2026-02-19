@@ -35,6 +35,13 @@ export default {
     'nav.operators': 'Operators',
     'nav.system': 'System',
     'nav.users': 'Users',
+    'nav.prompts': 'Prompts',
+    'nav.knowledge': 'Knowledge Base',
+    'nav.scenarios': 'Scenarios',
+    'nav.tools': 'Tools',
+    'nav.monitoring': 'Monitoring',
+    'nav.configuration': 'Configuration',
+    'nav.notifications': 'Notifications',
     'nav.audit': 'Audit Log',
     'nav.logout': 'Logout',
 
@@ -604,6 +611,11 @@ export default {
     'sources.intervalHours.12': 'Every 12h',
     'sources.intervalHours.24': 'Daily',
     'sources.intervalHours.168': 'Weekly',
+
+    // Tab labels
+    'sources.tabConfigs': 'Configurations',
+    'sources.tabScraper': 'Scraper',
+    'sources.tabWatched': 'Watched Pages',
 
     // Source Configs (multi-source)
     'sources.sourceConfigsTitle': 'Content Sources',

@@ -30,6 +30,15 @@
   background-color: rgb(39 39 42); /* zinc-800 */
 }
 
+/* Collapsible sidebar groups */
+.sidebar-group-toggle { cursor: pointer; user-select: none; }
+.sidebar-group-toggle .chevron { transition: transform 0.2s; display: inline-block; }
+.sidebar-group.open .sidebar-group-toggle .chevron { transform: rotate(180deg); }
+.sidebar-group-toggle.group-active { color: white; }
+.sidebar-sub-links { display: none; }
+.sidebar-group.open .sidebar-sub-links { display: block; }
+.sidebar-sub-links a { padding-left: 2.5rem; font-size: 0.8125rem; }
+
 /* Active tab */
 .tab-bar button.active {
   color: rgb(37 99 235);

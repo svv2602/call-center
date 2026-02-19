@@ -46,9 +46,34 @@
             <div class="flex-1 py-2 overflow-y-auto">
                 <a href="#" onclick="window._app.showPage('dashboard')" class="active flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="dashboard" data-i18n="nav.dashboard">Дашборд</a>
                 <a href="#" onclick="window._app.showPage('calls')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="calls" data-i18n="nav.calls">Журнал звонков</a>
-                <a href="#" onclick="window._app.showPage('training')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="training" data-i18n="nav.training">Обучение агента</a>
+                <!-- Обучение агента group -->
+                <div class="sidebar-group" data-group="training">
+                    <a href="#" class="sidebar-group-toggle flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                       onclick="event.preventDefault(); window._app.toggleSidebarGroup('training')">
+                        <span class="flex-1" data-i18n="nav.training">Обучение агента</span>
+                        <svg class="chevron w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </a>
+                    <div class="sidebar-sub-links">
+                        <a href="#" onclick="window._app.showPage('prompts')" data-page="prompts" data-i18n="nav.prompts" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors">Промпты</a>
+                        <a href="#" onclick="window._app.showPage('knowledge')" data-page="knowledge" data-i18n="nav.knowledge" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors">База знаний</a>
+                        <a href="#" onclick="window._app.showPage('scenarios')" data-page="scenarios" data-i18n="nav.scenarios" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors">Сценарии</a>
+                        <a href="#" onclick="window._app.showPage('tools')" data-page="tools" data-i18n="nav.tools" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors">Инструменты</a>
+                    </div>
+                </div>
                 <a href="#" onclick="window._app.showPage('operators')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="operators" data-i18n="nav.operators">Операторы</a>
-                <a href="#" onclick="window._app.showPage('settings')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="settings" data-i18n="nav.system">Система</a>
+                <!-- Система group -->
+                <div class="sidebar-group" data-group="settings">
+                    <a href="#" class="sidebar-group-toggle flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors"
+                       onclick="event.preventDefault(); window._app.toggleSidebarGroup('settings')">
+                        <span class="flex-1" data-i18n="nav.system">Система</span>
+                        <svg class="chevron w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+                    </a>
+                    <div class="sidebar-sub-links">
+                        <a href="#" onclick="window._app.showPage('monitoring')" data-page="monitoring" data-i18n="nav.monitoring" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors">Мониторинг</a>
+                        <a href="#" onclick="window._app.showPage('configuration')" data-page="configuration" data-i18n="nav.configuration" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors">Конфигурация</a>
+                        <a href="#" onclick="window._app.showPage('notifications')" data-page="notifications" data-i18n="nav.notifications" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors">Уведомления</a>
+                    </div>
+                </div>
                 <a href="#" onclick="window._app.showPage('users')" class="admin-only flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="users" data-i18n="nav.users">Пользователи</a>
                 <a href="#" onclick="window._app.showPage('audit')" class="admin-only flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="audit" data-i18n="nav.audit">Аудит</a>
                 <a href="#" onclick="window._app.showPage('vehicles')" class="flex items-center px-4 py-2 text-sm text-neutral-400 hover:text-white hover:bg-zinc-800 transition-colors" data-page="vehicles" data-i18n="nav.vehicles">База авто</a>
@@ -147,69 +172,115 @@
                 </div>
             </div>
 
-            <!-- Training (unified: Prompts + Knowledge + Templates + Dialogues + Safety + Tools) -->
-            <div id="page-training" style="display:none">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="training.breadcrumb">Обучение агента</span></div>
-                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="training.title">Обучение агента</h1>
+            <!-- Prompts -->
+            <div id="page-prompts" style="display:none">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.training">Обучение</span> / <span data-i18n="nav.prompts">Промпты</span></div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.prompts">Промпты</h1>
+                <div id="promptsContent" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
+            </div>
+
+            <!-- Knowledge (Articles + Sources) -->
+            <div id="page-knowledge" style="display:none">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.training">Обучение</span> / <span data-i18n="nav.knowledge">База знаний</span></div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.knowledge">База знаний</h1>
                 <div class="tab-bar flex border-b border-neutral-200 dark:border-neutral-700 mb-4 flex-wrap">
-                    <button class="active px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="prompts" onclick="window._pages.training.showTab('prompts')" data-i18n="training.tabPrompts">Промпты</button>
-                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="knowledge" onclick="window._pages.training.showTab('knowledge')" data-i18n="training.tabKnowledge">База знаний</button>
-                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="templates" onclick="window._pages.training.showTab('templates')" data-i18n="training.tabTemplates">Шаблоны ответов</button>
-                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="dialogues" onclick="window._pages.training.showTab('dialogues')" data-i18n="training.tabDialogues">Сценарии диалогов</button>
-                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="safety" onclick="window._pages.training.showTab('safety')" data-i18n="training.tabSafety">Правила безопасности</button>
-                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="tools" onclick="window._pages.training.showTab('tools')" data-i18n="training.tabTools">Инструменты</button>
-                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="sources" onclick="window._pages.training.showTab('sources')" data-i18n="training.tabSources">Источники</button>
+                    <button class="active px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="articles" onclick="window._pages.knowledge.showTab('articles')" data-i18n="training.tabKnowledge">Статьи</button>
+                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="source-configs" onclick="window._pages.knowledge.showTab('source-configs')" data-i18n="sources.tabConfigs">Конфигурации</button>
+                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="scraper" onclick="window._pages.knowledge.showTab('scraper')" data-i18n="sources.tabScraper">Скрапер</button>
+                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="watched" onclick="window._pages.knowledge.showTab('watched')" data-i18n="sources.tabWatched">Отслеживаемые</button>
                 </div>
 
-                <!-- Tab: Prompts -->
-                <div id="trainingContent-prompts" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
-
-                <!-- Tab: Knowledge -->
-                <div id="trainingContent-knowledge" style="display:none">
+                <!-- Tab: Articles -->
+                <div id="knowledgeContent-articles">
                     <div class="flex flex-wrap items-center gap-2 mb-4">
-                        <select id="kbCategory" onchange="window._pages.training.loadArticles(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                        <select id="kbCategory" onchange="window._pages.knowledge.loadArticles(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                             <option value="" data-i18n="knowledge.allCategories">Все категории</option>
                         </select>
-                        <select id="kbActive" onchange="window._pages.training.loadArticles(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                        <select id="kbActive" onchange="window._pages.knowledge.loadArticles(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                             <option value="" data-i18n="knowledge.allActive">Все</option>
                             <option value="true" data-i18n="knowledge.activeOnly">Активные</option>
                             <option value="false" data-i18n="knowledge.inactiveOnly">Неактивные</option>
                         </select>
                         <input type="text" id="kbSearch" data-i18n-placeholder="knowledge.searchPlaceholder" placeholder="Поиск..."
-                            onkeydown="if(event.key==='Enter')window._pages.training.loadArticles(0)"
+                            onkeydown="if(event.key==='Enter')window._pages.knowledge.loadArticles(0)"
                             class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
-                        <button onclick="window._pages.training.loadArticles(0)"
+                        <button onclick="window._pages.knowledge.loadArticles(0)"
                             class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.filter">Фильтровать</button>
-                        <button onclick="window._pages.training.showCreateArticle()"
+                        <button onclick="window._pages.knowledge.showCreateArticle()"
                             class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="knowledge.newArticle">+ Новая статья</button>
-                        <button onclick="window._pages.training.reindexAll()"
+                        <button onclick="window._pages.knowledge.reindexAll()"
                             class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-emerald-600 text-white hover:bg-emerald-700 max-md:w-full" data-i18n="knowledge.reindexAll">Переиндексировать всё</button>
-                        <button onclick="window._pages.training.showImportModal()"
+                        <button onclick="window._pages.knowledge.showImportModal()"
                             class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-violet-600 text-white hover:bg-violet-700 max-md:w-full" data-i18n="knowledge.importDocuments">Импорт документов</button>
                     </div>
                     <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="articlesContainer"></div>
                     <div id="articlesPagination"></div>
                 </div>
 
-                <!-- Tab: Templates -->
-                <div id="trainingContent-templates" style="display:none">
+                <!-- Tab: Source Configs -->
+                <div id="knowledgeContent-source-configs" style="display:none">
+                    <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-3" data-i18n="sources.sourceConfigsTitle">Источники контента</h3>
+                    <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="sources.sourceConfigsHint">Внешние сайты для сбора статей в базу знаний.</p>
+                    <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="sourceConfigsContainer"></div>
+                </div>
+
+                <!-- Tab: Scraper -->
+                <div id="knowledgeContent-scraper" style="display:none">
+                    <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-3" data-i18n="sources.scraperConfigTitle">ProKoleso — ручной импорт</h3>
+                    <div id="scraperConfigCard" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
                     <div class="flex flex-wrap items-center gap-2 mb-4">
-                        <select id="templateFilterKey" onchange="window._pages.training.loadTemplates()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                        <select id="sourcesStatusFilter" onchange="window._pages.knowledge.loadSources(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                            <option value="" data-i18n="sources.allStatuses">Все статусы</option>
+                            <option value="new">new</option>
+                            <option value="processing">processing</option>
+                            <option value="processed">processed</option>
+                            <option value="skipped">skipped</option>
+                            <option value="error">error</option>
+                        </select>
+                        <button onclick="window._pages.knowledge.loadSources(0)"
+                            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.filter">Фильтровать</button>
+                    </div>
+                    <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="sourcesContainer"></div>
+                    <div id="sourcesPagination"></div>
+                </div>
+
+                <!-- Tab: Watched Pages -->
+                <div id="knowledgeContent-watched" style="display:none">
+                    <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-3" data-i18n="sources.watchedPagesTitle">Отслеживаемые страницы</h3>
+                    <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="sources.watchedPagesHint">Страницы сайта, которые периодически пересканируются для обновления базы знаний агента.</p>
+                    <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="watchedPagesContainer"></div>
+                </div>
+            </div>
+
+            <!-- Scenarios (Templates + Dialogues + Safety) -->
+            <div id="page-scenarios" style="display:none">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.training">Обучение</span> / <span data-i18n="nav.scenarios">Сценарии</span></div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.scenarios">Сценарии</h1>
+                <div class="tab-bar flex border-b border-neutral-200 dark:border-neutral-700 mb-4 flex-wrap">
+                    <button class="active px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="templates" onclick="window._pages.scenarios.showTab('templates')" data-i18n="training.tabTemplates">Шаблоны ответов</button>
+                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="dialogues" onclick="window._pages.scenarios.showTab('dialogues')" data-i18n="training.tabDialogues">Сценарии диалогов</button>
+                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="safety" onclick="window._pages.scenarios.showTab('safety')" data-i18n="training.tabSafety">Правила безопасности</button>
+                </div>
+
+                <!-- Tab: Templates -->
+                <div id="scenariosContent-templates">
+                    <div class="flex flex-wrap items-center gap-2 mb-4">
+                        <select id="templateFilterKey" onchange="window._pages.scenarios.loadTemplates()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                             <option value="" data-i18n="training.allTemplateKeys">Все ключи</option>
                         </select>
                         <input type="text" id="templateSearch" data-i18n-placeholder="training.searchTemplates" placeholder="Поиск шаблонов..."
-                            onkeydown="if(event.key==='Enter')window._pages.training.loadTemplates()"
+                            onkeydown="if(event.key==='Enter')window._pages.scenarios.loadTemplates()"
                             class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
-                        <button onclick="window._pages.training.loadTemplates()"
+                        <button onclick="window._pages.scenarios.loadTemplates()"
                             class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.filter">Фильтровать</button>
                     </div>
                     <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="templatesContainer"></div>
                 </div>
 
                 <!-- Tab: Dialogues -->
-                <div id="trainingContent-dialogues" style="display:none">
+                <div id="scenariosContent-dialogues" style="display:none">
                     <div class="flex flex-wrap items-center gap-2 mb-4">
-                        <select id="dialogueFilterScenario" onchange="window._pages.training.loadDialogues(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                        <select id="dialogueFilterScenario" onchange="window._pages.scenarios.loadDialogues(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                             <option value="" data-i18n="training.allScenarios">Все сценарии</option>
                             <option value="tire_search">tire_search</option>
                             <option value="order_status">order_status</option>
@@ -218,19 +289,19 @@
                             <option value="consultation">consultation</option>
                             <option value="transfer">transfer</option>
                         </select>
-                        <select id="dialogueFilterPhase" onchange="window._pages.training.loadDialogues(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                        <select id="dialogueFilterPhase" onchange="window._pages.scenarios.loadDialogues(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                             <option value="" data-i18n="training.allPhases">Все фазы</option>
                             <option value="mvp">mvp</option>
                             <option value="orders">orders</option>
                             <option value="services">services</option>
                             <option value="analytics">analytics</option>
                         </select>
-                        <select id="dialogueFilterActive" onchange="window._pages.training.loadDialogues(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                        <select id="dialogueFilterActive" onchange="window._pages.scenarios.loadDialogues(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                             <option value="" data-i18n="training.allActive">Все</option>
                             <option value="true" data-i18n="training.activeOnly">Активные</option>
                             <option value="false" data-i18n="training.inactiveOnly">Неактивные</option>
                         </select>
-                        <button onclick="window._pages.training.loadDialogues(0)"
+                        <button onclick="window._pages.scenarios.loadDialogues(0)"
                             class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.filter">Фильтровать</button>
                     </div>
                     <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="dialoguesContainer"></div>
@@ -238,9 +309,9 @@
                 </div>
 
                 <!-- Tab: Safety Rules -->
-                <div id="trainingContent-safety" style="display:none">
+                <div id="scenariosContent-safety" style="display:none">
                     <div class="flex flex-wrap items-center gap-2 mb-4">
-                        <select id="safetyFilterType" onchange="window._pages.training.loadSafetyRules(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                        <select id="safetyFilterType" onchange="window._pages.scenarios.loadSafetyRules(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                             <option value="" data-i18n="training.allRuleTypes">Все типы</option>
                             <option value="behavioral">behavioral</option>
                             <option value="content">content</option>
@@ -248,58 +319,31 @@
                             <option value="privacy">privacy</option>
                             <option value="boundary">boundary</option>
                         </select>
-                        <select id="safetyFilterSeverity" onchange="window._pages.training.loadSafetyRules(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                        <select id="safetyFilterSeverity" onchange="window._pages.scenarios.loadSafetyRules(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                             <option value="" data-i18n="training.allSeverities">Все</option>
                             <option value="critical">critical</option>
                             <option value="high">high</option>
                             <option value="medium">medium</option>
                             <option value="low">low</option>
                         </select>
-                        <select id="safetyFilterActive" onchange="window._pages.training.loadSafetyRules(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                        <select id="safetyFilterActive" onchange="window._pages.scenarios.loadSafetyRules(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                             <option value="" data-i18n="training.allActive">Все</option>
                             <option value="true" data-i18n="training.activeOnly">Активные</option>
                             <option value="false" data-i18n="training.inactiveOnly">Неактивные</option>
                         </select>
-                        <button onclick="window._pages.training.loadSafetyRules(0)"
+                        <button onclick="window._pages.scenarios.loadSafetyRules(0)"
                             class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.filter">Фильтровать</button>
                     </div>
                     <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="safetyRulesContainer"></div>
                     <div id="safetyPagination"></div>
                 </div>
+            </div>
 
-                <!-- Tab: Tools -->
-                <div id="trainingContent-tools" style="display:none" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
-
-                <!-- Tab: Sources (scraper) -->
-                <div id="trainingContent-sources" style="display:none">
-                    <!-- Source Configs section -->
-                    <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-3" data-i18n="sources.sourceConfigsTitle">Источники контента</h3>
-                    <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="sources.sourceConfigsHint">Внешние сайты для сбора статей в базу знаний.</p>
-                    <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="sourceConfigsContainer"></div>
-
-                    <!-- ProKoleso Manual Import -->
-                    <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mt-6 mb-3" data-i18n="sources.scraperConfigTitle">ProKoleso — ручной импорт</h3>
-                    <div id="scraperConfigCard" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
-                    <div class="flex flex-wrap items-center gap-2 mb-4">
-                        <select id="sourcesStatusFilter" onchange="window._pages.training.loadSources(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
-                            <option value="" data-i18n="sources.allStatuses">Все статусы</option>
-                            <option value="new">new</option>
-                            <option value="processing">processing</option>
-                            <option value="processed">processed</option>
-                            <option value="skipped">skipped</option>
-                            <option value="error">error</option>
-                        </select>
-                        <button onclick="window._pages.training.loadSources(0)"
-                            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.filter">Фильтровать</button>
-                    </div>
-                    <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="sourcesContainer"></div>
-                    <div id="sourcesPagination"></div>
-
-                    <!-- Watched Pages section -->
-                    <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mt-6 mb-3" data-i18n="sources.watchedPagesTitle">Отслеживаемые страницы</h3>
-                    <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="sources.watchedPagesHint">Страницы сайта, которые периодически пересканируются для обновления базы знаний агента.</p>
-                    <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="watchedPagesContainer"></div>
-                </div>
+            <!-- Tools -->
+            <div id="page-tools" style="display:none">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.training">Обучение</span> / <span data-i18n="nav.tools">Инструменты</span></div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.tools">Инструменты</h1>
+                <div id="toolsContent" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
             </div>
 
             <!-- Operators -->
@@ -342,37 +386,19 @@
                 </div>
             </div>
 
-            <!-- System -->
-            <div id="page-settings" style="display:none">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="settings.breadcrumb">Система</span></div>
-                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="settings.title">Статус системы</h1>
+            <!-- Monitoring -->
+            <div id="page-monitoring" style="display:none">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.monitoring">Мониторинг</span></div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.monitoring">Мониторинг</h1>
                 <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
                     <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.healthCheck">Проверка здоровья</h3>
                     <div id="systemInfo"><div class="flex justify-center py-8"><div class="spinner"></div></div></div>
-                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.settings.loadSettings()" data-i18n="settings.refresh">Обновить</button>
+                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.monitoring.loadSettings()" data-i18n="settings.refresh">Обновить</button>
                 </div>
                 <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
                     <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.extendedStatus">Расширенный статус</h3>
                     <div id="extendedStatus"><div class="text-center py-8 text-neutral-400 dark:text-neutral-500 text-sm" data-i18n="settings.clickToLoad">Нажмите для загрузки</div></div>
-                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.settings.loadSystemStatus()" data-i18n="settings.loadStatus">Загрузить статус</button>
-                </div>
-                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
-                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.configuration">Конфигурация</h3>
-                    <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="settings.configDescription">Перезагрузить безопасные параметры конфигурации (качество, фича-флаги, логирование) без перезапуска.</p>
-                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.settings.reloadConfig()" data-i18n="settings.reloadConfig">Перезагрузить конфиг</button>
-                </div>
-                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
-                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.llmRouting">Маршрутизация LLM</h3>
-                    <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="settings.llmRoutingDesc">Мультипровайдерный роутинг LLM: управление провайдерами, задачами и fallback-цепочками.</p>
-                    <div id="llmProvidersContainer"><div class="text-center py-4 text-neutral-400 dark:text-neutral-500 text-sm" data-i18n="settings.clickToLoad">Нажмите для загрузки</div></div>
-                    <div id="llmTasksContainer" class="mt-4"></div>
-                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.settings.loadLLMConfig()" data-i18n="settings.llmLoadConfig">Загрузить конфигурацию</button>
-                </div>
-                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
-                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.telegram">Уведомления Telegram</h3>
-                    <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="settings.telegramDesc">Настройка Telegram-бота для получения алертов от Alertmanager.</p>
-                    <div id="telegramConfigContainer"><div class="text-center py-4 text-neutral-400 dark:text-neutral-500 text-sm" data-i18n="settings.clickToLoad">Нажмите для загрузки</div></div>
-                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.settings.loadTelegramConfig()" data-i18n="settings.telegramLoadConfig">Загрузить</button>
+                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.monitoring.loadSystemStatus()" data-i18n="settings.loadStatus">Загрузить статус</button>
                 </div>
                 <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
                     <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.externalTools">Внешние инструменты</h3>
@@ -391,6 +417,35 @@
                             <tr><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300" data-i18n="settings.version">Версия</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">v0.1.0</td></tr>
                         </table>
                     </div>
+                </div>
+            </div>
+
+            <!-- Configuration -->
+            <div id="page-configuration" style="display:none">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.configuration">Конфигурация</span></div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.configuration">Конфигурация</h1>
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
+                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.configuration">Конфигурация</h3>
+                    <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="settings.configDescription">Перезагрузить безопасные параметры конфигурации (качество, фича-флаги, логирование) без перезапуска.</p>
+                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.configuration.reloadConfig()" data-i18n="settings.reloadConfig">Перезагрузить конфиг</button>
+                </div>
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
+                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.llmRouting">Маршрутизация LLM</h3>
+                    <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="settings.llmRoutingDesc">Мультипровайдерный роутинг LLM: управление провайдерами, задачами и fallback-цепочками.</p>
+                    <div id="llmProvidersContainer"><div class="text-center py-4 text-neutral-400 dark:text-neutral-500 text-sm" data-i18n="settings.clickToLoad">Нажмите для загрузки</div></div>
+                    <div id="llmTasksContainer" class="mt-4"></div>
+                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.configuration.loadLLMConfig()" data-i18n="settings.llmLoadConfig">Загрузить конфигурацию</button>
+                </div>
+            </div>
+
+            <!-- Notifications -->
+            <div id="page-notifications" style="display:none">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.notifications">Уведомления</span></div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.notifications">Уведомления</h1>
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
+                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.telegram">Уведомления Telegram</h3>
+                    <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="settings.telegramDesc">Настройка Telegram-бота для получения алертов от Alertmanager.</p>
+                    <div id="telegramConfigContainer"><div class="text-center py-4 text-neutral-400 dark:text-neutral-500 text-sm" data-i18n="settings.clickToLoad">Нажмите для загрузки</div></div>
                 </div>
             </div>
 
@@ -531,12 +586,12 @@
             <div class="mb-3">
                 <div class="flex items-center justify-between mb-1">
                     <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300" data-i18n="prompts.systemPromptLabel">Системный промпт</label>
-                    <button id="loadDefaultBtn" class="inline-flex items-center px-2 py-1 text-xs font-medium rounded transition-colors cursor-pointer bg-neutral-500 text-white hover:bg-neutral-600 dark:bg-neutral-600 dark:hover:bg-neutral-500" onclick="window._pages.training.loadDefaultPrompt()" data-i18n="prompts.loadDefault">Загрузить системный</button>
+                    <button id="loadDefaultBtn" class="inline-flex items-center px-2 py-1 text-xs font-medium rounded transition-colors cursor-pointer bg-neutral-500 text-white hover:bg-neutral-600 dark:bg-neutral-600 dark:hover:bg-neutral-500" onclick="window._pages.prompts.loadDefaultPrompt()" data-i18n="prompts.loadDefault">Загрузить системный</button>
                 </div>
                 <textarea id="promptSystemPrompt" data-i18n-placeholder="prompts.systemPromptPlaceholder" placeholder="Введите текст системного промпта..."
                     class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-30 font-mono resize-y"></textarea>
             </div>
-            <button id="createPromptBtn" class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.training.createPrompt()" data-i18n="common.create">Создать</button>
+            <button id="createPromptBtn" class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.prompts.createPrompt()" data-i18n="common.create">Создать</button>
         </div>
     </div>
 
@@ -571,7 +626,7 @@
                     <span id="abTrafficSplitValue" class="text-sm font-medium text-neutral-700 dark:text-neutral-300 w-10 text-right">50%</span>
                 </div>
             </div>
-            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.training.createABTest()" data-i18n="common.create">Создать</button>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.prompts.createABTest()" data-i18n="common.create">Создать</button>
         </div>
     </div>
 
@@ -606,7 +661,7 @@
                 <textarea id="articleContent" data-i18n-placeholder="knowledge.contentPlaceholder" placeholder="Содержание статьи в формате Markdown..."
                     class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-30 font-mono resize-y"></textarea>
             </div>
-            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.training.saveArticle()" data-i18n="common.save">Сохранить</button>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.knowledge.saveArticle()" data-i18n="common.save">Сохранить</button>
         </div>
     </div>
 
@@ -662,7 +717,7 @@
                     <option value="" data-i18n="knowledge.importAutoDetect">Авто-определение по имени файла</option>
                 </select>
             </div>
-            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-violet-600 text-white hover:bg-violet-700" onclick="window._pages.training.importDocuments()" data-i18n="knowledge.importBtn">Импортировать</button>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-violet-600 text-white hover:bg-violet-700" onclick="window._pages.knowledge.importDocuments()" data-i18n="knowledge.importBtn">Импортировать</button>
         </div>
     </div>
 
@@ -709,7 +764,7 @@
                 <input type="text" id="dialogueDescription"
                     class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
-            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.training.saveDialogue()" data-i18n="common.save">Сохранить</button>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.scenarios.saveDialogue()" data-i18n="common.save">Сохранить</button>
         </div>
     </div>
 
@@ -756,7 +811,7 @@
                 <textarea id="safetyExpectedBehavior"
                     class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-20 resize-y"></textarea>
             </div>
-            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.training.saveSafetyRule()" data-i18n="common.save">Сохранить</button>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.scenarios.saveSafetyRule()" data-i18n="common.save">Сохранить</button>
         </div>
     </div>
 
@@ -794,7 +849,7 @@
                 <input type="text" id="templateDescription"
                     class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
-            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.training.saveTemplate()" data-i18n="common.save">Сохранить</button>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.scenarios.saveTemplate()" data-i18n="common.save">Сохранить</button>
         </div>
     </div>
 
@@ -813,7 +868,7 @@
                 <textarea id="toolOverrideDescription"
                     class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 min-h-30 resize-y"></textarea>
             </div>
-            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.training.saveToolOverride()" data-i18n="common.save">Сохранить</button>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.tools.saveToolOverride()" data-i18n="common.save">Сохранить</button>
         </div>
     </div>
 
@@ -880,7 +935,7 @@
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sources.settingsJson">Настройки (JSON)</label>
                 <textarea id="sourceConfigSettings" rows="3" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 font-mono resize-y">{}</textarea>
             </div>
-            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.training.saveSourceConfig()" data-i18n="common.save">Сохранить</button>
+            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.knowledge.saveSourceConfig()" data-i18n="common.save">Сохранить</button>
         </div>
     </div>
 

@@ -35,6 +35,13 @@ export default {
     'nav.operators': 'Операторы',
     'nav.system': 'Система',
     'nav.users': 'Пользователи',
+    'nav.prompts': 'Промпты',
+    'nav.knowledge': 'База знаний',
+    'nav.scenarios': 'Сценарии',
+    'nav.tools': 'Инструменты',
+    'nav.monitoring': 'Мониторинг',
+    'nav.configuration': 'Конфигурация',
+    'nav.notifications': 'Уведомления',
     'nav.audit': 'Аудит',
     'nav.logout': 'Выход',
 
@@ -604,6 +611,11 @@ export default {
     'sources.intervalHours.12': 'Каждые 12 ч',
     'sources.intervalHours.24': 'Раз в сутки',
     'sources.intervalHours.168': 'Раз в неделю',
+
+    // Tab labels
+    'sources.tabConfigs': 'Конфигурации',
+    'sources.tabScraper': 'Скрапер',
+    'sources.tabWatched': 'Отслеживаемые',
 
     // Source Configs (multi-source)
     'sources.sourceConfigsTitle': 'Источники контента',
