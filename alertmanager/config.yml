@@ -20,14 +20,21 @@ route:
       repeat_interval: 2h
 
 receivers:
+  # Telegram alerting — fill in real values and uncomment.
+  # Alertmanager does NOT support ${ENV} substitution in YAML config.
   - name: "telegram"
-    telegram_configs:
-      - bot_token: "${TELEGRAM_BOT_TOKEN}"
-        chat_id: ${TELEGRAM_CHAT_ID}
-        parse_mode: "HTML"
-        message: |
-          <b>{{ .Status | toUpper }}</b>
-          <b>Alert:</b> {{ .CommonLabels.alertname }}
-          <b>Severity:</b> {{ .CommonLabels.severity }}
-          <b>Summary:</b> {{ .CommonAnnotations.summary }}
-          <b>Description:</b> {{ .CommonAnnotations.description }}
+    webhook_configs:
+      - url: "http://localhost:9099/dev-null"
+        send_resolved: true
+  # To enable Telegram alerts, replace the receiver above with:
+  # - name: "telegram"
+  #   telegram_configs:
+  #     - bot_token: "YOUR_BOT_TOKEN"
+  #       chat_id: 123456789
+  #       parse_mode: "HTML"
+  #       message: |
+  #         <b>{{ .Status | toUpper }}</b>
+  #         <b>Alert:</b> {{ .CommonLabels.alertname }}
+  #         <b>Severity:</b> {{ .CommonLabels.severity }}
+  #         <b>Summary:</b> {{ .CommonAnnotations.summary }}
+  #         <b>Description:</b> {{ .CommonAnnotations.description }}

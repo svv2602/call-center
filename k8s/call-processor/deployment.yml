@@ -71,6 +71,8 @@ spec:
           env:
             - name: GOOGLE_APPLICATION_CREDENTIALS
               value: /secrets/gcp/key.json
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://callcenter:$(POSTGRES_PASSWORD)@postgresql:5432/callcenter"
           volumeMounts:
             - name: gcp-credentials
               mountPath: /secrets/gcp

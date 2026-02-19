@@ -4,6 +4,7 @@ services:
     ports:
       - "9092:9092"   # AudioSocket
       - "8080:8080"   # API / Prometheus metrics
+    env_file: .env
     environment:
       - GOOGLE_APPLICATION_CREDENTIALS=/secrets/gcp-key.json
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
@@ -22,6 +23,8 @@ services:
         condition: service_healthy
       store-api:
         condition: service_healthy
+    volumes:
+      - ./gcp-key.json:/secrets/gcp-key.json:ro
     restart: unless-stopped
     deploy:
       resources:
@@ -110,7 +113,6 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
       GF_USERS_ALLOW_SIGN_UP: "false"
-      GF_INSTALL_PLUGINS: grafana-postgresql-datasource
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - ./grafana/provisioning:/etc/grafana/provisioning:ro
@@ -128,10 +130,14 @@ services:
 
   celery-worker:
     build: .
-    command: celery -A src.tasks.celery_app worker -l info -Q quality,stats -c 2
+    command: celery -A src.tasks.celery_app worker -l info -Q quality,stats,embeddings,scraper -c 2
+    env_file: .env
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
       - DATABASE_URL=postgresql+asyncpg://callcenter:${POSTGRES_PASSWORD}@postgres:5432/callcenter
+      - REDIS_URL=redis://redis:6379/0
+      - STORE_API_URL=http://store-api:3000/api/v1
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - QUALITY_LLM_MODEL=claude-haiku-4-5-20251001
@@ -149,7 +155,8 @@ services:
 
   celery-beat:
     build: .
-    command: celery -A src.tasks.celery_app beat -l info
+    command: celery -A src.tasks.celery_app beat -l info -s /tmp/celerybeat-schedule
+    env_file: .env
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/1

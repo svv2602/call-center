@@ -41,9 +41,9 @@ data:
   STORE_API_TIMEOUT: "5"
 
   # ---------------------------------------------------------------------------
-  # Database (password injected from Secret via variable substitution)
+  # Database — DATABASE_URL is set as explicit env in each Deployment
+  # (ConfigMap envFrom does not support $(VAR) substitution)
   # ---------------------------------------------------------------------------
-  DATABASE_URL: "postgresql+asyncpg://callcenter:$(POSTGRES_PASSWORD)@postgresql:5432/callcenter"
 
   # ---------------------------------------------------------------------------
   # Redis

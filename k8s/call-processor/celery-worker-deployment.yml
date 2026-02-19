@@ -31,7 +31,7 @@ spec:
             - "-l"
             - info
             - "-Q"
-            - quality,stats
+            - quality,stats,embeddings,scraper
             - "-c"
             - "2"
           resources:
@@ -46,3 +46,19 @@ spec:
                 name: call-center-config
             - secretRef:
                 name: call-center-secrets
+          env:
+            - name: GOOGLE_APPLICATION_CREDENTIALS
+              value: /secrets/gcp/key.json
+            - name: DATABASE_URL
+              value: "postgresql+asyncpg://callcenter:$(POSTGRES_PASSWORD)@postgresql:5432/callcenter"
+          volumeMounts:
+            - name: gcp-credentials
+              mountPath: /secrets/gcp
+              readOnly: true
+      volumes:
+        - name: gcp-credentials
+          secret:
+            secretName: call-center-gcp-key
+            items:
+              - key: key.json
+                path: key.json

@@ -193,10 +193,9 @@ cd /opt/call-center
 cp .env.example .env
 chmod 600 .env
 
-# Разместить GCP-ключ
-mkdir -p secrets
-cp /path/to/gcp-service-account.json secrets/gcp-key.json
-chmod 600 secrets/gcp-key.json
+# Разместить GCP-ключ (монтируется в контейнер как /secrets/gcp-key.json)
+cp /path/to/gcp-service-account.json gcp-key.json
+chmod 600 gcp-key.json
 ```
 
 ---
@@ -416,7 +415,7 @@ redis                Up (healthy)        6379/tcp
 store-api            Up (healthy)        0.0.0.0:3002->3000
 prometheus           Up                  0.0.0.0:9090->9090
 grafana              Up                  0.0.0.0:3000->3000
-celery-worker        Up                  (очереди: celery, scraper)
+celery-worker        Up                  (очереди: quality,stats,embeddings,scraper)
 celery-beat          Up
 flower               Up                  0.0.0.0:5555->5555
 alertmanager         Up                  0.0.0.0:9093->9093
@@ -773,7 +772,7 @@ set -a; . ./.env.local; set +a
 python -m src.main
 
 # Запустить Celery worker (в отдельном терминале)
-celery -A src.tasks.celery_app worker -Q celery,scraper -c 1 --loglevel=info
+celery -A src.tasks.celery_app worker -Q quality,stats,embeddings,scraper -c 1 --loglevel=info
 ```
 
 ### Через start.sh

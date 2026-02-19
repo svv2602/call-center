@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Call Center AI — система автоматизации обработки входящих телефонных звонков для интернет-магазина шин (Украина). ИИ-агент принимает звонки, ведёт диалог на украинском языке, подбирает шины, оформляет заказы, записывает на шиномонтаж.
 
-**Status:** Active development. All 4 phases implemented in code (680+ tests, 15 DB migrations, full FastAPI backend, Admin UI, 82 knowledge base articles). Remaining: Grafana UI integration, Whisper GPU deployment, end-to-end testing with live Asterisk.
+**Status:** Active development. All 4 phases implemented in code (977+ tests, 20 DB migrations, full FastAPI backend, Admin UI, 82 knowledge base articles). Remaining: Grafana UI integration, Whisper GPU deployment, end-to-end testing with live Asterisk.
 
 ## Language Convention
 
@@ -63,7 +63,7 @@ ruff check src/                                       # Lint
 ruff format .                                         # Format
 
 # Database
-alembic upgrade head                                  # Apply migrations (15 total)
+alembic upgrade head                                  # Apply migrations (20 total)
 python -m scripts.import_vehicle_db                   # Import vehicle tire DB from CSV
 
 # Knowledge base seed
@@ -92,8 +92,8 @@ Key entry points: `doc/README.md` (navigation), `doc/development/00-overview.md`
 
 - `src/` — Python/FastAPI backend (port 8080): `core/` (pipeline, AudioSocket, sessions), `agent/` (LLM, tools, A/B testing), `stt/` + `tts/`, `api/` (14 routers), `store_client/`, `knowledge/` (RAG), `tasks/` (Celery), `monitoring/`
 - `admin-ui/` — Vite SPA: `src/pages/` (dashboard, calls, operators, training, users, vehicles, settings), i18n (ru/en)
-- `migrations/versions/` — 15 Alembic migrations (raw SQL)
-- `tests/` — 680+ tests: `unit/`, `integration/`, `e2e/`, `load/`, `chaos/`, `prompt_regression/`
+- `migrations/versions/` — 20 Alembic migrations (raw SQL)
+- `tests/` — 977+ tests: `unit/`, `integration/`, `e2e/`, `load/`, `chaos/`, `prompt_regression/`
 - `scripts/` — import scripts (vehicle DB)
 - `knowledge_seed/` — 82 seed articles (.md) for RAG knowledge base, organized by category: `faq/` (20), `guides/` (10), `comparisons/` (10), `brands/` (10), `procedures/` (7), `delivery/` (5), `warranty/` (5), `returns/` (5), `policies/` (5), `general/` (5). File naming: `NN_category_topic.md` (category auto-detected from filename on import).
 - `k8s/`, `prometheus/`, `grafana/`, `alertmanager/` — infrastructure configs

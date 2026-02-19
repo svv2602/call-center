@@ -37,8 +37,9 @@ RUN groupadd --gid 1000 app && \
 
 WORKDIR /app
 
-# Copy virtualenv from builder
+# Copy virtualenv from builder and fix shebang paths
 COPY --from=builder /build/venv /app/venv
+RUN sed -i 's|#!/build/venv/bin/python|#!/app/venv/bin/python|' /app/venv/bin/*
 ENV PATH="/app/venv/bin:$PATH"
 
 # Copy application code and resources
