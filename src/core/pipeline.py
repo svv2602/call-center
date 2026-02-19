@@ -77,11 +77,11 @@ class CallPipeline:
     async def run(self) -> None:
         """Run the full call pipeline until hangup or transfer."""
         try:
-            # Start STT stream
-            await self._stt.start_stream(self._stt_config)
-
-            # Play greeting
+            # Play greeting first (STT not needed yet)
             await self._play_greeting()
+
+            # Start STT stream after greeting, right before listening
+            await self._stt.start_stream(self._stt_config)
 
             # Main loop
             self._session.transition_to(CallState.LISTENING)
@@ -132,10 +132,6 @@ class CallPipeline:
                 t0 = time.monotonic()
                 await self._stt.feed_audio(packet.payload)
                 audiosocket_to_stt_ms.observe((time.monotonic() - t0) * 1000)
-
-                # Detect barge-in: if we're speaking and STT gets audio
-                if self._speaking:
-                    self._barge_in_event.set()
 
             if packet.type == PacketType.ERROR:
                 logger.warning("AudioSocket error: %s", self._session.channel_uuid)
