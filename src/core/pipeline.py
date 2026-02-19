@@ -25,6 +25,9 @@ from src.core.call_session import SILENCE_TIMEOUT_SEC, CallSession, CallState
 from src.monitoring.metrics import audiosocket_to_stt_ms, tts_delivery_ms
 from src.stt.base import STTConfig, STTEngine, Transcript
 
+# Max time to wait for LLM agent to produce a response (seconds)
+AGENT_PROCESSING_TIMEOUT_SEC = 30
+
 # Default template dict (used if no PromptManager or DB unavailable)
 _DEFAULT_TEMPLATES: dict[str, str] = {
     "greeting": GREETING_TEXT,
@@ -165,10 +168,22 @@ class CallPipeline:
             await self._speak(self._templates.get("wait", WAIT_TEXT))  # filler while processing
 
             start = time.monotonic()
-            response_text, _ = await self._agent.process_message(
-                user_text=transcript.text,
-                conversation_history=self._session.messages_for_llm,
-            )
+            try:
+                response_text, _ = await asyncio.wait_for(
+                    self._agent.process_message(
+                        user_text=transcript.text,
+                        conversation_history=self._session.messages_for_llm,
+                    ),
+                    timeout=AGENT_PROCESSING_TIMEOUT_SEC,
+                )
+            except TimeoutError:
+                logger.error(
+                    "Agent timeout after %ds: call=%s",
+                    AGENT_PROCESSING_TIMEOUT_SEC,
+                    self._session.channel_uuid,
+                )
+                response_text = ""
+
             llm_latency_ms = int((time.monotonic() - start) * 1000)
 
             logger.info(
@@ -182,6 +197,12 @@ class CallPipeline:
             if response_text:
                 self._session.add_assistant_turn(response_text)
                 await self._speak_streaming(response_text)
+            else:
+                # Never leave the caller in silence — speak an error fallback
+                logger.warning("Empty agent response: call=%s", self._session.channel_uuid)
+                fallback = self._templates.get("error", ERROR_TEXT)
+                self._session.add_assistant_turn(fallback)
+                await self._speak(fallback)
 
             # Check if transfer was triggered
             if self._session.transferred:
@@ -197,28 +218,19 @@ class CallPipeline:
         Returns None on silence timeout.
         """
         try:
-            async for transcript in self._stt.get_transcripts():
-                if transcript.is_final and transcript.text.strip():
-                    return transcript
-        except TimeoutError:
-            pass
-
-        # If we get here without a final transcript, it's a silence timeout
-        try:
-            await asyncio.wait_for(
-                self._wait_any_final_transcript(),
+            return await asyncio.wait_for(
+                self._get_next_final_transcript(),
                 timeout=SILENCE_TIMEOUT_SEC,
             )
         except TimeoutError:
             return None
 
-        return None
-
-    async def _wait_any_final_transcript(self) -> Transcript:
-        """Block until a final transcript arrives."""
+    async def _get_next_final_transcript(self) -> Transcript:
+        """Block until a final transcript with non-empty text arrives."""
         async for transcript in self._stt.get_transcripts():
             if transcript.is_final and transcript.text.strip():
                 return transcript
+        # STT stream ended without a final transcript
         raise asyncio.CancelledError
 
     async def _speak(self, text: str) -> None:

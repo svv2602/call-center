@@ -367,7 +367,7 @@ def _build_tool_router(session: CallSession) -> ToolRouter:
 
     async def transfer_to_operator(**_: object) -> dict[str, str]:
         session.transferred = True
-        await publish_event("call:transferred", {"call_id": str(session.call_id)})
+        await publish_event("call:transferred", {"call_id": str(session.channel_uuid)})
         return {"status": "transferring", "message": "З'єдную з оператором"}
 
     router.register("transfer_to_operator", transfer_to_operator)

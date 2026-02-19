@@ -12,7 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 import anthropic
 
-from src.agent.prompts import PROMPT_VERSION, SYSTEM_PROMPT
+from src.agent.prompts import ERROR_TEXT, PROMPT_VERSION, SYSTEM_PROMPT
 from src.agent.tools import ALL_TOOLS
 
 if TYPE_CHECKING:
@@ -152,7 +152,7 @@ class LLMAgent:
                         conversation_history,
                         system=system,
                         tools=self._tools,
-                        max_tokens=300,
+                        max_tokens=1024,
                     )
 
                     latency_ms = int((time.monotonic() - start) * 1000)
@@ -177,21 +177,21 @@ class LLMAgent:
                             "input": tc.arguments,
                         })
                 except Exception as exc:
-                    logger.error("LLM router error: %s", exc)
-                    return "", conversation_history
+                    logger.exception("LLM router error: %s", exc)
+                    return ERROR_TEXT, conversation_history
             else:
                 # Legacy path: direct Anthropic SDK
                 try:
                     response = await self._client.messages.create(
                         model=self._model,
-                        max_tokens=300,
+                        max_tokens=1024,
                         system=system,
                         tools=self._tools,  # type: ignore[arg-type]
                         messages=conversation_history,  # type: ignore[arg-type]
                     )
                 except anthropic.APIStatusError as exc:
-                    logger.error("Claude API error: %s", exc)
-                    return "", conversation_history
+                    logger.exception("Claude API error: %s", exc)
+                    return ERROR_TEXT, conversation_history
 
                 latency_ms = int((time.monotonic() - start) * 1000)
                 logger.info(
