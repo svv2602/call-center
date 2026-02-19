@@ -986,10 +986,6 @@ async function loadSources() {
         const configData = await api('/admin/scraper/config');
         const cfg = configData.config || {};
 
-        const days = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
-        const dayOptions = days.map(d => `<option value="${d}" ${(cfg.schedule_day_of_week || 'monday') === d ? 'selected' : ''}>${t('sources.scheduleDays.' + d)}</option>`).join('');
-        const hourOptions = Array.from({length: 24}, (_, i) => `<option value="${i}" ${(cfg.schedule_hour ?? 6) === i ? 'selected' : ''}>${String(i).padStart(2, '0')}:00</option>`).join('');
-
         configCard.innerHTML = `
             <div class="flex flex-wrap items-center gap-4 mb-2">
                 <label class="flex items-center gap-2 text-sm cursor-pointer">
@@ -1005,20 +1001,6 @@ async function loadSources() {
                     <span title="${t('sources.dedupLlmCheckHint')}">${t('sources.dedupLlmCheck')}</span>
                 </label>
                 <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.training.runScraperNow()">${t('sources.runNow')}</button>
-            </div>
-            <div class="flex flex-wrap items-center gap-4 mb-2">
-                <label class="flex items-center gap-2 text-sm cursor-pointer">
-                    <input type="checkbox" id="scraperScheduleEnabled" ${cfg.schedule_enabled !== false ? 'checked' : ''} onchange="window._pages.training.updateSchedule()">
-                    <span>${t('sources.scheduleEnabled')}</span>
-                </label>
-                <label class="flex items-center gap-2 text-sm">
-                    <span>${t('sources.scheduleDay')}</span>
-                    <select id="scraperScheduleDay" class="border rounded px-2 py-1 text-sm dark:bg-gray-700 dark:border-gray-600" onchange="window._pages.training.updateSchedule()">${dayOptions}</select>
-                </label>
-                <label class="flex items-center gap-2 text-sm">
-                    <span>${t('sources.scheduleHour')}</span>
-                    <select id="scraperScheduleHour" class="border rounded px-2 py-1 text-sm dark:bg-gray-700 dark:border-gray-600" onchange="window._pages.training.updateSchedule()">${hourOptions}</select>
-                </label>
             </div>
             <div class="flex flex-wrap items-center gap-4">
                 <label class="flex items-center gap-2 text-sm">
@@ -1093,15 +1075,6 @@ async function toggleAutoApprove() {
     } catch (e) { showToast(t('sources.configUpdateFailed', {error: e.message}), 'error'); }
 }
 
-async function updateSchedule() {
-    const schedule_enabled = document.getElementById('scraperScheduleEnabled').checked;
-    const schedule_day_of_week = document.getElementById('scraperScheduleDay').value;
-    const schedule_hour = parseInt(document.getElementById('scraperScheduleHour').value, 10);
-    try {
-        await api('/admin/scraper/config', { method: 'PATCH', body: JSON.stringify({ schedule_enabled, schedule_day_of_week, schedule_hour }) });
-        showToast(t('sources.configUpdated'));
-    } catch (e) { showToast(t('sources.configUpdateFailed', {error: e.message}), 'error'); }
-}
 
 async function toggleDedupLlm() {
     const dedup_llm_check = document.getElementById('scraperDedupLlm').checked;
@@ -1714,7 +1687,7 @@ window._pages.training = {
     loadSourceConfigs, showAddSourceConfig, editSourceConfig, saveSourceConfig,
     toggleSourceConfigEnabled, runSourceConfig, deleteSourceConfig,
     // Sources (scraper)
-    loadSources, toggleScraperEnabled, toggleAutoApprove, toggleDedupLlm, updateSchedule, updateMinDate, updateMaxDate,
+    loadSources, toggleScraperEnabled, toggleAutoApprove, toggleDedupLlm, updateMinDate, updateMaxDate,
     runScraperNow, approveSource, rejectSource, viewSourceArticle,
     // Watched pages
     loadWatchedPages, addWatchedPage, updateWatchedInterval, scrapeWatchedNow, deleteWatchedPage,

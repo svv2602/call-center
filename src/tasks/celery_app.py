@@ -82,11 +82,6 @@ app.conf.beat_schedule = {
         "task": "src.tasks.email_report.send_weekly_report",
         "schedule": crontab(hour=9, minute=0, day_of_week="monday"),  # Monday at 09:00 Kyiv time
     },
-    "scrape-prokoleso-articles": {
-        "task": "src.tasks.scraper_tasks.run_scraper",
-        "schedule": crontab(minute=0),  # Every hour; actual day/time filtered inside the task via Redis config
-        "kwargs": {"triggered_by": "beat"},
-    },
     "rescrape-watched-pages": {
         "task": "src.tasks.scraper_tasks.rescrape_watched_pages",
         "schedule": crontab(minute=30),  # Every hour at :30; actual timing per-page via next_scrape_at

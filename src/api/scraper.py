@@ -54,9 +54,6 @@ class ScraperConfigUpdate(BaseModel):
     min_date: str | None = None
     max_date: str | None = None
     dedup_llm_check: bool | None = None
-    schedule_enabled: bool | None = None
-    schedule_hour: int | None = None
-    schedule_day_of_week: str | None = None
 
 
 # ─── Source Config models ──────────────────────────────────
