@@ -39,7 +39,10 @@ class JSONFormatter(logging.Formatter):
             log_entry["success"] = record.success
 
         if record.exc_info and record.exc_info[1]:
-            log_entry["exception"] = str(record.exc_info[1])
+            exc = record.exc_info[1]
+            exc_str = str(exc) or repr(exc)
+            log_entry["exception"] = exc_str
+            log_entry["exception_type"] = type(exc).__qualname__
 
         return json.dumps(log_entry, ensure_ascii=False)
 
