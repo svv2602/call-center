@@ -132,7 +132,7 @@ services:
 
   celery-worker:
     build: .
-    command: celery -A src.tasks.celery_app worker -l info -Q quality,stats,embeddings,scraper -c 2
+    command: celery -A src.tasks.celery_app worker -l info -Q quality,stats,embeddings,scraper,catalog -c 2
     env_file: .env
     environment:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}

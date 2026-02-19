@@ -64,6 +64,7 @@ class OneCSettings(BaseSettings):
     username: str = ""
     password: str = ""
     timeout: int = 120
+    full_sync_timeout: int = 600  # Separate timeout for full catalog upload
     sync_interval_minutes: int = 5
     stock_cache_ttl: int = 300  # Redis TTL for stock cache (seconds)
 

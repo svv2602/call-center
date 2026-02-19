@@ -50,7 +50,6 @@ from src.logging.pii_vault import PIIVault
 from src.logging.structured_logger import setup_logging
 from src.monitoring.metrics import active_calls, calls_total, get_metrics
 from src.onec_client.client import OneCClient
-from src.onec_client.sync import CatalogSyncService
 from src.store_client.client import StoreClient
 from src.stt.base import STTConfig
 from src.stt.google_stt import GoogleSTTEngine
@@ -117,8 +116,6 @@ _redis: Redis | None = None
 _store_client: StoreClient | None = None
 _tts_engine: GoogleTTSEngine | None = None
 _onec_client: OneCClient | None = None
-_sync_service: CatalogSyncService | None = None
-_sync_task: asyncio.Task | None = None  # type: ignore[type-arg]
 _embedding_task: asyncio.Task | None = None  # type: ignore[type-arg]
 _db_engine: Any = None
 _llm_router: Any = None  # LLMRouter when FF_LLM_ROUTING_ENABLED=true
@@ -246,7 +243,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
 
     try:
         # Per-call STT engine (each call gets its own streaming session)
-        stt = GoogleSTTEngine()
+        stt = GoogleSTTEngine(project_id=settings.google_stt.project_id)
         stt_config = STTConfig(
             language_code=settings.google_stt.language_code,
             alternative_languages=settings.google_stt.alternative_language_list,
@@ -389,18 +386,6 @@ async def start_api_server(settings: Settings) -> None:
     await server.serve()
 
 
-async def _periodic_sync(sync_service: CatalogSyncService, interval_minutes: int) -> None:
-    """Run incremental catalog sync periodically."""
-    while True:
-        await asyncio.sleep(interval_minutes * 60)
-        try:
-            await sync_service.incremental_sync()
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("Periodic catalog sync failed")
-
-
 async def _periodic_embedding_check(interval_minutes: int = 5) -> None:
     """Periodically check for articles with pending embeddings and generate them.
 
@@ -455,7 +440,7 @@ async def _periodic_embedding_check(interval_minutes: int = 5) -> None:
 async def main() -> None:
     """Main application entry point."""
     global _audio_server, _redis, _store_client, _tts_engine
-    global _onec_client, _sync_service, _sync_task, _embedding_task, _db_engine, _llm_router
+    global _onec_client, _embedding_task, _db_engine, _llm_router
 
     settings = get_settings()
 
@@ -545,25 +530,8 @@ async def main() -> None:
             await _onec_client.open()
             logger.info("OneCClient initialized: %s", settings.onec.url)
 
-            # Full sync at startup (non-fatal if 1C is unreachable)
-            _sync_service = CatalogSyncService(
-                onec_client=_onec_client,
-                db_engine=_db_engine,
-                redis=_redis,
-                stock_cache_ttl=settings.onec.stock_cache_ttl,
-            )
-            try:
-                await _sync_service.full_sync()
-                logger.info("Initial catalog sync completed")
-            except Exception:
-                logger.warning(
-                    "Initial catalog sync failed — will retry periodically", exc_info=True
-                )
-
-            # Start periodic incremental sync
-            _sync_task = asyncio.create_task(
-                _periodic_sync(_sync_service, settings.onec.sync_interval_minutes)
-            )
+            # Catalog sync is delegated to Celery (catalog_full_sync + catalog_incremental_sync)
+            logger.info("Catalog sync delegated to Celery (full daily 05:00, incremental every 5 min)")
         except Exception:
             logger.warning(
                 "1C integration init failed — MVP tools will use fallback HTTP", exc_info=True
@@ -621,12 +589,6 @@ async def main() -> None:
         with contextlib.suppress(asyncio.CancelledError):
             await _embedding_task
         logger.info("Periodic embedding check stopped")
-
-    if _sync_task is not None:
-        _sync_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await _sync_task
-        logger.info("Periodic sync stopped")
 
     if _llm_router is not None:
         await _llm_router.close()

@@ -199,7 +199,7 @@ class CallSession:
 # Valid state transitions
 _VALID_TRANSITIONS: dict[CallState, set[CallState]] = {
     CallState.CONNECTED: {CallState.GREETING, CallState.ENDED},
-    CallState.GREETING: {CallState.LISTENING, CallState.ENDED},
+    CallState.GREETING: {CallState.LISTENING, CallState.SPEAKING, CallState.ENDED},
     CallState.LISTENING: {
         CallState.PROCESSING,
         CallState.SPEAKING,

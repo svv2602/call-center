@@ -116,8 +116,8 @@ class AudioSocketConnection:
     async def send_audio(self, audio_data: bytes) -> None:
         """Send audio data back to Asterisk as 0x10 packets.
 
-        Splits data into AUDIO_FRAME_BYTES-sized chunks to maintain
-        proper 20 ms frame timing.
+        Splits data into AUDIO_FRAME_BYTES-sized chunks with 20 ms pacing
+        to match real-time playback rate and avoid Asterisk queue overflow.
         """
         if self._closed:
             return
@@ -126,12 +126,14 @@ class AudioSocketConnection:
         while offset < len(audio_data):
             chunk = audio_data[offset : offset + AUDIO_FRAME_BYTES]
             self.writer.write(build_audio_packet(chunk))
+            try:
+                await self.writer.drain()
+            except (ConnectionResetError, OSError):
+                self._closed = True
+                return
             offset += AUDIO_FRAME_BYTES
-
-        try:
-            await self.writer.drain()
-        except (ConnectionResetError, OSError):
-            self._closed = True
+            # Pace frames at ~20 ms to match real-time playback
+            await asyncio.sleep(AUDIO_FRAME_DURATION_MS / 1000)
 
     async def close(self) -> None:
         """Close the connection."""

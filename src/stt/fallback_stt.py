@@ -31,9 +31,9 @@ class FallbackSTTEngine:
     Conforms to STTEngine Protocol.
     """
 
-    def __init__(self, whisper_config: WhisperConfig | None = None) -> None:
+    def __init__(self, whisper_config: WhisperConfig | None = None, project_id: str = "") -> None:
         self._whisper = WhisperSTTEngine(whisper_config)
-        self._google = GoogleSTTEngine()
+        self._google = GoogleSTTEngine(project_id=project_id)
         self._active_engine: WhisperSTTEngine | GoogleSTTEngine = self._whisper
         self._fell_back = False
         self._config: STTConfig | None = None

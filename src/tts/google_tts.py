@@ -121,5 +121,11 @@ class GoogleTTSEngine:
             audio_config=self._audio_config,
         )
 
-        logger.debug("TTS synthesized %d bytes for '%s'", len(response.audio_content), text[:50])
-        return response.audio_content
+        audio = response.audio_content
+
+        # Strip WAV header if present (Google TTS LINEAR16 includes 44-byte RIFF header)
+        if audio[:4] == b"RIFF":
+            audio = audio[44:]
+
+        logger.debug("TTS synthesized %d bytes for '%s'", len(audio), text[:50])
+        return audio

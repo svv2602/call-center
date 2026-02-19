@@ -25,6 +25,7 @@ app = Celery(
         "src.tasks.email_report",
         "src.tasks.embedding_tasks",
         "src.tasks.scraper_tasks",
+        "src.tasks.catalog_sync_tasks",
     ],
 )
 
@@ -46,6 +47,7 @@ app.conf.update(
         "src.tasks.email_report.*": {"queue": "stats"},
         "src.tasks.embedding_tasks.*": {"queue": "embeddings"},
         "src.tasks.scraper_tasks.*": {"queue": "scraper"},
+        "src.tasks.catalog_sync_tasks.*": {"queue": "catalog"},
     },
 )
 
@@ -90,6 +92,14 @@ app.conf.beat_schedule = {
         "task": "src.tasks.scraper_tasks.run_all_sources",
         "schedule": crontab(minute=15),  # Every hour at :15; actual day/time per-source in DB
         "kwargs": {"triggered_by": "beat"},
+    },
+    "catalog-full-sync": {
+        "task": "src.tasks.catalog_sync_tasks.catalog_full_sync",
+        "schedule": crontab(hour=5, minute=0),  # Daily at 05:00 Kyiv time
+    },
+    "catalog-incremental-sync": {
+        "task": "src.tasks.catalog_sync_tasks.catalog_incremental_sync",
+        "schedule": crontab(minute="*/5"),  # Every 5 minutes
     },
 }
 

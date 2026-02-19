@@ -30,7 +30,8 @@ class GoogleSTTEngine:
     recognition (uk-UA primary, ru-RU alternative).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, project_id: str = "") -> None:
+        self._project_id = project_id
         self._client: SpeechAsyncClient | None = None
         self._config: STTConfig | None = None
         self._audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
@@ -122,12 +123,13 @@ class GoogleSTTEngine:
             return
 
         recognition_config = cloud_speech.RecognitionConfig(
-            auto_decoding_config=cloud_speech.AutoDetectDecodingConfig(),
+            explicit_decoding_config=cloud_speech.ExplicitDecodingConfig(
+                encoding=cloud_speech.ExplicitDecodingConfig.AudioEncoding.LINEAR16,
+                sample_rate_hertz=self._config.sample_rate_hertz,
+                audio_channel_count=1,
+            ),
             language_codes=[self._config.language_code, *self._config.alternative_languages],
             model=self._config.model,
-            features=cloud_speech.RecognitionFeatures(
-                enable_automatic_punctuation=self._config.enable_punctuation,
-            ),
         )
 
         streaming_config = cloud_speech.StreamingRecognitionConfig(
@@ -137,11 +139,14 @@ class GoogleSTTEngine:
             ),
         )
 
+        recognizer = f"projects/{self._project_id}/locations/global/recognizers/_"
+
         try:
             # Build request generator
             async def request_generator() -> AsyncIterator[cloud_speech.StreamingRecognizeRequest]:
-                # First request: config only
+                # First request: config + recognizer
                 yield cloud_speech.StreamingRecognizeRequest(
+                    recognizer=recognizer,
                     streaming_config=streaming_config,
                 )
 
