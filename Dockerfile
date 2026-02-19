@@ -44,10 +44,12 @@ ENV PATH="/app/venv/bin:$PATH"
 
 # Copy application code and resources
 COPY src/ ./src/
+COPY scripts/ ./scripts/
 COPY migrations/ ./migrations/
 COPY alembic.ini ./
 COPY asterisk/ ./asterisk/
 COPY knowledge_base/ ./knowledge_base/
+COPY knowledge_seed/ ./knowledge_seed/
 COPY --from=ui-builder /ui/dist/ ./admin-ui/dist/
 
 # Install the package itself (src/) — metadata only, deps already in venv
