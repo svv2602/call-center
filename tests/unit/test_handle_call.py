@@ -51,6 +51,7 @@ class TestHandleCallDBIntegration:
         p = _make_patches(db_engine=MagicMock())
         mock_pm = AsyncMock()
         mock_pm.get_active_templates = AsyncMock(return_value=p["templates"])
+        mock_pm.get_active_prompt = AsyncMock(return_value={"id": None, "name": "test", "system_prompt": "test"})
 
         captured_pipeline_args: dict[str, Any] = {}
 
@@ -91,6 +92,7 @@ class TestHandleCallDBIntegration:
         p = _make_patches(db_engine=MagicMock())
         mock_pm = AsyncMock()
         mock_pm.get_active_templates = AsyncMock(return_value=p["templates"])
+        mock_pm.get_active_prompt = AsyncMock(return_value={"id": None, "name": "test", "system_prompt": "test"})
 
         captured_agent_kwargs: dict[str, Any] = {}
 

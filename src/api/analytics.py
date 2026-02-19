@@ -52,7 +52,7 @@ async def get_quality_report(
         conditions.append("started_at >= :date_from")
         params["date_from"] = date_from
     if date_to:
-        conditions.append("started_at < :date_to::date + interval '1 day'")
+        conditions.append("started_at < CAST(:date_to AS date) + interval '1 day'")
         params["date_to"] = date_to
     if scenario:
         conditions.append("scenario = :scenario")
@@ -134,7 +134,7 @@ async def get_calls_list(
         conditions.append("started_at >= :date_from")
         params["date_from"] = date_from
     if date_to:
-        conditions.append("started_at < :date_to::date + interval '1 day'")
+        conditions.append("started_at < CAST(:date_to AS date) + interval '1 day'")
         params["date_to"] = date_to
     if search:
         conditions.append("id IN (SELECT call_id FROM call_turns WHERE text ILIKE :search)")

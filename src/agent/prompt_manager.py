@@ -188,6 +188,43 @@ class PromptManager:
 
         return fallback
 
+    async def delete_version(self, version_id: UUID) -> None:
+        """Delete a prompt version.
+
+        Raises ValueError if version is active or used in an A/B test.
+        """
+        async with self._engine.begin() as conn:
+            # Check existence and active status
+            result = await conn.execute(
+                text("SELECT is_active FROM prompt_versions WHERE id = :vid"),
+                {"vid": str(version_id)},
+            )
+            row = result.first()
+            if not row:
+                msg = f"Prompt version {version_id} not found"
+                raise ValueError(msg)
+            if row.is_active:
+                msg = "Cannot delete the active prompt version"
+                raise ValueError(msg)
+
+            # Check if used in any A/B test
+            ab_result = await conn.execute(
+                text("""
+                    SELECT id FROM prompt_ab_tests
+                    WHERE (variant_a_id = :vid OR variant_b_id = :vid)
+                      AND status = 'active'
+                """),
+                {"vid": str(version_id)},
+            )
+            if ab_result.first():
+                msg = "Cannot delete a prompt version used in an active A/B test"
+                raise ValueError(msg)
+
+            await conn.execute(
+                text("DELETE FROM prompt_versions WHERE id = :vid"),
+                {"vid": str(version_id)},
+            )
+
     async def get_version(self, version_id: UUID) -> dict[str, Any] | None:
         """Get a specific prompt version by ID."""
         async with self._engine.begin() as conn:

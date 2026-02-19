@@ -190,7 +190,7 @@ async def list_sources(
         conditions.append("ks.status = :status")
         params["status"] = status
     if source_config_id:
-        conditions.append("ks.source_config_id = :source_config_id::uuid")
+        conditions.append("ks.source_config_id = CAST(:source_config_id AS uuid)")
         params["source_config_id"] = source_config_id
 
     where_clause = " AND ".join(conditions)
@@ -755,7 +755,7 @@ async def scrape_watched_page_now(
                         UPDATE knowledge_sources
                         SET fetched_at = now(),
                             next_scrape_at = now() + make_interval(hours => :interval)
-                        WHERE id = :id::uuid
+                        WHERE id = CAST(:id AS uuid)
                     """),
                     {"id": source_id, "interval": interval},
                 )
@@ -771,7 +771,7 @@ async def scrape_watched_page_now(
                     UPDATE knowledge_sources
                     SET fetched_at = now(),
                         next_scrape_at = now() + make_interval(hours => :interval)
-                    WHERE id = :id::uuid
+                    WHERE id = CAST(:id AS uuid)
                 """),
                 {"id": source_id, "interval": interval},
             )
@@ -795,7 +795,7 @@ async def scrape_watched_page_now(
                     text("""
                         UPDATE knowledge_sources
                         SET content_hash = :hash, processed_at = now()
-                        WHERE id = :id::uuid
+                        WHERE id = CAST(:id AS uuid)
                     """),
                     {"id": source_id, "hash": new_hash},
                 )
@@ -810,7 +810,7 @@ async def scrape_watched_page_now(
                         UPDATE knowledge_articles
                         SET title = :title, category = :category, content = :content,
                             embedding_status = 'pending', updated_at = now()
-                        WHERE id = :article_id::uuid
+                        WHERE id = CAST(:article_id AS uuid)
                     """),
                     {
                         "article_id": str(article_id),
@@ -824,7 +824,7 @@ async def scrape_watched_page_now(
                     text("""
                         UPDATE knowledge_sources
                         SET content_hash = :hash, status = 'processed', processed_at = now()
-                        WHERE id = :id::uuid
+                        WHERE id = CAST(:id AS uuid)
                     """),
                     {"id": source_id, "hash": new_hash},
                 )
@@ -852,9 +852,9 @@ async def scrape_watched_page_now(
                 await conn.execute(
                     text("""
                         UPDATE knowledge_sources
-                        SET article_id = :article_id::uuid, content_hash = :hash,
+                        SET article_id = CAST(:article_id AS uuid), content_hash = :hash,
                             status = 'processed', processed_at = now()
-                        WHERE id = :id::uuid
+                        WHERE id = CAST(:id AS uuid)
                     """),
                     {"id": source_id, "article_id": new_article_id, "hash": new_hash},
                 )
@@ -894,7 +894,7 @@ async def _scrape_discovery_page_inline(
                 UPDATE knowledge_sources
                 SET fetched_at = now(),
                     next_scrape_at = now() + make_interval(hours => :interval)
-                WHERE id = :id::uuid
+                WHERE id = CAST(:id AS uuid)
             """),
             {"id": source_id, "interval": interval},
         )
@@ -902,7 +902,7 @@ async def _scrape_discovery_page_inline(
     # Get existing children
     async with engine.begin() as conn:
         result = await conn.execute(
-            text("SELECT id, url FROM knowledge_sources WHERE parent_id = :pid::uuid"),
+            text("SELECT id, url FROM knowledge_sources WHERE parent_id = CAST(:pid AS uuid)"),
             {"pid": source_id},
         )
         existing_urls = {row.url for row in result}
@@ -917,7 +917,7 @@ async def _scrape_discovery_page_inline(
                         (url, source_site, source_type, status, rescrape_interval_hours,
                          original_title, parent_id, next_scrape_at)
                     VALUES (:url, 'prokoleso.ua', 'watched_page', 'new',
-                            :interval, :url, :parent_id::uuid, now())
+                            :interval, :url, CAST(:parent_id AS uuid), now())
                     ON CONFLICT (url) DO NOTHING
                 """),
                 {"url": child_url, "interval": interval, "parent_id": source_id},
@@ -930,7 +930,7 @@ async def _scrape_discovery_page_inline(
             await conn.execute(
                 text("""
                     DELETE FROM knowledge_sources
-                    WHERE parent_id = :pid::uuid AND url = ANY(:urls)
+                    WHERE parent_id = CAST(:pid AS uuid) AND url = ANY(:urls)
                 """),
                 {"pid": source_id, "urls": list(stale_urls)},
             )
@@ -940,7 +940,7 @@ async def _scrape_discovery_page_inline(
         result = await conn.execute(
             text("""
                 SELECT id, url, article_id, content_hash, rescrape_interval_hours
-                FROM knowledge_sources WHERE parent_id = :pid::uuid
+                FROM knowledge_sources WHERE parent_id = CAST(:pid AS uuid)
             """),
             {"pid": source_id},
         )
@@ -968,7 +968,7 @@ async def _scrape_discovery_page_inline(
                         UPDATE knowledge_sources
                         SET fetched_at = now(),
                             next_scrape_at = now() + make_interval(hours => :interval)
-                        WHERE id = :id::uuid
+                        WHERE id = CAST(:id AS uuid)
                     """),
                     {"id": child_id, "interval": child_interval},
                 )
@@ -992,7 +992,7 @@ async def _scrape_discovery_page_inline(
                         text("""
                             UPDATE knowledge_sources
                             SET content_hash = :hash, processed_at = now()
-                            WHERE id = :id::uuid
+                            WHERE id = CAST(:id AS uuid)
                         """),
                         {"id": child_id, "hash": new_hash},
                     )
@@ -1007,7 +1007,7 @@ async def _scrape_discovery_page_inline(
                             UPDATE knowledge_articles
                             SET title = :title, category = :category, content = :content,
                                 embedding_status = 'pending', updated_at = now()
-                            WHERE id = :article_id::uuid
+                            WHERE id = CAST(:article_id AS uuid)
                         """),
                         {
                             "article_id": str(article_id),
@@ -1021,7 +1021,7 @@ async def _scrape_discovery_page_inline(
                         text("""
                             UPDATE knowledge_sources
                             SET content_hash = :hash, status = 'processed', processed_at = now()
-                            WHERE id = :id::uuid
+                            WHERE id = CAST(:id AS uuid)
                         """),
                         {"id": child_id, "hash": new_hash},
                     )
@@ -1049,9 +1049,9 @@ async def _scrape_discovery_page_inline(
                     await conn.execute(
                         text("""
                             UPDATE knowledge_sources
-                            SET article_id = :article_id::uuid, content_hash = :hash,
+                            SET article_id = CAST(:article_id AS uuid), content_hash = :hash,
                                 status = 'processed', processed_at = now()
-                            WHERE id = :id::uuid
+                            WHERE id = CAST(:id AS uuid)
                         """),
                         {"id": child_id, "article_id": new_article_id, "hash": new_hash},
                     )

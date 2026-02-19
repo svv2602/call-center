@@ -68,6 +68,46 @@ check_node_modules() {
     fi
 }
 
+# --- Port cleanup ---
+
+# Ports used by components
+PORT_BACKEND=8080
+PORT_AUDIOSOCKET=9092
+PORT_VITE=5173
+
+free_port() {
+    local port=$1
+    local pids
+    pids=$(lsof -ti :"$port" 2>/dev/null) || true
+    if [[ -n "$pids" ]]; then
+        warn "Порт $port занят (PID: $(echo $pids | tr '\n' ' ')), завершаю..."
+        echo "$pids" | xargs kill 2>/dev/null || true
+        sleep 1
+        # Force kill survivors
+        pids=$(lsof -ti :"$port" 2>/dev/null) || true
+        if [[ -n "$pids" ]]; then
+            echo "$pids" | xargs kill -9 2>/dev/null || true
+            sleep 0.5
+        fi
+        success "Порт $port освобождён"
+    fi
+}
+
+free_ports_for() {
+    local mode=$1
+    case "$mode" in
+        dev)
+            free_port "$PORT_BACKEND"
+            free_port "$PORT_AUDIOSOCKET"
+            free_port "$PORT_VITE"
+            ;;
+        backend|build)
+            free_port "$PORT_BACKEND"
+            free_port "$PORT_AUDIOSOCKET"
+            ;;
+    esac
+}
+
 # --- Component start/stop ---
 
 start_docker() {
@@ -269,6 +309,7 @@ echo ""
 
 case "$MODE" in
     dev)
+        free_ports_for dev
         start_docker
         start_backend
         start_celery
@@ -277,6 +318,7 @@ case "$MODE" in
         wait_for_children
         ;;
     backend)
+        free_ports_for backend
         start_docker
         start_backend
         start_celery
@@ -288,6 +330,7 @@ case "$MODE" in
         show_urls docker
         ;;
     build)
+        free_ports_for build
         start_docker
         build_admin_ui
         start_backend

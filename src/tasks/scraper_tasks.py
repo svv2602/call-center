@@ -450,11 +450,11 @@ async def _check_duplicate(
         async with engine.begin() as conn:
             result = await conn.execute(
                 text("""
-                    SELECT ka.title, 1 - (ke.embedding <=> :vec::vector) AS similarity
+                    SELECT ka.title, 1 - (ke.embedding <=> CAST(:vec AS vector)) AS similarity
                     FROM knowledge_embeddings ke
                     JOIN knowledge_articles ka ON ka.id = ke.article_id
                     WHERE ka.active = true
-                    ORDER BY ke.embedding <=> :vec::vector
+                    ORDER BY ke.embedding <=> CAST(:vec AS vector)
                     LIMIT 1
                 """),
                 {"vec": vec_str},
@@ -587,7 +587,7 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
                                 UPDATE knowledge_sources
                                 SET next_scrape_at = now() + make_interval(hours => :interval),
                                     fetched_at = now()
-                                WHERE id = :id::uuid
+                                WHERE id = CAST(:id AS uuid)
                             """),
                             {"id": source_id, "interval": interval},
                         )
@@ -604,7 +604,7 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
                             UPDATE knowledge_sources
                             SET fetched_at = now(),
                                 next_scrape_at = now() + make_interval(hours => :interval)
-                            WHERE id = :id::uuid
+                            WHERE id = CAST(:id AS uuid)
                         """),
                         {"id": source_id, "interval": interval},
                     )
@@ -632,7 +632,7 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
                             text("""
                                 UPDATE knowledge_sources
                                 SET content_hash = :hash, processed_at = now()
-                                WHERE id = :id::uuid
+                                WHERE id = CAST(:id AS uuid)
                             """),
                             {"id": source_id, "hash": new_hash},
                         )
@@ -649,7 +649,7 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
                                 UPDATE knowledge_articles
                                 SET title = :title, category = :category, content = :content,
                                     embedding_status = 'pending', updated_at = now()
-                                WHERE id = :article_id::uuid
+                                WHERE id = CAST(:article_id AS uuid)
                             """),
                             {
                                 "article_id": str(article_id),
@@ -664,7 +664,7 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
                             text("""
                                 UPDATE knowledge_sources
                                 SET content_hash = :hash, status = 'processed', processed_at = now()
-                                WHERE id = :id::uuid
+                                WHERE id = CAST(:id AS uuid)
                             """),
                             {"id": source_id, "hash": new_hash},
                         )
@@ -694,9 +694,9 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
                         await conn.execute(
                             text("""
                                 UPDATE knowledge_sources
-                                SET article_id = :article_id::uuid, content_hash = :hash,
+                                SET article_id = CAST(:article_id AS uuid), content_hash = :hash,
                                     status = 'processed', processed_at = now()
-                                WHERE id = :id::uuid
+                                WHERE id = CAST(:id AS uuid)
                             """),
                             {"id": source_id, "article_id": new_article_id, "hash": new_hash},
                         )
@@ -758,7 +758,7 @@ async def _handle_discovery_page(
                 UPDATE knowledge_sources
                 SET fetched_at = now(),
                     next_scrape_at = now() + make_interval(hours => :interval)
-                WHERE id = :id::uuid
+                WHERE id = CAST(:id AS uuid)
             """),
             {"id": source_id, "interval": interval},
         )
@@ -769,7 +769,7 @@ async def _handle_discovery_page(
             text("""
                 SELECT id, url, article_id, content_hash, rescrape_interval_hours
                 FROM knowledge_sources
-                WHERE parent_id = :parent_id::uuid
+                WHERE parent_id = CAST(:parent_id AS uuid)
             """),
             {"parent_id": source_id},
         )
@@ -790,12 +790,12 @@ async def _handle_discovery_page(
                     text("""
                         UPDATE knowledge_articles
                         SET active = false, updated_at = now()
-                        WHERE id = :article_id::uuid
+                        WHERE id = CAST(:article_id AS uuid)
                     """),
                     {"article_id": str(child["article_id"])},
                 )
             await conn.execute(
-                text("DELETE FROM knowledge_sources WHERE id = :id::uuid"),
+                text("DELETE FROM knowledge_sources WHERE id = CAST(:id AS uuid)"),
                 {"id": str(child["id"])},
             )
 
@@ -810,7 +810,7 @@ async def _handle_discovery_page(
                         (url, source_site, source_type, status, rescrape_interval_hours,
                          original_title, parent_id, next_scrape_at)
                     VALUES (:url, 'prokoleso.ua', 'watched_page', 'new',
-                            :interval, :url, :parent_id::uuid, now())
+                            :interval, :url, CAST(:parent_id AS uuid), now())
                     ON CONFLICT (url) DO NOTHING
                 """),
                 {"url": child_url, "interval": interval, "parent_id": source_id},
@@ -822,7 +822,7 @@ async def _handle_discovery_page(
             text("""
                 SELECT id, url, article_id, content_hash, rescrape_interval_hours
                 FROM knowledge_sources
-                WHERE parent_id = :parent_id::uuid
+                WHERE parent_id = CAST(:parent_id AS uuid)
                   AND (next_scrape_at IS NULL OR next_scrape_at <= now())
             """),
             {"parent_id": source_id},
@@ -848,7 +848,7 @@ async def _handle_discovery_page(
                             UPDATE knowledge_sources
                             SET next_scrape_at = now() + make_interval(hours => :interval),
                                 fetched_at = now()
-                            WHERE id = :id::uuid
+                            WHERE id = CAST(:id AS uuid)
                         """),
                         {"id": child_id, "interval": child_interval},
                     )
@@ -865,7 +865,7 @@ async def _handle_discovery_page(
                         UPDATE knowledge_sources
                         SET fetched_at = now(),
                             next_scrape_at = now() + make_interval(hours => :interval)
-                        WHERE id = :id::uuid
+                        WHERE id = CAST(:id AS uuid)
                     """),
                     {"id": child_id, "interval": child_interval},
                 )
@@ -893,7 +893,7 @@ async def _handle_discovery_page(
                         text("""
                             UPDATE knowledge_sources
                             SET content_hash = :hash, processed_at = now()
-                            WHERE id = :id::uuid
+                            WHERE id = CAST(:id AS uuid)
                         """),
                         {"id": child_id, "hash": new_hash},
                     )
@@ -910,7 +910,7 @@ async def _handle_discovery_page(
                             UPDATE knowledge_articles
                             SET title = :title, category = :category, content = :content,
                                 embedding_status = 'pending', updated_at = now()
-                            WHERE id = :article_id::uuid
+                            WHERE id = CAST(:article_id AS uuid)
                         """),
                         {
                             "article_id": str(article_id),
@@ -924,7 +924,7 @@ async def _handle_discovery_page(
                         text("""
                             UPDATE knowledge_sources
                             SET content_hash = :hash, status = 'processed', processed_at = now()
-                            WHERE id = :id::uuid
+                            WHERE id = CAST(:id AS uuid)
                         """),
                         {"id": child_id, "hash": new_hash},
                     )
@@ -952,9 +952,9 @@ async def _handle_discovery_page(
                     await conn.execute(
                         text("""
                             UPDATE knowledge_sources
-                            SET article_id = :article_id::uuid, content_hash = :hash,
+                            SET article_id = CAST(:article_id AS uuid), content_hash = :hash,
                                 status = 'processed', processed_at = now()
-                            WHERE id = :id::uuid
+                            WHERE id = CAST(:id AS uuid)
                         """),
                         {"id": child_id, "article_id": new_article_id, "hash": new_hash},
                     )
@@ -1174,7 +1174,7 @@ async def _run_source_async(
                         text("""
                             INSERT INTO knowledge_sources
                                 (url, source_site, original_title, status, source_config_id)
-                            VALUES (:url, :site, :title, 'processing', :config_id::uuid)
+                            VALUES (:url, :site, :title, 'processing', CAST(:config_id AS uuid))
                             ON CONFLICT (url) DO NOTHING
                         """),
                         {

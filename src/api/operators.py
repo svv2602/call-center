@@ -100,7 +100,7 @@ async def create_operator(
             result = await conn.execute(
                 text("""
                     INSERT INTO operators (name, extension, skills, shift_start, shift_end)
-                    VALUES (:name, :extension, :skills::jsonb, :shift_start::time, :shift_end::time)
+                    VALUES (:name, :extension, CAST(:skills AS jsonb), CAST(:shift_start AS time), CAST(:shift_end AS time))
                     RETURNING id, name, extension, is_active, skills, shift_start, shift_end, created_at
                 """),
                 {
@@ -156,13 +156,13 @@ async def update_operator(
     if req.skills is not None:
         import json
 
-        updates.append("skills = :skills::jsonb")
+        updates.append("skills = CAST(:skills AS jsonb)")
         params["skills"] = json.dumps(req.skills)
     if req.shift_start is not None:
-        updates.append("shift_start = :shift_start::time")
+        updates.append("shift_start = CAST(:shift_start AS time)")
         params["shift_start"] = req.shift_start
     if req.shift_end is not None:
-        updates.append("shift_end = :shift_end::time")
+        updates.append("shift_end = CAST(:shift_end AS time)")
         params["shift_end"] = req.shift_end
 
     if not updates:
@@ -319,7 +319,7 @@ async def get_transfers(
         conditions.append("started_at >= :date_from")
         params["date_from"] = date_from
     if date_to:
-        conditions.append("started_at < :date_to::date + interval '1 day'")
+        conditions.append("started_at < CAST(:date_to AS date) + interval '1 day'")
         params["date_to"] = date_to
     if reason:
         conditions.append("transfer_reason = :reason")

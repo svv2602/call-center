@@ -162,9 +162,10 @@ class TestSystemPrompt:
 
         from src.agent.agent import LLMAgent
 
+        agent = LLMAgent(api_key="test-key")
         with patch("src.agent.agent.datetime") as mock_dt:
             mock_dt.date.today.return_value = datetime.date(2025, 1, 15)
-            prompt = LLMAgent._build_system_prompt()
+            prompt = agent._build_system_prompt()
         assert "зимовий сезон" in prompt
         assert "Підказка по сезону" in prompt
 
@@ -174,9 +175,10 @@ class TestSystemPrompt:
 
         from src.agent.agent import LLMAgent
 
+        agent = LLMAgent(api_key="test-key")
         with patch("src.agent.agent.datetime") as mock_dt:
             mock_dt.date.today.return_value = datetime.date(2025, 7, 15)
-            prompt = LLMAgent._build_system_prompt()
+            prompt = agent._build_system_prompt()
         assert "літній сезон" in prompt
 
     def test_season_hint_transition(self) -> None:
@@ -185,7 +187,36 @@ class TestSystemPrompt:
 
         from src.agent.agent import LLMAgent
 
+        agent = LLMAgent(api_key="test-key")
         with patch("src.agent.agent.datetime") as mock_dt:
             mock_dt.date.today.return_value = datetime.date(2025, 4, 15)
-            prompt = LLMAgent._build_system_prompt()
+            prompt = agent._build_system_prompt()
         assert "міжсезоння" in prompt
+
+    def test_custom_system_prompt(self) -> None:
+        from src.agent.agent import LLMAgent
+
+        custom = "Custom prompt for testing"
+        agent = LLMAgent(api_key="test-key", system_prompt=custom)
+        prompt = agent._build_system_prompt()
+        assert prompt.startswith(custom)
+        assert "Підказка по сезону" in prompt
+
+    def test_fallback_to_hardcoded_prompt(self) -> None:
+        from src.agent.agent import LLMAgent
+
+        agent = LLMAgent(api_key="test-key")
+        prompt = agent._build_system_prompt()
+        assert prompt.startswith(SYSTEM_PROMPT)
+
+    def test_prompt_version_name_default(self) -> None:
+        from src.agent.agent import LLMAgent
+
+        agent = LLMAgent(api_key="test-key")
+        assert agent.prompt_version_name == PROMPT_VERSION
+
+    def test_prompt_version_name_custom(self) -> None:
+        from src.agent.agent import LLMAgent
+
+        agent = LLMAgent(api_key="test-key", prompt_version_name="v4.0-test")
+        assert agent.prompt_version_name == "v4.0-test"

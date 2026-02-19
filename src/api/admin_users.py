@@ -200,7 +200,7 @@ async def get_audit_log(
         conditions.append("created_at >= :date_from")
         params["date_from"] = date_from
     if date_to:
-        conditions.append("created_at < :date_to::date + interval '1 day'")
+        conditions.append("created_at < CAST(:date_to AS date) + interval '1 day'")
         params["date_to"] = date_to
 
     where_clause = " AND ".join(conditions)

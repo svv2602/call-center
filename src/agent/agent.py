@@ -77,6 +77,8 @@ class LLMAgent:
         pii_vault: PIIVault | None = None,
         tools: list[dict[str, Any]] | None = None,
         llm_router: LLMRouter | None = None,
+        system_prompt: str | None = None,
+        prompt_version_name: str | None = None,
     ) -> None:
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._model = model
@@ -84,6 +86,8 @@ class LLMAgent:
         self._pii_vault = pii_vault
         self._tools = tools or list(ALL_TOOLS)
         self._llm_router = llm_router
+        self._system_prompt = system_prompt or SYSTEM_PROMPT
+        self._prompt_version_name = prompt_version_name or PROMPT_VERSION
 
     @property
     def tool_router(self) -> ToolRouter:
@@ -259,13 +263,13 @@ class LLMAgent:
 
         return response_text, conversation_history
 
-    @staticmethod
     def _build_system_prompt(
+        self,
         caller_phone: str | None = None,
         order_id: str | None = None,
     ) -> str:
         """Build system prompt with caller context and season hint appended."""
-        parts = [SYSTEM_PROMPT]
+        parts = [self._system_prompt]
 
         # Dynamic season hint
         month = datetime.date.today().month
@@ -288,7 +292,7 @@ class LLMAgent:
 
         return "\n".join(parts)
 
-    @staticmethod
-    def prompt_version() -> str:
-        """Return the current prompt version."""
-        return PROMPT_VERSION
+    @property
+    def prompt_version_name(self) -> str:
+        """Return the current prompt version name."""
+        return self._prompt_version_name

@@ -46,7 +46,7 @@ async def _export_calls_csv(
         conditions.append("started_at >= :date_from")
         params["date_from"] = date_from
     if date_to:
-        conditions.append("started_at < :date_to::date + interval '1 day'")
+        conditions.append("started_at < CAST(:date_to AS date) + interval '1 day'")
         params["date_to"] = date_to
 
     where_clause = " AND ".join(conditions)

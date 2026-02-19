@@ -250,13 +250,41 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             alternative_languages=settings.google_stt.alternative_language_list,
         )
 
-        # Load DB templates and tool overrides (if DB is available)
+        # Load DB templates, tool overrides, and active prompt (if DB is available)
         templates = None
         tools = None
+        system_prompt = None
+        prompt_version_name = None
         if _db_engine is not None:
             pm = PromptManager(_db_engine)
             templates = await pm.get_active_templates()
             tools = await get_tools_with_overrides(_db_engine)
+
+            # Load active prompt version from DB
+            active_prompt = await pm.get_active_prompt()
+            if active_prompt.get("id") is not None:
+                system_prompt = active_prompt["system_prompt"]
+                prompt_version_name = active_prompt["name"]
+
+            # A/B test: may override prompt with assigned variant
+            try:
+                from src.agent.ab_testing import ABTestManager
+
+                ab_manager = ABTestManager(_db_engine)
+                assignment = await ab_manager.assign_variant(str(conn.channel_uuid))
+                if assignment is not None:
+                    variant = await pm.get_version(assignment["prompt_version_id"])
+                    if variant:
+                        system_prompt = variant["system_prompt"]
+                        prompt_version_name = assignment["variant_name"]
+                        logger.info(
+                            "A/B test override: call=%s, variant=%s (%s)",
+                            conn.channel_uuid,
+                            assignment["variant_label"],
+                            assignment["variant_name"],
+                        )
+            except Exception:
+                logger.warning("A/B test assignment failed, using default prompt", exc_info=True)
 
         # Per-call tool router, PII vault, and LLM agent
         router = _build_tool_router(session)
@@ -268,6 +296,8 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             pii_vault=vault,
             tools=tools,
             llm_router=_llm_router,
+            system_prompt=system_prompt,
+            prompt_version_name=prompt_version_name,
         )
 
         # Run the pipeline (greeting → listen → STT → LLM → TTS loop)
@@ -298,6 +328,14 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             "duration_seconds": session.duration_seconds,
         },
     )
+
+    # Dispatch async quality evaluation (non-blocking, Celery task)
+    try:
+        from src.tasks.quality_evaluator import evaluate_call_quality
+
+        evaluate_call_quality.delay(str(conn.channel_uuid))
+    except Exception:
+        logger.debug("Quality evaluation dispatch failed", exc_info=True)
 
     logger.info(
         "Call ended: %s, duration=%ds, turns=%d",

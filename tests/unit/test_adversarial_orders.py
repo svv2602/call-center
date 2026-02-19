@@ -53,16 +53,19 @@ class TestBuildSystemPromptSecurity:
     """Test _build_system_prompt with caller context."""
 
     def test_caller_phone_injected(self) -> None:
-        prompt = LLMAgent._build_system_prompt(caller_phone="+380501234567")
+        agent = LLMAgent(api_key="test-key")
+        prompt = agent._build_system_prompt(caller_phone="+380501234567")
         assert "+380501234567" in prompt
         assert "CallerID" in prompt
 
     def test_order_id_injected(self) -> None:
-        prompt = LLMAgent._build_system_prompt(order_id="order-abc")
+        agent = LLMAgent(api_key="test-key")
+        prompt = agent._build_system_prompt(order_id="order-abc")
         assert "order-abc" in prompt
 
     def test_no_context_returns_base_prompt_with_season(self) -> None:
-        prompt = LLMAgent._build_system_prompt()
+        agent = LLMAgent(api_key="test-key")
+        prompt = agent._build_system_prompt()
         assert prompt.startswith(SYSTEM_PROMPT)
         assert "Підказка по сезону" in prompt
 
