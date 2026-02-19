@@ -33,6 +33,7 @@ from src.api.middleware.security_headers import SecurityHeadersMiddleware
 from src.api.notifications import router as notifications_router
 from src.api.operators import router as operators_router
 from src.api.prompts import router as prompts_router
+from src.api.sandbox import router as sandbox_router
 from src.api.scraper import router as scraper_router
 from src.api.system import router as system_router
 from src.api.training_dialogues import router as training_dialogues_router
@@ -72,6 +73,7 @@ app.include_router(llm_config_router)
 app.include_router(notifications_router)
 app.include_router(operators_router)
 app.include_router(prompts_router)
+app.include_router(sandbox_router)
 app.include_router(scraper_router)
 app.include_router(system_router)
 app.include_router(training_dialogues_router)

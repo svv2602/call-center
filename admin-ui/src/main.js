@@ -24,6 +24,7 @@ import { init as initNotifications } from './pages/notifications-page.js';
 import { init as initUsers } from './pages/users.js';
 import { init as initAudit } from './pages/audit.js';
 import { init as initVehicles } from './pages/vehicles.js';
+import { init as initSandbox } from './pages/sandbox.js';
 
 // Initialize language and theme
 initLang();
@@ -44,6 +45,7 @@ initNotifications();
 initUsers();
 initAudit();
 initVehicles();
+initSandbox();
 
 // WebSocket event handler — dispatches real-time updates to active page
 setWsEventHandler((msg) => {
