@@ -7,6 +7,7 @@ and stock/price queries.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from typing import Any
 
@@ -203,5 +204,11 @@ class OneCClient:
             if resp.status == 204:
                 return {}
 
-            data: dict[str, Any] = await resp.json()
+            # 1C may return JSON in Windows-1251 instead of UTF-8
+            raw = await resp.read()
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                text = raw.decode("windows-1251")
+            data: dict[str, Any] = json.loads(text)
             return data
