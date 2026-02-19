@@ -16,7 +16,7 @@ class TTSConfig:
     language_code: str = "uk-UA"
     voice_name: str = "uk-UA-Standard-A"
     speaking_rate: float = 1.0
-    sample_rate_hertz: int = 16000
+    sample_rate_hertz: int = 8000
 
 
 @runtime_checkable

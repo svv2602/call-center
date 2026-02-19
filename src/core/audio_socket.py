@@ -27,8 +27,8 @@ logger = logging.getLogger(__name__)
 
 # AudioSocket constants
 HEADER_SIZE = 3  # 1 byte type + 2 bytes length
-AUDIO_SAMPLE_RATE = 16000
-AUDIO_FRAME_BYTES = 640  # 20 ms × 16000 Hz × 2 bytes/sample
+AUDIO_SAMPLE_RATE = 8000  # Asterisk app_audiosocket uses slin (8kHz)
+AUDIO_FRAME_BYTES = 320  # 20 ms × 8000 Hz × 2 bytes/sample
 AUDIO_FRAME_DURATION_MS = 20
 
 

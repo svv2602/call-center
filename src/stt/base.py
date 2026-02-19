@@ -34,7 +34,7 @@ class STTConfig:
 
     language_code: str = "uk-UA"
     alternative_languages: list[str] = field(default_factory=lambda: ["ru-RU"])
-    sample_rate_hertz: int = 16000
+    sample_rate_hertz: int = 8000
     interim_results: bool = True
     model: str = "latest_long"
     enable_punctuation: bool = True
