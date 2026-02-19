@@ -119,6 +119,9 @@ export default {
     'calls.toolName': 'Инструмент',
     'calls.toolSuccess': 'Успех',
     'calls.toolDuration': 'Длительность',
+    'calls.downloadTranscript': 'Скачать расшифровку',
+    'calls.transcriptDownloaded': 'Расшифровка скачана',
+    'calls.transcriptFailed': 'Ошибка скачивания: {error}',
     'calls.failedToLoadDetail': 'Не удалось загрузить детали звонка: {error}',
 
     // Prompts

@@ -137,7 +137,7 @@ async def get_calls_list(
         conditions.append("started_at < CAST(:date_to AS date) + interval '1 day'")
         params["date_to"] = date_to
     if search:
-        conditions.append("id IN (SELECT call_id FROM call_turns WHERE text ILIKE :search)")
+        conditions.append("id IN (SELECT call_id FROM call_turns WHERE content ILIKE :search)")
         params["search"] = f"%{search}%"
 
     where_clause = " AND ".join(conditions)
@@ -211,12 +211,13 @@ async def get_call_details(call_id: UUID, _: dict[str, Any] = _analyst_dep) -> d
         turns_result = await conn.execute(
             text("""
                 SELECT
-                    turn_index, speaker, text, stt_confidence,
+                    turn_number AS turn_index, speaker,
+                    content AS text, stt_confidence,
                     stt_latency_ms, llm_latency_ms, tts_latency_ms,
                     created_at
                 FROM call_turns
                 WHERE call_id = :call_id
-                ORDER BY turn_index
+                ORDER BY turn_number
             """),
             {"call_id": str(call_id)},
         )
@@ -227,10 +228,10 @@ async def get_call_details(call_id: UUID, _: dict[str, Any] = _analyst_dep) -> d
             text("""
                 SELECT
                     tool_name, tool_args, tool_result, success,
-                    duration_ms, called_at
+                    duration_ms, created_at AS called_at
                 FROM call_tool_calls
                 WHERE call_id = :call_id
-                ORDER BY called_at
+                ORDER BY created_at
             """),
             {"call_id": str(call_id)},
         )
@@ -241,6 +242,71 @@ async def get_call_details(call_id: UUID, _: dict[str, Any] = _analyst_dep) -> d
         "turns": turns,
         "tool_calls": tool_calls,
     }
+
+
+@router.get("/calls/{call_id}/transcript")
+async def download_call_transcript(call_id: UUID, _: dict[str, Any] = _analyst_dep) -> Any:
+    """Download call transcription as a plain-text file."""
+    from fastapi.responses import Response
+
+    engine = await _get_engine()
+
+    async with engine.begin() as conn:
+        # Call metadata
+        call_result = await conn.execute(
+            text("""
+                SELECT caller_id, started_at, duration_seconds, scenario
+                FROM calls
+                WHERE id = :call_id
+            """),
+            {"call_id": str(call_id)},
+        )
+        call = call_result.first()
+        if not call:
+            raise HTTPException(status_code=404, detail="Call not found")
+
+        c = call._mapping
+
+        # Turns
+        turns_result = await conn.execute(
+            text("""
+                SELECT turn_number, speaker, content, created_at
+                FROM call_turns
+                WHERE call_id = :call_id
+                ORDER BY turn_number
+            """),
+            {"call_id": str(call_id)},
+        )
+        turns = [row._mapping for row in turns_result]
+
+    # Build text
+    lines: list[str] = []
+    started = str(c["started_at"] or "")[:19]
+    lines.append(f"Звонок: {call_id}")
+    lines.append(f"Дата: {started}")
+    lines.append(f"Звонящий: {c['caller_id'] or 'N/A'}")
+    lines.append(f"Сценарий: {c['scenario'] or 'N/A'}")
+    lines.append(f"Длительность: {c['duration_seconds'] or 0}с")
+    lines.append("")
+    lines.append("=" * 50)
+    lines.append("")
+
+    speaker_map = {"bot": "Бот", "customer": "Клієнт"}
+    for t_row in turns:
+        speaker = speaker_map.get(t_row["speaker"], t_row["speaker"] or "?")
+        lines.append(f"[{speaker}]")
+        lines.append(t_row["content"] or "")
+        lines.append("")
+
+    content = "\n".join(lines)
+    date_part = started[:10] if started else "unknown"
+    filename = f"transcript_{date_part}_{call_id}.txt"
+
+    return Response(
+        content=content.encode("utf-8"),
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/summary")

@@ -119,6 +119,9 @@ export default {
     'calls.toolName': 'Tool',
     'calls.toolSuccess': 'Success',
     'calls.toolDuration': 'Duration',
+    'calls.downloadTranscript': 'Download transcript',
+    'calls.transcriptDownloaded': 'Transcript downloaded',
+    'calls.transcriptFailed': 'Download failed: {error}',
     'calls.failedToLoadDetail': 'Failed to load call details: {error}',
 
     // Prompts

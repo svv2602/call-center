@@ -121,7 +121,7 @@ async function showCallDetail(callId) {
             html += '</table></div>';
         }
 
-        html += `<h3 class="${tw.sectionTitle} mt-4">${t('calls.transcription')}</h3>`;
+        html += `<div class="flex items-center justify-between mt-4"><h3 class="${tw.sectionTitle}">${t('calls.transcription')}</h3><button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.calls.downloadTranscript('${callId}')">${t('calls.downloadTranscript')}</button></div>`;
         if (turns.length === 0) {
             html += `<div class="${tw.emptyState}">${t('calls.noTranscription')}</div>`;
         } else {
@@ -146,6 +146,21 @@ async function showCallDetail(callId) {
     }
 }
 
+async function downloadTranscript(callId) {
+    try {
+        const res = await fetchWithAuth(`/analytics/calls/${callId}/transcript`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const blob = await res.blob();
+        const disposition = res.headers.get('Content-Disposition') || '';
+        const match = disposition.match(/filename="(.+)"/);
+        const filename = match ? match[1] : `transcript_${callId}.txt`;
+        downloadBlob(blob, filename);
+        showToast(t('calls.transcriptDownloaded'));
+    } catch (e) {
+        showToast(t('calls.transcriptFailed', {error: e.message}), 'error');
+    }
+}
+
 function closeCallModal() {
     document.getElementById('callModal').classList.remove('show');
 }
@@ -157,4 +172,4 @@ export function init() {
 }
 
 window._pages = window._pages || {};
-window._pages.calls = { loadCalls, exportCallsCSV, showCallDetail, closeCallModal };
+window._pages.calls = { loadCalls, exportCallsCSV, showCallDetail, closeCallModal, downloadTranscript };
