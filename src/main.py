@@ -53,6 +53,7 @@ from src.onec_client.client import OneCClient
 from src.store_client.client import StoreClient
 from src.stt.base import STTConfig
 from src.stt.google_stt import GoogleSTTEngine
+from src.tts.base import TTSConfig
 from src.tts.google_tts import GoogleTTSEngine
 
 logger = logging.getLogger(__name__)
@@ -554,7 +555,12 @@ async def main() -> None:
     logger.info("StoreClient initialized: %s", settings.store_api.url)
 
     try:
-        _tts_engine = GoogleTTSEngine()
+        _tts_engine = GoogleTTSEngine(
+            config=TTSConfig(
+                voice_name=settings.google_tts.voice,
+                speaking_rate=settings.google_tts.speaking_rate,
+            )
+        )
         await _tts_engine.initialize()
         logger.info("TTS engine initialized")
     except Exception:
