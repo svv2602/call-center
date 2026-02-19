@@ -12,6 +12,8 @@ services:
       - STORE_API_KEY=${STORE_API_KEY:-test-store-api-key}
       - DATABASE_URL=postgresql+asyncpg://callcenter:${POSTGRES_PASSWORD}@postgres:5432/callcenter
       - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
       # Asterisk ARI — внешняя зависимость, не входит в compose
       - ARI_URL=${ARI_URL:-http://localhost:8088/ari}
       - ARI_USER=${ARI_USER:-}
