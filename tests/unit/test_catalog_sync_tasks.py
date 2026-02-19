@@ -257,11 +257,11 @@ class TestOneCSettingsFullSyncTimeout:
     """Verify full_sync_timeout setting."""
 
     def test_default_value(self) -> None:
-        """full_sync_timeout defaults to 600."""
+        """full_sync_timeout defaults to 1200."""
         from src.config import OneCSettings
 
         settings = OneCSettings()
-        assert settings.full_sync_timeout == 600
+        assert settings.full_sync_timeout == 1200
 
     def test_env_override(self, monkeypatch: pytest.MonkeyPatch) -> None:
         """full_sync_timeout can be overridden via ONEC_FULL_SYNC_TIMEOUT."""
