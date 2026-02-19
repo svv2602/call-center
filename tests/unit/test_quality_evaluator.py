@@ -19,8 +19,8 @@ class TestBuildTranscriptionText:
 
     def test_formats_customer_and_bot_turns(self) -> None:
         turns = [
-            {"speaker": "customer", "text": "Добрий день"},
-            {"speaker": "bot", "text": "Вітаю! Чим можу допомогти?"},
+            {"speaker": "customer", "content": "Добрий день"},
+            {"speaker": "bot", "content": "Вітаю! Чим можу допомогти?"},
         ]
         result = _build_transcription_text(turns)
         assert "Customer: Добрий день" in result
@@ -30,7 +30,7 @@ class TestBuildTranscriptionText:
         turns = [
             {
                 "speaker": "bot",
-                "text": "Шукаю шини для вас",
+                "content": "Шукаю шини для вас",
                 "tool_calls": [{"tool_name": "search_tires", "success": True}],
             },
         ]

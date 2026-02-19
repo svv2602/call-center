@@ -87,7 +87,7 @@ def _build_transcription_text(turns: list[dict[str, Any]]) -> str:
     lines: list[str] = []
     for turn in turns:
         speaker = turn.get("speaker", "unknown")
-        text_content = turn.get("text", "")
+        text_content = turn.get("content", "")
         tool_calls = turn.get("tool_calls", [])
 
         if text_content:
@@ -125,10 +125,10 @@ async def _evaluate_call_quality_async(task: Any, call_id: str) -> dict[str, Any
         async with engine.begin() as conn:
             result = await conn.execute(
                 text("""
-                    SELECT speaker, text, stt_confidence
+                    SELECT speaker, content, stt_confidence
                     FROM call_turns
                     WHERE call_id = :call_id
-                    ORDER BY turn_index
+                    ORDER BY turn_number
                 """),
                 {"call_id": call_id},
             )
@@ -140,7 +140,7 @@ async def _evaluate_call_quality_async(task: Any, call_id: str) -> dict[str, Any
                     SELECT tool_name, success
                     FROM call_tool_calls
                     WHERE call_id = :call_id
-                    ORDER BY called_at
+                    ORDER BY created_at
                 """),
                 {"call_id": call_id},
             )
@@ -162,7 +162,7 @@ async def _evaluate_call_quality_async(task: Any, call_id: str) -> dict[str, Any
             return {"call_id": call_id, "error": "no_turns"}
 
         # Enrich turns with tool call info
-        turn_data = [{"speaker": t["speaker"], "text": t["text"]} for t in turns]
+        turn_data = [{"speaker": t["speaker"], "content": t["content"]} for t in turns]
         if tool_calls:
             turn_data.append({"tool_calls": tool_calls})
 
