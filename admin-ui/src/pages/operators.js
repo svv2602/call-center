@@ -14,7 +14,18 @@ async function loadOperators() {
     try {
         const data = await api('/operators');
         loading.style.display = 'none';
-        const ops = data.operators || [];
+        let ops = data.operators || [];
+        const totalCount = ops.length;
+
+        // Client-side filtering (filters are in DOM, preserved across auto-refresh)
+        const searchText = (document.getElementById('operatorSearch')?.value || '').toLowerCase().trim();
+        const filterStatus = document.getElementById('operatorFilterStatus')?.value || '';
+        if (searchText) ops = ops.filter(o =>
+            (o.name || '').toLowerCase().includes(searchText) ||
+            (o.extension || '').toLowerCase().includes(searchText)
+        );
+        if (filterStatus) ops = ops.filter(o => o.current_status === filterStatus);
+
         if (ops.length === 0) {
             tbody.innerHTML = `<tr><td colspan="7" class="${tw.emptyState}">${t('operators.noOperators')}</td></tr>`;
             return;
@@ -42,6 +53,9 @@ async function loadOperators() {
                 </td>
             </tr>
         `).join('');
+        if (ops.length < totalCount) {
+            tbody.innerHTML += `<tr><td colspan="7" class="${tw.mutedText} text-center py-2">${t('common.showing', {shown: ops.length, total: totalCount})}</td></tr>`;
+        }
 
         makeSortable('operatorsTable');
     } catch (e) {

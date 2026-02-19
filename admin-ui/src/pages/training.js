@@ -4,11 +4,16 @@ import { qualityBadge, formatDate, escapeHtml, closeModal, downloadBlob } from '
 import { registerPageLoader } from '../router.js';
 import { t } from '../i18n.js';
 import { makeSortable } from '../sorting.js';
+import { renderPagination, buildParams } from '../pagination.js';
 import * as tw from '../tw.js';
 
 // ─── State ───────────────────────────────────────────────────
 let _categories = [];
 let _activeTab = 'prompts';
+let _articlesOffset = 0;
+let _dialoguesOffset = 0;
+let _safetyOffset = 0;
+let _sourcesOffset = 0;
 
 // ─── Tab switching ───────────────────────────────────────────
 function showTab(tab) {
@@ -21,6 +26,12 @@ function showTab(tab) {
     document.querySelectorAll('#page-training .tab-bar button').forEach(b => b.classList.remove('active'));
     const activeBtn = document.querySelector(`#page-training .tab-bar button[data-tab="${tab}"]`);
     if (activeBtn) activeBtn.classList.add('active');
+
+    // Reset offsets when switching tabs
+    _articlesOffset = 0;
+    _dialoguesOffset = 0;
+    _safetyOffset = 0;
+    _sourcesOffset = 0;
 
     // Load data for the tab
     const loaders = { prompts: loadPromptVersions, knowledge: loadKnowledge, templates: loadTemplates, dialogues: loadDialogues, safety: loadSafetyRules, tools: loadTools, sources: loadSourcesAndWatched };
@@ -212,21 +223,22 @@ async function loadKnowledge() {
     await loadArticles();
 }
 
-async function loadArticles() {
+async function loadArticles(offset) {
+    if (offset !== undefined) _articlesOffset = offset;
     const container = document.getElementById('articlesContainer');
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
 
-    const params = new URLSearchParams();
-    const cat = document.getElementById('kbCategory')?.value;
-    const search = document.getElementById('kbSearch')?.value;
-    if (cat) params.set('category', cat);
-    if (search) params.set('search', search);
+    const params = buildParams({
+        offset: _articlesOffset,
+        filters: { category: 'kbCategory', search: 'kbSearch', active: 'kbActive' },
+    });
 
     try {
         const data = await api(`/knowledge/articles?${params}`);
         const articles = data.articles || [];
         if (articles.length === 0) {
             container.innerHTML = `<div class="${tw.emptyState}">${t('knowledge.noArticles')}</div>`;
+            renderPagination({ containerId: 'articlesPagination', total: 0, offset: 0 });
             return;
         }
         container.innerHTML = `
@@ -252,6 +264,12 @@ async function loadArticles() {
             <p class="${tw.mutedText} mt-2">${t('knowledge.total', {count: data.total})}</p>`;
 
         makeSortable('articlesTable');
+        renderPagination({
+            containerId: 'articlesPagination',
+            total: data.total,
+            offset: _articlesOffset,
+            onPage: (newOffset) => loadArticles(newOffset),
+        });
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('knowledge.failedToLoad', {error: escapeHtml(e.message)})}
             <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.training.loadArticles()">${t('common.retry')}</button></div>`;
@@ -295,7 +313,7 @@ async function saveArticle() {
             showToast(t('knowledge.articleCreated'));
         }
         closeModal('createArticleModal');
-        loadArticles();
+        loadArticles(_articlesOffset);
     } catch (e) { showToast(t('knowledge.saveFailed', {error: e.message}), 'error'); }
 }
 
@@ -303,7 +321,7 @@ async function toggleArticle(id, currentlyActive) {
     try {
         await api(`/knowledge/articles/${id}`, { method: 'PATCH', body: JSON.stringify({ active: !currentlyActive }) });
         showToast(currentlyActive ? t('knowledge.articleDeactivated') : t('knowledge.articleActivated'));
-        loadArticles();
+        loadArticles(_articlesOffset);
     } catch (e) { showToast(t('knowledge.toggleFailed', {error: e.message}), 'error'); }
 }
 
@@ -312,7 +330,7 @@ async function deleteArticle(id, title) {
     try {
         await api(`/knowledge/articles/${id}`, { method: 'DELETE' });
         showToast(t('knowledge.articleDeleted'));
-        loadArticles();
+        loadArticles(_articlesOffset);
     } catch (e) { showToast(t('knowledge.deleteFailed', {error: e.message}), 'error'); }
 }
 
@@ -320,7 +338,7 @@ async function reindexArticle(id) {
     try {
         const data = await api(`/knowledge/articles/${id}/reindex`, { method: 'POST' });
         showToast(data.message || t('knowledge.reindexQueued'));
-        loadArticles();
+        loadArticles(_articlesOffset);
     } catch (e) { showToast(t('knowledge.reindexFailed', {error: e.message}), 'error'); }
 }
 
@@ -329,7 +347,7 @@ async function reindexAll() {
     try {
         const data = await api('/knowledge/reindex-all', { method: 'POST' });
         showToast(data.message || t('knowledge.reindexAllDispatched'));
-        loadArticles();
+        loadArticles(_articlesOffset);
     } catch (e) { showToast(t('knowledge.reindexAllFailed', {error: e.message}), 'error'); }
 }
 
@@ -362,7 +380,7 @@ async function importDocuments() {
             for (const err of data.error_details) showToast(`${err.filename}: ${err.error}`, 'error');
         }
         closeModal('importDocumentsModal');
-        loadArticles();
+        loadArticles(_articlesOffset);
     } catch (e) { showToast(t('knowledge.importFailed', {error: e.message}), 'error'); }
 }
 
@@ -370,11 +388,31 @@ async function importDocuments() {
 //  TAB 3: Шаблоны ответов (with variant support)
 // ═══════════════════════════════════════════════════════════
 async function loadTemplates() {
-    const container = document.getElementById('trainingContent-templates');
+    const container = document.getElementById('templatesContainer') || document.getElementById('trainingContent-templates');
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
     try {
         const data = await api('/training/templates/');
-        const items = data.items || [];
+        let items = data.items || [];
+
+        // Populate filter key select with unique keys
+        const filterKeyEl = document.getElementById('templateFilterKey');
+        if (filterKeyEl) {
+            const currentVal = filterKeyEl.value;
+            const uniqueKeys = [...new Set(items.map(i => i.template_key))].sort();
+            filterKeyEl.innerHTML = `<option value="">${t('training.allTemplateKeys')}</option>`
+                + uniqueKeys.map(k => `<option value="${escapeHtml(k)}"${k === currentVal ? ' selected' : ''}>${escapeHtml(k)}</option>`).join('');
+        }
+
+        // Client-side filtering
+        const filterKey = document.getElementById('templateFilterKey')?.value || '';
+        const searchText = (document.getElementById('templateSearch')?.value || '').toLowerCase().trim();
+        if (filterKey) items = items.filter(i => i.template_key === filterKey);
+        if (searchText) items = items.filter(i =>
+            (i.title || '').toLowerCase().includes(searchText) ||
+            (i.content || '').toLowerCase().includes(searchText) ||
+            (i.template_key || '').toLowerCase().includes(searchText)
+        );
+
         if (items.length === 0) {
             container.innerHTML = `
                 <div class="mb-4"><button class="${tw.btnPrimary}" onclick="window._pages.training.showCreateTemplate()">${t('training.newTemplate')}</button></div>
@@ -494,16 +532,24 @@ async function deleteTemplate(id, title) {
 // ═══════════════════════════════════════════════════════════
 //  TAB 4: Сценарии диалогов
 // ═══════════════════════════════════════════════════════════
-async function loadDialogues() {
-    const container = document.getElementById('trainingContent-dialogues');
+async function loadDialogues(offset) {
+    if (offset !== undefined) _dialoguesOffset = offset;
+    const container = document.getElementById('dialoguesContainer') || document.getElementById('trainingContent-dialogues');
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+
+    const params = buildParams({
+        offset: _dialoguesOffset,
+        filters: { scenario_type: 'dialogueFilterScenario', phase: 'dialogueFilterPhase', is_active: 'dialogueFilterActive' },
+    });
+
     try {
-        const data = await api('/training/dialogues/');
+        const data = await api(`/training/dialogues/?${params}`);
         const items = data.items || [];
         if (items.length === 0) {
             container.innerHTML = `
                 <div class="mb-4"><button class="${tw.btnPrimary}" onclick="window._pages.training.showCreateDialogue()">${t('training.newDialogue')}</button></div>
                 <div class="${tw.emptyState}">${t('training.noDialogues')}</div>`;
+            renderPagination({ containerId: 'dialoguesPagination', total: 0, offset: 0 });
             return;
         }
         container.innerHTML = `
@@ -527,6 +573,12 @@ async function loadDialogues() {
             </tbody></table></div>`;
 
         makeSortable('dialoguesTable');
+        renderPagination({
+            containerId: 'dialoguesPagination',
+            total: data.total,
+            offset: _dialoguesOffset,
+            onPage: (newOffset) => loadDialogues(newOffset),
+        });
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('training.loadFailed', {error: escapeHtml(e.message)})}</div>`;
     }
@@ -579,7 +631,7 @@ async function saveDialogue() {
         }
         closeModal('dialogueModal');
         showToast(t('training.dialogueSaved'));
-        loadDialogues();
+        loadDialogues(_dialoguesOffset);
     } catch (e) { showToast(t('training.saveFailed', {error: e.message}), 'error'); }
 }
 
@@ -588,7 +640,7 @@ async function deleteDialogue(id, title) {
     try {
         await api(`/training/dialogues/${id}`, { method: 'DELETE' });
         showToast(t('training.dialogueDeleted'));
-        loadDialogues();
+        loadDialogues(_dialoguesOffset);
     } catch (e) { showToast(t('training.deleteFailed', {error: e.message}), 'error'); }
 }
 
@@ -606,16 +658,24 @@ function severityBadge(sev) {
     }
 }
 
-async function loadSafetyRules() {
-    const container = document.getElementById('trainingContent-safety');
+async function loadSafetyRules(offset) {
+    if (offset !== undefined) _safetyOffset = offset;
+    const container = document.getElementById('safetyRulesContainer') || document.getElementById('trainingContent-safety');
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+
+    const params = buildParams({
+        offset: _safetyOffset,
+        filters: { rule_type: 'safetyFilterType', severity: 'safetyFilterSeverity', is_active: 'safetyFilterActive' },
+    });
+
     try {
-        const data = await api('/training/safety-rules/');
+        const data = await api(`/training/safety-rules/?${params}`);
         const items = data.items || [];
         if (items.length === 0) {
             container.innerHTML = `
                 <div class="mb-4"><button class="${tw.btnPrimary}" onclick="window._pages.training.showCreateSafetyRule()">${t('training.newSafetyRule')}</button></div>
                 <div class="${tw.emptyState}">${t('training.noSafetyRules')}</div>`;
+            renderPagination({ containerId: 'safetyPagination', total: 0, offset: 0 });
             return;
         }
         container.innerHTML = `
@@ -639,6 +699,12 @@ async function loadSafetyRules() {
             </tbody></table></div>`;
 
         makeSortable('safetyRulesTable');
+        renderPagination({
+            containerId: 'safetyPagination',
+            total: data.total,
+            offset: _safetyOffset,
+            onPage: (newOffset) => loadSafetyRules(newOffset),
+        });
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('training.loadFailed', {error: escapeHtml(e.message)})}</div>`;
     }
@@ -688,7 +754,7 @@ async function saveSafetyRule() {
         }
         closeModal('safetyRuleModal');
         showToast(t('training.safetyRuleSaved'));
-        loadSafetyRules();
+        loadSafetyRules(_safetyOffset);
     } catch (e) { showToast(t('training.saveFailed', {error: e.message}), 'error'); }
 }
 
@@ -697,7 +763,7 @@ async function deleteSafetyRule(id, title) {
     try {
         await api(`/training/safety-rules/${id}`, { method: 'DELETE' });
         showToast(t('training.safetyRuleDeleted'));
-        loadSafetyRules();
+        loadSafetyRules(_safetyOffset);
     } catch (e) { showToast(t('training.deleteFailed', {error: e.message}), 'error'); }
 }
 
@@ -977,7 +1043,8 @@ async function deleteSourceConfig(id, name) {
     } catch (e) { showToast(t('sources.sourceConfigDeleteFailed', {error: e.message}), 'error'); }
 }
 
-async function loadSources() {
+async function loadSources(offset) {
+    if (offset !== undefined) _sourcesOffset = offset;
     const configCard = document.getElementById('scraperConfigCard');
     const container = document.getElementById('sourcesContainer');
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
@@ -1019,15 +1086,17 @@ async function loadSources() {
     }
 
     // Load sources list
-    const params = new URLSearchParams();
-    const statusFilter = document.getElementById('sourcesStatusFilter')?.value;
-    if (statusFilter) params.set('status', statusFilter);
+    const params = buildParams({
+        offset: _sourcesOffset,
+        filters: { status: 'sourcesStatusFilter' },
+    });
 
     try {
         const data = await api(`/admin/scraper/sources?${params}`);
         const sources = data.sources || [];
         if (sources.length === 0) {
             container.innerHTML = `<div class="${tw.emptyState}">${t('sources.noSources')}</div>`;
+            renderPagination({ containerId: 'sourcesPagination', total: 0, offset: 0 });
             return;
         }
         container.innerHTML = `
@@ -1053,6 +1122,12 @@ async function loadSources() {
             <p class="${tw.mutedText} mt-2">${t('sources.total', {count: data.total})}</p>`;
 
         makeSortable('sourcesTable');
+        renderPagination({
+            containerId: 'sourcesPagination',
+            total: data.total,
+            offset: _sourcesOffset,
+            onPage: (newOffset) => loadSources(newOffset),
+        });
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('sources.failedToLoad', {error: escapeHtml(e.message)})}
             <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.training.loadSources()">${t('common.retry')}</button></div>`;
@@ -1111,7 +1186,7 @@ async function approveSource(id) {
     try {
         await api(`/admin/scraper/sources/${id}/approve`, { method: 'POST' });
         showToast(t('sources.approved'));
-        loadSources();
+        loadSources(_sourcesOffset);
     } catch (e) { showToast(t('sources.approveFailed', {error: e.message}), 'error'); }
 }
 
@@ -1120,7 +1195,7 @@ async function rejectSource(id) {
     try {
         await api(`/admin/scraper/sources/${id}/reject`, { method: 'POST' });
         showToast(t('sources.rejected'));
-        loadSources();
+        loadSources(_sourcesOffset);
     } catch (e) { showToast(t('sources.rejectFailed', {error: e.message}), 'error'); }
 }
 

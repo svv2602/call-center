@@ -13,8 +13,8 @@
             }
         })();
     </script>
-  <script type="module" crossorigin src="/assets/index-Dc8XILF6.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-Bqxy6rCV.css">
+  <script type="module" crossorigin src="/assets/index-BVdaJWs8.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-DTOo245R.css">
 </head>
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-50 font-sans antialiased">
     <!-- Toast container -->
@@ -169,13 +169,18 @@
                 <!-- Tab: Knowledge -->
                 <div id="trainingContent-knowledge" style="display:none">
                     <div class="flex flex-wrap items-center gap-2 mb-4">
-                        <select id="kbCategory" onchange="window._pages.training.loadArticles()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                        <select id="kbCategory" onchange="window._pages.training.loadArticles(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                             <option value="" data-i18n="knowledge.allCategories">Все категории</option>
                         </select>
+                        <select id="kbActive" onchange="window._pages.training.loadArticles(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                            <option value="" data-i18n="knowledge.allActive">Все</option>
+                            <option value="true" data-i18n="knowledge.activeOnly">Активные</option>
+                            <option value="false" data-i18n="knowledge.inactiveOnly">Неактивные</option>
+                        </select>
                         <input type="text" id="kbSearch" data-i18n-placeholder="knowledge.searchPlaceholder" placeholder="Поиск..."
-                            onkeydown="if(event.key==='Enter')window._pages.training.loadArticles()"
+                            onkeydown="if(event.key==='Enter')window._pages.training.loadArticles(0)"
                             class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
-                        <button onclick="window._pages.training.loadArticles()"
+                        <button onclick="window._pages.training.loadArticles(0)"
                             class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.filter">Фильтровать</button>
                         <button onclick="window._pages.training.showCreateArticle()"
                             class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="knowledge.newArticle">+ Новая статья</button>
@@ -185,16 +190,84 @@
                             class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-violet-600 text-white hover:bg-violet-700 max-md:w-full" data-i18n="knowledge.importDocuments">Импорт документов</button>
                     </div>
                     <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="articlesContainer"></div>
+                    <div id="articlesPagination"></div>
                 </div>
 
                 <!-- Tab: Templates -->
-                <div id="trainingContent-templates" style="display:none" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
+                <div id="trainingContent-templates" style="display:none">
+                    <div class="flex flex-wrap items-center gap-2 mb-4">
+                        <select id="templateFilterKey" onchange="window._pages.training.loadTemplates()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                            <option value="" data-i18n="training.allTemplateKeys">Все ключи</option>
+                        </select>
+                        <input type="text" id="templateSearch" data-i18n-placeholder="training.searchTemplates" placeholder="Поиск шаблонов..."
+                            onkeydown="if(event.key==='Enter')window._pages.training.loadTemplates()"
+                            class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                        <button onclick="window._pages.training.loadTemplates()"
+                            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.filter">Фильтровать</button>
+                    </div>
+                    <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="templatesContainer"></div>
+                </div>
 
                 <!-- Tab: Dialogues -->
-                <div id="trainingContent-dialogues" style="display:none" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
+                <div id="trainingContent-dialogues" style="display:none">
+                    <div class="flex flex-wrap items-center gap-2 mb-4">
+                        <select id="dialogueFilterScenario" onchange="window._pages.training.loadDialogues(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                            <option value="" data-i18n="training.allScenarios">Все сценарии</option>
+                            <option value="tire_search">tire_search</option>
+                            <option value="order_status">order_status</option>
+                            <option value="order_creation">order_creation</option>
+                            <option value="fitting_booking">fitting_booking</option>
+                            <option value="consultation">consultation</option>
+                            <option value="transfer">transfer</option>
+                        </select>
+                        <select id="dialogueFilterPhase" onchange="window._pages.training.loadDialogues(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                            <option value="" data-i18n="training.allPhases">Все фазы</option>
+                            <option value="mvp">mvp</option>
+                            <option value="orders">orders</option>
+                            <option value="services">services</option>
+                            <option value="analytics">analytics</option>
+                        </select>
+                        <select id="dialogueFilterActive" onchange="window._pages.training.loadDialogues(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                            <option value="" data-i18n="training.allActive">Все</option>
+                            <option value="true" data-i18n="training.activeOnly">Активные</option>
+                            <option value="false" data-i18n="training.inactiveOnly">Неактивные</option>
+                        </select>
+                        <button onclick="window._pages.training.loadDialogues(0)"
+                            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.filter">Фильтровать</button>
+                    </div>
+                    <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="dialoguesContainer"></div>
+                    <div id="dialoguesPagination"></div>
+                </div>
 
                 <!-- Tab: Safety Rules -->
-                <div id="trainingContent-safety" style="display:none" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
+                <div id="trainingContent-safety" style="display:none">
+                    <div class="flex flex-wrap items-center gap-2 mb-4">
+                        <select id="safetyFilterType" onchange="window._pages.training.loadSafetyRules(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                            <option value="" data-i18n="training.allRuleTypes">Все типы</option>
+                            <option value="behavioral">behavioral</option>
+                            <option value="content">content</option>
+                            <option value="language">language</option>
+                            <option value="privacy">privacy</option>
+                            <option value="boundary">boundary</option>
+                        </select>
+                        <select id="safetyFilterSeverity" onchange="window._pages.training.loadSafetyRules(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                            <option value="" data-i18n="training.allSeverities">Все</option>
+                            <option value="critical">critical</option>
+                            <option value="high">high</option>
+                            <option value="medium">medium</option>
+                            <option value="low">low</option>
+                        </select>
+                        <select id="safetyFilterActive" onchange="window._pages.training.loadSafetyRules(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                            <option value="" data-i18n="training.allActive">Все</option>
+                            <option value="true" data-i18n="training.activeOnly">Активные</option>
+                            <option value="false" data-i18n="training.inactiveOnly">Неактивные</option>
+                        </select>
+                        <button onclick="window._pages.training.loadSafetyRules(0)"
+                            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.filter">Фильтровать</button>
+                    </div>
+                    <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="safetyRulesContainer"></div>
+                    <div id="safetyPagination"></div>
+                </div>
 
                 <!-- Tab: Tools -->
                 <div id="trainingContent-tools" style="display:none" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
@@ -210,7 +283,7 @@
                     <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mt-6 mb-3" data-i18n="sources.scraperConfigTitle">ProKoleso — ручной импорт</h3>
                     <div id="scraperConfigCard" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
                     <div class="flex flex-wrap items-center gap-2 mb-4">
-                        <select id="sourcesStatusFilter" onchange="window._pages.training.loadSources()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                        <select id="sourcesStatusFilter" onchange="window._pages.training.loadSources(0)" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                             <option value="" data-i18n="sources.allStatuses">Все статусы</option>
                             <option value="new">new</option>
                             <option value="processing">processing</option>
@@ -218,10 +291,11 @@
                             <option value="skipped">skipped</option>
                             <option value="error">error</option>
                         </select>
-                        <button onclick="window._pages.training.loadSources()"
+                        <button onclick="window._pages.training.loadSources(0)"
                             class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.filter">Фильтровать</button>
                     </div>
                     <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="sourcesContainer"></div>
+                    <div id="sourcesPagination"></div>
 
                     <!-- Watched Pages section -->
                     <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mt-6 mb-3" data-i18n="sources.watchedPagesTitle">Отслеживаемые страницы</h3>
@@ -236,6 +310,16 @@
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="operators.title">Операторы</h1>
                 <div class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4 mb-6 max-md:grid-cols-2 max-[480px]:grid-cols-1" id="operatorQueueStats"></div>
                 <div class="flex flex-wrap items-center gap-2 mb-4">
+                    <input type="text" id="operatorSearch" data-i18n-placeholder="operators.searchPlaceholder" placeholder="Поиск по имени/номеру..."
+                        onkeydown="if(event.key==='Enter')window._pages.operators.loadOperators()"
+                        class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                    <select id="operatorFilterStatus" onchange="window._pages.operators.loadOperators()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                        <option value="" data-i18n="operators.allStatuses">Все статусы</option>
+                        <option value="online">online</option>
+                        <option value="offline">offline</option>
+                        <option value="busy">busy</option>
+                        <option value="break">break</option>
+                    </select>
                     <button onclick="window._pages.operators.showCreateOperator()"
                         class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="operators.newOperator">+ Новый оператор</button>
                 </div>
