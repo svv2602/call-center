@@ -197,18 +197,18 @@ class OneCClient:
             if resp.status == 401:
                 logger.critical("1C API authentication failed — check credentials")
 
+            # 1C may return body in Windows-1251 instead of UTF-8
+            raw = await resp.read()
+            try:
+                body_text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                body_text = raw.decode("windows-1251")
+
             if resp.status >= 400:
-                body = await resp.text()
-                raise OneCAPIError(resp.status, body[:200])
+                raise OneCAPIError(resp.status, body_text[:200])
 
             if resp.status == 204:
                 return {}
 
-            # 1C may return JSON in Windows-1251 instead of UTF-8
-            raw = await resp.read()
-            try:
-                text = raw.decode("utf-8")
-            except UnicodeDecodeError:
-                text = raw.decode("windows-1251")
-            data: dict[str, Any] = json.loads(text)
+            data: dict[str, Any] = json.loads(body_text)
             return data
