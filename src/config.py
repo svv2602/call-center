@@ -20,6 +20,7 @@ class AudioSocketSettings(BaseSettings):
 class GoogleSTTSettings(BaseSettings):
     language_code: str = "uk-UA"
     alternative_languages: str = "ru-RU"
+    project_id: str = ""
 
     model_config = {"env_prefix": "GOOGLE_STT_"}
 
@@ -62,7 +63,7 @@ class OneCSettings(BaseSettings):
     url: str = "http://192.168.11.9"
     username: str = ""
     password: str = ""
-    timeout: int = 10
+    timeout: int = 120
     sync_interval_minutes: int = 5
     stock_cache_ttl: int = 300  # Redis TTL for stock cache (seconds)
 
