@@ -827,4 +827,13 @@ export default {
     'sandbox.noPatterns': 'No patterns',
     'sandbox.customerMessages': 'Customer messages',
     'sandbox.agentMessages': 'Agent messages',
+    'sandbox.sending': 'Sending...',
+    'sandbox.exitMarking': 'Exit marking',
+    'sandbox.markingHint': 'Select turns to create a group',
+    'sandbox.error': 'Error',
+    'sandbox.openNewConversation': 'Open new conversation',
+    'sandbox.intentRequired': 'Enter an intent label',
+    'sandbox.guidanceRequired': 'Enter a guidance note',
+    'sandbox.titleRequired': 'Enter a conversation title',
+    'sandbox.ratingCommentPlaceholder': 'Comment (Enter to save)',
 };

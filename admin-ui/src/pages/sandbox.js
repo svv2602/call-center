@@ -14,6 +14,8 @@ let _sending = false;
 let _markingMode = false;
 let _selectedTurnIds = new Set();
 let _turnGroups = [];
+let _ratingTurnId = null;
+let _pendingRating = null;
 
 // ─── Tab switching ───────────────────────────────────────────
 function showTab(tab) {
@@ -90,7 +92,7 @@ function renderConversationView() {
         : '';
 
     const markingBtnClass = _markingMode ? tw.btnPrimary : tw.btnSecondary;
-    const markingLabel = t('sandbox.markingMode');
+    const markingLabel = _markingMode ? t('sandbox.exitMarking') : t('sandbox.markingMode');
 
     // Messages
     let messagesHtml = '';
@@ -107,6 +109,11 @@ function renderConversationView() {
             <div class="flex items-center gap-2 mb-2 p-2 bg-yellow-50 dark:bg-yellow-950/20 rounded border border-yellow-200 dark:border-yellow-800">
                 <span class="text-sm">${t('sandbox.turnsSelected', { count: _selectedTurnIds.size })}</span>
                 <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.showGroupModal()">${t('sandbox.createGroup')}</button>
+            </div>`;
+    } else if (_markingMode && _selectedTurnIds.size === 0) {
+        markingToolbar = `
+            <div class="flex items-center gap-2 mb-2 p-2 bg-blue-50 dark:bg-blue-950/20 rounded border border-blue-200 dark:border-blue-800">
+                <span class="text-sm text-blue-700 dark:text-blue-300">${t('sandbox.markingHint')}</span>
             </div>`;
     }
 
@@ -145,11 +152,14 @@ function renderConversationView() {
             </details>`;
     }
 
+    // Preserve input value across re-renders
+    const prevInput = document.getElementById('sandboxInput')?.value || '';
+
     container.innerHTML = `
         <div class="flex flex-wrap items-center gap-2 mb-4 pb-3 border-b border-neutral-200 dark:border-neutral-700">
             <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mr-2">${escapeHtml(conv.title)}</h2>
             ${promptBadge} ${toolBadge} ${modelBadge} ${scenarioBadge}
-            <div class="ml-auto flex gap-2">
+            <div class="ml-auto flex flex-wrap gap-2">
                 <button class="${markingBtnClass} ${tw.btnSm}" onclick="window._pages.sandbox.toggleMarking()">${markingLabel}</button>
                 <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.showNewConvModal()">${t('sandbox.newConversation')}</button>
                 ${isActive ? `<button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.archiveConversation()">${t('sandbox.archiveConversation')}</button>` : ''}
@@ -157,7 +167,7 @@ function renderConversationView() {
         </div>
         ${groupsHtml}
         ${markingToolbar}
-        <div id="sandboxMessages" class="max-h-[500px] overflow-y-auto mb-4 space-y-1">
+        <div id="sandboxMessages" class="max-h-[60vh] min-h-[250px] overflow-y-auto mb-4 space-y-2">
             ${messagesHtml}
         </div>
         ${isActive ? `
@@ -170,6 +180,10 @@ function renderConversationView() {
             <button id="sandboxAutoBtn" class="${tw.btnPurple} ${tw.btnSm}" title="${t('sandbox.autoCustomerHint')}" onclick="window._pages.sandbox.autoCustomer()">${t('sandbox.autoCustomer')}</button>
             <button id="sandboxSendBtn" class="${tw.btnPrimary}" onclick="window._pages.sandbox.sendMessage()">${t('sandbox.sendMessage')}</button>
         </div>` : ''}`;
+
+    // Restore input value
+    const newInput = document.getElementById('sandboxInput');
+    if (newInput && prevInput) newInput.value = prevInput;
 
     // Scroll to bottom
     const msgArea = document.getElementById('sandboxMessages');
@@ -215,14 +229,24 @@ function renderTurn(turn) {
 
     let toolCallsHtml = '';
     if (turn.tool_calls && turn.tool_calls.length > 0) {
-        const rows = turn.tool_calls.map(tc => `
+        const rows = turn.tool_calls.map(tc => {
+            const argsJson = JSON.stringify(tc.tool_args);
+            const resultJson = JSON.stringify(tc.tool_result);
+            const argsCell = argsJson.length > 60
+                ? `<details><summary class="text-xs cursor-pointer">${escapeHtml(argsJson.substring(0, 60))}...</summary><pre class="text-xs bg-neutral-100 dark:bg-neutral-800 p-2 rounded mt-1 max-h-48 overflow-auto whitespace-pre-wrap">${escapeHtml(JSON.stringify(tc.tool_args, null, 2))}</pre></details>`
+                : `<code class="text-xs break-all">${escapeHtml(argsJson)}</code>`;
+            const resultCell = resultJson.length > 60
+                ? `<details><summary class="text-xs cursor-pointer">${escapeHtml(resultJson.substring(0, 60))}...</summary><pre class="text-xs bg-neutral-100 dark:bg-neutral-800 p-2 rounded mt-1 max-h-48 overflow-auto whitespace-pre-wrap">${escapeHtml(JSON.stringify(tc.tool_result, null, 2))}</pre></details>`
+                : `<code class="text-xs break-all">${escapeHtml(resultJson)}</code>`;
+            return `
             <tr class="${tw.trHover}">
                 <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(tc.tool_name)}</span></td>
-                <td class="${tw.td}"><code class="text-xs break-all">${escapeHtml(JSON.stringify(tc.tool_args).substring(0, 120))}</code></td>
-                <td class="${tw.td}"><code class="text-xs break-all">${escapeHtml(JSON.stringify(tc.tool_result).substring(0, 120))}</code></td>
+                <td class="${tw.td}">${argsCell}</td>
+                <td class="${tw.td}">${resultCell}</td>
                 <td class="${tw.td}">${tc.duration_ms != null ? tc.duration_ms + 'ms' : '-'}</td>
                 <td class="${tw.td}">${tc.is_mock ? `<span class="${tw.badgeYellow}">${t('sandbox.mock')}</span>` : `<span class="${tw.badgeGreen}">${t('sandbox.live')}</span>`}</td>
-            </tr>`).join('');
+            </tr>`;
+        }).join('');
 
         toolCallsHtml = `
             <details class="mt-1">
@@ -262,7 +286,19 @@ function renderTurn(turn) {
             const color = filled ? 'text-amber-400' : 'text-neutral-300 dark:text-neutral-600';
             return `<span class="cursor-pointer ${color} text-lg" onclick="window._pages.sandbox.rateTurn('${turn.id}', ${s})">&#9733;</span>`;
         }).join('');
-        ratingHtml = `<div class="mt-1 flex items-center gap-1">${stars}${turn.rating_comment ? `<span class="${tw.mutedText} ml-2">${escapeHtml(turn.rating_comment)}</span>` : ''}</div>`;
+        let ratingCommentHtml = '';
+        if (turn.id === _ratingTurnId) {
+            ratingCommentHtml = `
+                <div class="flex items-center gap-2 mt-1">
+                    <input type="text" id="ratingCommentInput" placeholder="${t('sandbox.ratingCommentPlaceholder')}" class="${tw.formInput} text-xs flex-1"
+                        onkeydown="if(event.key==='Enter'){event.preventDefault();window._pages.sandbox.saveRating();}">
+                    <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.saveRating()">OK</button>
+                    <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.cancelRating()">&times;</button>
+                </div>`;
+        } else if (turn.rating_comment) {
+            ratingCommentHtml = `<span class="${tw.mutedText} ml-2">${escapeHtml(turn.rating_comment)}</span>`;
+        }
+        ratingHtml = `<div class="mt-1 flex items-center gap-1 flex-wrap">${stars}${ratingCommentHtml}</div>`;
         branchHtml = `<button class="${tw.btnSecondary} ${tw.btnSm} mt-1" onclick="window._pages.sandbox.branchFrom('${turn.id}', ${turn.turn_number})">${t('sandbox.branch')}</button>`;
     }
 
@@ -273,11 +309,13 @@ function renderTurn(turn) {
         groupBadge = `<span class="text-xs ml-2">${icon} ${escapeHtml(group.intent_label)}</span>`;
     }
 
+    const alignClass = isCustomer ? 'ml-auto max-w-[80%]' : 'mr-auto max-w-[80%]';
+
     return `
-        <div class="${bgClass} rounded-lg px-3 py-2">
+        <div class="${bgClass} ${alignClass} rounded-lg px-3 py-2">
             <div class="flex items-start gap-1">
                 ${checkboxHtml}
-                <div class="flex-1">
+                <div class="flex-1 min-w-0">
                     <div class="flex items-center gap-2">
                         <span class="${speakerClass}">${speakerLabel}</span>
                         <span class="${tw.mutedText}">${formatDate(turn.created_at)}</span>
@@ -325,7 +363,7 @@ function showGroupModal() {
 
 async function submitGroup() {
     const intentLabel = document.getElementById('sandboxGroupIntent').value.trim();
-    if (!intentLabel) { showToast(t('sandbox.intentLabel'), 'error'); return; }
+    if (!intentLabel) { showToast(t('sandbox.intentRequired'), 'error'); return; }
 
     const patternType = document.getElementById('sandboxGroupType').value;
     const ratingVal = document.getElementById('sandboxGroupRating').value;
@@ -378,7 +416,7 @@ function showExportModal(groupId) {
 async function submitExport() {
     const groupId = document.getElementById('sandboxExportGroupId').value;
     const guidanceNote = document.getElementById('sandboxExportGuidance').value.trim();
-    if (!guidanceNote) { showToast(t('sandbox.guidanceNote'), 'error'); return; }
+    if (!guidanceNote) { showToast(t('sandbox.guidanceRequired'), 'error'); return; }
 
     try {
         await api(`/admin/sandbox/turn-groups/${groupId}/export`, {
@@ -401,7 +439,7 @@ async function sendMessage() {
 
     _sending = true;
     const btn = document.getElementById('sandboxSendBtn');
-    if (btn) btn.disabled = true;
+    if (btn) { btn.disabled = true; btn.textContent = t('sandbox.sending'); }
     input.value = '';
 
     try {
@@ -414,29 +452,50 @@ async function sendMessage() {
         showToast(t('sandbox.sendFailed', { error: e.message }), 'error');
     } finally {
         _sending = false;
-        if (btn) btn.disabled = false;
+        const curBtn = document.getElementById('sandboxSendBtn');
+        if (curBtn) { curBtn.disabled = false; curBtn.textContent = t('sandbox.sendMessage'); }
         // Refocus input
         const newInput = document.getElementById('sandboxInput');
         if (newInput) newInput.focus();
     }
 }
 
-async function rateTurn(turnId, rating) {
-    const comment = prompt(t('sandbox.ratingCommentPrompt'));
-    if (comment === null) return; // cancelled
+function rateTurn(turnId, stars) {
+    _ratingTurnId = turnId;
+    _pendingRating = stars;
+    renderConversationView();
+    // Focus the comment input after render
+    setTimeout(() => {
+        const inp = document.getElementById('ratingCommentInput');
+        if (inp) inp.focus();
+    }, 0);
+}
+
+async function saveRating() {
+    if (!_ratingTurnId || !_pendingRating) return;
+    const commentInput = document.getElementById('ratingCommentInput');
+    const comment = commentInput?.value?.trim() || '';
 
     try {
-        const body = { rating };
-        if (comment.trim()) body.comment = comment.trim();
-        await api(`/admin/sandbox/turns/${turnId}/rate`, {
+        const body = { rating: _pendingRating };
+        if (comment) body.comment = comment;
+        await api(`/admin/sandbox/turns/${_ratingTurnId}/rate`, {
             method: 'PATCH',
             body: JSON.stringify(body),
         });
         showToast(t('sandbox.ratingSaved'));
+        _ratingTurnId = null;
+        _pendingRating = null;
         if (_currentConvId) await loadConversation(_currentConvId);
     } catch (e) {
         showToast(t('sandbox.ratingFailed', { error: e.message }), 'error');
     }
+}
+
+function cancelRating() {
+    _ratingTurnId = null;
+    _pendingRating = null;
+    renderConversationView();
 }
 
 function branchFrom(turnId, turnNumber) {
@@ -529,7 +588,7 @@ async function showNewConvModal() {
 
 async function createConversation() {
     const title = document.getElementById('sandboxConvTitle').value.trim();
-    if (!title) { showToast(t('sandbox.conversationTitle'), 'error'); return; }
+    if (!title) { showToast(t('sandbox.titleRequired'), 'error'); return; }
 
     const promptId = document.getElementById('sandboxConvPrompt').value || null;
     const modelId = document.getElementById('sandboxConvModel').value || null;
@@ -710,7 +769,7 @@ async function loadRegressionRuns() {
                 <th class="${tw.th}">${t('sandbox.status')}</th>
                 <th class="${tw.th}">${t('sandbox.turnsCompared')}</th>
                 <th class="${tw.th}">${t('sandbox.sourceRating')}</th>
-                <th class="${tw.th}">Error</th>
+                <th class="${tw.th}">${t('sandbox.error')}</th>
                 <th class="${tw.th}">${t('sandbox.lastActivity')}</th>
             </tr></thead><tbody>${rows}</tbody></table></div>`;
     } catch (e) {
@@ -763,7 +822,7 @@ async function showRegressionDetail(runId) {
                     <div><span class="${tw.mutedText}">${t('sandbox.promptVersion')}</span><br>${escapeHtml(item.prompt_version_name || '-')}</div>
                 </div>
                 ${item.error_message ? `<div class="${tw.badgeRed} mb-2">${escapeHtml(item.error_message)}</div>` : ''}
-                ${item.new_conversation_id ? `<button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.openConversation('${item.new_conversation_id}');window._pages.sandbox.showTab('chat')">Open new conversation</button>` : ''}
+                ${item.new_conversation_id ? `<button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.openConversation('${item.new_conversation_id}');window._pages.sandbox.showTab('chat')">${t('sandbox.openNewConversation')}</button>` : ''}
             </div>
             ${diffsHtml}`;
     } catch (e) {
@@ -855,7 +914,7 @@ async function loadPatterns() {
                     <td class="${tw.td}">${activeBadge}</td>
                     <td class="${tw.td}">${tagsHtml}</td>
                     <td class="${tw.td}">
-                        <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.togglePatternActive('${item.id}', ${item.is_active})">${item.is_active ? 'Off' : 'On'}</button>
+                        <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.togglePatternActive('${item.id}', ${item.is_active})">${item.is_active ? t('common.deactivate') : t('common.activate')}</button>
                         <button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.sandbox.deletePattern('${item.id}')">&times;</button>
                     </td>
                 </tr>`;
@@ -960,6 +1019,8 @@ window._pages.sandbox = {
     createConversation,
     sendMessage,
     rateTurn,
+    saveRating,
+    cancelRating,
     archiveConversation,
     deleteConversation,
     branchFrom,

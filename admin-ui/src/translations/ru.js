@@ -827,4 +827,13 @@ export default {
     'sandbox.noPatterns': 'Нет паттернов',
     'sandbox.customerMessages': 'Сообщения клиента',
     'sandbox.agentMessages': 'Ответы агента',
+    'sandbox.sending': 'Отправка...',
+    'sandbox.exitMarking': 'Выйти из разметки',
+    'sandbox.markingHint': 'Выберите ходы для создания группы',
+    'sandbox.error': 'Ошибка',
+    'sandbox.openNewConversation': 'Открыть новый диалог',
+    'sandbox.intentRequired': 'Введите метку интента',
+    'sandbox.guidanceRequired': 'Введите инструкцию для промпта',
+    'sandbox.titleRequired': 'Введите название диалога',
+    'sandbox.ratingCommentPlaceholder': 'Комментарий (Enter для сохранения)',
 };
