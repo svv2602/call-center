@@ -1,10 +1,11 @@
-"""Google Cloud Text-to-Speech implementation with caching."""
+"""Google Cloud Text-to-Speech implementation with caching and SSML."""
 
 from __future__ import annotations
 
 import hashlib
 import logging
 import re
+import xml.sax.saxutils
 from typing import TYPE_CHECKING
 
 from google.cloud import texttospeech_v1 as texttospeech
@@ -34,6 +35,16 @@ logger = logging.getLogger(__name__)
 
 # Sentence-splitting pattern (split on ., !, ? followed by space or end)
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
+
+# SSML break insertion patterns (applied after XML escaping)
+_BREAK_RULES: list[tuple[re.Pattern[str], str]] = [
+    # After comma + space: subtle pause extending natural comma break
+    (re.compile(r",(\s)"), r',<break time="100ms"/>\1'),
+    # After em-dash + space: thinking/contrast pause
+    (re.compile(r"—(\s)"), r'—<break time="150ms"/>\1'),
+    # After colon + space: anticipation before explanation/list
+    (re.compile(r":(\s)"), r':<break time="200ms"/>\1'),
+]
 
 # Phrases to pre-cache at startup (imported from prompts.py to ensure cache key match)
 CACHED_PHRASES = [
@@ -79,6 +90,7 @@ class GoogleTTSEngine:
             audio_encoding=texttospeech.AudioEncoding.LINEAR16,
             sample_rate_hertz=self._config.sample_rate_hertz,
             speaking_rate=self._config.speaking_rate,
+            pitch=self._config.pitch,
         )
 
         # Pre-cache common phrases
@@ -132,12 +144,27 @@ class GoogleTTSEngine:
         """Generate a cache key for a text string."""
         return hashlib.sha256(text.encode()).hexdigest()
 
+    @staticmethod
+    def _to_ssml(text: str) -> str:
+        """Convert plain text to SSML with natural pauses.
+
+        Escapes XML entities, then inserts <break> tags after commas,
+        em-dashes, and colons to extend natural pauses for a more
+        human-like cadence.  Global rate/pitch are set via AudioConfig,
+        so the SSML only adds breaks.
+        """
+        ssml = xml.sax.saxutils.escape(text)
+        for pattern, replacement in _BREAK_RULES:
+            ssml = pattern.sub(replacement, ssml)
+        return f"<speak>{ssml}</speak>"
+
     async def _synthesize_uncached(self, text: str) -> bytes:
-        """Call Google TTS API to synthesize text."""
+        """Call Google TTS API to synthesize text (SSML mode)."""
         if self._client is None:
             raise RuntimeError("TTS not initialized — call initialize() first")
 
-        synthesis_input = texttospeech.SynthesisInput(text=text)
+        ssml = self._to_ssml(text)
+        synthesis_input = texttospeech.SynthesisInput(ssml=ssml)
 
         response = await self._client.synthesize_speech(
             input=synthesis_input,

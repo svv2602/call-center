@@ -21,8 +21,9 @@ data:
   # ---------------------------------------------------------------------------
   # Google Cloud Text-to-Speech
   # ---------------------------------------------------------------------------
-  GOOGLE_TTS_VOICE: "uk-UA-Standard-A"
-  GOOGLE_TTS_SPEAKING_RATE: "1.0"
+  GOOGLE_TTS_VOICE: "uk-UA-Wavenet-A"
+  GOOGLE_TTS_SPEAKING_RATE: "0.93"
+  GOOGLE_TTS_PITCH: "-1.0"
 
   # ---------------------------------------------------------------------------
   # Google Application Credentials (mount path for the service account JSON)

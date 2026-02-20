@@ -634,6 +634,7 @@ async def main() -> None:
             config=TTSConfig(
                 voice_name=settings.google_tts.voice,
                 speaking_rate=settings.google_tts.speaking_rate,
+                pitch=settings.google_tts.pitch,
             )
         )
         await _tts_engine.initialize()

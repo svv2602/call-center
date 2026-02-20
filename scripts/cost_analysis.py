@@ -26,9 +26,9 @@ WHISPER_SERVER_MONTHLY = 150.0
 CLAUDE_SONNET_INPUT_PER_1M = 3.0
 CLAUDE_SONNET_OUTPUT_PER_1M = 15.0
 
-# Google Cloud TTS Neural2: $16/1M characters
+# Google Cloud TTS WaveNet: $16/1M characters (default, better quality)
 # Google Cloud TTS Standard: $4/1M characters
-GOOGLE_TTS_PER_1M_CHARS = 4.0
+GOOGLE_TTS_PER_1M_CHARS = 16.0
 
 # Infrastructure costs (monthly)
 SIP_TRUNK_MONTHLY = 50.0  # SIP provider

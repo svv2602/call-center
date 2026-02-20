@@ -30,8 +30,9 @@ class GoogleSTTSettings(BaseSettings):
 
 
 class GoogleTTSSettings(BaseSettings):
-    voice: str = "uk-UA-Standard-A"
-    speaking_rate: float = 1.0
+    voice: str = "uk-UA-Wavenet-A"
+    speaking_rate: float = 0.93
+    pitch: float = -1.0
 
     model_config = {"env_prefix": "GOOGLE_TTS_"}
 

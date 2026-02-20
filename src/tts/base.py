@@ -14,8 +14,9 @@ class TTSConfig:
     """Configuration for the TTS engine."""
 
     language_code: str = "uk-UA"
-    voice_name: str = "uk-UA-Standard-A"
-    speaking_rate: float = 1.0
+    voice_name: str = "uk-UA-Wavenet-A"
+    speaking_rate: float = 0.93
+    pitch: float = -1.0
     sample_rate_hertz: int = 8000
 
 
