@@ -92,7 +92,81 @@ class TestCreateSandboxAgent:
             agent = await create_sandbox_agent(mock_engine, tool_mode="mock")
 
         assert agent is not None
-        assert agent._model == "claude-sonnet-4-5-20250929"
+        assert agent._model == "claude-haiku-4-5-20251001"
+
+
+    @pytest.mark.asyncio
+    async def test_creates_agent_with_provider_override(self) -> None:
+        """Agent should use LLM router when provider_override is given."""
+        from src.sandbox.agent_runner import create_sandbox_agent
+
+        mock_engine = AsyncMock()
+        mock_conn = AsyncMock()
+        mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        mock_result = MagicMock()
+        mock_result.first.return_value = None
+        mock_conn.execute.return_value = mock_result
+
+        mock_tool_result = MagicMock()
+        mock_tool_result.__iter__ = MagicMock(return_value=iter([]))
+        mock_conn.execute.return_value = mock_tool_result
+
+        mock_router = MagicMock()
+
+        with patch("src.sandbox.agent_runner.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                anthropic=MagicMock(api_key="test-key", model="claude-sonnet-4-5-20250929"),
+                database=MagicMock(url="postgresql+asyncpg://test"),
+            )
+            agent = await create_sandbox_agent(
+                mock_engine,
+                tool_mode="mock",
+                model="gemini-flash",
+                llm_router=mock_router,
+                provider_override="gemini-flash",
+            )
+
+        assert agent is not None
+        assert agent._llm_router is mock_router
+        assert agent._provider_override == "gemini-flash"
+
+    @pytest.mark.asyncio
+    async def test_no_router_without_provider_override(self) -> None:
+        """Agent should NOT use LLM router when provider_override is None."""
+        from src.sandbox.agent_runner import create_sandbox_agent
+
+        mock_engine = AsyncMock()
+        mock_conn = AsyncMock()
+        mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        mock_result = MagicMock()
+        mock_result.first.return_value = None
+        mock_conn.execute.return_value = mock_result
+
+        mock_tool_result = MagicMock()
+        mock_tool_result.__iter__ = MagicMock(return_value=iter([]))
+        mock_conn.execute.return_value = mock_tool_result
+
+        mock_router = MagicMock()
+
+        with patch("src.sandbox.agent_runner.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                anthropic=MagicMock(api_key="test-key", model="claude-sonnet-4-5-20250929"),
+                database=MagicMock(url="postgresql+asyncpg://test"),
+            )
+            agent = await create_sandbox_agent(
+                mock_engine,
+                tool_mode="mock",
+                llm_router=mock_router,
+                # provider_override not set → router should be None
+            )
+
+        assert agent is not None
+        assert agent._llm_router is None
+        assert agent._provider_override is None
 
 
 class TestProcessSandboxTurn:

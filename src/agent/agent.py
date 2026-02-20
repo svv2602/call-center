@@ -79,6 +79,7 @@ class LLMAgent:
         llm_router: LLMRouter | None = None,
         system_prompt: str | None = None,
         prompt_version_name: str | None = None,
+        provider_override: str | None = None,
     ) -> None:
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._model = model
@@ -88,6 +89,7 @@ class LLMAgent:
         self._llm_router = llm_router
         self._system_prompt = system_prompt or SYSTEM_PROMPT
         self._prompt_version_name = prompt_version_name or PROMPT_VERSION
+        self._provider_override = provider_override
 
     @property
     def tool_router(self) -> ToolRouter:
@@ -155,6 +157,7 @@ class LLMAgent:
                         system=system,
                         tools=self._tools,
                         max_tokens=1024,
+                        provider_override=self._provider_override,
                     )
 
                     latency_ms = int((time.monotonic() - start) * 1000)

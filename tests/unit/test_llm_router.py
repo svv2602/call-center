@@ -239,6 +239,119 @@ class TestLLMRouterRouting:
         await router.close()
 
 
+class TestLLMRouterProviderOverride:
+    """Test provider_override bypasses task routing."""
+
+    @pytest.mark.asyncio()
+    async def test_provider_override_routes_directly(self) -> None:
+        router = LLMRouter()
+        primary = AsyncMock()
+        primary.complete = AsyncMock(return_value=_make_response("primary"))
+        primary.close = AsyncMock()
+
+        override = AsyncMock()
+        override.complete = AsyncMock(return_value=_make_response("override"))
+        override.close = AsyncMock()
+
+        router._providers = {"anthropic-sonnet": primary, "gemini-flash": override}
+        from aiobreaker import CircuitBreaker
+
+        router._breakers = {
+            "anthropic-sonnet": CircuitBreaker(fail_max=5, timeout_duration=30),
+            "gemini-flash": CircuitBreaker(fail_max=5, timeout_duration=30),
+        }
+        router._config = {
+            "providers": {
+                "anthropic-sonnet": {"enabled": True},
+                "gemini-flash": {"enabled": True},
+            },
+            "tasks": {"agent": {"primary": "anthropic-sonnet", "fallbacks": []}},
+        }
+        router._initialized = True
+
+        result = await router.complete(
+            LLMTask.AGENT,
+            messages=[{"role": "user", "content": "hi"}],
+            provider_override="gemini-flash",
+        )
+        assert result.text == "override"
+        override.complete.assert_called_once()
+        primary.complete.assert_not_called()
+        await router.close()
+
+    @pytest.mark.asyncio()
+    async def test_provider_override_not_found(self) -> None:
+        router = LLMRouter()
+        router._providers = {"anthropic-sonnet": AsyncMock()}
+        router._config = {
+            "providers": {"anthropic-sonnet": {"enabled": True}},
+            "tasks": {"agent": {"primary": "anthropic-sonnet", "fallbacks": []}},
+        }
+        router._initialized = True
+
+        with pytest.raises(RuntimeError, match="Provider override 'nonexistent' not found"):
+            await router.complete(
+                LLMTask.AGENT,
+                messages=[{"role": "user", "content": "hi"}],
+                provider_override="nonexistent",
+            )
+
+    @pytest.mark.asyncio()
+    async def test_provider_override_with_tools(self) -> None:
+        router = LLMRouter()
+        mock_provider = AsyncMock()
+        mock_provider.complete_with_tools = AsyncMock(return_value=_make_response("tools-override"))
+        mock_provider.close = AsyncMock()
+
+        router._providers = {"gemini-flash": mock_provider}
+        from aiobreaker import CircuitBreaker
+
+        router._breakers = {"gemini-flash": CircuitBreaker(fail_max=5, timeout_duration=30)}
+        router._config = {
+            "providers": {"gemini-flash": {"enabled": True}},
+            "tasks": {"agent": {"primary": "anthropic-sonnet", "fallbacks": []}},
+        }
+        router._initialized = True
+
+        tools = [{"name": "search", "description": "Search", "input_schema": {"type": "object", "properties": {}}}]
+        result = await router.complete(
+            LLMTask.AGENT,
+            messages=[{"role": "user", "content": "hi"}],
+            tools=tools,
+            provider_override="gemini-flash",
+        )
+        assert result.text == "tools-override"
+        mock_provider.complete_with_tools.assert_called_once()
+        await router.close()
+
+
+class TestLLMRouterGetAvailableModels:
+    """Test get_available_models method."""
+
+    def test_returns_active_providers(self) -> None:
+        router = LLMRouter()
+        router._providers = {"anthropic-sonnet": MagicMock(), "gemini-flash": MagicMock()}
+        router._config = {
+            "providers": {
+                "anthropic-sonnet": {"model": "claude-sonnet-4-5-20250929", "type": "anthropic"},
+                "gemini-flash": {"model": "gemini-2.0-flash", "type": "gemini"},
+            },
+        }
+
+        models = router.get_available_models()
+        assert len(models) == 2
+        ids = {m["id"] for m in models}
+        assert ids == {"anthropic-sonnet", "gemini-flash"}
+
+    def test_empty_when_no_providers(self) -> None:
+        router = LLMRouter()
+        router._providers = {}
+        router._config = {"providers": {}}
+
+        models = router.get_available_models()
+        assert models == []
+
+
 class TestLLMRouterHealthCheck:
     """Test health check aggregation."""
 

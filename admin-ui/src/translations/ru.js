@@ -837,4 +837,5 @@ export default {
     'sandbox.titleRequired': 'Введите название диалога',
     'sandbox.ratingCommentPlaceholder': 'Комментарий (Enter для сохранения)',
     'sandbox.convInfo': 'Параметры диалога',
+    'sandbox.routerModel': 'router',
 };

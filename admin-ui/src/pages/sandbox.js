@@ -605,7 +605,8 @@ async function showNewConvModal() {
         select.innerHTML = `<option value="">${t('sandbox.modelDefault')}</option>`;
         for (const m of data.models || []) {
             const speedLabel = m.speed === 'fast' ? ' ⚡' : '';
-            select.innerHTML += `<option value="${m.id}">${escapeHtml(m.label)}${speedLabel}</option>`;
+            const routerLabel = m.source === 'router' ? ` [${t('sandbox.routerModel')}]` : '';
+            select.innerHTML += `<option value="${m.id}">${escapeHtml(m.label)}${speedLabel}${routerLabel}</option>`;
         }
     } catch { /* ignore */ }
 

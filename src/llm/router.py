@@ -94,24 +94,42 @@ class LLMRouter:
         system: str | None = None,
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = 1024,
+        provider_override: str | None = None,
     ) -> LLMResponse:
         """Route an LLM call through the provider chain for the given task.
+
+        Args:
+            task: The LLM task type (used for routing when no override).
+            messages: Conversation messages.
+            system: Optional system prompt.
+            tools: Optional tool definitions.
+            max_tokens: Max tokens for the response.
+            provider_override: If set, bypass task routing and use this
+                provider key directly (e.g. "gemini-flash").
 
         Tries primary provider first, then fallbacks in order.
         Raises RuntimeError if all providers fail.
         """
-        task_config = self._config.get("tasks", {}).get(task.value, {})
-        primary = task_config.get("primary", "")
-        fallbacks = task_config.get("fallbacks", [])
+        if provider_override is not None:
+            if provider_override not in self._providers:
+                raise RuntimeError(
+                    f"Provider override '{provider_override}' not found. "
+                    f"Available: {list(self._providers.keys())}"
+                )
+            chain = [provider_override]
+        else:
+            task_config = self._config.get("tasks", {}).get(task.value, {})
+            primary = task_config.get("primary", "")
+            fallbacks = task_config.get("fallbacks", [])
 
-        chain = [primary, *fallbacks]
-        # Filter to only providers that are actually available
-        chain = [key for key in chain if key in self._providers]
+            chain = [primary, *fallbacks]
+            # Filter to only providers that are actually available
+            chain = [key for key in chain if key in self._providers]
 
         if not chain:
             raise RuntimeError(
                 f"No available providers for task {task.value}. "
-                f"Primary: {primary}, fallbacks: {fallbacks}"
+                f"Configured providers: {list(self._providers.keys())}"
             )
 
         last_error: Exception | None = None
@@ -144,6 +162,23 @@ class LLMRouter:
         raise RuntimeError(
             f"All providers failed for task {task.value}: {last_error}"
         ) from last_error
+
+    def get_available_models(self) -> list[dict[str, str]]:
+        """Return list of available provider models for UI dropdowns.
+
+        Returns a list of dicts with keys: id (provider key), label, model, type.
+        Only includes providers that are enabled and have valid API keys.
+        """
+        models: list[dict[str, str]] = []
+        for key, _provider in self._providers.items():
+            cfg = self._config.get("providers", {}).get(key, {})
+            models.append({
+                "id": key,
+                "label": key,
+                "model": cfg.get("model", ""),
+                "type": cfg.get("type", ""),
+            })
+        return models
 
     async def health_check_all(self) -> dict[str, bool]:
         """Run health checks on all initialized providers."""

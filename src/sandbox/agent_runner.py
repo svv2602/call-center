@@ -1,8 +1,10 @@
 """Sandbox agent factory and turn processor.
 
-Creates a lightweight LLMAgent for sandbox testing (no PII vault,
-no LLM router — direct Anthropic API). Captures tool calls and
-token metrics per turn.
+Creates a lightweight LLMAgent for sandbox testing. Supports two modes:
+- Direct Anthropic API (default, no LLM router)
+- LLM Router with provider_override (when router + provider key provided)
+
+Captures tool calls and token metrics per turn.
 """
 
 from __future__ import annotations
@@ -23,6 +25,8 @@ if TYPE_CHECKING:
     from uuid import UUID
 
     from sqlalchemy.ext.asyncio import AsyncEngine
+
+    from src.llm.router import LLMRouter
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +60,8 @@ async def create_sandbox_agent(
     prompt_version_id: UUID | None = None,
     tool_mode: str = "mock",
     model: str | None = None,
+    llm_router: LLMRouter | None = None,
+    provider_override: str | None = None,
 ) -> LLMAgent:
     """Create an LLMAgent configured for sandbox testing.
 
@@ -64,6 +70,9 @@ async def create_sandbox_agent(
         prompt_version_id: Specific prompt version to use (None = active).
         tool_mode: 'mock' for static responses, 'live' for real Store API.
         model: LLM model ID to use (None = default from settings).
+        llm_router: Optional LLM router for multi-provider routing.
+        provider_override: If set with llm_router, routes all calls to
+            this specific provider (e.g. "gemini-flash").
 
     Returns:
         Configured LLMAgent instance.
@@ -107,8 +116,10 @@ async def create_sandbox_agent(
         model=model or sandbox_default_model,
         tool_router=tool_router,
         tools=tools,
+        llm_router=llm_router if provider_override else None,
         system_prompt=system_prompt,
         prompt_version_name=prompt_version_name,
+        provider_override=provider_override,
     )
 
 

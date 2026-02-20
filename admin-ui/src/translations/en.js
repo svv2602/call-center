@@ -837,4 +837,5 @@ export default {
     'sandbox.titleRequired': 'Enter a conversation title',
     'sandbox.ratingCommentPlaceholder': 'Comment (Enter to save)',
     'sandbox.convInfo': 'Conversation details',
+    'sandbox.routerModel': 'router',
 };

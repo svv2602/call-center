@@ -101,8 +101,37 @@ SANDBOX_MODELS = [
 
 @router.get("/models")
 async def list_models(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
-    """List available LLM models for sandbox conversations."""
-    return {"models": SANDBOX_MODELS}
+    """List available LLM models for sandbox conversations.
+
+    Returns static Anthropic models plus any active providers from the
+    LLM Router (marked with source='router').
+    """
+    models = [dict(m) for m in SANDBOX_MODELS]
+
+    # Add router providers if available
+    try:
+        from src.llm import get_router
+
+        llm_router = get_router()
+        if llm_router is not None:
+            router_models = llm_router.get_available_models()
+            # Deduplicate: skip router providers whose model ID already exists
+            existing_ids = {m["id"] for m in models}
+            for rm in router_models:
+                if rm["id"] not in existing_ids:
+                    models.append({
+                        "id": rm["id"],
+                        "label": rm["label"],
+                        "speed": "",
+                        "quality": "",
+                        "source": "router",
+                        "model": rm.get("model", ""),
+                        "type": rm.get("type", ""),
+                    })
+    except Exception:
+        logger.debug("LLM router not available for sandbox models", exc_info=True)
+
+    return {"models": models}
 
 
 # ── Conversation CRUD ────────────────────────────────────────
@@ -428,13 +457,29 @@ async def send_message(
     customer_turn_number = max_turn + 1
     agent_turn_number = max_turn + 2
 
+    # Determine if the model is a router provider key
+    provider_override = None
+    llm_router = None
+    model_for_agent = conv.model
+
+    try:
+        from src.llm import get_router
+
+        llm_router = get_router()
+        if llm_router is not None and conv.model and conv.model in llm_router.providers:
+            provider_override = conv.model
+    except Exception:
+        logger.debug("LLM router not available for sandbox", exc_info=True)
+
     # Create sandbox agent and process
     prompt_version_id = conv.prompt_version_id
     agent = await create_sandbox_agent(
         engine,
         prompt_version_id=prompt_version_id,
         tool_mode=conv.tool_mode,
-        model=conv.model,
+        model=model_for_agent,
+        llm_router=llm_router,
+        provider_override=provider_override,
     )
 
     result = await process_sandbox_turn(agent, request.message, history, is_mock=is_mock)
