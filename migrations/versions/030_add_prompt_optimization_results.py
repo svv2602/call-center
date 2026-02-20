@@ -30,10 +30,11 @@ def upgrade() -> None:
             error TEXT,
             triggered_by TEXT NOT NULL DEFAULT 'manual',
             created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-        );
-
-        CREATE INDEX idx_prompt_opt_created ON prompt_optimization_results (created_at DESC);
+        )
     """)
+    op.execute(
+        "CREATE INDEX idx_prompt_opt_created ON prompt_optimization_results (created_at DESC)"
+    )
 
 
 def downgrade() -> None:
