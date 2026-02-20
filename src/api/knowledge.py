@@ -13,7 +13,7 @@ from typing import Any
 from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -52,15 +52,15 @@ def _dispatch_embedding(article_id: str) -> None:
 
 
 class ArticleCreateRequest(BaseModel):
-    title: str
-    category: str
-    content: str
+    title: str = Field(min_length=1, max_length=300)
+    category: str = Field(min_length=1, max_length=50)
+    content: str = Field(min_length=1)
 
 
 class ArticleUpdateRequest(BaseModel):
-    title: str | None = None
-    category: str | None = None
-    content: str | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=300)
+    category: str | None = Field(default=None, min_length=1, max_length=50)
+    content: str | None = Field(default=None, min_length=1)
     active: bool | None = None
 
 

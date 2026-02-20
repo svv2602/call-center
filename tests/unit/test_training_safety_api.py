@@ -93,18 +93,16 @@ class TestSafetyEndpoints:
         """Invalid severity should raise 400."""
         from fastapi import HTTPException
 
-        from src.api.training_safety import create_safety_rule
+        from pydantic import ValidationError
 
-        req = SafetyRuleCreateRequest(
-            title="Test",
-            rule_type="behavioral",
-            trigger_input="x",
-            expected_behavior="y",
-            severity="invalid",
-        )
-        with pytest.raises(HTTPException) as exc_info:
-            await create_safety_rule(req, {})
-        assert exc_info.value.status_code == 400
+        with pytest.raises(ValidationError, match="severity"):
+            SafetyRuleCreateRequest(
+                title="Test",
+                rule_type="behavioral",
+                trigger_input="x",
+                expected_behavior="y",
+                severity="invalid",
+            )
 
     @pytest.mark.asyncio
     async def test_update_no_fields_raises_400(self) -> None:

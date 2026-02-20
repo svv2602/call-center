@@ -12,7 +12,7 @@ from typing import Any
 from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -49,13 +49,13 @@ async def _get_redis() -> Redis:
 class ScraperConfigUpdate(BaseModel):
     enabled: bool | None = None
     auto_approve: bool | None = None
-    max_pages: int | None = None
-    request_delay: float | None = None
+    max_pages: int | None = Field(default=None, ge=1, le=500)
+    request_delay: float | None = Field(default=None, gt=0.0)
     min_date: str | None = None
     max_date: str | None = None
     dedup_llm_check: bool | None = None
     schedule_enabled: bool | None = None
-    schedule_hour: int | None = None
+    schedule_hour: int | None = Field(default=None, ge=0, le=23)
     schedule_day_of_week: str | None = None
 
 
@@ -65,32 +65,32 @@ _VALID_LANGUAGES = {"uk", "de", "en", "fr", "pl"}
 
 
 class SourceConfigCreate(BaseModel):
-    name: str
-    source_type: str
-    source_url: str
-    language: str = "uk"
+    name: str = Field(min_length=1, max_length=200)
+    source_type: str = Field(min_length=1, max_length=30)
+    source_url: str = Field(min_length=1, max_length=2000)
+    language: str = Field(default="uk", max_length=5)
     enabled: bool = False
     auto_approve: bool = False
-    request_delay: float = 2.0
-    max_articles_per_run: int = 20
+    request_delay: float = Field(default=2.0, gt=0.0)
+    max_articles_per_run: int = Field(default=20, ge=1, le=200)
     schedule_enabled: bool = True
-    schedule_hour: int = 6
-    schedule_day_of_week: str = "monday"
+    schedule_hour: int = Field(default=6, ge=0, le=23)
+    schedule_day_of_week: str = Field(default="monday", max_length=10)
     settings: dict[str, Any] = {}
 
 
 class SourceConfigUpdate(BaseModel):
-    name: str | None = None
-    source_type: str | None = None
-    source_url: str | None = None
-    language: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=200)
+    source_type: str | None = Field(default=None, min_length=1, max_length=30)
+    source_url: str | None = Field(default=None, min_length=1, max_length=2000)
+    language: str | None = Field(default=None, max_length=5)
     enabled: bool | None = None
     auto_approve: bool | None = None
-    request_delay: float | None = None
-    max_articles_per_run: int | None = None
+    request_delay: float | None = Field(default=None, gt=0.0)
+    max_articles_per_run: int | None = Field(default=None, ge=1, le=200)
     schedule_enabled: bool | None = None
-    schedule_hour: int | None = None
-    schedule_day_of_week: str | None = None
+    schedule_hour: int | None = Field(default=None, ge=0, le=23)
+    schedule_day_of_week: str | None = Field(default=None, max_length=10)
     settings: dict[str, Any] | None = None
 
 
@@ -535,15 +535,15 @@ _VALID_CATEGORIES = {
 
 
 class WatchedPageCreate(BaseModel):
-    url: str
-    category: str = "general"
-    rescrape_interval_hours: int = 168  # default: weekly
+    url: str = Field(min_length=1, max_length=2000)
+    category: str = Field(default="general", min_length=1, max_length=50)
+    rescrape_interval_hours: int = Field(default=168, ge=1, le=8760)
     is_discovery: bool = False
 
 
 class WatchedPageUpdate(BaseModel):
-    category: str | None = None
-    rescrape_interval_hours: int | None = None
+    category: str | None = Field(default=None, min_length=1, max_length=50)
+    rescrape_interval_hours: int | None = Field(default=None, ge=1, le=8760)
     is_discovery: bool | None = None
 
 

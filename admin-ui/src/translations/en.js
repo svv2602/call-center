@@ -57,6 +57,8 @@ export default {
     // API
     'api.sessionExpired': 'Session expired. Please login again.',
     'api.unauthorized': 'Unauthorized',
+    'api.requestTimeout': 'Server response timed out',
+    'api.networkError': 'Unable to connect to server',
 
     // Dashboard
     'dashboard.breadcrumb': 'Dashboard',

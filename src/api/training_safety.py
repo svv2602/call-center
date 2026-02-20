@@ -11,7 +11,7 @@ from typing import Any
 from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -66,22 +66,22 @@ async def _invalidate_safety_cache() -> None:
 
 
 class SafetyRuleCreateRequest(BaseModel):
-    title: str
-    rule_type: str
-    trigger_input: str
-    expected_behavior: str
-    severity: str = "medium"
-    sort_order: int = 0
+    title: str = Field(min_length=1, max_length=200)
+    rule_type: str = Field(min_length=1, max_length=30)
+    trigger_input: str = Field(min_length=1, max_length=2000)
+    expected_behavior: str = Field(min_length=1, max_length=2000)
+    severity: str = Field(default="medium", pattern=f"^({'|'.join(SEVERITIES)})$")
+    sort_order: int = Field(default=0, ge=0)
 
 
 class SafetyRuleUpdateRequest(BaseModel):
-    title: str | None = None
-    rule_type: str | None = None
-    trigger_input: str | None = None
-    expected_behavior: str | None = None
-    severity: str | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    rule_type: str | None = Field(default=None, min_length=1, max_length=30)
+    trigger_input: str | None = Field(default=None, min_length=1, max_length=2000)
+    expected_behavior: str | None = Field(default=None, min_length=1, max_length=2000)
+    severity: str | None = Field(default=None, pattern=f"^({'|'.join(SEVERITIES)})$")
     is_active: bool | None = None
-    sort_order: int | None = None
+    sort_order: int | None = Field(default=None, ge=0)
 
 
 @router.get("/")

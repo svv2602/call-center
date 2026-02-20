@@ -111,9 +111,11 @@ async def _ensure_partitions_async() -> dict[str, Any]:
                     results["dropped"].append(partition_name)
 
         logger.info(
-            "Partition management: created=%d, dropped=%d",
+            "Partition management: created=%d (%s), dropped=%d (%s)",
             len(results["created"]),
+            ", ".join(results["created"]) or "none",
             len(results["dropped"]),
+            ", ".join(results["dropped"]) or "none",
         )
 
     except Exception:

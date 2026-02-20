@@ -11,6 +11,7 @@ import * as tw from '../tw.js';
 let _activeTab = 'templates';
 let _dialoguesOffset = 0;
 let _safetyOffset = 0;
+let _saving = false; // prevent double-submit on modal save buttons
 
 // ─── Tab switching ───────────────────────────────────────────
 function showTab(tab) {
@@ -148,12 +149,14 @@ async function editTemplate(id) {
 }
 
 async function saveTemplate() {
+    if (_saving) return;
     const id = document.getElementById('editTemplateId').value;
     const templateKey = document.getElementById('templateKey').value.trim();
     const title = document.getElementById('templateTitle').value.trim();
     const content = document.getElementById('templateContent').value.trim();
     const description = document.getElementById('templateDescription').value.trim();
     if (!title || !content) { showToast(t('training.titleContentRequired'), 'error'); return; }
+    _saving = true;
     try {
         if (id) {
             await api(`/training/templates/${id}`, { method: 'PATCH', body: JSON.stringify({ title, content, description: description || null }) });
@@ -164,7 +167,7 @@ async function saveTemplate() {
         closeModal('responseTemplateModal');
         showToast(t('training.templateSaved'));
         loadTemplates();
-    } catch (e) { showToast(t('training.saveFailed', {error: e.message}), 'error'); }
+    } catch (e) { showToast(t('training.saveFailed', {error: e.message}), 'error'); } finally { _saving = false; }
 }
 
 async function deleteTemplate(id, title) {
@@ -258,6 +261,7 @@ async function editDialogue(id) {
 }
 
 async function saveDialogue() {
+    if (_saving) return;
     const id = document.getElementById('editDialogueId').value;
     const title = document.getElementById('dialogueTitle').value.trim();
     const scenarioType = document.getElementById('dialogueScenarioType').value;
@@ -270,6 +274,7 @@ async function saveDialogue() {
     const toolsUsed = [...new Set(dialogue.filter(d => d.tool_calls).flatMap(d => d.tool_calls.map(tc => tc.name)))];
     const body = { title, scenario_type: scenarioType, phase, dialogue, tools_used: toolsUsed, description: description || null };
 
+    _saving = true;
     try {
         if (id) {
             await api(`/training/dialogues/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
@@ -279,7 +284,7 @@ async function saveDialogue() {
         closeModal('dialogueModal');
         showToast(t('training.dialogueSaved'));
         loadDialogues(_dialoguesOffset);
-    } catch (e) { showToast(t('training.saveFailed', {error: e.message}), 'error'); }
+    } catch (e) { showToast(t('training.saveFailed', {error: e.message}), 'error'); } finally { _saving = false; }
 }
 
 async function deleteDialogue(id, title) {
@@ -387,6 +392,7 @@ async function editSafetyRule(id) {
 }
 
 async function saveSafetyRule() {
+    if (_saving) return;
     const id = document.getElementById('editSafetyRuleId').value;
     const title = document.getElementById('safetyRuleTitle').value.trim();
     const ruleType = document.getElementById('safetyRuleType').value;
@@ -396,6 +402,7 @@ async function saveSafetyRule() {
     if (!title || !triggerInput || !expectedBehavior) { showToast(t('training.fieldsRequired'), 'error'); return; }
 
     const body = { title, rule_type: ruleType, severity, trigger_input: triggerInput, expected_behavior: expectedBehavior };
+    _saving = true;
     try {
         if (id) {
             await api(`/training/safety-rules/${id}`, { method: 'PATCH', body: JSON.stringify(body) });
@@ -405,7 +412,7 @@ async function saveSafetyRule() {
         closeModal('safetyRuleModal');
         showToast(t('training.safetyRuleSaved'));
         loadSafetyRules(_safetyOffset);
-    } catch (e) { showToast(t('training.saveFailed', {error: e.message}), 'error'); }
+    } catch (e) { showToast(t('training.saveFailed', {error: e.message}), 'error'); } finally { _saving = false; }
 }
 
 async function deleteSafetyRule(id, title) {

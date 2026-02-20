@@ -12,15 +12,15 @@ async function loadCalls(offset = 0) {
     callsOffset = offset;
     const loading = document.getElementById('callsLoading');
     const tbody = document.querySelector('#callsTable tbody');
-    loading.style.display = 'flex';
+    if (loading) loading.style.display = 'flex';
 
     const params = new URLSearchParams({ limit: 20, offset });
-    const df = document.getElementById('filterDateFrom').value;
-    const dt = document.getElementById('filterDateTo').value;
-    const sc = document.getElementById('filterScenario').value;
-    const tr = document.getElementById('filterTransferred').value;
-    const qb = document.getElementById('filterQualityBelow').value;
-    const search = document.getElementById('filterSearch').value;
+    const df = document.getElementById('filterDateFrom')?.value;
+    const dt = document.getElementById('filterDateTo')?.value;
+    const sc = document.getElementById('filterScenario')?.value;
+    const tr = document.getElementById('filterTransferred')?.value;
+    const qb = document.getElementById('filterQualityBelow')?.value;
+    const search = document.getElementById('filterSearch')?.value;
     if (df) params.set('date_from', df);
     if (dt) params.set('date_to', dt);
     if (sc) params.set('scenario', sc);
@@ -30,11 +30,12 @@ async function loadCalls(offset = 0) {
 
     try {
         const data = await api(`/analytics/calls?${params}`);
-        loading.style.display = 'none';
+        if (loading) loading.style.display = 'none';
 
         if (!data.calls || data.calls.length === 0) {
-            tbody.innerHTML = `<tr><td colspan="7" class="${tw.emptyState}">${t('calls.noCalls')}</td></tr>`;
-            document.getElementById('callsPagination').innerHTML = '';
+            if (tbody) tbody.innerHTML = `<tr><td colspan="7" class="${tw.emptyState}">${t('calls.noCalls')}</td></tr>`;
+            const pag = document.getElementById('callsPagination');
+            if (pag) pag.innerHTML = '';
             return;
         }
 

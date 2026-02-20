@@ -45,7 +45,7 @@ class TestDialogueCreateRequest:
             title="Test",
             scenario_type="tire_search",
             phase="mvp",
-            dialogue=[],
+            dialogue=[{"role": "customer", "text": "hello"}],
             tools_used=["search_tires"],
             description="Test desc",
             sort_order=5,
@@ -91,7 +91,7 @@ class TestDialogueEndpoints:
             title="Test",
             scenario_type="invalid_type",
             phase="mvp",
-            dialogue=[],
+            dialogue=[{"role": "customer", "text": "hello"}],
         )
         with pytest.raises(HTTPException) as exc_info:
             await create_dialogue(req, {})
@@ -108,7 +108,7 @@ class TestDialogueEndpoints:
             title="Test",
             scenario_type="tire_search",
             phase="invalid_phase",
-            dialogue=[],
+            dialogue=[{"role": "customer", "text": "hello"}],
         )
         with pytest.raises(HTTPException) as exc_info:
             await create_dialogue(req, {})

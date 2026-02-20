@@ -11,7 +11,7 @@ from typing import Any
 from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -46,16 +46,16 @@ async def _get_engine() -> AsyncEngine:
 
 
 class TemplateCreateRequest(BaseModel):
-    template_key: str
-    title: str
-    content: str
-    description: str | None = None
+    template_key: str = Field(min_length=1, max_length=50)
+    title: str = Field(min_length=1, max_length=200)
+    content: str = Field(min_length=1)
+    description: str | None = Field(default=None, max_length=2000)
 
 
 class TemplateUpdateRequest(BaseModel):
-    title: str | None = None
-    content: str | None = None
-    description: str | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    content: str | None = Field(default=None, min_length=1)
+    description: str | None = Field(default=None, max_length=2000)
     is_active: bool | None = None
 
 

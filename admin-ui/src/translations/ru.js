@@ -57,6 +57,8 @@ export default {
     // API
     'api.sessionExpired': 'Сессия истекла. Пожалуйста, войдите снова.',
     'api.unauthorized': 'Не авторизован',
+    'api.requestTimeout': 'Превышено время ожидания ответа сервера',
+    'api.networkError': 'Нет соединения с сервером',
 
     // Dashboard
     'dashboard.breadcrumb': 'Дашборд',

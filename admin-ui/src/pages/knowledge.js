@@ -764,11 +764,12 @@ async function addWatchedPage() {
     const url = document.getElementById('watchedPageUrl')?.value?.trim();
     const category = document.getElementById('watchedPageCategory')?.value;
     const intervalRaw = document.getElementById('watchedPageInterval')?.value;
-    const interval = parseInt(intervalRaw, 10);
     const is_discovery = document.getElementById('watchedPageDiscovery')?.checked || false;
     if (!url) { showToast(t('sources.urlRequired'), 'error'); return; }
     if (!category) { showToast(t('sources.categoryRequired'), 'error'); return; }
     if (!intervalRaw) { showToast(t('sources.intervalRequired'), 'error'); return; }
+    const interval = parseInt(intervalRaw, 10);
+    if (isNaN(interval) || interval < 1) { showToast(t('sources.intervalRequired'), 'error'); return; }
 
     try {
         await api('/admin/scraper/watched-pages', {

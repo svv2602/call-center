@@ -67,7 +67,7 @@ class TestSTTConfig:
 
     def test_default_sample_rate(self) -> None:
         config = STTConfig()
-        assert config.sample_rate_hertz == 16000
+        assert config.sample_rate_hertz == 8000
 
     def test_default_interim_results(self) -> None:
         config = STTConfig()

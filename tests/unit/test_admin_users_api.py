@@ -119,7 +119,7 @@ class TestCreateUser:
         response = client.post(
             "/admin/users",
             headers={"Authorization": f"Bearer {_admin_token()}"},
-            json={"username": "new_user", "password": "pass123", "role": "analyst"},
+            json={"username": "new_user", "password": "pass1234", "role": "analyst"},
         )
         assert response.status_code == 200
         assert response.json()["user"]["username"] == "new_user"
@@ -133,9 +133,9 @@ class TestCreateUser:
         response = client.post(
             "/admin/users",
             headers={"Authorization": f"Bearer {_admin_token()}"},
-            json={"username": "x", "password": "y", "role": "superadmin"},
+            json={"username": "testuser", "password": "pass1234", "role": "superadmin"},
         )
-        assert response.status_code == 400
+        assert response.status_code == 422
 
 
 class TestGetAuditLog:

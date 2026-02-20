@@ -11,7 +11,7 @@ from typing import Any
 from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -67,24 +67,24 @@ async def _invalidate_dialogue_cache() -> None:
 
 
 class DialogueCreateRequest(BaseModel):
-    title: str
-    scenario_type: str
-    phase: str
-    dialogue: list[dict[str, Any]]
+    title: str = Field(min_length=1, max_length=200)
+    scenario_type: str = Field(min_length=1, max_length=50)
+    phase: str = Field(min_length=1, max_length=20)
+    dialogue: list[dict[str, Any]] = Field(min_length=1)
     tools_used: list[str] | None = None
-    description: str | None = None
-    sort_order: int = 0
+    description: str | None = Field(default=None, max_length=2000)
+    sort_order: int = Field(default=0, ge=0)
 
 
 class DialogueUpdateRequest(BaseModel):
-    title: str | None = None
-    scenario_type: str | None = None
-    phase: str | None = None
-    dialogue: list[dict[str, Any]] | None = None
+    title: str | None = Field(default=None, min_length=1, max_length=200)
+    scenario_type: str | None = Field(default=None, min_length=1, max_length=50)
+    phase: str | None = Field(default=None, min_length=1, max_length=20)
+    dialogue: list[dict[str, Any]] | None = Field(default=None, min_length=1)
     tools_used: list[str] | None = None
-    description: str | None = None
+    description: str | None = Field(default=None, max_length=2000)
     is_active: bool | None = None
-    sort_order: int | None = None
+    sort_order: int | None = Field(default=None, ge=0)
 
 
 @router.get("/")

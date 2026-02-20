@@ -175,6 +175,66 @@ groups:
             Circuit breaker has tripped. Store API calls are being blocked.
             Will auto-recover after timeout period.
 
+      # Average quality score drop below threshold
+      - alert: QualityScoreDegraded
+        expr: >
+          avg_over_time(callcenter_call_cost_usd_count[1h]) > 5
+          and
+          (
+            sum(rate(callcenter_calls_resolved_by_bot_total[6h]))
+            /
+            sum(rate(callcenter_calls_total[6h]))
+          ) < 0.4
+        for: 30m
+        labels:
+          severity: high
+        annotations:
+          summary: "Bot resolution rate degraded"
+          description: >
+            Bot resolution rate is {{ $value | humanizePercentage }} over the last 6 hours.
+            Threshold: 40%. Check prompt quality and tool availability.
+
+      # LLM provider fallback rate high
+      - alert: LLMFallbackRateHigh
+        expr: >
+          sum(rate(callcenter_llm_fallbacks_total[1h])) > 0.1
+        for: 10m
+        labels:
+          severity: medium
+        annotations:
+          summary: "High LLM provider fallback rate"
+          description: >
+            LLM fallback rate is {{ $value | humanize }}/s.
+            Primary provider may be experiencing issues.
+
+      # Redis connection issues (no health check update)
+      - alert: RedisUnhealthy
+        expr: >
+          up{job="call-processor"} == 1
+          and callcenter_active_calls >= 0
+          unless callcenter_celery_workers_online >= 0
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Redis may be unreachable"
+          description: >
+            Call processor is up but Celery workers metric is missing.
+            Redis may be down. Check: docker compose logs redis
+
+      # Rate limiting triggered frequently
+      - alert: RateLimitingHigh
+        expr: >
+          sum(increase(callcenter_rate_limit_exceeded_total[10m])) > 20
+        for: 5m
+        labels:
+          severity: medium
+        annotations:
+          summary: "High rate limit trigger rate"
+          description: >
+            {{ $value }} rate limit triggers in the last 10 minutes.
+            May indicate brute-force attack or misconfigured client.
+
   - name: backup_partition_alerts
     rules:
       # PostgreSQL backup stale: no successful backup in 26 hours
@@ -228,10 +288,10 @@ groups:
             Backup task for {{ $labels.component }} failed.
             Check Celery worker logs: docker compose logs celery-worker.
 
-      # Partition management stale: no run in 35 days
+      # Partition management stale: no run in 10 days (runs weekly)
       - alert: PartitionCreationStale
         expr: >
-          (time() - callcenter_partition_last_success_timestamp) > 3024000
+          (time() - callcenter_partition_last_success_timestamp) > 864000
         for: 5m
         labels:
           severity: high
@@ -239,7 +299,7 @@ groups:
           summary: "Partition management has not run recently"
           description: >
             Last successful partition management was {{ $value | humanizeDuration }} ago.
-            Expected: monthly on the 1st at 02:00.
+            Expected: weekly on Mondays at 02:00.
 
       # Partition errors
       - alert: PartitionManagementFailed

@@ -11,7 +11,7 @@ from typing import Any
 
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -35,19 +35,22 @@ async def _get_engine() -> AsyncEngine:
     return _engine
 
 
+_VALID_ROLES = ("admin", "analyst", "operator")
+
+
 class CreateUserRequest(BaseModel):
-    username: str
-    password: str
-    role: str = "operator"
+    username: str = Field(min_length=3, max_length=50)
+    password: str = Field(min_length=8, max_length=128)
+    role: str = Field(default="operator", pattern=f"^({'|'.join(_VALID_ROLES)})$")
 
 
 class UpdateUserRequest(BaseModel):
-    role: str | None = None
+    role: str | None = Field(default=None, pattern=f"^({'|'.join(_VALID_ROLES)})$")
     is_active: bool | None = None
 
 
 class ResetPasswordRequest(BaseModel):
-    new_password: str
+    new_password: str = Field(min_length=8, max_length=128)
 
 
 @router.get("/users")

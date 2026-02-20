@@ -10,7 +10,7 @@ from typing import Any
 from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.agent.ab_testing import QUALITY_CRITERIA, ABTestManager
@@ -42,17 +42,17 @@ async def _get_engine() -> AsyncEngine:
 
 
 class CreatePromptRequest(BaseModel):
-    name: str
-    system_prompt: str
+    name: str = Field(min_length=1, max_length=200)
+    system_prompt: str = Field(min_length=1)
     tools_config: dict[str, Any] | None = None
     metadata: dict[str, Any] | None = None
 
 
 class CreateABTestRequest(BaseModel):
-    test_name: str
+    test_name: str = Field(min_length=1, max_length=200)
     variant_a_id: UUID
     variant_b_id: UUID
-    traffic_split: float = 0.5
+    traffic_split: float = Field(default=0.5, ge=0.0, le=1.0)
 
 
 # --- Prompt CRUD ---

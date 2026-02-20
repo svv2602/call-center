@@ -150,12 +150,13 @@ class TestWatchedPagesAPI:
 
     @pytest.mark.asyncio
     async def test_add_watched_page_validates_interval(self) -> None:
-        """Interval must be between 1 and 8760."""
+        """Interval must be between 1 and 8760 — Pydantic rejects invalid values."""
+        from pydantic import ValidationError
+
         from src.api.scraper import WatchedPageCreate
 
-        request = WatchedPageCreate(url="https://example.com", rescrape_interval_hours=0)
-        assert request.rescrape_interval_hours == 0
-        # API will reject interval < 1
+        with pytest.raises(ValidationError, match="rescrape_interval_hours"):
+            WatchedPageCreate(url="https://example.com", rescrape_interval_hours=0)
 
     @pytest.mark.asyncio
     async def test_watched_page_create_model_defaults(self) -> None:
