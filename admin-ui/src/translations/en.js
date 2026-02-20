@@ -726,6 +726,7 @@ export default {
     'sandbox.archived': 'Conversation archived',
     'sandbox.deleted': 'Conversation deleted',
     'sandbox.deleteConfirm': 'Delete conversation "{title}"? All data will be lost.',
+    'sandbox.ratingCommentPrompt': 'Rating comment (optional):',
     'sandbox.ratingSaved': 'Rating saved',
     'sandbox.ratingFailed': 'Failed to save rating: {error}',
     'sandbox.sendFailed': 'Send failed: {error}',

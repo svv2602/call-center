@@ -422,13 +422,17 @@ async function sendMessage() {
 }
 
 async function rateTurn(turnId, rating) {
+    const comment = prompt(t('sandbox.ratingCommentPrompt'));
+    if (comment === null) return; // cancelled
+
     try {
+        const body = { rating };
+        if (comment.trim()) body.comment = comment.trim();
         await api(`/admin/sandbox/turns/${turnId}/rate`, {
             method: 'PATCH',
-            body: JSON.stringify({ rating }),
+            body: JSON.stringify(body),
         });
         showToast(t('sandbox.ratingSaved'));
-        // Refresh the turn inline
         if (_currentConvId) await loadConversation(_currentConvId);
     } catch (e) {
         showToast(t('sandbox.ratingFailed', { error: e.message }), 'error');

@@ -98,9 +98,13 @@ async def create_sandbox_agent(
         logger.warning("Live tool mode requested but using mock fallback in sandbox")
         tool_router = build_mock_tool_router()
 
+    # Sandbox defaults to Haiku (cheap/fast) independently of ANTHROPIC_MODEL
+    # which may be set to a more expensive model for production calls.
+    sandbox_default_model = "claude-haiku-4-5-20251001"
+
     return LLMAgent(
         api_key=settings.anthropic.api_key,
-        model=model or settings.anthropic.model,
+        model=model or sandbox_default_model,
         tool_router=tool_router,
         tools=tools,
         system_prompt=system_prompt,

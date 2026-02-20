@@ -726,6 +726,7 @@ export default {
     'sandbox.archived': 'Диалог архивирован',
     'sandbox.deleted': 'Диалог удалён',
     'sandbox.deleteConfirm': 'Удалить диалог «{title}»? Все данные будут потеряны.',
+    'sandbox.ratingCommentPrompt': 'Комментарий к оценке (необязательно):',
     'sandbox.ratingSaved': 'Оценка сохранена',
     'sandbox.ratingFailed': 'Не удалось сохранить оценку: {error}',
     'sandbox.sendFailed': 'Ошибка отправки: {error}',
