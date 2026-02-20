@@ -58,11 +58,15 @@ class TestMVPTools:
 
     def test_search_tires_schema(self) -> None:
         tool = next(t for t in MVP_TOOLS if t["name"] == "search_tires")
-        props = tool["input_schema"]["properties"]
-        assert "vehicle_make" in props
+        schema = tool["input_schema"]
+        props = schema["properties"]
         assert "width" in props
+        assert "profile" in props
+        assert "diameter" in props
         assert "season" in props
         assert props["season"]["enum"] == ["summer", "winter", "all_season"]
+        # Tire dimensions and season are required to prevent premature search
+        assert set(schema["required"]) == {"width", "profile", "diameter", "season"}
 
     def test_transfer_to_operator_required_fields(self) -> None:
         tool = next(t for t in MVP_TOOLS if t["name"] == "transfer_to_operator")
@@ -148,7 +152,7 @@ class TestSystemPrompt:
         assert "гривнях" in SYSTEM_PROMPT or "грн" in SYSTEM_PROMPT
 
     def test_prompt_version(self) -> None:
-        assert PROMPT_VERSION == "v3.0-services"
+        assert PROMPT_VERSION == "v3.1-checklists"
 
     def test_prompt_has_order_capabilities(self) -> None:
         assert "замовлення" in SYSTEM_PROMPT.lower()

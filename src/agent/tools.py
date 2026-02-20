@@ -33,24 +33,14 @@ MVP_TOOLS: list[dict] = [  # type: ignore[type-arg]
     {
         "name": "search_tires",
         "description": (
-            "Пошук шин у каталозі магазину за параметрами автомобіля або розміром. "
-            "Використовуй, коли клієнт хоче підібрати шини."
+            "Пошук шин у каталозі магазину. "
+            "УВАГА: НЕ викликай цей інструмент, поки не з'ясуєш у клієнта "
+            "розмір шин (ширина/профіль/діаметр) та сезон. "
+            "Спершу з'ясуй потреби, потім шукай."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
-                "vehicle_make": {
-                    "type": "string",
-                    "description": "Марка автомобіля (наприклад, Toyota, BMW)",
-                },
-                "vehicle_model": {
-                    "type": "string",
-                    "description": "Модель автомобіля (наприклад, Camry, X5)",
-                },
-                "vehicle_year": {
-                    "type": "integer",
-                    "description": "Рік випуску автомобіля",
-                },
                 "width": {
                     "type": "integer",
                     "description": "Ширина шини в мм (наприклад, 205, 225)",
@@ -73,6 +63,7 @@ MVP_TOOLS: list[dict] = [  # type: ignore[type-arg]
                     "description": "Бренд шин (наприклад, Michelin, Continental)",
                 },
             },
+            "required": ["width", "profile", "diameter", "season"],
         },
     },
     {
