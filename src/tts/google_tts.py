@@ -37,8 +37,8 @@ logger = logging.getLogger(__name__)
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
 # Combining acute accent (U+0301) used for stress marks in prompts.
-# TTS engines handle pronunciation natively; these marks must be stripped
-# before synthesis (Chirp3-HD rejects them outright).
+# Standard/Wavenet voices use these marks for correct stress placement.
+# Chirp3-HD rejects them outright — strip only for Chirp voices.
 _COMBINING_ACUTE = "\u0301"
 
 # SSML break insertion patterns (applied after XML escaping)
@@ -84,6 +84,9 @@ class GoogleTTSEngine:
         self._cache_hits = 0
         self._cache_misses = 0
         self._ssml_supported: bool = True
+        # Chirp voices reject combining accent marks (U+0301);
+        # Standard/Wavenet voices use them for correct stress placement
+        self._strip_stress_marks: bool = "chirp" in self._config.voice_name.lower()
 
     async def initialize(self) -> None:
         """Initialize the TTS client and pre-cache common phrases."""
@@ -193,7 +196,8 @@ class GoogleTTSEngine:
         if self._client is None:
             raise RuntimeError("TTS not initialized — call initialize() first")
 
-        text = text.replace(_COMBINING_ACUTE, "")
+        if self._strip_stress_marks:
+            text = text.replace(_COMBINING_ACUTE, "")
 
         if self._ssml_supported:
             try:

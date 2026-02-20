@@ -162,25 +162,41 @@ class TestSSMLFallback:
         assert engine._ssml_supported is True
 
     @pytest.mark.asyncio
-    async def test_stress_marks_stripped_before_synthesis(self) -> None:
-        """Combining acute accents (U+0301) are removed before sending to TTS."""
-        from unittest.mock import AsyncMock, call
+    async def test_stress_marks_stripped_for_chirp_voice(self) -> None:
+        """Combining acute accents (U+0301) are stripped for Chirp voices."""
+        from unittest.mock import AsyncMock
 
-        from google.cloud import texttospeech_v1 as texttospeech
-
-        engine = GoogleTTSEngine()
+        engine = GoogleTTSEngine(config=TTSConfig(voice_name="uk-UA-Chirp3-HD-Accel"))
         engine._client = AsyncMock()
         engine._voice = "fake-voice"
         engine._audio_config = "fake-config"
-        engine._ssml_supported = False  # plain text mode
+        engine._ssml_supported = False
 
         mock_response = AsyncMock()
         mock_response.audio_content = b"\x00" * 50
         engine._client.synthesize_speech = AsyncMock(return_value=mock_response)
 
-        # Text with stress marks (combining acute U+0301)
         await engine._synthesize_uncached("Дя\u0301кую за дзвіно\u0301к!")
 
-        # Verify stress marks were stripped
         actual_input = engine._client.synthesize_speech.call_args.kwargs["input"]
         assert actual_input.text == "Дякую за дзвінок!"
+
+    @pytest.mark.asyncio
+    async def test_stress_marks_kept_for_wavenet_voice(self) -> None:
+        """Combining acute accents (U+0301) are preserved for Wavenet/Standard voices."""
+        from unittest.mock import AsyncMock
+
+        engine = GoogleTTSEngine()  # default: uk-UA-Wavenet-A
+        engine._client = AsyncMock()
+        engine._voice = "fake-voice"
+        engine._audio_config = "fake-config"
+        engine._ssml_supported = False
+
+        mock_response = AsyncMock()
+        mock_response.audio_content = b"\x00" * 50
+        engine._client.synthesize_speech = AsyncMock(return_value=mock_response)
+
+        await engine._synthesize_uncached("Дя\u0301кую за дзвіно\u0301к!")
+
+        actual_input = engine._client.synthesize_speech.call_args.kwargs["input"]
+        assert actual_input.text == "Дя\u0301кую за дзвіно\u0301к!"
