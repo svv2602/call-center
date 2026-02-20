@@ -186,6 +186,8 @@ class CallPipeline:
         self._session.transition_to(CallState.GREETING)
         await self._speak(greeting)
         self._session.add_assistant_turn(greeting)
+        # Seed LLM history so the model knows the greeting was already spoken
+        self._llm_history.append({"role": "assistant", "content": greeting})
 
     async def _audio_reader_loop(self) -> None:
         """Continuously read audio from AudioSocket and feed to STT."""
