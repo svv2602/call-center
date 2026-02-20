@@ -1,5 +1,6 @@
 let dashboardRefreshTimer = null;
 let pageLoaders = {};
+let _currentPage = null;
 
 export function registerPageLoader(page, loader) {
     pageLoaders[page] = loader;
@@ -15,6 +16,11 @@ export function clearRefreshTimer() {
 export function toggleSidebarGroup(group) {
     const el = document.querySelector(`.nav-group[data-group="${group}"]`);
     if (el) el.classList.toggle('open');
+}
+
+/** Extract page name from location.hash (e.g. "#/calls" → "calls") */
+export function getPageFromHash() {
+    return location.hash.replace(/^#\/?/, '') || null;
 }
 
 export function showPage(page) {
@@ -37,11 +43,37 @@ export function showPage(page) {
         if (trigger) trigger.classList.add('active');
     }
 
+    _currentPage = page;
+
+    // Sync URL hash
+    if (getPageFromHash() !== page) {
+        history.pushState(null, '', '#/' + page);
+    }
+
     localStorage.setItem('admin_active_page', page);
     clearRefreshTimer();
 
     const loader = pageLoaders[page];
     if (loader) loader();
+}
+
+/** Initialize hash-based routing: listen for back/forward navigation */
+export function initRouter() {
+    // hashchange fires on back/forward and direct hash edits
+    window.addEventListener('hashchange', () => {
+        const page = getPageFromHash();
+        if (page && page !== _currentPage) {
+            showPage(page);
+        }
+    });
+
+    // popstate fires on back/forward after pushState
+    window.addEventListener('popstate', () => {
+        const page = getPageFromHash();
+        if (page && page !== _currentPage) {
+            showPage(page);
+        }
+    });
 }
 
 export function setRefreshTimer(fn, interval) {

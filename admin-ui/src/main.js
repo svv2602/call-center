@@ -4,7 +4,7 @@ import './styles/main.css';
 // Core modules
 import { getToken } from './api.js';
 import { login, logout, checkTokenExpiry, applyRoleVisibility } from './auth.js';
-import { showPage, toggleSidebarGroup } from './router.js';
+import { showPage, toggleSidebarGroup, initRouter, getPageFromHash } from './router.js';
 import { connectWebSocket, setWsEventHandler, refreshWsStatus } from './websocket.js';
 import { closeModal } from './utils.js';
 import { initTheme, toggleTheme, refreshThemeLabel } from './theme.js';
@@ -26,10 +26,11 @@ import { init as initAudit } from './pages/audit.js';
 import { init as initVehicles } from './pages/vehicles.js';
 import { init as initSandbox } from './pages/sandbox.js';
 
-// Initialize language and theme
+// Initialize language, theme, and hash router
 initLang();
 initTheme();
 translateStaticDOM();
+initRouter();
 
 // Initialize all page loaders
 initDashboard();
@@ -82,7 +83,9 @@ if (getToken()) {
         document.getElementById('app').style.display = 'block';
         applyRoleVisibility();
         connectWebSocket();
-        showPage(savedPage || 'dashboard');
+        // Prefer URL hash over localStorage for initial page
+        const hashPage = getPageFromHash();
+        showPage(hashPage || savedPage || 'dashboard');
     }
 }
 
@@ -120,8 +123,14 @@ if (localStorage.getItem('sidebar_expanded') === '1') {
     if (main) main.style.marginLeft = '14rem';
 }
 
-document.querySelectorAll('.nav-item[data-page], .nav-flyout-link[data-page]').forEach(a => {
-    a.addEventListener('click', () => {
+// Set proper hash hrefs on nav links and handle click navigation
+document.querySelectorAll('a[data-page]').forEach(a => {
+    const page = a.dataset.page;
+    a.href = '#/' + page;
+    a.removeAttribute('onclick');
+    a.addEventListener('click', (e) => {
+        e.preventDefault();
+        showPage(page);
         if (window.innerWidth <= 768) {
             document.getElementById('sidebar').classList.remove('open');
         }

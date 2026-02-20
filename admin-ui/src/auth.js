@@ -1,7 +1,7 @@
 import { api, getToken, setToken, clearToken, onLogout } from './api.js';
 import { showToast } from './notifications.js';
 import { connectWebSocket, disconnectWebSocket } from './websocket.js';
-import { showPage, clearRefreshTimer } from './router.js';
+import { showPage, clearRefreshTimer, getPageFromHash } from './router.js';
 import { t } from './i18n.js';
 
 export function getUserRole() {
@@ -42,8 +42,9 @@ export async function login() {
         document.getElementById('loginError').style.display = 'none';
         applyRoleVisibility();
         connectWebSocket();
+        const hashPage = getPageFromHash();
         const savedPage = localStorage.getItem('admin_active_page') || 'dashboard';
-        showPage(savedPage);
+        showPage(hashPage || savedPage);
     } catch (e) {
         document.getElementById('loginError').textContent = t('login.error');
         document.getElementById('loginError').style.display = 'block';
