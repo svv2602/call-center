@@ -2,6 +2,7 @@
 
 Analyzes low-quality calls, identifies failure patterns,
 and generates improvement suggestions for manual review.
+Results are persisted to the prompt_optimization_results table.
 """
 
 from __future__ import annotations
@@ -18,21 +19,6 @@ from src.config import get_settings
 from src.tasks.celery_app import app
 
 logger = logging.getLogger(__name__)
-
-# Shared LLM router reference (set from main.py when FF_LLM_ROUTING_ENABLED=true)
-_llm_router_ref: object | None = None
-
-
-def set_llm_router(router: object | None) -> None:
-    """Set the shared LLM router for prompt optimization tasks."""
-    global _llm_router_ref
-    _llm_router_ref = router
-
-
-def _get_llm_router() -> object | None:
-    """Get the shared LLM router (or None if not configured)."""
-    return _llm_router_ref
-
 
 ANALYSIS_PROMPT = """\
 You are a prompt engineer analyzing failed AI call center dialogues.
@@ -66,19 +52,30 @@ FAILED CALL TRANSCRIPTIONS:
 
 
 @app.task(name="src.tasks.prompt_optimizer.analyze_failed_calls")  # type: ignore[untyped-decorator]
-def analyze_failed_calls(days: int = 7, max_calls: int = 20) -> dict[str, Any]:
+def analyze_failed_calls(
+    days: int = 7, max_calls: int = 20, triggered_by: str = "manual"
+) -> dict[str, Any]:
     """Analyze recent low-quality calls and suggest prompt improvements.
 
     Args:
         days: Number of days to look back.
         max_calls: Maximum number of calls to analyze.
+        triggered_by: Who triggered the analysis ('manual', 'beat').
     """
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(_analyze_failed_calls_async(days, max_calls))
+    loop = asyncio.new_event_loop()
+    try:
+        return loop.run_until_complete(
+            _analyze_failed_calls_async(days, max_calls, triggered_by)
+        )
+    finally:
+        loop.close()
 
 
-async def _analyze_failed_calls_async(days: int, max_calls: int) -> dict[str, Any]:
+async def _analyze_failed_calls_async(
+    days: int, max_calls: int, triggered_by: str
+) -> dict[str, Any]:
     """Async implementation of failed calls analysis."""
     settings = get_settings()
     engine = create_async_engine(settings.database.url)
@@ -108,17 +105,23 @@ async def _analyze_failed_calls_async(days: int, max_calls: int) -> dict[str, An
 
             if not calls:
                 logger.info("No low-quality calls found in the last %d days", days)
-                return {"patterns": [], "overall_recommendation": "No issues found"}
+                empty_result: dict[str, Any] = {
+                    "patterns": [],
+                    "overall_recommendation": "No issues found",
+                    "calls_analyzed": 0,
+                }
+                await _persist_result(conn, days, 0, empty_result, triggered_by)
+                return empty_result
 
             # Fetch transcriptions for each call
             transcriptions: list[str] = []
             for call in calls:
                 turns_result = await conn.execute(
                     text("""
-                        SELECT speaker, text
+                        SELECT speaker, content
                         FROM call_turns
                         WHERE call_id = :call_id
-                        ORDER BY turn_index
+                        ORDER BY turn_number
                     """),
                     {"call_id": str(call["id"])},
                 )
@@ -129,25 +132,32 @@ async def _analyze_failed_calls_async(days: int, max_calls: int) -> dict[str, An
                     lines.append(f"Scenario: {call['scenario']}")
                 for turn in turns:
                     speaker = "Customer" if turn.speaker == "customer" else "Bot"
-                    lines.append(f"{speaker}: {turn.text}")
+                    lines.append(f"{speaker}: {turn.content}")
                 transcriptions.append("\n".join(lines))
 
         combined_text = "\n\n".join(transcriptions)
 
-        # Analyze with LLM (router or direct Anthropic)
+        # Analyze with LLM (try LLM router first, fall back to direct Anthropic)
         messages = [{"role": "user", "content": ANALYSIS_PROMPT + combined_text}]
 
-        llm_router = _get_llm_router()
-        if llm_router is not None:
-            from src.llm.models import LLMTask
+        response_text = ""
+        try:
+            from src.llm import get_router
 
-            llm_response = await llm_router.complete(  # type: ignore[union-attr]
-                LLMTask.PROMPT_OPTIMIZER,
-                messages,
-                max_tokens=1024,
-            )
-            response_text = llm_response.text.strip()
-        else:
+            llm_router = get_router()
+            if llm_router is not None:
+                from src.llm.models import LLMTask
+
+                llm_response = await llm_router.complete(
+                    LLMTask.PROMPT_OPTIMIZER,
+                    messages,
+                    max_tokens=1024,
+                )
+                response_text = llm_response.text.strip()
+        except Exception:
+            pass
+
+        if not response_text:
             client = anthropic.Anthropic(api_key=settings.anthropic.api_key)
             response = client.messages.create(
                 model=settings.quality.llm_model,
@@ -156,10 +166,12 @@ async def _analyze_failed_calls_async(days: int, max_calls: int) -> dict[str, An
             )
             content_block = response.content[0]
             response_text = content_block.text.strip() if hasattr(content_block, "text") else ""
+
         if response_text.startswith("```"):
             response_text = response_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()
 
         analysis = json.loads(response_text)
+        analysis["calls_analyzed"] = len(calls)
 
         logger.info(
             "Prompt optimization analysis complete: %d calls analyzed, %d patterns found",
@@ -167,11 +179,54 @@ async def _analyze_failed_calls_async(days: int, max_calls: int) -> dict[str, An
             len(analysis.get("patterns", [])),
         )
 
-        analysis_result: dict[str, Any] = analysis
-        return analysis_result
+        # Persist results
+        async with engine.begin() as conn:
+            await _persist_result(conn, days, len(calls), analysis, triggered_by)
+
+        return analysis
 
     except json.JSONDecodeError:
         logger.exception("Failed to parse optimization analysis response")
-        return {"error": "Failed to parse LLM response"}
+        error_result: dict[str, Any] = {"error": "Failed to parse LLM response"}
+        try:
+            async with engine.begin() as conn:
+                await _persist_result(
+                    conn, days, 0, error_result, triggered_by, error="JSON parse error"
+                )
+        except Exception:
+            pass
+        return error_result
     finally:
         await engine.dispose()
+
+
+async def _persist_result(
+    conn: Any,
+    days: int,
+    calls_analyzed: int,
+    analysis: dict[str, Any],
+    triggered_by: str,
+    error: str | None = None,
+) -> None:
+    """Save analysis result to prompt_optimization_results table."""
+    patterns = json.dumps(analysis.get("patterns", []))
+    recommendation = analysis.get("overall_recommendation", "")
+    status = "error" if error else "completed"
+
+    await conn.execute(
+        text("""
+            INSERT INTO prompt_optimization_results
+                (days_analyzed, calls_analyzed, patterns, overall_recommendation,
+                 status, error, triggered_by)
+            VALUES (:days, :calls, :patterns::jsonb, :recommendation, :status, :error, :triggered_by)
+        """),
+        {
+            "days": days,
+            "calls": calls_analyzed,
+            "patterns": patterns,
+            "recommendation": recommendation,
+            "status": status,
+            "error": error,
+            "triggered_by": triggered_by,
+        },
+    )

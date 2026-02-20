@@ -26,6 +26,7 @@ app = Celery(
         "src.tasks.embedding_tasks",
         "src.tasks.scraper_tasks",
         "src.tasks.catalog_sync_tasks",
+        "src.tasks.prompt_optimizer",
     ],
 )
 
@@ -48,6 +49,7 @@ app.conf.update(
         "src.tasks.embedding_tasks.*": {"queue": "embeddings"},
         "src.tasks.scraper_tasks.*": {"queue": "scraper"},
         "src.tasks.catalog_sync_tasks.*": {"queue": "catalog"},
+        "src.tasks.prompt_optimizer.*": {"queue": "quality"},
     },
 )
 
@@ -100,6 +102,11 @@ app.conf.beat_schedule = {
     "catalog-incremental-sync": {
         "task": "src.tasks.catalog_sync_tasks.catalog_incremental_sync",
         "schedule": crontab(minute="*/5"),  # Every 5 minutes
+    },
+    "analyze-failed-calls": {
+        "task": "src.tasks.prompt_optimizer.analyze_failed_calls",
+        "schedule": crontab(hour=6, minute=0, day_of_week="sunday"),  # Weekly Sunday 06:00
+        "kwargs": {"days": 7, "max_calls": 20, "triggered_by": "beat"},
     },
 }
 

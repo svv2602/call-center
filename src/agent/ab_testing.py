@@ -21,14 +21,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 QUALITY_CRITERIA = [
-    "accuracy",
-    "completeness",
-    "politeness",
-    "response_time",
-    "problem_resolution",
-    "language_quality",
-    "tool_usage",
-    "scenario_adherence",
+    "bot_greeted_properly",
+    "bot_understood_intent",
+    "bot_used_correct_tool",
+    "bot_provided_accurate_info",
+    "bot_confirmed_before_action",
+    "bot_was_concise",
+    "call_resolved_without_human",
+    "customer_seemed_satisfied",
 ]
 
 

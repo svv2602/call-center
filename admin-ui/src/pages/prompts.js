@@ -231,6 +231,7 @@ async function loadABTests() {
         section.innerHTML = `<div class="${tw.emptyState}">${t('prompts.failedToLoadAB', {error: escapeHtml(e.message)})}</div>`;
     }
     loadPronunciationRules();
+    loadOptimizerResults();
 }
 
 function showCreateABTest() {
@@ -306,14 +307,14 @@ async function deleteABTest(id, name) {
 //  A/B Test Report
 // ═══════════════════════════════════════════════════════════
 const CRITERION_I18N = {
-    accuracy: 'prompts.criterionAccuracy',
-    completeness: 'prompts.criterionCompleteness',
-    politeness: 'prompts.criterionPoliteness',
-    response_time: 'prompts.criterionResponseTime',
-    problem_resolution: 'prompts.criterionProblemResolution',
-    language_quality: 'prompts.criterionLanguageQuality',
-    tool_usage: 'prompts.criterionToolUsage',
-    scenario_adherence: 'prompts.criterionScenarioAdherence',
+    bot_greeted_properly: 'prompts.criterionGreeting',
+    bot_understood_intent: 'prompts.criterionIntent',
+    bot_used_correct_tool: 'prompts.criterionToolUsage',
+    bot_provided_accurate_info: 'prompts.criterionAccuracy',
+    bot_confirmed_before_action: 'prompts.criterionConfirmation',
+    bot_was_concise: 'prompts.criterionConciseness',
+    call_resolved_without_human: 'prompts.criterionResolution',
+    customer_seemed_satisfied: 'prompts.criterionSatisfaction',
 };
 
 async function showABReport(testId) {
@@ -525,6 +526,136 @@ function _keepPronunciationOpen() {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  Prompt Optimizer
+// ═══════════════════════════════════════════════════════════
+async function loadOptimizerResults() {
+    const container = document.getElementById('promptsContent');
+    const existing = document.getElementById('optimizerSection');
+    if (existing) existing.remove();
+
+    const section = document.createElement('div');
+    section.id = 'optimizerSection';
+    section.className = 'mt-6';
+    container.appendChild(section);
+
+    try {
+        const data = await api('/prompts/optimizer/results');
+        const items = data.items || [];
+
+        let html = `
+            <details id="optimizerDetails">
+                <summary class="cursor-pointer select-none flex items-center gap-2 text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-1">
+                    <svg class="w-4 h-4 transition-transform duration-200 details-chevron" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd"/></svg>
+                    ${t('prompts.optimizer')}
+                    <span class="${tw.badge} ml-1">${items.length} ${t('prompts.optimizerRuns')}</span>
+                </summary>
+                <div class="mt-3">
+                    <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3">${t('prompts.optimizerDesc')}</p>
+                    <div class="mb-3">
+                        <button class="${tw.btnPrimary}" id="runOptimizerBtn" onclick="window._pages.prompts.runOptimizer()">${t('prompts.optimizerRun')}</button>
+                    </div>`;
+
+        if (items.length > 0) {
+            html += `<div class="overflow-x-auto"><table class="${tw.table}"><thead><tr>
+                <th class="${tw.th}">${t('prompts.optimizerDate')}</th>
+                <th class="${tw.th}">${t('prompts.optimizerCalls')}</th>
+                <th class="${tw.th}">${t('prompts.optimizerPatterns')}</th>
+                <th class="${tw.th}">${t('prompts.optimizerStatus')}</th>
+                <th class="${tw.th}">${t('prompts.optimizerTriggered')}</th>
+                <th class="${tw.th}">${t('prompts.action')}</th>
+            </tr></thead><tbody>`;
+            for (const item of items) {
+                const patterns = item.patterns || [];
+                const statusBadge = item.status === 'completed'
+                    ? `<span class="${tw.badgeGreen}">${t('prompts.optimizerCompleted')}</span>`
+                    : `<span class="${tw.badgeRed}">${t('prompts.optimizerError')}</span>`;
+                html += `<tr class="${tw.trHover}">
+                    <td class="${tw.td}">${formatDate(item.created_at)}</td>
+                    <td class="${tw.td}">${item.calls_analyzed}</td>
+                    <td class="${tw.td}">${patterns.length}</td>
+                    <td class="${tw.td}">${statusBadge}</td>
+                    <td class="${tw.td}"><span class="${tw.badge}">${escapeHtml(item.triggered_by)}</span></td>
+                    <td class="${tw.td}">
+                        <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.prompts.showOptimizerDetail('${item.id}')">${t('prompts.optimizerView')}</button>
+                    </td>
+                </tr>`;
+            }
+            html += '</tbody></table></div>';
+        } else {
+            html += `<div class="${tw.emptyState}">${t('prompts.optimizerNoResults')}</div>`;
+        }
+
+        html += '</div></details>';
+        section.innerHTML = html;
+    } catch (e) {
+        section.innerHTML = `<div class="${tw.emptyState}">${t('prompts.optimizerLoadFailed', {error: escapeHtml(e.message)})}</div>`;
+    }
+}
+
+async function runOptimizer() {
+    const btn = document.getElementById('runOptimizerBtn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = t('prompts.optimizerRunning');
+    }
+    try {
+        const data = await api('/prompts/optimizer/run', { method: 'POST' });
+        showToast(t('prompts.optimizerStarted', {taskId: data.task_id || ''}));
+    } catch (e) {
+        showToast(t('prompts.optimizerRunFailed', {error: e.message}), 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = t('prompts.optimizerRun');
+        }
+    }
+}
+
+function showOptimizerDetail(id) {
+    api(`/prompts/optimizer/results`).then(data => {
+        const item = (data.items || []).find(i => i.id === id);
+        if (!item) return;
+
+        const patterns = item.patterns || [];
+        let body = `<p class="mb-3"><strong>${t('prompts.optimizerRecommendation')}:</strong> ${escapeHtml(item.overall_recommendation || '—')}</p>`;
+
+        if (patterns.length > 0) {
+            body += `<div class="overflow-x-auto"><table class="${tw.table}"><thead><tr>
+                <th class="${tw.th}">${t('prompts.optimizerPattern')}</th>
+                <th class="${tw.th}">${t('prompts.optimizerSeverity')}</th>
+                <th class="${tw.th}">${t('prompts.optimizerFrequency')}</th>
+                <th class="${tw.th}">${t('prompts.optimizerSuggestion')}</th>
+            </tr></thead><tbody>`;
+            for (const p of patterns) {
+                const sevClass = p.severity === 'high' ? tw.badgeRed : p.severity === 'medium' ? tw.badgeYellow : tw.badge;
+                body += `<tr class="${tw.trHover}">
+                    <td class="${tw.td}"><div class="max-w-xs">${escapeHtml(p.description || '')}</div></td>
+                    <td class="${tw.td}"><span class="${sevClass}">${escapeHtml(p.severity || '')}</span></td>
+                    <td class="${tw.td}">${p.frequency || 0}</td>
+                    <td class="${tw.td}"><div class="max-w-md text-sm">${escapeHtml(p.suggestion || '')}</div></td>
+                </tr>`;
+            }
+            body += '</tbody></table></div>';
+        }
+
+        // Show in a modal
+        const modal = document.createElement('div');
+        modal.className = 'fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50';
+        modal.id = 'optimizerDetailModal';
+        modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
+        modal.innerHTML = `
+            <div class="bg-white dark:bg-neutral-800 rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-y-auto p-6">
+                <div class="flex justify-between items-center mb-4">
+                    <h3 class="text-lg font-semibold">${t('prompts.optimizerDetailTitle')}</h3>
+                    <button class="text-neutral-400 hover:text-neutral-600" onclick="document.getElementById('optimizerDetailModal').remove()">&#x2715;</button>
+                </div>
+                ${body}
+            </div>`;
+        document.body.appendChild(modal);
+    });
+}
+
+// ═══════════════════════════════════════════════════════════
 //  Init & exports
 // ═══════════════════════════════════════════════════════════
 export function init() {
@@ -537,4 +668,5 @@ window._pages.prompts = {
     viewPrompt, loadDefaultPrompt, resetToDefault, deletePrompt,
     loadABTests, showCreateABTest, createABTest, stopABTest, deleteABTest, showABReport, exportABReportCSV,
     loadPronunciationRules, savePronunciationRules, resetPronunciationRules,
+    loadOptimizerResults, runOptimizer, showOptimizerDetail,
 };

@@ -210,6 +210,47 @@ async def export_ab_test_report_csv(
     return _csv_streaming_response(rows, columns, filename)
 
 
+# --- Prompt Optimizer ---
+
+
+@router.get("/optimizer/results")
+async def list_optimization_results(
+    limit: int = 10,
+    _: dict[str, Any] = _analyst_dep,
+) -> dict[str, Any]:
+    """List recent prompt optimization analysis results."""
+    from sqlalchemy import text as sa_text
+
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            sa_text("""
+                SELECT id, days_analyzed, calls_analyzed, patterns,
+                       overall_recommendation, status, error,
+                       triggered_by, created_at
+                FROM prompt_optimization_results
+                ORDER BY created_at DESC
+                LIMIT :limit
+            """),
+            {"limit": limit},
+        )
+        items = [dict(r._mapping) for r in result]
+    return {"items": items}
+
+
+@router.post("/optimizer/run")
+async def run_prompt_optimization(
+    days: int = 7,
+    max_calls: int = 20,
+    _: dict[str, Any] = _admin_dep,
+) -> dict[str, Any]:
+    """Trigger a prompt optimization analysis (async Celery task)."""
+    from src.tasks.prompt_optimizer import analyze_failed_calls
+
+    task = analyze_failed_calls.delay(days=days, max_calls=max_calls, triggered_by="manual")
+    return {"task_id": task.id, "message": "Prompt optimization analysis started"}
+
+
 # --- Prompt by ID (after /ab-tests to avoid route conflict) ---
 
 

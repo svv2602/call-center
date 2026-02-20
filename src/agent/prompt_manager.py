@@ -352,17 +352,19 @@ async def get_safety_rules_for_prompt(
 def format_few_shot_section(
     examples: dict[str, list[dict[str, Any]]],
     max_examples: int = 2,
+    scenario_type: str | None = None,
 ) -> str | None:
     """Format dialogue examples as a prompt section.
 
-    Randomly selects up to *max_examples* dialogues total (across all
-    scenario types), truncates each to 6 turns, and strips tool_calls
+    Selects up to *max_examples* dialogues, preferring diversity across
+    scenario types.  If *scenario_type* is provided, one slot is reserved
+    for that scenario.  Truncates each to 6 turns and strips tool_calls
     to tool names only.  Returns ``None`` if there are no examples.
     """
     if not examples:
         return None
 
-    # Flatten and sample
+    # Flatten all dialogues
     all_dialogues: list[dict[str, Any]] = []
     for items in examples.values():
         all_dialogues.extend(items)
@@ -370,7 +372,28 @@ def format_few_shot_section(
     if not all_dialogues:
         return None
 
-    selected = random.sample(all_dialogues, min(max_examples, len(all_dialogues)))
+    selected: list[dict[str, Any]] = []
+
+    # If scenario_type given, pick one matching example first
+    if scenario_type and scenario_type in examples:
+        matching = examples[scenario_type]
+        selected.append(random.choice(matching))
+
+    # Fill remaining slots with diversity: one per scenario type
+    remaining = max_examples - len(selected)
+    if remaining > 0:
+        used_scenarios = {d.get("scenario_type") for d in selected}
+        other_scenarios = [s for s in examples if s not in used_scenarios]
+        random.shuffle(other_scenarios)
+        for sc in other_scenarios[:remaining]:
+            selected.append(random.choice(examples[sc]))
+
+    # If still not enough, fill from any remaining dialogues
+    if len(selected) < max_examples:
+        used_ids = {id(d) for d in selected}
+        pool = [d for d in all_dialogues if id(d) not in used_ids]
+        need = max_examples - len(selected)
+        selected.extend(random.sample(pool, min(need, len(pool))))
 
     parts: list[str] = ["## Приклади діалогів (для орієнтиру)"]
     for dlg in selected:

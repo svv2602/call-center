@@ -255,6 +255,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     logger.info("Call started: %s", conn.channel_uuid)
     await publish_event("call:started", {"call_id": str(conn.channel_uuid)})
 
+    _embedding_gen = None
     try:
         # Per-call STT engine (each call gets its own streaming session)
         stt = GoogleSTTEngine(project_id=settings.google_stt.project_id)
@@ -344,9 +345,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 from src.knowledge.embeddings import EmbeddingGenerator
                 from src.sandbox.patterns import PatternSearch
 
-                gen = EmbeddingGenerator(settings.openai.api_key)
-                await gen.open()
-                pattern_search = PatternSearch(_asyncpg_pool, gen)
+                _embedding_gen = EmbeddingGenerator(settings.openai.api_key)
+                await _embedding_gen.open()
+                pattern_search = PatternSearch(_asyncpg_pool, _embedding_gen)
             except Exception:
                 logger.debug("Pattern search init failed, continuing without", exc_info=True)
 
@@ -394,6 +395,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         logger.exception("Unhandled error in call: %s", conn.channel_uuid)
 
     # Cleanup
+    if _embedding_gen is not None:
+        with contextlib.suppress(Exception):
+            await _embedding_gen.close()
     if session.state != CallState.ENDED:
         session.transition_to(CallState.ENDED)
     if _redis is not None:
@@ -569,11 +573,9 @@ async def main() -> None:
             set_router(_llm_router)
 
             # Share router with Celery tasks
-            from src.tasks.prompt_optimizer import set_llm_router as set_optimizer_router
             from src.tasks.quality_evaluator import set_llm_router as set_evaluator_router
 
             set_evaluator_router(_llm_router)
-            set_optimizer_router(_llm_router)
         except Exception:
             logger.warning(
                 "LLM router init failed — falling back to direct Anthropic", exc_info=True

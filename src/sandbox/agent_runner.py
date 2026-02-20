@@ -18,7 +18,11 @@ from typing import TYPE_CHECKING, Any
 from src.agent.agent import LLMAgent
 from src.agent.prompt_manager import (
     PromptManager,
+    format_few_shot_section,
+    format_safety_rules_section,
+    get_few_shot_examples,
     get_pronunciation_rules,
+    get_safety_rules_for_prompt,
     inject_pronunciation_rules,
 )
 from src.agent.tool_loader import get_tools_with_overrides
@@ -118,6 +122,20 @@ async def create_sandbox_agent(
         pron_rules = await get_pronunciation_rules(redis)
         system_prompt = inject_pronunciation_rules(system_prompt, pron_rules)
 
+    # Load few-shot examples and safety rules
+    few_shot_context = None
+    safety_context = None
+    try:
+        few_shot_examples = await get_few_shot_examples(engine, redis)
+        few_shot_context = format_few_shot_section(few_shot_examples)
+    except Exception:
+        logger.debug("Sandbox: few-shot loading failed", exc_info=True)
+    try:
+        safety_rules = await get_safety_rules_for_prompt(engine, redis)
+        safety_context = format_safety_rules_section(safety_rules)
+    except Exception:
+        logger.debug("Sandbox: safety rules loading failed", exc_info=True)
+
     # Sandbox defaults to Haiku (cheap/fast) independently of ANTHROPIC_MODEL
     # which may be set to a more expensive model for production calls.
     sandbox_default_model = "claude-haiku-4-5-20251001"
@@ -131,6 +149,8 @@ async def create_sandbox_agent(
         system_prompt=system_prompt,
         prompt_version_name=prompt_version_name,
         provider_override=provider_override,
+        few_shot_context=few_shot_context,
+        safety_context=safety_context,
     )
 
 

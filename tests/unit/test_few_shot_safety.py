@@ -88,6 +88,28 @@ class TestFormatFewShotSection:
         assert result is not None
         assert "[search_tires, check_availability]" in result
 
+    def test_scenario_aware_selection_prioritizes_matching(self) -> None:
+        """When scenario_type is given, at least one example should match."""
+        examples = {
+            "tire_search": [self._make_dialogue(scenario="tire_search")],
+            "order_status": [self._make_dialogue(scenario="order_status")],
+            "fitting": [self._make_dialogue(scenario="fitting")],
+        }
+        result = format_few_shot_section(examples, max_examples=2, scenario_type="fitting")
+        assert result is not None
+        assert "### fitting" in result
+
+    def test_diversity_across_scenarios(self) -> None:
+        """With max_examples=2, should pick from different scenario types."""
+        examples = {
+            "tire_search": [self._make_dialogue(scenario="tire_search")],
+            "order_status": [self._make_dialogue(scenario="order_status")],
+        }
+        result = format_few_shot_section(examples, max_examples=2)
+        assert result is not None
+        assert "### tire_search" in result
+        assert "### order_status" in result
+
     def test_handles_json_string_dialogue(self) -> None:
         """dialogue field may be a JSON string from DB."""
         import json
