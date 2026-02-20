@@ -70,10 +70,20 @@ function loadFlower() {
     if (container) container.style.display = 'block';
 }
 
-export function init() {
-    // Set external Flower link on page load
+function initToolLinks() {
+    const host = window.location.hostname;
+    const proto = window.location.protocol;
+    // Update all external tool links with dynamic hostname
+    document.querySelectorAll('#externalToolsTable a[data-tool-port]').forEach(a => {
+        a.href = `${proto}//${host}:${a.dataset.toolPort}`;
+    });
+    // Flower iframe link
     const link = document.getElementById('flowerExternalLink');
-    if (link) link.href = `${window.location.protocol}//${window.location.hostname}:5555`;
+    if (link) link.href = `${proto}//${host}:5555`;
+}
+
+export function init() {
+    initToolLinks();
     registerPageLoader('monitoring', () => loadSettings());
 }
 

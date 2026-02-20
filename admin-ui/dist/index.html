@@ -13,7 +13,7 @@
             }
         })();
     </script>
-  <script type="module" crossorigin src="/assets/index-0mtxNqGk.js"></script>
+  <script type="module" crossorigin src="/assets/index-B6tQfRST.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index-BEXo-8i0.css">
 </head>
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-50 font-sans antialiased">
@@ -520,14 +520,14 @@
                 <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
                     <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.externalTools">Внешние инструменты</h3>
                     <div class="overflow-x-auto">
-                        <table class="w-full text-sm">
-                            <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">Grafana</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800"><a href="http://localhost:3000" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline" data-i18n="settings.openGrafana">Открыть Grafana</a></td></tr>
-                            <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">Prometheus</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800"><a href="http://localhost:9090" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline" data-i18n="settings.openPrometheus">Открыть Prometheus</a></td></tr>
-                            <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">Flower (Celery)</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800"><a href="http://localhost:5555" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline" data-i18n="settings.openFlower">Открыть Flower</a></td></tr>
+                        <table class="w-full text-sm" id="externalToolsTable">
+                            <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">Grafana</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800"><a data-tool-port="3000" href="#" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline" data-i18n="settings.openGrafana">Открыть Grafana</a></td></tr>
+                            <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">Prometheus</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800"><a data-tool-port="9090" href="#" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline" data-i18n="settings.openPrometheus">Открыть Prometheus</a></td></tr>
+                            <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">Flower (Celery)</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800"><a data-tool-port="5555" href="#" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline" data-i18n="settings.openFlower">Открыть Flower</a></td></tr>
                         </table>
                     </div>
                 </div>
-                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
                     <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.celeryTasks">Задачи Celery (Flower)</h3>
                     <div class="flex gap-2 mb-3">
                         <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.monitoring.loadFlower()" data-i18n="settings.loadFlower">Загрузить Flower</button>
