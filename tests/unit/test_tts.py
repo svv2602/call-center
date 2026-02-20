@@ -111,3 +111,76 @@ class TestSSMLConversion:
         """Comma not followed by space (e.g. numbers) should not get a break."""
         result = GoogleTTSEngine._to_ssml("розмір 225/45R17")
         assert "<break" not in result
+
+
+class TestSSMLFallback:
+    """Test automatic SSML → plain text fallback for voices like Chirp3-HD."""
+
+    @pytest.mark.asyncio
+    async def test_ssml_failure_falls_back_to_plain_text(self) -> None:
+        """When SSML fails (e.g. Chirp3-HD), engine retries with plain text."""
+        from unittest.mock import AsyncMock
+
+        engine = GoogleTTSEngine()
+        engine._client = AsyncMock()
+        engine._voice = "fake-voice"
+        engine._audio_config = "fake-config"
+
+        # First call (SSML) fails, second call (plain text) succeeds
+        mock_response = AsyncMock()
+        mock_response.audio_content = b"\x00" * 100
+        engine._client.synthesize_speech = AsyncMock(
+            side_effect=[Exception("SSML not supported"), mock_response]
+        )
+
+        audio = await engine._synthesize_uncached("Привіт")
+        assert audio == b"\x00" * 100
+        assert engine._ssml_supported is False
+        assert engine._client.synthesize_speech.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_after_fallback_uses_plain_text_directly(self) -> None:
+        """Once SSML is disabled, subsequent calls skip SSML attempt."""
+        from unittest.mock import AsyncMock
+
+        engine = GoogleTTSEngine()
+        engine._client = AsyncMock()
+        engine._voice = "fake-voice"
+        engine._audio_config = "fake-config"
+        engine._ssml_supported = False  # already downgraded
+
+        mock_response = AsyncMock()
+        mock_response.audio_content = b"\x00" * 50
+        engine._client.synthesize_speech = AsyncMock(return_value=mock_response)
+
+        await engine._synthesize_uncached("Тест")
+        # Only one call — no SSML attempt
+        assert engine._client.synthesize_speech.call_count == 1
+
+    def test_ssml_supported_default_true(self) -> None:
+        engine = GoogleTTSEngine()
+        assert engine._ssml_supported is True
+
+    @pytest.mark.asyncio
+    async def test_stress_marks_stripped_before_synthesis(self) -> None:
+        """Combining acute accents (U+0301) are removed before sending to TTS."""
+        from unittest.mock import AsyncMock, call
+
+        from google.cloud import texttospeech_v1 as texttospeech
+
+        engine = GoogleTTSEngine()
+        engine._client = AsyncMock()
+        engine._voice = "fake-voice"
+        engine._audio_config = "fake-config"
+        engine._ssml_supported = False  # plain text mode
+
+        mock_response = AsyncMock()
+        mock_response.audio_content = b"\x00" * 50
+        engine._client.synthesize_speech = AsyncMock(return_value=mock_response)
+
+        # Text with stress marks (combining acute U+0301)
+        await engine._synthesize_uncached("Дя\u0301кую за дзвіно\u0301к!")
+
+        # Verify stress marks were stripped
+        actual_input = engine._client.synthesize_speech.call_args.kwargs["input"]
+        assert actual_input.text == "Дякую за дзвінок!"

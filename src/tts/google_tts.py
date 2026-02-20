@@ -36,6 +36,11 @@ logger = logging.getLogger(__name__)
 # Sentence-splitting pattern (split on ., !, ? followed by space or end)
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
+# Combining acute accent (U+0301) used for stress marks in prompts.
+# TTS engines handle pronunciation natively; these marks must be stripped
+# before synthesis (Chirp3-HD rejects them outright).
+_COMBINING_ACUTE = "\u0301"
+
 # SSML break insertion patterns (applied after XML escaping)
 _BREAK_RULES: list[tuple[re.Pattern[str], str]] = [
     # After comma + space: subtle pause extending natural comma break
@@ -78,6 +83,7 @@ class GoogleTTSEngine:
         self._cache: dict[str, bytes] = {}
         self._cache_hits = 0
         self._cache_misses = 0
+        self._ssml_supported: bool = True
 
     async def initialize(self) -> None:
         """Initialize the TTS client and pre-cache common phrases."""
@@ -93,12 +99,30 @@ class GoogleTTSEngine:
             pitch=self._config.pitch,
         )
 
-        # Pre-cache common phrases
+        # Pre-cache common phrases (with auto-detection of voice capabilities)
         for phrase in CACHED_PHRASES:
             try:
                 audio = await self._synthesize_uncached(phrase)
                 self._cache[self._cache_key(phrase)] = audio
-            except Exception:
+            except Exception as exc:
+                exc_msg = str(exc)
+                if "pitch" in exc_msg.lower():
+                    # Chirp3-HD and some voices don't support pitch parameter
+                    logger.info(
+                        "Voice %s does not support pitch, retrying without it",
+                        self._config.voice_name,
+                    )
+                    self._audio_config = texttospeech.AudioConfig(
+                        audio_encoding=texttospeech.AudioEncoding.LINEAR16,
+                        sample_rate_hertz=self._config.sample_rate_hertz,
+                        speaking_rate=self._config.speaking_rate,
+                    )
+                    try:
+                        audio = await self._synthesize_uncached(phrase)
+                        self._cache[self._cache_key(phrase)] = audio
+                    except Exception:
+                        logger.warning("Failed to pre-cache phrase: '%s'", phrase[:40])
+                    continue
                 logger.warning("Failed to pre-cache phrase: '%s'", phrase[:40])
 
         logger.info("TTS initialized, pre-cached %d phrases", len(self._cache))
@@ -159,14 +183,39 @@ class GoogleTTSEngine:
         return f"<speak>{ssml}</speak>"
 
     async def _synthesize_uncached(self, text: str) -> bytes:
-        """Call Google TTS API to synthesize text (SSML mode)."""
+        """Call Google TTS API, preferring SSML with automatic plain-text fallback.
+
+        Some voices (e.g. Chirp3-HD) don't support SSML.  On first SSML
+        failure we downgrade to plain text for all subsequent calls.
+        Combining accent marks (stress hints from prompts) are stripped —
+        TTS engines handle pronunciation natively.
+        """
         if self._client is None:
             raise RuntimeError("TTS not initialized — call initialize() first")
 
-        ssml = self._to_ssml(text)
-        synthesis_input = texttospeech.SynthesisInput(ssml=ssml)
+        text = text.replace(_COMBINING_ACUTE, "")
 
-        response = await self._client.synthesize_speech(
+        if self._ssml_supported:
+            try:
+                return await self._call_tts_api(
+                    texttospeech.SynthesisInput(ssml=self._to_ssml(text)), text
+                )
+            except Exception:
+                self._ssml_supported = False
+                logger.info(
+                    "Voice %s does not support SSML, falling back to plain text",
+                    self._config.voice_name,
+                )
+
+        return await self._call_tts_api(
+            texttospeech.SynthesisInput(text=text), text
+        )
+
+    async def _call_tts_api(
+        self, synthesis_input: texttospeech.SynthesisInput, text: str
+    ) -> bytes:
+        """Send synthesis request to Google TTS and return raw PCM audio."""
+        response = await self._client.synthesize_speech(  # type: ignore[union-attr]
             input=synthesis_input,
             voice=self._voice,
             audio_config=self._audio_config,
