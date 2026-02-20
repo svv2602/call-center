@@ -470,18 +470,23 @@ async function loadPronunciationRules() {
             : t('prompts.pronunciationRulesSourceDefault');
 
         section.innerHTML = `
-            <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-1">${t('prompts.pronunciationRules')}</h3>
-            <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3">
-                ${t('prompts.pronunciationRulesDesc')}
-                <span class="${tw.badge} ml-1">${t('prompts.pronunciationRulesSource', {source: sourceLabel})}</span>
-            </p>
-            <textarea id="pronunciationRulesText" rows="16"
-                class="w-full font-mono text-sm rounded border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 p-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-            >${escapeHtml(data.rules || '')}</textarea>
-            <div class="mt-3 flex gap-2">
-                <button class="${tw.btnPrimary}" onclick="window._pages.prompts.savePronunciationRules()">${t('prompts.pronunciationRulesSave')}</button>
-                <button class="${tw.btnSecondary}" onclick="window._pages.prompts.resetPronunciationRules()">${t('prompts.pronunciationRulesReset')}</button>
-            </div>`;
+            <details id="pronunciationDetails">
+                <summary class="cursor-pointer select-none flex items-center gap-2 text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-1">
+                    <svg class="w-4 h-4 transition-transform duration-200 details-chevron" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd"/></svg>
+                    ${t('prompts.pronunciationRules')}
+                    <span class="${tw.badge} ml-1">${t('prompts.pronunciationRulesSource', {source: sourceLabel})}</span>
+                </summary>
+                <div class="mt-3">
+                    <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3">${t('prompts.pronunciationRulesDesc')}</p>
+                    <textarea id="pronunciationRulesText" rows="16"
+                        class="w-full font-mono text-sm rounded border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 p-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                    >${escapeHtml(data.rules || '')}</textarea>
+                    <div class="mt-3 flex gap-2">
+                        <button class="${tw.btnPrimary}" onclick="window._pages.prompts.savePronunciationRules()">${t('prompts.pronunciationRulesSave')}</button>
+                        <button class="${tw.btnSecondary}" onclick="window._pages.prompts.resetPronunciationRules()">${t('prompts.pronunciationRulesReset')}</button>
+                    </div>
+                </div>
+            </details>`;
     } catch (e) {
         section.innerHTML = `<div class="${tw.emptyState}">${t('prompts.pronunciationRulesSaveFailed', {error: escapeHtml(e.message)})}</div>`;
     }
@@ -495,7 +500,8 @@ async function savePronunciationRules() {
             body: JSON.stringify({ rules }),
         });
         showToast(t('prompts.pronunciationRulesSaved'));
-        loadPronunciationRules();
+        await loadPronunciationRules();
+        _keepPronunciationOpen();
     } catch (e) {
         showToast(t('prompts.pronunciationRulesSaveFailed', {error: e.message}), 'error');
     }
@@ -506,10 +512,16 @@ async function resetPronunciationRules() {
     try {
         await api('/admin/agent/pronunciation-rules/reset', { method: 'POST' });
         showToast(t('prompts.pronunciationRulesResetDone'));
-        loadPronunciationRules();
+        await loadPronunciationRules();
+        _keepPronunciationOpen();
     } catch (e) {
         showToast(t('prompts.pronunciationRulesSaveFailed', {error: e.message}), 'error');
     }
+}
+
+function _keepPronunciationOpen() {
+    const details = document.getElementById('pronunciationDetails');
+    if (details) details.open = true;
 }
 
 // ═══════════════════════════════════════════════════════════

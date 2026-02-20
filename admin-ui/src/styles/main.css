@@ -3,6 +3,11 @@
 /* Class-based dark mode (toggle via .dark on <html>) */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Details/accordion chevron rotation */
+details summary { list-style: none; }
+details summary::-webkit-details-marker { display: none; }
+details[open] .details-chevron { transform: rotate(90deg); }
+
 /* --- Programmatic state classes (toggled by JS) --- */
 
 /* Modal visibility toggle */
