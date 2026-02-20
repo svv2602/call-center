@@ -24,7 +24,7 @@ All documentation is written in **Russian**. The AI agent speaks **Ukrainian** t
                                                                     └── PostgreSQL (logs, analytics)
 ```
 
-- **AudioSocket protocol:** `[type:1B][length:2B BE][payload:NB]`. Types: 0x01=UUID, 0x10=audio, 0x00=hangup, 0xFF=error. Audio: 16kHz, 16-bit signed linear PCM, little-endian.
+- **AudioSocket protocol:** `[type:1B][length:2B BE][payload:NB]`. Types: 0x01=UUID, 0x10=audio, 0x00=hangup, 0xFF=error. Audio: 8kHz, 16-bit signed linear PCM, little-endian.
 - **Pipeline flow:** AudioSocket → STT (streaming) → LLM (Claude) → TTS → AudioSocket. Supports barge-in.
 - **Multilingual STT:** Primary `uk-UA` + alternative `ru-RU`. Agent always responds in Ukrainian regardless of input language.
 - **Session state** is in Redis (stateless Call Processor for horizontal scaling). TTL prevents memory leaks on abnormal disconnects.
