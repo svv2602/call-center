@@ -6,14 +6,17 @@ Manage example conversations for evaluation and few-shot prompting.
 from __future__ import annotations
 
 import logging
+import time
 from typing import Any
 from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from src.agent.prompt_manager import DIALOGUE_CACHE_REDIS_KEY
 from src.api.auth import require_role
 from src.config import get_settings
 
@@ -21,6 +24,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/training/dialogues", tags=["training"])
 
 _engine: AsyncEngine | None = None
+_redis: Redis | None = None
 
 _admin_dep = Depends(require_role("admin"))
 _analyst_dep = Depends(require_role("admin", "analyst"))
@@ -43,6 +47,23 @@ async def _get_engine() -> AsyncEngine:
         settings = get_settings()
         _engine = create_async_engine(settings.database.url)
     return _engine
+
+
+async def _get_redis() -> Redis:
+    global _redis
+    if _redis is None:
+        settings = get_settings()
+        _redis = Redis.from_url(settings.redis.url, decode_responses=True)
+    return _redis
+
+
+async def _invalidate_dialogue_cache() -> None:
+    """Signal cache invalidation via Redis timestamp."""
+    try:
+        redis = await _get_redis()
+        await redis.set(DIALOGUE_CACHE_REDIS_KEY, str(time.time()))
+    except Exception:
+        logger.debug("Failed to invalidate dialogue cache", exc_info=True)
 
 
 class DialogueCreateRequest(BaseModel):
@@ -176,6 +197,7 @@ async def create_dialogue(
             msg = "Expected row from INSERT RETURNING"
             raise RuntimeError(msg)
 
+    await _invalidate_dialogue_cache()
     return {"item": dict(row._mapping), "message": "Dialogue example created"}
 
 
@@ -243,6 +265,7 @@ async def update_dialogue(
         if not row:
             raise HTTPException(status_code=404, detail="Dialogue example not found")
 
+    await _invalidate_dialogue_cache()
     return {"item": dict(row._mapping), "message": "Dialogue example updated"}
 
 
@@ -265,6 +288,7 @@ async def delete_dialogue(dialogue_id: UUID, _: dict[str, Any] = _admin_dep) -> 
         if not row:
             raise HTTPException(status_code=404, detail="Dialogue example not found")
 
+    await _invalidate_dialogue_cache()
     return {"message": f"Dialogue example '{row.title}' deactivated"}
 
 
@@ -310,4 +334,6 @@ async def import_dialogues(
         except Exception as exc:
             errors.append({"title": item.title, "error": str(exc)})
 
+    if imported > 0:
+        await _invalidate_dialogue_cache()
     return {"imported": imported, "errors": len(errors), "error_details": errors}

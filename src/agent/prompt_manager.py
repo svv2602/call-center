@@ -7,6 +7,8 @@ Falls back to hardcoded prompt if database is unavailable.
 from __future__ import annotations
 
 import logging
+import random
+import time
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
@@ -31,6 +33,16 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
 logger = logging.getLogger(__name__)
+
+# ── Dialogue / safety caches ────────────────────────────────
+_dialogue_cache: dict[str, list[dict[str, Any]]] = {}
+_dialogue_cache_ts: float = 0.0
+
+_safety_cache: list[dict[str, Any]] = []
+_safety_cache_ts: float = 0.0
+
+DIALOGUE_CACHE_REDIS_KEY = "training:dialogue_cache_ts"
+SAFETY_CACHE_REDIS_KEY = "training:safety_cache_ts"
 
 
 class PromptManager:
@@ -240,6 +252,173 @@ class PromptManager:
             )
             row = result.first()
             return dict(row._mapping) if row else None
+
+
+async def get_few_shot_examples(
+    engine: AsyncEngine, redis: Redis | None = None
+) -> dict[str, list[dict[str, Any]]]:
+    """Get active dialogue examples grouped by scenario_type.
+
+    Cached in-process; invalidated when Redis key changes.
+    """
+    global _dialogue_cache, _dialogue_cache_ts
+
+    # Check Redis invalidation signal
+    if redis is not None:
+        try:
+            raw = await redis.get(DIALOGUE_CACHE_REDIS_KEY)
+            remote_ts = float(raw) if raw else 0.0
+        except Exception:
+            remote_ts = 0.0
+        if remote_ts > _dialogue_cache_ts and _dialogue_cache:
+            _dialogue_cache.clear()
+
+    if _dialogue_cache:
+        return _dialogue_cache
+
+    try:
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                text("""
+                    SELECT id, title, scenario_type, dialogue, tools_used
+                    FROM dialogue_examples
+                    WHERE is_active = true
+                    ORDER BY scenario_type, sort_order
+                """)
+            )
+            rows = result.fetchall()
+
+        grouped: dict[str, list[dict[str, Any]]] = {}
+        for row in rows:
+            entry = dict(row._mapping)
+            grouped.setdefault(entry["scenario_type"], []).append(entry)
+
+        _dialogue_cache = grouped
+        _dialogue_cache_ts = time.time()
+        return grouped
+    except Exception:
+        logger.warning("Failed to load dialogue examples from DB")
+        return {}
+
+
+async def get_safety_rules_for_prompt(
+    engine: AsyncEngine, redis: Redis | None = None
+) -> list[dict[str, Any]]:
+    """Get active safety rules ordered by severity DESC, sort_order.
+
+    Cached in-process; invalidated when Redis key changes.
+    """
+    global _safety_cache, _safety_cache_ts
+
+    if redis is not None:
+        try:
+            raw = await redis.get(SAFETY_CACHE_REDIS_KEY)
+            remote_ts = float(raw) if raw else 0.0
+        except Exception:
+            remote_ts = 0.0
+        if remote_ts > _safety_cache_ts and _safety_cache:
+            _safety_cache = []
+
+    if _safety_cache:
+        return _safety_cache
+
+    try:
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                text("""
+                    SELECT id, title, rule_type, severity, expected_behavior
+                    FROM safety_rules
+                    WHERE is_active = true
+                    ORDER BY
+                        CASE severity
+                            WHEN 'critical' THEN 0
+                            WHEN 'high' THEN 1
+                            WHEN 'medium' THEN 2
+                            WHEN 'low' THEN 3
+                        END,
+                        sort_order
+                """)
+            )
+            rows = [dict(r._mapping) for r in result]
+
+        _safety_cache = rows
+        _safety_cache_ts = time.time()
+        return rows
+    except Exception:
+        logger.warning("Failed to load safety rules from DB")
+        return []
+
+
+def format_few_shot_section(
+    examples: dict[str, list[dict[str, Any]]],
+    max_examples: int = 2,
+) -> str | None:
+    """Format dialogue examples as a prompt section.
+
+    Randomly selects up to *max_examples* dialogues total (across all
+    scenario types), truncates each to 6 turns, and strips tool_calls
+    to tool names only.  Returns ``None`` if there are no examples.
+    """
+    if not examples:
+        return None
+
+    # Flatten and sample
+    all_dialogues: list[dict[str, Any]] = []
+    for items in examples.values():
+        all_dialogues.extend(items)
+
+    if not all_dialogues:
+        return None
+
+    selected = random.sample(all_dialogues, min(max_examples, len(all_dialogues)))
+
+    parts: list[str] = ["## Приклади діалогів (для орієнтиру)"]
+    for dlg in selected:
+        import json as _json
+
+        scenario = dlg.get("scenario_type", "")
+        parts.append(f"### {scenario}")
+
+        raw_dialogue = dlg.get("dialogue", [])
+        # Parse JSON string if needed
+        if isinstance(raw_dialogue, str):
+            try:
+                raw_dialogue = _json.loads(raw_dialogue)
+            except (ValueError, TypeError):
+                continue
+
+        turns = raw_dialogue[:6]  # truncate to 6 turns
+        for turn in turns:
+            role = turn.get("role", "")
+            text_val = turn.get("text", "")
+            label = "Клієнт" if role == "customer" else "Агент"
+            tool_calls = turn.get("tool_calls")
+            if tool_calls:
+                tool_names = ", ".join(tc.get("name", "?") for tc in tool_calls)
+                parts.append(f"{label}: [{tool_names}] {text_val}")
+            else:
+                parts.append(f"{label}: {text_val}")
+
+    return "\n".join(parts)
+
+
+def format_safety_rules_section(
+    rules: list[dict[str, Any]],
+) -> str | None:
+    """Format safety rules as a prompt section.
+
+    Returns ``None`` if the list is empty.
+    """
+    if not rules:
+        return None
+
+    parts: list[str] = ["## Додаткові правила безпеки"]
+    for rule in rules:
+        severity = (rule.get("severity") or "medium").upper()
+        behaviour = rule.get("expected_behavior", "")
+        parts.append(f"- [{severity}] {behaviour}")
+
+    return "\n".join(parts)
 
 
 PRONUNCIATION_REDIS_KEY = "agent:pronunciation_rules"

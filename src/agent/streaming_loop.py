@@ -65,6 +65,8 @@ class StreamingAgentLoop:
         pii_vault: PIIVault | None = None,
         provider_override: str | None = None,
         max_tool_rounds: int = MAX_TOOL_CALLS_PER_TURN,
+        few_shot_context: str | None = None,
+        safety_context: str | None = None,
     ) -> None:
         self._llm_router = llm_router
         self._tool_router = tool_router
@@ -76,6 +78,8 @@ class StreamingAgentLoop:
         self._pii_vault = pii_vault
         self._provider_override = provider_override
         self._max_tool_rounds = max_tool_rounds
+        self._few_shot_context = few_shot_context
+        self._safety_context = safety_context
 
     async def run_turn(
         self,
@@ -244,6 +248,12 @@ class StreamingAgentLoop:
     ) -> str:
         """Build system prompt with caller context and season hint."""
         parts = [self._system_prompt]
+
+        # Safety rules and few-shot examples (before dynamic per-turn sections)
+        if self._safety_context:
+            parts.append(self._safety_context)
+        if self._few_shot_context:
+            parts.append(self._few_shot_context)
 
         month = datetime.date.today().month
         if month in (11, 12, 1, 2, 3):

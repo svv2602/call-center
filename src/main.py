@@ -21,7 +21,11 @@ from sqlalchemy import text
 from src.agent.agent import LLMAgent, ToolRouter
 from src.agent.prompt_manager import (
     PromptManager,
+    format_few_shot_section,
+    format_safety_rules_section,
+    get_few_shot_examples,
     get_pronunciation_rules,
+    get_safety_rules_for_prompt,
     inject_pronunciation_rules,
 )
 from src.agent.tool_loader import get_tools_with_overrides
@@ -295,6 +299,21 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             except Exception:
                 logger.warning("A/B test assignment failed, using default prompt", exc_info=True)
 
+        # Load few-shot dialogue examples and safety rules (if DB available)
+        few_shot_context = None
+        safety_context = None
+        if _db_engine is not None:
+            try:
+                few_shot_examples = await get_few_shot_examples(_db_engine, _redis)
+                few_shot_context = format_few_shot_section(few_shot_examples)
+            except Exception:
+                logger.debug("Few-shot examples loading failed", exc_info=True)
+            try:
+                safety_rules_extra = await get_safety_rules_for_prompt(_db_engine, _redis)
+                safety_context = format_safety_rules_section(safety_rules_extra)
+            except Exception:
+                logger.debug("Safety rules loading failed", exc_info=True)
+
         # Inject pronunciation rules from Redis into system prompt
         if _redis is not None:
             pron_rules = await get_pronunciation_rules(_redis)
@@ -314,6 +333,8 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             llm_router=_llm_router,
             system_prompt=system_prompt,
             prompt_version_name=prompt_version_name,
+            few_shot_context=few_shot_context,
+            safety_context=safety_context,
         )
 
         # Initialize pattern search (if asyncpg pool available)
@@ -347,6 +368,8 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 tools=tools,
                 system_prompt=system_prompt,
                 pii_vault=vault,
+                few_shot_context=few_shot_context,
+                safety_context=safety_context,
             )
 
         # Run the pipeline (greeting → listen → STT → LLM → TTS loop)

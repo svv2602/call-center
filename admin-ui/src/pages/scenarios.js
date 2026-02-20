@@ -326,7 +326,10 @@ async function loadSafetyRules(offset) {
             return;
         }
         container.innerHTML = `
-            <div class="mb-4"><button class="${tw.btnPrimary}" onclick="window._pages.scenarios.showCreateSafetyRule()">${t('training.newSafetyRule')}</button></div>
+            <div class="mb-4">
+                <button class="${tw.btnPrimary}" onclick="window._pages.scenarios.showCreateSafetyRule()">${t('training.newSafetyRule')}</button>
+                <button class="${tw.btnSecondary} ml-2" id="regressionTestBtn" onclick="window._pages.scenarios.runSafetyRegressionTest()">${t('training.regressionTest')}</button>
+            </div>
             <div class="overflow-x-auto"><table class="${tw.table}" id="safetyRulesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('training.ruleTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('training.ruleType')}</th><th class="${tw.thSortable}" data-sortable>${t('training.severity')}</th><th class="${tw.th}">${t('training.triggerInput')}</th><th class="${tw.thSortable}" data-sortable>${t('training.activeCol')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
             ${items.map(item => `
                 <tr class="${tw.trHover}">
@@ -414,6 +417,88 @@ async function deleteSafetyRule(id, title) {
     } catch (e) { showToast(t('training.deleteFailed', {error: e.message}), 'error'); }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  Safety rules — regression test
+// ═══════════════════════════════════════════════════════════
+async function runSafetyRegressionTest() {
+    const btn = document.getElementById('regressionTestBtn');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = t('training.regressionRunning');
+    }
+
+    try {
+        const data = await api('/training/safety-rules/regression-test', { method: 'POST' });
+        showRegressionResults(data);
+    } catch (e) {
+        showToast(t('training.regressionFailed', { error: e.message }), 'error');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = t('training.regressionTest');
+        }
+    }
+}
+
+function showRegressionResults(data) {
+    const results = data.results || [];
+    const rows = results.map(r => `
+        <tr class="${tw.trHover}">
+            <td class="${tw.td}">
+                ${r.passed
+                    ? `<span class="${tw.badgeGreen}">${t('training.regressionPassed')}</span>`
+                    : `<span class="${tw.badgeRed}">${t('training.regressionFailed_label')}</span>`}
+            </td>
+            <td class="${tw.td}">${escapeHtml(r.title)}</td>
+            <td class="${tw.td}">${severityBadge(r.severity)}</td>
+            <td class="${tw.td}"><span class="${tw.mutedText}">${escapeHtml((r.trigger_input || '').substring(0, 80))}</span></td>
+            <td class="${tw.td}"><span class="${tw.mutedText}">${escapeHtml((r.expected || '').substring(0, 80))}</span></td>
+            <td class="${tw.td}"><span class="${tw.mutedText}">${escapeHtml((r.actual || '').substring(0, 120))}</span></td>
+            <td class="${tw.td}"><span class="${tw.mutedText}">${escapeHtml((r.reason || '').substring(0, 80))}</span></td>
+        </tr>
+    `).join('');
+
+    const modal = document.getElementById('regressionResultsModal');
+    if (!modal) {
+        // Create modal dynamically
+        const div = document.createElement('div');
+        div.id = 'regressionResultsModal';
+        div.className = 'modal';
+        div.innerHTML = `
+            <div class="modal-content" style="max-width:900px">
+                <div class="modal-header">
+                    <h3>${t('training.regressionResults')}</h3>
+                    <button class="modal-close" onclick="window._pages.scenarios.closeRegressionModal()">&times;</button>
+                </div>
+                <div class="modal-body" id="regressionResultsBody"></div>
+            </div>`;
+        document.body.appendChild(div);
+    }
+
+    const body = document.getElementById('regressionResultsBody');
+    body.innerHTML = `
+        <div class="mb-4">
+            <span class="${tw.badgeGreen} mr-2">${t('training.regressionPassedCount', { count: data.passed })}</span>
+            <span class="${tw.badgeRed}">${t('training.regressionFailedCount', { count: data.failed })}</span>
+            <span class="${tw.mutedText} ml-2">${t('training.regressionTotal', { count: data.total })}</span>
+        </div>
+        <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr>
+            <th class="${tw.th}">${t('training.regressionStatus')}</th>
+            <th class="${tw.th}">${t('training.ruleTitle')}</th>
+            <th class="${tw.th}">${t('training.severity')}</th>
+            <th class="${tw.th}">${t('training.triggerInput')}</th>
+            <th class="${tw.th}">${t('training.expectedBehavior')}</th>
+            <th class="${tw.th}">${t('training.regressionActual')}</th>
+            <th class="${tw.th}">${t('training.regressionReason')}</th>
+        </tr></thead><tbody>${rows}</tbody></table></div>`;
+
+    document.getElementById('regressionResultsModal').classList.add('show');
+}
+
+function closeRegressionModal() {
+    closeModal('regressionResultsModal');
+}
+
 // ─── Init ────────────────────────────────────────────────────
 export function init() {
     registerPageLoader('scenarios', () => showTab(_activeTab));
@@ -425,4 +510,5 @@ window._pages.scenarios = {
     loadTemplates, showCreateTemplate, addVariant, editTemplate, saveTemplate, deleteTemplate,
     loadDialogues, showCreateDialogue, editDialogue, saveDialogue, deleteDialogue,
     loadSafetyRules, showCreateSafetyRule, editSafetyRule, saveSafetyRule, deleteSafetyRule,
+    runSafetyRegressionTest, closeRegressionModal,
 };
