@@ -156,7 +156,7 @@ async def export_group_to_pattern(
                 VALUES
                     (:group_id, :intent_label, :pattern_type, :customer_messages,
                      :agent_messages, :guidance_note, :scenario_type, :tags, :rating,
-                     :embedding::vector)
+                     CAST(:embedding AS vector))
                 RETURNING id, intent_label, pattern_type, is_active, created_at
             """),
             {

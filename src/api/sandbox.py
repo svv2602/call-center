@@ -1358,12 +1358,12 @@ async def test_pattern_search(
                 text("""
                     SELECT id, intent_label, pattern_type, customer_messages,
                            guidance_note, rating, tags,
-                           1 - (embedding <=> :embedding::vector) AS similarity
+                           1 - (embedding <=> CAST(:embedding AS vector)) AS similarity
                     FROM conversation_patterns
                     WHERE is_active = true
                       AND embedding IS NOT NULL
-                      AND 1 - (embedding <=> :embedding::vector) >= :min_sim
-                    ORDER BY embedding <=> :embedding::vector
+                      AND 1 - (embedding <=> CAST(:embedding AS vector)) >= :min_sim
+                    ORDER BY embedding <=> CAST(:embedding AS vector)
                     LIMIT :top_k
                 """),
                 {
