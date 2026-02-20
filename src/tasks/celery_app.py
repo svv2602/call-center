@@ -64,7 +64,7 @@ app.conf.beat_schedule = {
     },
     "ensure-partitions": {
         "task": "src.tasks.partition_manager.ensure_partitions",
-        "schedule": crontab(hour=2, minute=0, day_of_month="1"),  # 1st of each month at 02:00
+        "schedule": crontab(hour=2, minute=0, day_of_week="monday"),  # Weekly Monday 02:00 (idempotent, 3 months ahead)
     },
     "backup-database": {
         "task": "src.tasks.backup.backup_database",

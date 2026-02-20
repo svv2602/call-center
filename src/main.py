@@ -58,7 +58,16 @@ from src.core.pipeline import CallPipeline
 from src.events.publisher import publish_event
 from src.logging.pii_vault import PIIVault
 from src.logging.structured_logger import setup_logging
-from src.monitoring.metrics import active_calls, calls_total, get_metrics
+from src.monitoring.metrics import (
+    active_calls,
+    call_duration_seconds,
+    call_scenario_total,
+    calls_resolved_by_bot_total,
+    calls_total,
+    fittings_booked_total,
+    get_metrics,
+    orders_created_total,
+)
 from src.onec_client.client import OneCClient
 from src.store_client.client import StoreClient
 from src.stt.base import STTConfig
@@ -171,6 +180,17 @@ async def readiness_check() -> dict[str, object]:
             checks["redis"] = "disconnected"
     else:
         checks["redis"] = "not_initialized"
+
+    # PostgreSQL
+    if _db_engine is not None:
+        try:
+            async with _db_engine.begin() as conn:
+                await conn.execute(text("SELECT 1"))
+            checks["postgresql"] = "connected"
+        except Exception:
+            checks["postgresql"] = "disconnected"
+    else:
+        checks["postgresql"] = "not_initialized"
 
     # Store API — lightweight HEAD request to base URL
     if _store_client is not None and _store_client._session is not None:
@@ -407,6 +427,11 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     active_calls.dec()
     status = "transferred" if session.transferred else "completed"
     calls_total.labels(status=status).inc()
+    call_duration_seconds.observe(session.duration_seconds)
+    if session.scenario:
+        call_scenario_total.labels(scenario=session.scenario).inc()
+    if not session.transferred:
+        calls_resolved_by_bot_total.inc()
     await publish_event(
         "call:ended",
         {
@@ -422,7 +447,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
 
         evaluate_call_quality.delay(str(conn.channel_uuid))
     except Exception:
-        logger.debug("Quality evaluation dispatch failed", exc_info=True)
+        logger.warning("Quality evaluation dispatch failed", exc_info=True)
 
     logger.info(
         "Call ended: %s, duration=%ds, turns=%d",
@@ -442,18 +467,36 @@ def _build_tool_router(session: CallSession) -> ToolRouter:
     router.register("search_tires", _store_client.search_tires)
     router.register("check_availability", _store_client.check_availability)
     router.register("get_order_status", _store_client.search_orders)
-    router.register("create_order_draft", _store_client.create_order)
+    async def _create_order_with_metric(**kwargs: Any) -> Any:
+        result = await _store_client.create_order(**kwargs)
+        if isinstance(result, dict) and result.get("id"):
+            orders_created_total.inc()
+        return result
+
+    async def _book_fitting_with_metric(**kwargs: Any) -> Any:
+        result = await _store_client.book_fitting(**kwargs)
+        if isinstance(result, dict) and result.get("id"):
+            fittings_booked_total.inc()
+        return result
+
+    router.register("create_order_draft", _create_order_with_metric)
     router.register("update_order_delivery", _store_client.update_delivery)
     router.register("confirm_order", _store_client.confirm_order)
     router.register("get_fitting_stations", _store_client.get_fitting_stations)
     router.register("get_fitting_slots", _store_client.get_fitting_slots)
-    router.register("book_fitting", _store_client.book_fitting)
+    router.register("book_fitting", _book_fitting_with_metric)
     router.register("cancel_fitting", _store_client.cancel_fitting)
     router.register("get_fitting_price", _store_client.get_fitting_price)
     router.register("search_knowledge_base", _store_client.search_knowledge_base)
 
     async def transfer_to_operator(**_: object) -> dict[str, str]:
         session.transferred = True
+        session.transfer_reason = _.get("reason", "") if isinstance(_, dict) else ""
+        logger.warning(
+            "Operator transfer requested for call %s (ARI not configured — "
+            "flag set but no SIP transfer performed)",
+            session.channel_uuid,
+        )
         await publish_event("call:transferred", {"call_id": str(session.channel_uuid)})
         return {"status": "transferring", "message": "З'єдную з оператором"}
 
@@ -486,24 +529,20 @@ async def _periodic_embedding_check(interval_minutes: int = 5) -> None:
 
     while True:
         try:
-            from sqlalchemy.ext.asyncio import create_async_engine
+            if _db_engine is None:
+                await asyncio.sleep(interval_minutes * 60)
+                continue
 
-            settings = get_settings()
-            engine = create_async_engine(settings.database.url)
-
-            try:
-                async with engine.begin() as conn:
-                    result = await conn.execute(
-                        text("""
-                            SELECT id, title FROM knowledge_articles
-                            WHERE embedding_status = 'pending' AND active = true
-                            ORDER BY updated_at NULLS FIRST
-                            LIMIT 20
-                        """)
-                    )
-                    pending = [(str(row.id), row.title) for row in result]
-            finally:
-                await engine.dispose()
+            async with _db_engine.begin() as conn:
+                result = await conn.execute(
+                    text("""
+                        SELECT id, title FROM knowledge_articles
+                        WHERE embedding_status = 'pending' AND active = true
+                        ORDER BY updated_at NULLS FIRST
+                        LIMIT 20
+                    """)
+                )
+                pending = [(str(row.id), row.title) for row in result]
 
             if pending:
                 logger.info("Embedding check: %d pending articles found", len(pending))

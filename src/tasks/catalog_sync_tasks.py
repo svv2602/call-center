@@ -32,7 +32,7 @@ def catalog_full_sync(self: Any) -> dict[str, Any]:
     """
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         _catalog_full_sync_async(self)
     )
 
@@ -109,7 +109,7 @@ def catalog_incremental_sync(self: Any) -> dict[str, Any]:
     """
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         _catalog_incremental_sync_async(self)
     )
 

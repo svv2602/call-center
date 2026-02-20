@@ -32,7 +32,7 @@ def cleanup_expired_data() -> dict[str, Any]:
     - Transcriptions (call_turns, call_tool_calls): 90 days
     - Caller metadata (caller_id): 1 year → anonymize
     """
-    return asyncio.get_event_loop().run_until_complete(_cleanup_async())
+    return asyncio.run(_cleanup_async())
 
 
 async def _cleanup_async() -> dict[str, Any]:

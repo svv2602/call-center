@@ -105,4 +105,4 @@ async def _generate_and_send_weekly_report() -> dict[str, Any]:
 @app.task(name="src.tasks.email_report.send_weekly_report")  # type: ignore[untyped-decorator]
 def send_weekly_report() -> dict[str, Any]:
     """Celery task: generate and send weekly report."""
-    return asyncio.get_event_loop().run_until_complete(_generate_and_send_weekly_report())
+    return asyncio.run(_generate_and_send_weekly_report())

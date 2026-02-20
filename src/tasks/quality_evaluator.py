@@ -112,7 +112,7 @@ def evaluate_call_quality(self: Any, call_id: str) -> dict[str, Any]:
     """
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(_evaluate_call_quality_async(self, call_id))
+    return asyncio.run(_evaluate_call_quality_async(self, call_id))
 
 
 async def _evaluate_call_quality_async(task: Any, call_id: str) -> dict[str, Any]:

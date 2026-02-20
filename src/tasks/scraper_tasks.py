@@ -37,7 +37,7 @@ def run_scraper(self: Any, triggered_by: str = "manual") -> dict[str, Any]:
     """
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         _run_scraper_async(self, triggered_by=triggered_by)
     )
 
@@ -297,7 +297,7 @@ def scrape_single_url(
     """Scrape a single URL (for manual trigger from admin)."""
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         _scrape_single_url_async(self, url, is_promotion=is_promotion, is_shop_info=is_shop_info)
     )
 
@@ -521,7 +521,7 @@ def rescrape_watched_pages(self: Any) -> dict[str, Any]:
     """Check and rescrape watched pages that are due for update."""
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         _rescrape_watched_pages_async(self)
     )
 
@@ -1007,7 +1007,7 @@ def run_all_sources(self: Any, triggered_by: str = "manual") -> dict[str, Any]:
     """
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         _run_all_sources_async(self, triggered_by=triggered_by)
     )
 
@@ -1084,7 +1084,7 @@ def run_source(
     """
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         _run_source_async(self, source_config_id, triggered_by=triggered_by)
     )
 

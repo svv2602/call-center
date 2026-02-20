@@ -137,8 +137,11 @@ async def get_calls_list(
         conditions.append("started_at < CAST(:date_to AS date) + interval '1 day'")
         params["date_to"] = date_to
     if search:
-        conditions.append("id IN (SELECT call_id FROM call_turns WHERE content ILIKE :search)")
-        params["search"] = f"%{search}%"
+        conditions.append(
+            "id IN (SELECT call_id FROM call_turns "
+            "WHERE to_tsvector('simple', content) @@ plainto_tsquery('simple', :search))"
+        )
+        params["search"] = search
 
     where_clause = " AND ".join(conditions)
 

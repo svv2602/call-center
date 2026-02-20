@@ -1,7 +1,7 @@
 """Automatic partition management for time-partitioned PostgreSQL tables.
 
 Creates future partitions and drops old ones (for transcription tables).
-Runs monthly via Celery Beat on the 1st of each month.
+Runs weekly via Celery Beat (idempotent, safe to run anytime).
 
 Partitioned tables: calls, call_turns, call_tool_calls.
 Partition naming: {table}_{YYYY}_{MM}
@@ -61,7 +61,7 @@ def ensure_partitions() -> dict[str, Any]:
     Idempotent: uses IF NOT EXISTS / IF EXISTS.
     """
     try:
-        result = asyncio.get_event_loop().run_until_complete(_ensure_partitions_async())
+        result = asyncio.run(_ensure_partitions_async())
         partition_last_success_timestamp.set(time.time())
         partition_created_total.inc(len(result["created"]))
         partition_dropped_total.inc(len(result["dropped"]))

@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.api.auth import require_role
 from src.config import get_settings
+from src.monitoring.metrics import celery_workers_online
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["system"])
@@ -54,6 +55,7 @@ async def celery_health() -> dict[str, Any]:
             for worker_name, tasks in active.items():
                 queue_lengths[worker_name] = len(tasks)
 
+        celery_workers_online.set(workers_online)
         return {
             "status": "ok" if workers_online > 0 else "degraded",
             "workers_online": workers_online,
@@ -61,6 +63,7 @@ async def celery_health() -> dict[str, Any]:
         }
     except Exception as e:
         logger.debug("Celery health check failed: %s", e)
+        celery_workers_online.set(0)
         return {
             "status": "unavailable",
             "workers_online": 0,

@@ -28,6 +28,12 @@ services:
     volumes:
       - ./gcp-key.json:/secrets/gcp-key.json:ro
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8080/health')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
     deploy:
       resources:
         limits:
@@ -181,7 +187,7 @@ services:
     environment:
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
-      - FLOWER_BASIC_AUTH=${FLOWER_BASIC_AUTH:-admin:admin}
+      - FLOWER_BASIC_AUTH=${FLOWER_BASIC_AUTH:?Set FLOWER_BASIC_AUTH in .env (e.g. user:password)}
     depends_on:
       redis:
         condition: service_healthy

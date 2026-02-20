@@ -30,7 +30,7 @@ def calculate_daily_stats(target_date: str | None = None) -> dict[str, Any]:
     """
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(_calculate_daily_stats_async(target_date))
+    return asyncio.run(_calculate_daily_stats_async(target_date))
 
 
 async def _calculate_daily_stats_async(target_date: str | None = None) -> dict[str, Any]:

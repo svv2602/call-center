@@ -35,7 +35,7 @@ def generate_article_embeddings(self: Any, article_id: str) -> dict[str, Any]:
     """
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(
+    return asyncio.run(
         _generate_article_embeddings_async(self, article_id)
     )
 
@@ -156,7 +156,7 @@ def reindex_all_articles(self: Any) -> dict[str, Any]:
     """
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(_reindex_all_articles_async())
+    return asyncio.run(_reindex_all_articles_async())
 
 
 async def _reindex_all_articles_async() -> dict[str, Any]:

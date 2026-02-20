@@ -23,6 +23,8 @@ services:
       - ARI_USER=${ARI_USER:-}
       - ARI_PASSWORD=${ARI_PASSWORD:-}
       - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
+      - ADMIN_JWT_SECRET=${ADMIN_JWT_SECRET:-staging-jwt-secret-change-me}
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - LOG_FORMAT=json
     depends_on:
