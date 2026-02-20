@@ -399,106 +399,6 @@
                 </div>
             </div>
 
-            <!-- New Conversation Modal -->
-            <div class="modal-overlay" id="sandboxNewConvModal">
-                <div class="modal-content max-w-md">
-                    <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxNewConvModal')">&times;</span>
-                    <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.newConversation">Новый диалог</h3>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.conversationTitle">Название</label>
-                        <input type="text" id="sandboxConvTitle" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.promptVersion">Версия промпта</label>
-                        <select id="sandboxConvPrompt" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="" data-i18n="sandbox.promptVersionDefault">Активная версия</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.model">Модель</label>
-                        <select id="sandboxConvModel" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="" data-i18n="sandbox.modelDefault">По умолчанию</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.toolMode">Режим инструментов</label>
-                        <select id="sandboxConvToolMode" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="mock" data-i18n="sandbox.toolModeMock">Мок (тестовые данные)</option>
-                            <option value="live" data-i18n="sandbox.toolModeLive">Живой (Store API)</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.scenarioType">Тип сценария</label>
-                        <select id="sandboxConvScenario" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="" data-i18n="sandbox.scenarioNone">Без типа</option>
-                            <option value="tire_search">tire_search</option>
-                            <option value="order_creation">order_creation</option>
-                            <option value="fitting_booking">fitting_booking</option>
-                            <option value="expert_consultation">expert_consultation</option>
-                            <option value="operator_transfer">operator_transfer</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.tags">Теги</label>
-                        <input type="text" id="sandboxConvTags" placeholder="tag1, tag2" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    </div>
-                    <button onclick="window._pages.sandbox.createConversation()" class="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="sandbox.createConversation">Создать диалог</button>
-                </div>
-            </div>
-
-            <!-- Turn Group Modal -->
-            <div class="modal-overlay" id="sandboxGroupModal">
-                <div class="modal-content max-w-md">
-                    <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxGroupModal')">&times;</span>
-                    <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.createGroup">Создать группу</h3>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.intentLabel">Интент</label>
-                        <input type="text" id="sandboxGroupIntent" placeholder="tire_search_clarification" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.patternType">Тип паттерна</label>
-                        <select id="sandboxGroupType" onchange="document.getElementById('sandboxGroupCorrectionWrap').style.display=this.value==='negative'?'block':'none'" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="positive">Positive</option>
-                            <option value="negative">Negative</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.avgRating">Оценка</label>
-                        <select id="sandboxGroupRating" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                            <option value="">-</option>
-                            <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
-                        </select>
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.rateComment">Комментарий</label>
-                        <textarea id="sandboxGroupComment" rows="2" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
-                    </div>
-                    <div class="mb-3" id="sandboxGroupCorrectionWrap" style="display:none">
-                        <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.correction">Исправление</label>
-                        <textarea id="sandboxGroupCorrection" rows="3" placeholder="" data-i18n-placeholder="sandbox.correctionHint" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
-                    </div>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.tags">Теги</label>
-                        <input type="text" id="sandboxGroupTags" placeholder="tag1, tag2" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    </div>
-                    <button onclick="window._pages.sandbox.submitGroup()" class="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="sandbox.createGroup">Создать группу</button>
-                </div>
-            </div>
-
-            <!-- Export Pattern Modal -->
-            <div class="modal-overlay" id="sandboxExportModal">
-                <div class="modal-content max-w-md">
-                    <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxExportModal')">&times;</span>
-                    <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.exportToPatterns">Экспорт в паттерны</h3>
-                    <div class="mb-3">
-                        <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.guidanceNote">Инструкция для промпта</label>
-                        <textarea id="sandboxExportGuidance" rows="4" placeholder="" data-i18n-placeholder="sandbox.guidanceHint" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
-                    </div>
-                    <input type="hidden" id="sandboxExportGroupId">
-                    <button onclick="window._pages.sandbox.submitExport()" class="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="sandbox.exportToPatterns">Экспорт в паттерны</button>
-                </div>
-            </div>
-
             <!-- Operators -->
             <div id="page-operators" style="display:none">
                 <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="operators.breadcrumb">Операторы</span></div>
@@ -661,6 +561,106 @@
                 </div>
                 <div class="pagination flex justify-center gap-1 mt-4" id="vehiclesPagination"></div>
             </div>
+        </div>
+    </div>
+
+    <!-- New Conversation Modal -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxNewConvModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-md w-[90%] max-h-[80vh] overflow-y-auto">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxNewConvModal')">&times;</span>
+            <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.newConversation">Новый диалог</h3>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.conversationTitle">Название</label>
+                <input type="text" id="sandboxConvTitle" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.promptVersion">Версия промпта</label>
+                <select id="sandboxConvPrompt" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="" data-i18n="sandbox.promptVersionDefault">Активная версия</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.model">Модель</label>
+                <select id="sandboxConvModel" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="" data-i18n="sandbox.modelDefault">По умолчанию</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.toolMode">Режим инструментов</label>
+                <select id="sandboxConvToolMode" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="mock" data-i18n="sandbox.toolModeMock">Мок (тестовые данные)</option>
+                    <option value="live" data-i18n="sandbox.toolModeLive">Живой (Store API)</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.scenarioType">Тип сценария</label>
+                <select id="sandboxConvScenario" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="" data-i18n="sandbox.scenarioNone">Без типа</option>
+                    <option value="tire_search">tire_search</option>
+                    <option value="order_creation">order_creation</option>
+                    <option value="fitting_booking">fitting_booking</option>
+                    <option value="expert_consultation">expert_consultation</option>
+                    <option value="operator_transfer">operator_transfer</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.tags">Теги</label>
+                <input type="text" id="sandboxConvTags" placeholder="tag1, tag2" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <button onclick="window._pages.sandbox.createConversation()" class="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="sandbox.createConversation">Создать диалог</button>
+        </div>
+    </div>
+
+    <!-- Turn Group Modal -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxGroupModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-md w-[90%] max-h-[80vh] overflow-y-auto">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxGroupModal')">&times;</span>
+            <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.createGroup">Создать группу</h3>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.intentLabel">Интент</label>
+                <input type="text" id="sandboxGroupIntent" placeholder="tire_search_clarification" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.patternType">Тип паттерна</label>
+                <select id="sandboxGroupType" onchange="document.getElementById('sandboxGroupCorrectionWrap').style.display=this.value==='negative'?'block':'none'" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="positive">Positive</option>
+                    <option value="negative">Negative</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.avgRating">Оценка</label>
+                <select id="sandboxGroupRating" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="">-</option>
+                    <option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.rateComment">Комментарий</label>
+                <textarea id="sandboxGroupComment" rows="2" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+            </div>
+            <div class="mb-3" id="sandboxGroupCorrectionWrap" style="display:none">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.correction">Исправление</label>
+                <textarea id="sandboxGroupCorrection" rows="3" placeholder="" data-i18n-placeholder="sandbox.correctionHint" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.tags">Теги</label>
+                <input type="text" id="sandboxGroupTags" placeholder="tag1, tag2" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <button onclick="window._pages.sandbox.submitGroup()" class="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="sandbox.createGroup">Создать группу</button>
+        </div>
+    </div>
+
+    <!-- Export Pattern Modal -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxExportModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-md w-[90%] max-h-[80vh] overflow-y-auto">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxExportModal')">&times;</span>
+            <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.exportToPatterns">Экспорт в паттерны</h3>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.guidanceNote">Инструкция для промпта</label>
+                <textarea id="sandboxExportGuidance" rows="4" placeholder="" data-i18n-placeholder="sandbox.guidanceHint" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+            </div>
+            <input type="hidden" id="sandboxExportGroupId">
+            <button onclick="window._pages.sandbox.submitExport()" class="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="sandbox.exportToPatterns">Экспорт в паттерны</button>
         </div>
     </div>
 

@@ -836,4 +836,5 @@ export default {
     'sandbox.guidanceRequired': 'Введите инструкцию для промпта',
     'sandbox.titleRequired': 'Введите название диалога',
     'sandbox.ratingCommentPlaceholder': 'Комментарий (Enter для сохранения)',
+    'sandbox.convInfo': 'Параметры диалога',
 };

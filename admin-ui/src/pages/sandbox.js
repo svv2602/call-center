@@ -89,6 +89,25 @@ function renderConversationView() {
         ? `<span class="${tw.badge}">${escapeHtml(conv.scenario_type)}</span>`
         : '';
 
+    const tagsBadges = (conv.tags || []).map(tg => `<span class="${tw.badge}">${escapeHtml(tg)}</span>`).join(' ');
+    const createdStr = conv.created_at ? formatDate(conv.created_at) : '-';
+    const updatedStr = conv.updated_at ? formatDate(conv.updated_at) : '-';
+    const avgRatingStr = conv.avg_rating != null ? parseFloat(conv.avg_rating).toFixed(1) + ' &#9733;' : '-';
+    const turnsCountStr = conv.turns_count ?? _turns.length;
+
+    const convInfoPanel = `
+        <div class="mb-3 p-3 bg-neutral-50 dark:bg-neutral-800 rounded-md text-xs grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-2">
+            <div><span class="text-neutral-500 dark:text-neutral-400">${t('sandbox.promptVersion')}:</span><br>${conv.prompt_version_name ? escapeHtml(conv.prompt_version_name) : t('sandbox.promptVersionDefault')}</div>
+            <div><span class="text-neutral-500 dark:text-neutral-400">${t('sandbox.model')}:</span><br>${conv.model ? escapeHtml(conv.model) : t('sandbox.modelDefault')}</div>
+            <div><span class="text-neutral-500 dark:text-neutral-400">${t('sandbox.toolMode')}:</span><br>${conv.tool_mode === 'mock' ? t('sandbox.toolModeMock') : t('sandbox.toolModeLive')}</div>
+            <div><span class="text-neutral-500 dark:text-neutral-400">${t('sandbox.scenarioType')}:</span><br>${conv.scenario_type || t('sandbox.scenarioNone')}</div>
+            <div><span class="text-neutral-500 dark:text-neutral-400">${t('sandbox.turnsCount')}:</span><br>${turnsCountStr}</div>
+            <div><span class="text-neutral-500 dark:text-neutral-400">${t('sandbox.avgRating')}:</span><br>${avgRatingStr}</div>
+            <div><span class="text-neutral-500 dark:text-neutral-400">${t('sandbox.status')}:</span><br>${conv.status === 'active' ? t('sandbox.active') : t('sandbox.archivedStatus')}</div>
+            <div><span class="text-neutral-500 dark:text-neutral-400">${t('sandbox.lastActivity')}:</span><br>${updatedStr}</div>
+            ${tagsBadges ? `<div class="col-span-2 sm:col-span-4"><span class="text-neutral-500 dark:text-neutral-400">${t('sandbox.tags')}:</span> ${tagsBadges}</div>` : ''}
+        </div>`;
+
     const markingBtnClass = _markingMode ? tw.btnPrimary : tw.btnSecondary;
     const markingLabel = _markingMode ? t('sandbox.exitMarking') : t('sandbox.markingMode');
 
@@ -155,13 +174,20 @@ function renderConversationView() {
 
     container.innerHTML = `
         <div class="flex flex-col h-full">
-            <div class="flex flex-wrap items-center gap-2 mb-3 pb-3 border-b border-neutral-200 dark:border-neutral-700">
-                <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mr-2">${escapeHtml(conv.title)}</h2>
-                ${promptBadge} ${toolBadge} ${modelBadge} ${scenarioBadge}
-                <div class="ml-auto flex flex-wrap gap-2">
-                    <button class="${markingBtnClass} ${tw.btnSm}" onclick="window._pages.sandbox.toggleMarking()">${markingLabel}</button>
-                    ${isActive ? `<button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.archiveConversation()">${t('sandbox.archiveConversation')}</button>` : ''}
+            <div class="mb-3 pb-3 border-b border-neutral-200 dark:border-neutral-700">
+                <div class="flex flex-wrap items-center gap-2">
+                    <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mr-2">${escapeHtml(conv.title)}</h2>
+                    ${promptBadge} ${toolBadge} ${modelBadge} ${scenarioBadge}
+                    <div class="ml-auto flex flex-wrap gap-2">
+                        <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="document.getElementById('sandboxConvInfo').toggleAttribute('open')" title="${t('sandbox.convInfo')}">&#9432;</button>
+                        <button class="${markingBtnClass} ${tw.btnSm}" onclick="window._pages.sandbox.toggleMarking()">${markingLabel}</button>
+                        ${isActive ? `<button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.archiveConversation()">${t('sandbox.archiveConversation')}</button>` : ''}
+                    </div>
                 </div>
+                <details id="sandboxConvInfo" class="mt-2">
+                    <summary class="text-xs text-blue-600 dark:text-blue-400 cursor-pointer">${t('sandbox.convInfo')}</summary>
+                    ${convInfoPanel}
+                </details>
             </div>
             ${groupsHtml}
             ${markingToolbar}
