@@ -177,13 +177,15 @@ async def _run_scraper_async(task: Any, *, triggered_by: str = "manual") -> dict
                         {"url": url},
                     )
 
-                # LLM processing
+                # LLM processing (auto-detect promotion URLs)
+                _is_promo = "/promotions/" in url or "/promo/" in url
                 processed = await process_article(
                     title=scraped.title,
                     content=scraped.content,
                     source_url=url,
                     api_key=settings.anthropic.api_key,
                     model=config["llm_model"],
+                    is_promotion=_is_promo,
                 )
 
                 if not processed.is_useful:
@@ -289,14 +291,20 @@ async def _run_scraper_async(task: Any, *, triggered_by: str = "manual") -> dict
     bind=True,
     max_retries=3,
 )  # type: ignore[untyped-decorator]
-def scrape_single_url(self: Any, url: str) -> dict[str, Any]:
+def scrape_single_url(
+    self: Any, url: str, *, is_promotion: bool = False, is_shop_info: bool = False
+) -> dict[str, Any]:
     """Scrape a single URL (for manual trigger from admin)."""
     import asyncio
 
-    return asyncio.get_event_loop().run_until_complete(_scrape_single_url_async(self, url))
+    return asyncio.get_event_loop().run_until_complete(
+        _scrape_single_url_async(self, url, is_promotion=is_promotion, is_shop_info=is_shop_info)
+    )
 
 
-async def _scrape_single_url_async(task: Any, url: str) -> dict[str, Any]:
+async def _scrape_single_url_async(
+    task: Any, url: str, *, is_promotion: bool = False, is_shop_info: bool = False
+) -> dict[str, Any]:
     """Async implementation of single-URL scraping."""
     from redis.asyncio import Redis
 
@@ -323,12 +331,18 @@ async def _scrape_single_url_async(task: Any, url: str) -> dict[str, Any]:
         if scraped is None:
             return {"status": "error", "reason": "Fetch failed"}
 
+        # Auto-detect promotion URLs if not explicitly set
+        _is_promotion = is_promotion or "/promotions/" in url or "/promo/" in url
+        _is_shop_info = is_shop_info
+
         processed = await process_article(
             title=scraped.title,
             content=scraped.content,
             source_url=url,
             api_key=settings.anthropic.api_key,
             model=config["llm_model"],
+            is_promotion=_is_promotion,
+            is_shop_info=_is_shop_info,
         )
 
         if not processed.is_useful:
