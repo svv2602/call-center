@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
+from unittest.mock import patch
+
 import pytest
 
 from src.core.sentence_buffer import SentenceReady
@@ -152,7 +156,7 @@ class TestTTSError:
     @pytest.mark.asyncio
     async def test_error_propagates(self):
         tts = MockTTSEngine(error=RuntimeError("TTS service unavailable"))
-        synth = StreamingTTSSynthesizer(tts)
+        synth = StreamingTTSSynthesizer(tts, prefetch=False)
         with pytest.raises(RuntimeError, match="TTS service unavailable"):
             await _collect(
                 synth.process(_aiter(SentenceReady(text="Привіт.")))
@@ -220,3 +224,148 @@ class TestRealisticSequence:
         assert isinstance(events[6], StreamDone)
         # Only 3 synthesize calls (3 sentences)
         assert tts.synthesize_count == 3
+
+
+# ---------------------------------------------------------------------------
+# TTS cache Prometheus metrics
+# ---------------------------------------------------------------------------
+
+
+class TestTTSCacheMetrics:
+    @pytest.mark.asyncio
+    async def test_cache_hit_increments_prometheus_counter(self):
+        """Prometheus tts_cache_hits_total increments on cache hit."""
+        from src.tts.google_tts import GoogleTTSEngine
+
+        engine = GoogleTTSEngine()
+        # Pre-populate cache
+        key = engine._cache_key("Привіт")
+        engine._cache[key] = b"\x00" * 100
+
+        with patch("src.tts.google_tts.tts_cache_hits_total") as mock_hits:
+            await engine.synthesize("Привіт")
+            mock_hits.inc.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_cache_miss_increments_prometheus_counter(self):
+        """Prometheus tts_cache_misses_total increments on cache miss."""
+        from unittest.mock import AsyncMock
+
+        from src.tts.google_tts import GoogleTTSEngine
+
+        engine = GoogleTTSEngine()
+        # Patch _synthesize_uncached to avoid real API call
+        engine._synthesize_uncached = AsyncMock(return_value=b"\x00" * 50)
+
+        with patch("src.tts.google_tts.tts_cache_misses_total") as mock_misses:
+            await engine.synthesize("Нова фраза для тесту")
+            mock_misses.inc.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Parallel TTS prefetch
+# ---------------------------------------------------------------------------
+
+
+class TestParallelPrefetch:
+    @pytest.mark.asyncio
+    async def test_prefetch_same_output(self):
+        """prefetch=True produces same AudioReady sequence as prefetch=False."""
+        events_input = [
+            SentenceReady(text="Перше речення."),
+            SentenceReady(text="Друге речення."),
+            SentenceReady(text="Третє речення."),
+            StreamDone(stop_reason="end_turn", usage=Usage(10, 20)),
+        ]
+
+        tts_seq = MockTTSEngine()
+        synth_seq = StreamingTTSSynthesizer(tts_seq, prefetch=False)
+        result_seq = await _collect(synth_seq.process(_aiter(*events_input)))
+
+        tts_pre = MockTTSEngine()
+        synth_pre = StreamingTTSSynthesizer(tts_pre, prefetch=True)
+        result_pre = await _collect(synth_pre.process(_aiter(*events_input)))
+
+        # Same number and types of events
+        assert len(result_seq) == len(result_pre)
+        for s, p in zip(result_seq, result_pre):
+            assert type(s) is type(p)
+            if isinstance(s, AudioReady):
+                assert s.text == p.text
+                assert len(s.audio) == len(p.audio)
+
+    @pytest.mark.asyncio
+    async def test_prefetch_overlaps_timing(self):
+        """With prefetch, 3 sentences take ~2x delay, not 3x."""
+        delay = 0.05
+        tts = MockTTSEngine(delay=delay)
+        synth = StreamingTTSSynthesizer(tts, prefetch=True)
+
+        events = [
+            SentenceReady(text="A."),
+            SentenceReady(text="B."),
+            SentenceReady(text="C."),
+            StreamDone(stop_reason="end_turn", usage=Usage(0, 0)),
+        ]
+
+        t0 = time.monotonic()
+        await _collect(synth.process(_aiter(*events)))
+        elapsed = time.monotonic() - t0
+
+        # With prefetch: synthesis of B starts while we yield A, etc.
+        # Sequential would be ~3*delay=0.15, prefetch should be ~2*delay=0.10
+        # Use generous upper bound to avoid flaky test
+        assert elapsed < 3 * delay, f"Expected overlap, took {elapsed:.3f}s"
+
+    @pytest.mark.asyncio
+    async def test_prefetch_flush_before_tool_call(self):
+        """Pending synthesis completes before ToolCallStart passes through."""
+        tts = MockTTSEngine(delay=0.01)
+        synth = StreamingTTSSynthesizer(tts, prefetch=True)
+        tc_start = ToolCallStart(id="t1", name="search_tires")
+
+        events = await _collect(
+            synth.process(
+                _aiter(
+                    SentenceReady(text="Зараз перевірю."),
+                    tc_start,
+                )
+            )
+        )
+
+        # AudioReady must come before ToolCallStart
+        assert len(events) == 2
+        assert isinstance(events[0], AudioReady)
+        assert events[0].text == "Зараз перевірю."
+        assert events[1] is tc_start
+
+    @pytest.mark.asyncio
+    async def test_prefetch_error_skips_sentence(self):
+        """If one synthesis fails, stream continues with remaining events."""
+        call_count = 0
+
+        class FailOnceTTS:
+            async def synthesize(self, text: str) -> bytes:
+                nonlocal call_count
+                call_count += 1
+                if call_count == 1:
+                    raise RuntimeError("TTS temporary error")
+                return b"\x00" * 100
+
+        synth = StreamingTTSSynthesizer(FailOnceTTS(), prefetch=True)  # type: ignore[arg-type]
+
+        events = await _collect(
+            synth.process(
+                _aiter(
+                    SentenceReady(text="Перше — зламається."),
+                    SentenceReady(text="Друге — ок."),
+                    StreamDone(stop_reason="end_turn", usage=Usage(0, 0)),
+                )
+            )
+        )
+
+        # First sentence fails, second succeeds, plus StreamDone
+        audio_events = [e for e in events if isinstance(e, AudioReady)]
+        assert len(audio_events) == 1
+        assert audio_events[0].text == "Друге — ок."
+        assert any(isinstance(e, StreamDone) for e in events)

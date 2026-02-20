@@ -11,6 +11,7 @@ import asyncio  # noqa: TC003
 import datetime
 import json
 import logging
+import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -116,6 +117,8 @@ class StreamingAgentLoop:
         interrupted = False
         disconnected = False
 
+        turn_start = time.monotonic()
+
         tool_round = 0
         while tool_round <= self._max_tool_rounds:
             # Stream LLM → sentence buffer → TTS → audio sender
@@ -130,7 +133,12 @@ class StreamingAgentLoop:
                 )
                 buffered = buffer_sentences(stream)
                 tts_stream = synthesize_stream(buffered, self._tts)
-                result = await send_audio_stream(tts_stream, self._conn, self._barge_in)
+                result = await send_audio_stream(
+                    tts_stream,
+                    self._conn,
+                    self._barge_in,
+                    turn_start_time=turn_start,
+                )
             except Exception:
                 logger.exception("LLM streaming error in round %d", tool_round)
                 return TurnResult(

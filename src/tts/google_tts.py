@@ -24,6 +24,7 @@ from src.agent.prompts import (
     WAIT_STATUS_TEXT,
     WAIT_TEXT,
 )
+from src.monitoring.metrics import tts_cache_hits_total, tts_cache_misses_total
 from src.tts.base import TTSConfig
 
 if TYPE_CHECKING:
@@ -96,9 +97,11 @@ class GoogleTTSEngine:
 
         if key in self._cache:
             self._cache_hits += 1
+            tts_cache_hits_total.inc()
             return self._cache[key]
 
         self._cache_misses += 1
+        tts_cache_misses_total.inc()
         audio = await self._synthesize_uncached(text)
 
         # Cache short phrases (likely to repeat)

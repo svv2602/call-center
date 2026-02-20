@@ -65,6 +65,14 @@ tts_delivery_ms = Histogram(
     buckets=[5, 10, 20, 30, 50, 75, 100, 200],
 )
 
+# --- Streaming pipeline metrics ---
+
+time_to_first_audio_ms = Histogram(
+    "callcenter_time_to_first_audio_ms",
+    "Time from turn start to first audio chunk sent (streaming pipeline)",
+    buckets=[100, 200, 300, 500, 700, 1000, 1500, 2000, 3000, 5000],
+)
+
 # --- Tool call metrics ---
 
 tool_call_duration_ms = Histogram(

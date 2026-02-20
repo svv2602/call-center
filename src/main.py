@@ -329,11 +329,35 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             except Exception:
                 logger.debug("Pattern search init failed, continuing without", exc_info=True)
 
+        # Create streaming loop if FF enabled and LLM router available
+        streaming_loop = None
+        ff = settings.feature_flags
+        if ff.streaming_llm and _llm_router is not None:
+            from src.agent.streaming_loop import StreamingAgentLoop
+
+            streaming_loop = StreamingAgentLoop(
+                llm_router=_llm_router,
+                tool_router=router,
+                tts=_tts_engine,
+                conn=conn,
+                barge_in_event=asyncio.Event(),
+                tools=tools,
+                system_prompt=system_prompt,
+                pii_vault=vault,
+            )
+
         # Run the pipeline (greeting → listen → STT → LLM → TTS loop)
         assert _tts_engine is not None, "TTS engine must be initialized before handling calls"
         pipeline = CallPipeline(
-            conn, stt, _tts_engine, agent, session, stt_config, templates,
+            conn,
+            stt,
+            _tts_engine,
+            agent,
+            session,
+            stt_config,
+            templates,
             pattern_search=pattern_search,
+            streaming_loop=streaming_loop,
         )
         await pipeline.run()
 
@@ -457,7 +481,9 @@ async def _periodic_embedding_check(interval_minutes: int = 5) -> None:
                         result = await generate_embeddings_inline(article_id)
                         logger.info(
                             "Embedding generated: %s (%s, %s chunks)",
-                            title, result["status"], result.get("chunks", "?"),
+                            title,
+                            result["status"],
+                            result.get("chunks", "?"),
                         )
                     except Exception:
                         logger.exception("Embedding failed for article %s", article_id)
@@ -522,7 +548,9 @@ async def main() -> None:
             set_evaluator_router(_llm_router)
             set_optimizer_router(_llm_router)
         except Exception:
-            logger.warning("LLM router init failed — falling back to direct Anthropic", exc_info=True)
+            logger.warning(
+                "LLM router init failed — falling back to direct Anthropic", exc_info=True
+            )
             _llm_router = None
     else:
         logger.info("LLM routing disabled (FF_LLM_ROUTING_ENABLED=false)")
@@ -564,7 +592,9 @@ async def main() -> None:
             logger.info("OneCClient initialized: %s", settings.onec.url)
 
             # Catalog sync is delegated to Celery (catalog_full_sync + catalog_incremental_sync)
-            logger.info("Catalog sync delegated to Celery (full daily 05:00, incremental every 5 min)")
+            logger.info(
+                "Catalog sync delegated to Celery (full daily 05:00, incremental every 5 min)"
+            )
         except Exception:
             logger.warning(
                 "1C integration init failed — MVP tools will use fallback HTTP", exc_info=True

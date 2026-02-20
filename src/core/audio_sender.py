@@ -9,7 +9,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from src.llm.models import StreamDone, ToolCallDelta, ToolCallEnd, ToolCallStart, Usage
-from src.monitoring.metrics import tts_delivery_ms
+from src.monitoring.metrics import time_to_first_audio_ms, tts_delivery_ms
 from src.tts.streaming_tts import AudioReady
 
 if TYPE_CHECKING:
@@ -64,9 +64,12 @@ class StreamingAudioSender:
         self,
         conn: AudioSocketConnection,
         barge_in_event: asyncio.Event | None = None,
+        turn_start_time: float | None = None,
     ) -> None:
         self._conn = conn
         self._barge_in = barge_in_event
+        self._turn_start_time = turn_start_time
+        self._first_audio_sent = False
 
     async def send(self, stream: AsyncIterator[TTSEvent]) -> SendResult:
         """Consume entire TTSEvent stream, return result."""
@@ -90,6 +93,12 @@ class StreamingAudioSender:
                 await self._conn.send_audio(event.audio)
                 tts_delivery_ms.observe((time.monotonic() - t0) * 1000)
                 spoken_parts.append(event.text)
+
+                # Record time-to-first-audio once per turn
+                if not self._first_audio_sent and self._turn_start_time is not None:
+                    ttfa = (time.monotonic() - self._turn_start_time) * 1000
+                    time_to_first_audio_ms.observe(ttfa)
+                    self._first_audio_sent = True
 
             elif isinstance(event, ToolCallStart):
                 pending_tool_calls[event.id] = _PendingToolCall(id=event.id, name=event.name)
@@ -124,7 +133,8 @@ async def send_audio_stream(
     stream: AsyncIterator[TTSEvent],
     conn: AudioSocketConnection,
     barge_in_event: asyncio.Event | None = None,
+    turn_start_time: float | None = None,
 ) -> SendResult:
     """Convenience wrapper — create sender and consume stream."""
-    sender = StreamingAudioSender(conn, barge_in_event)
+    sender = StreamingAudioSender(conn, barge_in_event, turn_start_time=turn_start_time)
     return await sender.send(stream)

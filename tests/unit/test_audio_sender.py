@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from collections.abc import AsyncIterator
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -314,3 +316,60 @@ class TestIntegration:
         assert result.usage == Usage(50, 30)
         assert result.interrupted is False
         assert result.disconnected is False
+
+
+# ---------------------------------------------------------------------------
+# Time-to-first-audio metric
+# ---------------------------------------------------------------------------
+
+
+class TestTimeToFirstAudio:
+    @pytest.mark.asyncio
+    async def test_ttfa_recorded_on_first_audio(self) -> None:
+        """Metric observed once on first AudioReady, not per chunk."""
+        conn = MockAudioSocketConnection()
+        start = time.monotonic()
+        sender = StreamingAudioSender(conn, turn_start_time=start)
+        stream = _events(
+            AudioReady(audio=b"\x01", text="Раз"),
+            AudioReady(audio=b"\x02", text="Два"),
+            StreamDone(stop_reason="end_turn", usage=Usage(0, 0)),
+        )
+
+        with patch("src.core.audio_sender.time_to_first_audio_ms") as mock_metric:
+            await sender.send(stream)
+            mock_metric.observe.assert_called_once()
+            # Value should be a positive number in ms
+            observed_ms = mock_metric.observe.call_args[0][0]
+            assert observed_ms >= 0
+
+    @pytest.mark.asyncio
+    async def test_ttfa_not_recorded_when_no_start_time(self) -> None:
+        """Backward compat: no turn_start_time → no metric."""
+        conn = MockAudioSocketConnection()
+        sender = StreamingAudioSender(conn)  # no turn_start_time
+        stream = _events(
+            AudioReady(audio=b"\x01", text="Тест"),
+            StreamDone(stop_reason="end_turn", usage=Usage(0, 0)),
+        )
+
+        with patch("src.core.audio_sender.time_to_first_audio_ms") as mock_metric:
+            await sender.send(stream)
+            mock_metric.observe.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ttfa_not_recorded_when_all_skipped(self) -> None:
+        """Barge-in skips all audio → no TTFA metric."""
+        conn = MockAudioSocketConnection()
+        barge_in = asyncio.Event()
+        barge_in.set()  # pre-set: all audio skipped
+        start = time.monotonic()
+        sender = StreamingAudioSender(conn, barge_in_event=barge_in, turn_start_time=start)
+        stream = _events(
+            AudioReady(audio=b"\x01", text="Skipped"),
+            StreamDone(stop_reason="end_turn", usage=Usage(0, 0)),
+        )
+
+        with patch("src.core.audio_sender.time_to_first_audio_ms") as mock_metric:
+            await sender.send(stream)
+            mock_metric.observe.assert_not_called()

@@ -88,6 +88,7 @@ def _select_wait_message(user_text: str, default: str) -> str:
             return message
     return default
 
+
 # --- Contextual farewell prompt ---
 
 _FAREWELL_SYSTEM_PROMPT = (
@@ -98,6 +99,7 @@ _FAREWELL_SYSTEM_PROMPT = (
 
 if TYPE_CHECKING:
     from src.agent.agent import LLMAgent
+    from src.agent.streaming_loop import StreamingAgentLoop
     from src.sandbox.patterns import PatternSearch
     from src.tts.base import TTSEngine
 
@@ -126,6 +128,7 @@ class CallPipeline:
         stt_config: STTConfig | None = None,
         templates: dict[str, str] | None = None,
         pattern_search: PatternSearch | None = None,
+        streaming_loop: StreamingAgentLoop | None = None,
     ) -> None:
         self._conn = conn
         self._stt = stt
@@ -135,6 +138,8 @@ class CallPipeline:
         self._stt_config = stt_config or STTConfig()
         self._templates = templates or _DEFAULT_TEMPLATES
         self._pattern_search = pattern_search
+        self._streaming_loop = streaming_loop
+        self._llm_history: list[dict] = []  # persistent LLM context for streaming path
         self._speaking = False
         self._barge_in_event = asyncio.Event()
 
@@ -229,12 +234,6 @@ class CallPipeline:
                 detected_language=transcript.language,
             )
 
-            # Process through LLM
-            self._session.transition_to(CallState.PROCESSING)
-            wait_default = self._templates.get("wait", WAIT_TEXT)
-            wait_msg = _select_wait_message(transcript.text, wait_default)
-            await self._speak(wait_msg)  # contextual filler while processing
-
             # Search for relevant conversation patterns
             pattern_context = None
             if self._pattern_search is not None:
@@ -246,9 +245,7 @@ class CallPipeline:
                     )
                     pattern_context = await self._pattern_search.format_for_prompt(patterns)
                     if patterns:
-                        await self._pattern_search.increment_usage(
-                            [p["id"] for p in patterns]
-                        )
+                        await self._pattern_search.increment_usage([p["id"] for p in patterns])
                         logger.info(
                             "Pattern injection: call=%s, patterns_found=%d, intents=%s",
                             self._session.channel_uuid,
@@ -258,43 +255,91 @@ class CallPipeline:
                 except Exception:
                     logger.warning("Pattern search failed, continuing without", exc_info=True)
 
-            start = time.monotonic()
-            try:
-                response_text, _ = await asyncio.wait_for(
-                    self._agent.process_message(
-                        user_text=transcript.text,
-                        conversation_history=self._session.messages_for_llm,
-                        pattern_context=pattern_context,
-                    ),
-                    timeout=AGENT_PROCESSING_TIMEOUT_SEC,
-                )
-            except TimeoutError:
-                logger.error(
-                    "Agent timeout after %ds: call=%s",
-                    AGENT_PROCESSING_TIMEOUT_SEC,
-                    self._session.channel_uuid,
-                )
-                response_text = ""
+            if self._streaming_loop is not None:
+                # STREAMING PATH — audio starts immediately, no WAIT filler
+                self._session.transition_to(CallState.SPEAKING)
+                start = time.monotonic()
+                try:
+                    result = await asyncio.wait_for(
+                        self._streaming_loop.run_turn(
+                            user_text=transcript.text,
+                            conversation_history=self._llm_history,
+                            caller_phone=self._session.caller_phone,
+                            order_id=self._session.order_id,
+                            pattern_context=pattern_context,
+                        ),
+                        timeout=AGENT_PROCESSING_TIMEOUT_SEC,
+                    )
+                except TimeoutError:
+                    logger.error(
+                        "Streaming agent timeout after %ds: call=%s",
+                        AGENT_PROCESSING_TIMEOUT_SEC,
+                        self._session.channel_uuid,
+                    )
+                    result = None
 
-            llm_latency_ms = int((time.monotonic() - start) * 1000)
+                llm_latency_ms = int((time.monotonic() - start) * 1000)
 
-            logger.info(
-                "Turn completed: call=%s, user='%s', agent='%s', llm=%dms",
-                self._session.channel_uuid,
-                transcript.text[:50],
-                response_text[:50] if response_text else "(empty)",
-                llm_latency_ms,
-            )
-
-            if response_text:
-                self._session.add_assistant_turn(response_text)
-                await self._speak_streaming(response_text)
+                if result is not None and result.spoken_text:
+                    self._session.add_assistant_turn(result.spoken_text)
+                    logger.info(
+                        "Streaming turn completed: call=%s, user='%s', agent='%s', "
+                        "tools=%d, llm=%dms",
+                        self._session.channel_uuid,
+                        transcript.text[:50],
+                        result.spoken_text[:50],
+                        result.tool_calls_made,
+                        llm_latency_ms,
+                    )
+                else:
+                    logger.warning("Empty streaming response: call=%s", self._session.channel_uuid)
+                    fallback = self._templates.get("error", ERROR_TEXT)
+                    self._session.add_assistant_turn(fallback)
+                    await self._speak(fallback)
             else:
-                # Never leave the caller in silence — speak an error fallback
-                logger.warning("Empty agent response: call=%s", self._session.channel_uuid)
-                fallback = self._templates.get("error", ERROR_TEXT)
-                self._session.add_assistant_turn(fallback)
-                await self._speak(fallback)
+                # BLOCKING PATH — existing code unchanged
+                self._session.transition_to(CallState.PROCESSING)
+                wait_default = self._templates.get("wait", WAIT_TEXT)
+                wait_msg = _select_wait_message(transcript.text, wait_default)
+                await self._speak(wait_msg)  # contextual filler while processing
+
+                start = time.monotonic()
+                try:
+                    response_text, _ = await asyncio.wait_for(
+                        self._agent.process_message(
+                            user_text=transcript.text,
+                            conversation_history=self._session.messages_for_llm,
+                            pattern_context=pattern_context,
+                        ),
+                        timeout=AGENT_PROCESSING_TIMEOUT_SEC,
+                    )
+                except TimeoutError:
+                    logger.error(
+                        "Agent timeout after %ds: call=%s",
+                        AGENT_PROCESSING_TIMEOUT_SEC,
+                        self._session.channel_uuid,
+                    )
+                    response_text = ""
+
+                llm_latency_ms = int((time.monotonic() - start) * 1000)
+
+                logger.info(
+                    "Turn completed: call=%s, user='%s', agent='%s', llm=%dms",
+                    self._session.channel_uuid,
+                    transcript.text[:50],
+                    response_text[:50] if response_text else "(empty)",
+                    llm_latency_ms,
+                )
+
+                if response_text:
+                    self._session.add_assistant_turn(response_text)
+                    await self._speak_streaming(response_text)
+                else:
+                    # Never leave the caller in silence — speak an error fallback
+                    logger.warning("Empty agent response: call=%s", self._session.channel_uuid)
+                    fallback = self._templates.get("error", ERROR_TEXT)
+                    self._session.add_assistant_turn(fallback)
+                    await self._speak(fallback)
 
             # Check if transfer was triggered
             if self._session.transferred:
@@ -333,7 +378,9 @@ class CallPipeline:
         except TimeoutError:
             logger.warning("Contextual farewell LLM timed out: %s", self._session.channel_uuid)
         except Exception:
-            logger.warning("Contextual farewell LLM failed: %s", self._session.channel_uuid, exc_info=True)
+            logger.warning(
+                "Contextual farewell LLM failed: %s", self._session.channel_uuid, exc_info=True
+            )
 
         return None
 
