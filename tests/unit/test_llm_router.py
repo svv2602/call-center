@@ -39,9 +39,9 @@ class TestLLMRouterConfig:
         assert router.config is not None
         assert "providers" in router.config
         assert "tasks" in router.config
-        assert router.config["tasks"]["agent"]["primary"] == "anthropic-sonnet"
+        assert router.config["tasks"]["agent"]["primary"] == "anthropic-haiku"
         # Anthropic providers should be initialized (key is set)
-        assert "anthropic-sonnet" in router.providers
+        assert "anthropic-haiku" in router.providers
         assert "anthropic-haiku" in router.providers
         await router.close()
 
@@ -100,7 +100,7 @@ class TestLLMRouterConfig:
         with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
             await router.initialize(redis=None)
 
-        assert router.config["tasks"]["agent"]["primary"] == "anthropic-sonnet"
+        assert router.config["tasks"]["agent"]["primary"] == "anthropic-haiku"
         await router.close()
 
 

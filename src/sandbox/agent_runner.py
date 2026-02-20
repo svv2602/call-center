@@ -55,6 +55,7 @@ async def create_sandbox_agent(
     engine: AsyncEngine,
     prompt_version_id: UUID | None = None,
     tool_mode: str = "mock",
+    model: str | None = None,
 ) -> LLMAgent:
     """Create an LLMAgent configured for sandbox testing.
 
@@ -62,6 +63,7 @@ async def create_sandbox_agent(
         engine: Database engine for loading prompts and tool overrides.
         prompt_version_id: Specific prompt version to use (None = active).
         tool_mode: 'mock' for static responses, 'live' for real Store API.
+        model: LLM model ID to use (None = default from settings).
 
     Returns:
         Configured LLMAgent instance.
@@ -98,7 +100,7 @@ async def create_sandbox_agent(
 
     return LLMAgent(
         api_key=settings.anthropic.api_key,
-        model=settings.anthropic.model,
+        model=model or settings.anthropic.model,
         tool_router=tool_router,
         tools=tools,
         system_prompt=system_prompt,
@@ -111,6 +113,7 @@ async def process_sandbox_turn(
     user_text: str,
     history: list[dict[str, Any]],
     is_mock: bool = True,
+    pattern_context: str | None = None,
 ) -> SandboxTurnResult:
     """Process a single sandbox turn, capturing metrics and tool calls.
 
@@ -119,6 +122,7 @@ async def process_sandbox_turn(
         user_text: Customer message text.
         history: Conversation history (Anthropic format). Will be copied.
         is_mock: Whether tools are in mock mode.
+        pattern_context: Optional pattern injection text for system prompt.
 
     Returns:
         SandboxTurnResult with response, updated history, and metrics.
@@ -149,7 +153,7 @@ async def process_sandbox_turn(
     try:
         start = time.monotonic()
         response_text, updated_history = await agent.process_message(
-            user_text, history_copy
+            user_text, history_copy, pattern_context=pattern_context,
         )
         latency_ms = int((time.monotonic() - start) * 1000)
     finally:

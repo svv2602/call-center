@@ -11,11 +11,14 @@ let _currentConvId = null;
 let _currentConv = null;
 let _turns = [];
 let _sending = false;
+let _markingMode = false;
+let _selectedTurnIds = new Set();
+let _turnGroups = [];
 
 // ─── Tab switching ───────────────────────────────────────────
 function showTab(tab) {
     _activeTab = tab;
-    ['chat', 'history', 'regression'].forEach(t => {
+    ['chat', 'history', 'regression', 'patterns'].forEach(t => {
         const el = document.getElementById(`sandboxContent-${t}`);
         if (el) el.style.display = t === tab ? 'block' : 'none';
     });
@@ -26,6 +29,7 @@ function showTab(tab) {
     if (tab === 'chat') renderChat();
     if (tab === 'history') loadHistory();
     if (tab === 'regression') loadRegressionRuns();
+    if (tab === 'patterns') loadPatterns();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -53,6 +57,13 @@ async function loadConversation(convId) {
         _currentConv = data.item;
         _turns = data.turns || [];
         _currentConvId = convId;
+
+        // Load turn groups
+        try {
+            const gdata = await api(`/admin/sandbox/conversations/${convId}/turn-groups`);
+            _turnGroups = gdata.items || [];
+        } catch { _turnGroups = []; }
+
         renderConversationView();
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('sandbox.loadFailed', { error: escapeHtml(e.message) })}</div>`;
@@ -71,9 +82,15 @@ function renderConversationView() {
     const promptBadge = conv.prompt_version_name
         ? `<span class="${tw.badgeBlue}">${escapeHtml(conv.prompt_version_name)}</span>`
         : `<span class="${tw.badge}">${t('sandbox.promptVersionDefault')}</span>`;
+    const modelBadge = conv.model
+        ? `<span class="${tw.badgeGray}">${escapeHtml(conv.model.replace('claude-', '').replace(/-\d+$/, ''))}</span>`
+        : '';
     const scenarioBadge = conv.scenario_type
         ? `<span class="${tw.badge}">${escapeHtml(conv.scenario_type)}</span>`
         : '';
+
+    const markingBtnClass = _markingMode ? tw.btnPrimary : tw.btnSecondary;
+    const markingLabel = t('sandbox.markingMode');
 
     // Messages
     let messagesHtml = '';
@@ -83,15 +100,63 @@ function renderConversationView() {
         messagesHtml = _turns.map(turn => renderTurn(turn)).join('');
     }
 
+    // Marking mode toolbar
+    let markingToolbar = '';
+    if (_markingMode && _selectedTurnIds.size >= 1) {
+        markingToolbar = `
+            <div class="flex items-center gap-2 mb-2 p-2 bg-yellow-50 dark:bg-yellow-950/20 rounded border border-yellow-200 dark:border-yellow-800">
+                <span class="text-sm">${t('sandbox.turnsSelected', { count: _selectedTurnIds.size })}</span>
+                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.showGroupModal()">${t('sandbox.createGroup')}</button>
+            </div>`;
+    }
+
+    // Groups panel
+    let groupsHtml = '';
+    if (_turnGroups.length > 0) {
+        const groupRows = _turnGroups.map(g => {
+            const typeBadge = g.pattern_type === 'positive'
+                ? `<span class="${tw.badgeGreen}">positive</span>`
+                : `<span class="${tw.badgeRed}">negative</span>`;
+            const exportBadge = g.is_exported
+                ? `<span class="${tw.badgeBlue}">${t('sandbox.alreadyExported')}</span>`
+                : `<button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.showExportModal('${g.id}')">${t('sandbox.exportToPatterns')}</button>`;
+            const ratingStars = g.rating ? '&#9733;'.repeat(g.rating) : '-';
+            const tagsHtml = (g.tags || []).map(tg => `<span class="${tw.badge}">${escapeHtml(tg)}</span>`).join(' ');
+            return `
+                <div class="p-2 rounded border ${g.pattern_type === 'positive' ? 'border-emerald-300 dark:border-emerald-800 bg-emerald-50/50 dark:bg-emerald-950/10' : 'border-red-300 dark:border-red-800 bg-red-50/50 dark:bg-red-950/10'} mb-2">
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="text-sm font-medium">${escapeHtml(g.intent_label)}</span>
+                        ${typeBadge}
+                        <span class="text-amber-400 text-sm">${ratingStars}</span>
+                        <div class="ml-auto flex gap-1">
+                            ${exportBadge}
+                            <button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.sandbox.deleteGroup('${g.id}')">&times;</button>
+                        </div>
+                    </div>
+                    <div class="${tw.mutedText}">${g.turn_ids.length} ${t('sandbox.turnsCount').toLowerCase()} ${tagsHtml}</div>
+                    ${g.rating_comment ? `<div class="${tw.mutedText}">${escapeHtml(g.rating_comment)}</div>` : ''}
+                    ${g.correction ? `<div class="text-xs text-red-600 dark:text-red-400 mt-1">${t('sandbox.correction')}: ${escapeHtml(g.correction)}</div>` : ''}
+                </div>`;
+        }).join('');
+        groupsHtml = `
+            <details class="mb-3" open>
+                <summary class="text-sm font-semibold text-neutral-700 dark:text-neutral-300 cursor-pointer mb-2">${t('sandbox.turnGroups')} (${_turnGroups.length})</summary>
+                ${groupRows}
+            </details>`;
+    }
+
     container.innerHTML = `
         <div class="flex flex-wrap items-center gap-2 mb-4 pb-3 border-b border-neutral-200 dark:border-neutral-700">
             <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mr-2">${escapeHtml(conv.title)}</h2>
-            ${promptBadge} ${toolBadge} ${scenarioBadge}
+            ${promptBadge} ${toolBadge} ${modelBadge} ${scenarioBadge}
             <div class="ml-auto flex gap-2">
+                <button class="${markingBtnClass} ${tw.btnSm}" onclick="window._pages.sandbox.toggleMarking()">${markingLabel}</button>
                 <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.showNewConvModal()">${t('sandbox.newConversation')}</button>
                 ${isActive ? `<button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.archiveConversation()">${t('sandbox.archiveConversation')}</button>` : ''}
             </div>
         </div>
+        ${groupsHtml}
+        ${markingToolbar}
         <div id="sandboxMessages" class="max-h-[500px] overflow-y-auto mb-4 space-y-1">
             ${messagesHtml}
         </div>
@@ -111,13 +176,42 @@ function renderConversationView() {
     if (msgArea) msgArea.scrollTop = msgArea.scrollHeight;
 }
 
+function _getTurnGroupIds() {
+    const ids = new Set();
+    for (const g of _turnGroups) {
+        for (const tid of g.turn_ids) ids.add(tid);
+    }
+    return ids;
+}
+
+function _getGroupForTurn(turnId) {
+    return _turnGroups.find(g => g.turn_ids.includes(turnId));
+}
+
 function renderTurn(turn) {
     const isCustomer = turn.speaker === 'customer';
     const speakerClass = isCustomer ? tw.speakerCustomer : tw.speakerBot;
     const speakerLabel = isCustomer ? t('sandbox.customer') : t('sandbox.agent');
-    const bgClass = isCustomer
-        ? 'bg-blue-50 dark:bg-blue-950/30'
-        : 'bg-emerald-50 dark:bg-emerald-950/30';
+
+    // Group membership styling
+    const group = _getGroupForTurn(turn.id);
+    let bgClass;
+    if (group) {
+        bgClass = group.pattern_type === 'positive'
+            ? 'bg-emerald-100 dark:bg-emerald-950/40 border-l-4 border-emerald-500'
+            : 'bg-red-100 dark:bg-red-950/40 border-l-4 border-red-500';
+    } else {
+        bgClass = isCustomer
+            ? 'bg-blue-50 dark:bg-blue-950/30'
+            : 'bg-emerald-50 dark:bg-emerald-950/30';
+    }
+
+    // Checkbox for marking mode
+    let checkboxHtml = '';
+    if (_markingMode) {
+        const checked = _selectedTurnIds.has(turn.id) ? 'checked' : '';
+        checkboxHtml = `<input type="checkbox" ${checked} onchange="window._pages.sandbox.toggleTurnSelect('${turn.id}')" class="mr-2 mt-1 cursor-pointer">`;
+    }
 
     let toolCallsHtml = '';
     if (turn.tool_calls && turn.tool_calls.length > 0) {
@@ -172,20 +266,131 @@ function renderTurn(turn) {
         branchHtml = `<button class="${tw.btnSecondary} ${tw.btnSm} mt-1" onclick="window._pages.sandbox.branchFrom('${turn.id}', ${turn.turn_number})">${t('sandbox.branch')}</button>`;
     }
 
+    // Group badge
+    let groupBadge = '';
+    if (group) {
+        const icon = group.pattern_type === 'positive' ? '&#9989;' : '&#10060;';
+        groupBadge = `<span class="text-xs ml-2">${icon} ${escapeHtml(group.intent_label)}</span>`;
+    }
+
     return `
         <div class="${bgClass} rounded-lg px-3 py-2">
-            <div class="flex items-center gap-2">
-                <span class="${speakerClass}">${speakerLabel}</span>
-                <span class="${tw.mutedText}">${formatDate(turn.created_at)}</span>
-            </div>
-            <div class="${tw.turnText}">${escapeHtml(turn.content)}</div>
-            ${toolCallsHtml}
-            ${metricsHtml}
-            <div class="flex items-center gap-2 flex-wrap">
-                ${ratingHtml}
-                ${branchHtml}
+            <div class="flex items-start gap-1">
+                ${checkboxHtml}
+                <div class="flex-1">
+                    <div class="flex items-center gap-2">
+                        <span class="${speakerClass}">${speakerLabel}</span>
+                        <span class="${tw.mutedText}">${formatDate(turn.created_at)}</span>
+                        ${groupBadge}
+                    </div>
+                    <div class="${tw.turnText}">${escapeHtml(turn.content)}</div>
+                    ${toolCallsHtml}
+                    ${metricsHtml}
+                    <div class="flex items-center gap-2 flex-wrap">
+                        ${ratingHtml}
+                        ${branchHtml}
+                    </div>
+                </div>
             </div>
         </div>`;
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Marking Mode & Turn Groups
+// ═══════════════════════════════════════════════════════════
+
+function toggleMarking() {
+    _markingMode = !_markingMode;
+    _selectedTurnIds.clear();
+    renderConversationView();
+}
+
+function toggleTurnSelect(turnId) {
+    if (_selectedTurnIds.has(turnId)) _selectedTurnIds.delete(turnId);
+    else _selectedTurnIds.add(turnId);
+    renderConversationView();
+}
+
+function showGroupModal() {
+    if (_selectedTurnIds.size < 1) return;
+    document.getElementById('sandboxGroupIntent').value = '';
+    document.getElementById('sandboxGroupType').value = 'positive';
+    document.getElementById('sandboxGroupRating').value = '';
+    document.getElementById('sandboxGroupComment').value = '';
+    document.getElementById('sandboxGroupCorrection').value = '';
+    document.getElementById('sandboxGroupTags').value = '';
+    document.getElementById('sandboxGroupCorrectionWrap').style.display = 'none';
+    document.getElementById('sandboxGroupModal').classList.add('show');
+}
+
+async function submitGroup() {
+    const intentLabel = document.getElementById('sandboxGroupIntent').value.trim();
+    if (!intentLabel) { showToast(t('sandbox.intentLabel'), 'error'); return; }
+
+    const patternType = document.getElementById('sandboxGroupType').value;
+    const ratingVal = document.getElementById('sandboxGroupRating').value;
+    const rating = ratingVal ? parseInt(ratingVal) : null;
+    const ratingComment = document.getElementById('sandboxGroupComment').value.trim() || null;
+    const correction = document.getElementById('sandboxGroupCorrection').value.trim() || null;
+    const tagsRaw = document.getElementById('sandboxGroupTags').value.trim();
+    const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
+
+    try {
+        await api(`/admin/sandbox/conversations/${_currentConvId}/turn-groups`, {
+            method: 'POST',
+            body: JSON.stringify({
+                turn_ids: Array.from(_selectedTurnIds),
+                intent_label: intentLabel,
+                pattern_type: patternType,
+                rating,
+                rating_comment: ratingComment,
+                correction,
+                tags,
+            }),
+        });
+        closeModal('sandboxGroupModal');
+        showToast(t('sandbox.groupCreated'));
+        _selectedTurnIds.clear();
+        _markingMode = false;
+        await loadConversation(_currentConvId);
+    } catch (e) {
+        showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
+    }
+}
+
+async function deleteGroup(groupId) {
+    if (!confirm(t('sandbox.deleteConfirm', { title: 'group' }))) return;
+    try {
+        await api(`/admin/sandbox/turn-groups/${groupId}`, { method: 'DELETE' });
+        showToast(t('sandbox.groupDeleted'));
+        await loadConversation(_currentConvId);
+    } catch (e) {
+        showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
+    }
+}
+
+function showExportModal(groupId) {
+    document.getElementById('sandboxExportGroupId').value = groupId;
+    document.getElementById('sandboxExportGuidance').value = '';
+    document.getElementById('sandboxExportModal').classList.add('show');
+}
+
+async function submitExport() {
+    const groupId = document.getElementById('sandboxExportGroupId').value;
+    const guidanceNote = document.getElementById('sandboxExportGuidance').value.trim();
+    if (!guidanceNote) { showToast(t('sandbox.guidanceNote'), 'error'); return; }
+
+    try {
+        await api(`/admin/sandbox/turn-groups/${groupId}/export`, {
+            method: 'POST',
+            body: JSON.stringify({ guidance_note: guidanceNote }),
+        });
+        closeModal('sandboxExportModal');
+        showToast(t('sandbox.exportSuccess'));
+        await loadConversation(_currentConvId);
+    } catch (e) {
+        showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
+    }
 }
 
 async function sendMessage() {
@@ -304,6 +509,17 @@ async function showNewConvModal() {
         }
     } catch { /* ignore — select keeps default */ }
 
+    // Load models for select
+    try {
+        const data = await api('/admin/sandbox/models');
+        const select = document.getElementById('sandboxConvModel');
+        select.innerHTML = `<option value="">${t('sandbox.modelDefault')}</option>`;
+        for (const m of data.models || []) {
+            const speedLabel = m.speed === 'fast' ? ' ⚡' : '';
+            select.innerHTML += `<option value="${m.id}">${escapeHtml(m.label)}${speedLabel}</option>`;
+        }
+    } catch { /* ignore */ }
+
     document.getElementById('sandboxNewConvModal').classList.add('show');
 }
 
@@ -312,6 +528,7 @@ async function createConversation() {
     if (!title) { showToast(t('sandbox.conversationTitle'), 'error'); return; }
 
     const promptId = document.getElementById('sandboxConvPrompt').value || null;
+    const modelId = document.getElementById('sandboxConvModel').value || null;
     const toolMode = document.getElementById('sandboxConvToolMode').value;
     const scenarioType = document.getElementById('sandboxConvScenario').value || null;
     const tagsRaw = document.getElementById('sandboxConvTags').value.trim();
@@ -320,6 +537,7 @@ async function createConversation() {
     try {
         const body = { title, tool_mode: toolMode, tags };
         if (promptId) body.prompt_version_id = promptId;
+        if (modelId) body.model = modelId;
         if (scenarioType) body.scenario_type = scenarioType;
 
         const result = await api('/admin/sandbox/conversations', {
@@ -372,6 +590,9 @@ async function loadHistory() {
             const toolBadge = item.tool_mode === 'mock'
                 ? `<span class="${tw.badgeYellow}">${t('sandbox.mock')}</span>`
                 : `<span class="${tw.badgeGreen}">${t('sandbox.live')}</span>`;
+            const modelLabel = item.model
+                ? item.model.replace('claude-', '').replace(/-\d+$/, '')
+                : '-';
             const avgRating = item.avg_rating != null
                 ? parseFloat(item.avg_rating).toFixed(1) + ' &#9733;'
                 : '-';
@@ -381,6 +602,7 @@ async function loadHistory() {
                     <td class="${tw.td}">${escapeHtml(item.title)}</td>
                     <td class="${tw.td}">${item.prompt_version_name ? `<span class="${tw.badgeBlue}">${escapeHtml(item.prompt_version_name)}</span>` : '-'}</td>
                     <td class="${tw.td}">${item.scenario_type ? `<span class="${tw.badge}">${escapeHtml(item.scenario_type)}</span>` : '-'}</td>
+                    <td class="${tw.td}">${modelLabel}</td>
                     <td class="${tw.td}">${toolBadge}</td>
                     <td class="${tw.td}">${item.turns_count || 0}</td>
                     <td class="${tw.td}">${avgRating}</td>
@@ -400,6 +622,7 @@ async function loadHistory() {
                 <th class="${tw.th}">${t('sandbox.conversationTitle')}</th>
                 <th class="${tw.th}">${t('sandbox.promptVersion')}</th>
                 <th class="${tw.th}">${t('sandbox.scenarioType')}</th>
+                <th class="${tw.th}">${t('sandbox.model')}</th>
                 <th class="${tw.th}">${t('sandbox.toolMode')}</th>
                 <th class="${tw.th}">${t('sandbox.turnsCount')}</th>
                 <th class="${tw.th}">${t('sandbox.avgRating')}</th>
@@ -590,6 +813,135 @@ async function toggleBaseline(convId, isBaseline) {
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  Patterns Tab (Phase 4)
+// ═══════════════════════════════════════════════════════════
+
+async function loadPatterns() {
+    const container = document.getElementById('sandboxPatternsContainer');
+    container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+
+    try {
+        const data = await api('/admin/sandbox/patterns?limit=100');
+        const items = data.items || [];
+
+        if (items.length === 0) {
+            container.innerHTML = `<div class="${tw.emptyState}">${t('sandbox.noPatterns')}</div>`;
+            return;
+        }
+
+        const rows = items.map(item => {
+            const typeBadge = item.pattern_type === 'positive'
+                ? `<span class="${tw.badgeGreen}">positive</span>`
+                : `<span class="${tw.badgeRed}">negative</span>`;
+            const activeBadge = item.is_active
+                ? `<span class="${tw.badgeGreen}">${t('sandbox.patternActive')}</span>`
+                : `<span class="${tw.badgeGray}">${t('sandbox.patternInactive')}</span>`;
+            const tagsHtml = (item.tags || []).map(tg => `<span class="${tw.badge}">${escapeHtml(tg)}</span>`).join(' ');
+            const rating = item.rating ? '&#9733;'.repeat(item.rating) : '-';
+
+            return `
+                <tr class="${tw.trHover}">
+                    <td class="${tw.td}">${escapeHtml(item.intent_label)}</td>
+                    <td class="${tw.td}">${typeBadge}</td>
+                    <td class="${tw.td}"><div class="max-w-xs truncate text-xs">${escapeHtml(item.guidance_note)}</div></td>
+                    <td class="${tw.td}"><div class="max-w-xs truncate text-xs">${escapeHtml(item.customer_messages?.substring(0, 80) || '-')}</div></td>
+                    <td class="${tw.td}"><span class="text-amber-400">${rating}</span></td>
+                    <td class="${tw.td}">${item.times_used}</td>
+                    <td class="${tw.td}">${activeBadge}</td>
+                    <td class="${tw.td}">${tagsHtml}</td>
+                    <td class="${tw.td}">
+                        <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.togglePatternActive('${item.id}', ${item.is_active})">${item.is_active ? 'Off' : 'On'}</button>
+                        <button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.sandbox.deletePattern('${item.id}')">&times;</button>
+                    </td>
+                </tr>`;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="mb-4 flex flex-wrap items-center gap-2">
+                <input type="text" id="patternSearchQuery" placeholder="${t('sandbox.testSearchHint')}"
+                    class="${tw.formInput} flex-1"
+                    onkeydown="if(event.key==='Enter')window._pages.sandbox.testSearch()">
+                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.testSearch()">${t('sandbox.testSearch')}</button>
+            </div>
+            <div id="patternSearchResults" class="mb-4"></div>
+            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr>
+                <th class="${tw.th}">${t('sandbox.intentLabel')}</th>
+                <th class="${tw.th}">${t('sandbox.patternType')}</th>
+                <th class="${tw.th}">${t('sandbox.guidanceNote')}</th>
+                <th class="${tw.th}">${t('sandbox.customerMessages')}</th>
+                <th class="${tw.th}">${t('sandbox.avgRating')}</th>
+                <th class="${tw.th}">${t('sandbox.timesUsed')}</th>
+                <th class="${tw.th}">${t('sandbox.status')}</th>
+                <th class="${tw.th}">${t('sandbox.tags')}</th>
+                <th class="${tw.th}"></th>
+            </tr></thead><tbody>${rows}</tbody></table></div>`;
+    } catch (e) {
+        container.innerHTML = `<div class="${tw.emptyState}">${t('sandbox.loadFailed', { error: escapeHtml(e.message) })}</div>`;
+    }
+}
+
+async function togglePatternActive(patternId, currentActive) {
+    try {
+        await api(`/admin/sandbox/patterns/${patternId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ is_active: !currentActive }),
+        });
+        loadPatterns();
+    } catch (e) {
+        showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
+    }
+}
+
+async function deletePattern(patternId) {
+    if (!confirm(t('sandbox.deleteConfirm', { title: 'pattern' }))) return;
+    try {
+        await api(`/admin/sandbox/patterns/${patternId}`, { method: 'DELETE' });
+        loadPatterns();
+    } catch (e) {
+        showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
+    }
+}
+
+async function testSearch() {
+    const query = document.getElementById('patternSearchQuery')?.value?.trim();
+    if (!query) return;
+
+    const container = document.getElementById('patternSearchResults');
+    container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+
+    try {
+        const params = new URLSearchParams({ query, top_k: '5', min_similarity: '0.5' });
+        const data = await api(`/admin/sandbox/patterns/search-test?${params}`, { method: 'POST' });
+        const results = data.results || [];
+
+        if (results.length === 0) {
+            container.innerHTML = `<div class="${tw.mutedText} p-2">${t('sandbox.noPatterns')}</div>`;
+            return;
+        }
+
+        const rows = results.map(r => {
+            const sim = (parseFloat(r.similarity) * 100).toFixed(1);
+            const typeBadge = r.pattern_type === 'positive'
+                ? `<span class="${tw.badgeGreen}">+</span>`
+                : `<span class="${tw.badgeRed}">&minus;</span>`;
+            return `
+                <div class="flex items-center gap-2 p-2 rounded bg-neutral-50 dark:bg-neutral-800 mb-1">
+                    ${typeBadge}
+                    <span class="text-sm font-medium">${escapeHtml(r.intent_label)}</span>
+                    <span class="${tw.badgeBlue}">${sim}%</span>
+                    <span class="${tw.mutedText} text-xs truncate flex-1">${escapeHtml(r.guidance_note)}</span>
+                </div>`;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="text-xs font-semibold text-neutral-500 mb-1">${t('sandbox.similarity')} (${results.length})</div>
+            ${rows}`;
+    } catch (e) {
+        container.innerHTML = `<div class="${tw.mutedText} p-2">${escapeHtml(e.message)}</div>`;
+    }
+}
+
 // ─── Init ────────────────────────────────────────────────────
 export function init() {
     registerPageLoader('sandbox', () => showTab(_activeTab));
@@ -612,4 +964,16 @@ window._pages.sandbox = {
     showRegressionDetail,
     replayConversation,
     toggleBaseline,
+    // Phase 4: Turn Groups + Patterns
+    toggleMarking,
+    toggleTurnSelect,
+    showGroupModal,
+    submitGroup,
+    deleteGroup,
+    showExportModal,
+    submitExport,
+    loadPatterns,
+    togglePatternActive,
+    deletePattern,
+    testSearch,
 };

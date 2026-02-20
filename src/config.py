@@ -38,7 +38,7 @@ class GoogleTTSSettings(BaseSettings):
 
 class AnthropicSettings(BaseSettings):
     api_key: str = ""
-    model: str = "claude-sonnet-4-5-20250929"
+    model: str = "claude-haiku-4-5-20251001"
 
     model_config = {"env_prefix": "ANTHROPIC_"}
 

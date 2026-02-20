@@ -122,6 +122,7 @@ _onec_client: OneCClient | None = None
 _embedding_task: asyncio.Task | None = None  # type: ignore[type-arg]
 _db_engine: Any = None
 _llm_router: Any = None  # LLMRouter when FF_LLM_ROUTING_ENABLED=true
+_asyncpg_pool: Any = None  # asyncpg pool for PatternSearch (pgvector)
 
 
 @app.get("/health")
@@ -302,9 +303,25 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             prompt_version_name=prompt_version_name,
         )
 
+        # Initialize pattern search (if asyncpg pool available)
+        pattern_search = None
+        if _asyncpg_pool is not None:
+            try:
+                from src.knowledge.embeddings import EmbeddingGenerator
+                from src.sandbox.patterns import PatternSearch
+
+                gen = EmbeddingGenerator(settings.openai.api_key)
+                await gen.open()
+                pattern_search = PatternSearch(_asyncpg_pool, gen)
+            except Exception:
+                logger.debug("Pattern search init failed, continuing without", exc_info=True)
+
         # Run the pipeline (greeting → listen → STT → LLM → TTS loop)
         assert _tts_engine is not None, "TTS engine must be initialized before handling calls"
-        pipeline = CallPipeline(conn, stt, _tts_engine, agent, session, stt_config, templates)
+        pipeline = CallPipeline(
+            conn, stt, _tts_engine, agent, session, stt_config, templates,
+            pattern_search=pattern_search,
+        )
         await pipeline.run()
 
     except asyncio.CancelledError:
@@ -443,7 +460,7 @@ async def _periodic_embedding_check(interval_minutes: int = 5) -> None:
 async def main() -> None:
     """Main application entry point."""
     global _audio_server, _redis, _store_client, _tts_engine
-    global _onec_client, _embedding_task, _db_engine, _llm_router
+    global _onec_client, _embedding_task, _db_engine, _llm_router, _asyncpg_pool
 
     settings = get_settings()
 
@@ -544,6 +561,19 @@ async def main() -> None:
     else:
         logger.info("1C integration not configured (ONEC_USERNAME empty)")
 
+    # Initialize asyncpg pool for PatternSearch (pgvector direct queries)
+    if settings.openai.api_key and _db_engine is not None:
+        try:
+            import asyncpg
+
+            # Convert SQLAlchemy URL to asyncpg DSN (replace +asyncpg driver prefix)
+            dsn = settings.database.url.replace("postgresql+asyncpg://", "postgresql://")
+            _asyncpg_pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3)
+            logger.info("asyncpg pool created for pattern search")
+        except Exception:
+            logger.debug("asyncpg pool init failed — pattern search disabled", exc_info=True)
+            _asyncpg_pool = None
+
     # Initialize shared components (TTS is shared across calls, StoreClient too)
     _store_client = StoreClient(
         base_url=settings.store_api.url,
@@ -612,6 +642,10 @@ async def main() -> None:
     if _onec_client is not None:
         await _onec_client.close()
         logger.info("OneCClient closed")
+
+    if _asyncpg_pool is not None:
+        await _asyncpg_pool.close()
+        logger.info("asyncpg pool closed")
 
     if _db_engine is not None:
         await _db_engine.dispose()

@@ -99,7 +99,7 @@ DEFAULT_ROUTING_CONFIG: dict[str, Any] = {
         },
     },
     "tasks": {
-        "agent": {"primary": "anthropic-sonnet", "fallbacks": []},
+        "agent": {"primary": "anthropic-haiku", "fallbacks": ["anthropic-sonnet"]},
         "article_processor": {"primary": "anthropic-haiku", "fallbacks": []},
         "quality_scoring": {"primary": "anthropic-haiku", "fallbacks": []},
         "prompt_optimizer": {"primary": "anthropic-haiku", "fallbacks": []},

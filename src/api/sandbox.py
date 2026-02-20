@@ -40,6 +40,7 @@ class ConversationCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=300)
     prompt_version_id: UUID | None = None
     tool_mode: str = "mock"
+    model: str | None = None
     tags: list[str] = Field(default_factory=list)
     scenario_type: str | None = None
 
@@ -59,6 +60,49 @@ class SendMessage(BaseModel):
 class RateTurn(BaseModel):
     rating: int = Field(..., ge=1, le=5)
     comment: str | None = None
+
+
+class TurnGroupCreate(BaseModel):
+    turn_ids: list[UUID] = Field(..., min_length=1)
+    intent_label: str = Field(..., min_length=1, max_length=200)
+    pattern_type: str = "positive"
+    rating: int | None = Field(None, ge=1, le=5)
+    rating_comment: str | None = None
+    correction: str | None = None
+    tags: list[str] = Field(default_factory=list)
+
+
+class TurnGroupUpdate(BaseModel):
+    intent_label: str | None = None
+    pattern_type: str | None = None
+    rating: int | None = Field(None, ge=1, le=5)
+    rating_comment: str | None = None
+    correction: str | None = None
+    tags: list[str] | None = None
+
+
+class ExportPatternRequest(BaseModel):
+    guidance_note: str = Field(..., min_length=1)
+
+
+class PatternUpdate(BaseModel):
+    guidance_note: str | None = None
+    is_active: bool | None = None
+    tags: list[str] | None = None
+
+
+# ── Available models ─────────────────────────────────────────
+
+SANDBOX_MODELS = [
+    {"id": "claude-sonnet-4-5-20250929", "label": "Claude Sonnet 4.5", "speed": "slow", "quality": "best"},
+    {"id": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5", "speed": "fast", "quality": "good"},
+]
+
+
+@router.get("/models")
+async def list_models(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+    """List available LLM models for sandbox conversations."""
+    return {"models": SANDBOX_MODELS}
 
 
 # ── Conversation CRUD ────────────────────────────────────────
@@ -100,7 +144,7 @@ async def list_conversations(
         result = await conn.execute(
             text(f"""
                 SELECT c.id, c.title, c.prompt_version_id, c.prompt_version_name,
-                       c.tool_mode, c.tags, c.scenario_type, c.status, c.is_baseline,
+                       c.tool_mode, c.model, c.tags, c.scenario_type, c.status, c.is_baseline,
                        c.metadata, c.created_at, c.updated_at,
                        (SELECT COUNT(*) FROM sandbox_turns t WHERE t.conversation_id = c.id) AS turns_count,
                        (SELECT AVG(t.rating) FROM sandbox_turns t
@@ -143,10 +187,10 @@ async def create_conversation(
         result = await conn.execute(
             text("""
                 INSERT INTO sandbox_conversations
-                    (title, prompt_version_id, prompt_version_name, tool_mode, tags, scenario_type, created_by)
+                    (title, prompt_version_id, prompt_version_name, tool_mode, model, tags, scenario_type, created_by)
                 VALUES
-                    (:title, :prompt_version_id, :prompt_version_name, :tool_mode, :tags, :scenario_type, :created_by)
-                RETURNING id, title, prompt_version_id, prompt_version_name, tool_mode, tags,
+                    (:title, :prompt_version_id, :prompt_version_name, :tool_mode, :model, :tags, :scenario_type, :created_by)
+                RETURNING id, title, prompt_version_id, prompt_version_name, tool_mode, model, tags,
                           scenario_type, status, is_baseline, metadata, created_at, updated_at
             """),
             {
@@ -154,6 +198,7 @@ async def create_conversation(
                 "prompt_version_id": str(request.prompt_version_id) if request.prompt_version_id else None,
                 "prompt_version_name": prompt_version_name,
                 "tool_mode": request.tool_mode,
+                "model": request.model,
                 "tags": request.tags,
                 "scenario_type": request.scenario_type,
                 "created_by": user_id,
@@ -179,7 +224,7 @@ async def get_conversation(
         conv_result = await conn.execute(
             text("""
                 SELECT id, title, prompt_version_id, prompt_version_name,
-                       tool_mode, tags, scenario_type, status, is_baseline,
+                       tool_mode, model, tags, scenario_type, status, is_baseline,
                        metadata, created_at, updated_at
                 FROM sandbox_conversations
                 WHERE id = :id
@@ -321,7 +366,7 @@ async def send_message(
     async with engine.begin() as conn:
         conv_result = await conn.execute(
             text("""
-                SELECT id, prompt_version_id, tool_mode, status
+                SELECT id, prompt_version_id, tool_mode, model, status
                 FROM sandbox_conversations
                 WHERE id = :id
             """),
@@ -389,6 +434,7 @@ async def send_message(
         engine,
         prompt_version_id=prompt_version_id,
         tool_mode=conv.tool_mode,
+        model=conv.model,
     )
 
     result = await process_sandbox_turn(agent, request.message, history, is_mock=is_mock)
@@ -940,3 +986,394 @@ async def get_regression_run(
             raise HTTPException(status_code=404, detail="Regression run not found")
 
     return {"item": dict(row._mapping)}
+
+
+# ── Phase 4: Turn Groups (conversation fragment marking) ─────
+
+
+@router.post("/conversations/{conversation_id}/turn-groups")
+async def create_turn_group(
+    conversation_id: UUID,
+    request: TurnGroupCreate,
+    user: dict[str, Any] = _admin_dep,
+) -> dict[str, Any]:
+    """Create a turn group (marked conversation fragment)."""
+    engine = await _get_engine()
+
+    if request.pattern_type not in ("positive", "negative"):
+        raise HTTPException(status_code=400, detail="pattern_type must be 'positive' or 'negative'")
+
+    async with engine.begin() as conn:
+        # Verify conversation exists
+        conv_result = await conn.execute(
+            text("SELECT id FROM sandbox_conversations WHERE id = :id"),
+            {"id": str(conversation_id)},
+        )
+        if not conv_result.first():
+            raise HTTPException(status_code=404, detail="Conversation not found")
+
+        # Verify all turn_ids belong to this conversation
+        turn_ids_str = [str(tid) for tid in request.turn_ids]
+        valid_result = await conn.execute(
+            text("""
+                SELECT COUNT(*) FROM sandbox_turns
+                WHERE id = ANY(:turn_ids) AND conversation_id = :conv_id
+            """),
+            {"turn_ids": turn_ids_str, "conv_id": str(conversation_id)},
+        )
+        valid_count = valid_result.scalar()
+        if valid_count != len(request.turn_ids):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Some turn_ids do not belong to this conversation (found {valid_count}/{len(request.turn_ids)})",
+            )
+
+        user_id = user.get("user_id")
+        result = await conn.execute(
+            text("""
+                INSERT INTO sandbox_turn_groups
+                    (conversation_id, turn_ids, intent_label, pattern_type,
+                     rating, rating_comment, correction, tags, created_by)
+                VALUES
+                    (:conv_id, :turn_ids, :intent_label, :pattern_type,
+                     :rating, :rating_comment, :correction, :tags, :created_by)
+                RETURNING id, conversation_id, turn_ids, intent_label, pattern_type,
+                          rating, rating_comment, correction, tags, is_exported, created_at
+            """),
+            {
+                "conv_id": str(conversation_id),
+                "turn_ids": turn_ids_str,
+                "intent_label": request.intent_label,
+                "pattern_type": request.pattern_type,
+                "rating": request.rating,
+                "rating_comment": request.rating_comment,
+                "correction": request.correction,
+                "tags": request.tags,
+                "created_by": user_id,
+            },
+        )
+        row = result.first()
+
+    return {"item": dict(row._mapping), "message": "Turn group created"}
+
+
+@router.get("/conversations/{conversation_id}/turn-groups")
+async def list_turn_groups(
+    conversation_id: UUID,
+    _: dict[str, Any] = _admin_dep,
+) -> dict[str, Any]:
+    """List turn groups for a conversation."""
+    engine = await _get_engine()
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                SELECT id, conversation_id, turn_ids, intent_label, pattern_type,
+                       rating, rating_comment, correction, tags, is_exported, created_at
+                FROM sandbox_turn_groups
+                WHERE conversation_id = :conv_id
+                ORDER BY created_at
+            """),
+            {"conv_id": str(conversation_id)},
+        )
+        items = [dict(row._mapping) for row in result]
+
+    return {"items": items}
+
+
+@router.patch("/turn-groups/{group_id}")
+async def update_turn_group(
+    group_id: UUID,
+    request: TurnGroupUpdate,
+    _: dict[str, Any] = _admin_dep,
+) -> dict[str, Any]:
+    """Update a turn group."""
+    engine = await _get_engine()
+
+    updates: list[str] = []
+    params: dict[str, Any] = {"id": str(group_id)}
+
+    if request.intent_label is not None:
+        updates.append("intent_label = :intent_label")
+        params["intent_label"] = request.intent_label
+    if request.pattern_type is not None:
+        if request.pattern_type not in ("positive", "negative"):
+            raise HTTPException(status_code=400, detail="pattern_type must be 'positive' or 'negative'")
+        updates.append("pattern_type = :pattern_type")
+        params["pattern_type"] = request.pattern_type
+    if request.rating is not None:
+        updates.append("rating = :rating")
+        params["rating"] = request.rating
+    if request.rating_comment is not None:
+        updates.append("rating_comment = :rating_comment")
+        params["rating_comment"] = request.rating_comment
+    if request.correction is not None:
+        updates.append("correction = :correction")
+        params["correction"] = request.correction
+    if request.tags is not None:
+        updates.append("tags = :tags")
+        params["tags"] = request.tags
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    set_clause = ", ".join(updates)
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(f"""
+                UPDATE sandbox_turn_groups
+                SET {set_clause}
+                WHERE id = :id
+                RETURNING id, conversation_id, turn_ids, intent_label, pattern_type,
+                          rating, rating_comment, correction, tags, is_exported, created_at
+            """),
+            params,
+        )
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Turn group not found")
+
+    return {"item": dict(row._mapping), "message": "Turn group updated"}
+
+
+@router.delete("/turn-groups/{group_id}")
+async def delete_turn_group(
+    group_id: UUID,
+    _: dict[str, Any] = _admin_dep,
+) -> dict[str, Any]:
+    """Delete a turn group."""
+    engine = await _get_engine()
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("DELETE FROM sandbox_turn_groups WHERE id = :id RETURNING id"),
+            {"id": str(group_id)},
+        )
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Turn group not found")
+
+    return {"message": "Turn group deleted"}
+
+
+# ── Phase 4: Pattern Bank ────────────────────────────────────
+
+
+@router.post("/turn-groups/{group_id}/export")
+async def export_turn_group(
+    group_id: UUID,
+    request: ExportPatternRequest,
+    _: dict[str, Any] = _admin_dep,
+) -> dict[str, Any]:
+    """Export a turn group to the conversation pattern bank."""
+    from src.knowledge.embeddings import EmbeddingGenerator
+    from src.sandbox.patterns import export_group_to_pattern
+
+    engine = await _get_engine()
+    settings = get_settings()
+
+    generator = EmbeddingGenerator(settings.openai.api_key)
+    await generator.open()
+
+    try:
+        pattern = await export_group_to_pattern(
+            engine, generator, group_id, request.guidance_note,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        await generator.close()
+
+    return {"item": pattern, "message": "Pattern exported"}
+
+
+@router.get("/patterns")
+async def list_patterns(
+    pattern_type: str | None = Query(None),
+    is_active: bool | None = Query(None),
+    search: str | None = Query(None),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    _: dict[str, Any] = _admin_dep,
+) -> dict[str, Any]:
+    """List conversation patterns with filters."""
+    engine = await _get_engine()
+
+    conditions = ["1=1"]
+    params: dict[str, Any] = {"limit": limit, "offset": offset}
+
+    if pattern_type:
+        conditions.append("pattern_type = :pattern_type")
+        params["pattern_type"] = pattern_type
+    if is_active is not None:
+        conditions.append("is_active = :is_active")
+        params["is_active"] = is_active
+    if search:
+        conditions.append("(intent_label ILIKE :search OR guidance_note ILIKE :search)")
+        params["search"] = f"%{search}%"
+
+    where = " AND ".join(conditions)
+
+    async with engine.begin() as conn:
+        count_result = await conn.execute(
+            text(f"SELECT COUNT(*) FROM conversation_patterns WHERE {where}"),
+            params,
+        )
+        total = count_result.scalar()
+
+        result = await conn.execute(
+            text(f"""
+                SELECT id, source_group_id, intent_label, pattern_type,
+                       customer_messages, agent_messages, guidance_note,
+                       scenario_type, tags, rating, is_active, times_used,
+                       created_at, updated_at
+                FROM conversation_patterns
+                WHERE {where}
+                ORDER BY created_at DESC
+                LIMIT :limit OFFSET :offset
+            """),
+            params,
+        )
+        items = [dict(row._mapping) for row in result]
+
+    return {"total": total, "items": items}
+
+
+@router.get("/patterns/{pattern_id}")
+async def get_pattern(
+    pattern_id: UUID,
+    _: dict[str, Any] = _admin_dep,
+) -> dict[str, Any]:
+    """Get pattern detail."""
+    engine = await _get_engine()
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                SELECT id, source_group_id, intent_label, pattern_type,
+                       customer_messages, agent_messages, guidance_note,
+                       scenario_type, tags, rating, is_active, times_used,
+                       created_at, updated_at
+                FROM conversation_patterns
+                WHERE id = :id
+            """),
+            {"id": str(pattern_id)},
+        )
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Pattern not found")
+
+    return {"item": dict(row._mapping)}
+
+
+@router.patch("/patterns/{pattern_id}")
+async def update_pattern(
+    pattern_id: UUID,
+    request: PatternUpdate,
+    _: dict[str, Any] = _admin_dep,
+) -> dict[str, Any]:
+    """Update a conversation pattern."""
+    engine = await _get_engine()
+
+    updates: list[str] = []
+    params: dict[str, Any] = {"id": str(pattern_id)}
+
+    if request.guidance_note is not None:
+        updates.append("guidance_note = :guidance_note")
+        params["guidance_note"] = request.guidance_note
+    if request.is_active is not None:
+        updates.append("is_active = :is_active")
+        params["is_active"] = request.is_active
+    if request.tags is not None:
+        updates.append("tags = :tags")
+        params["tags"] = request.tags
+
+    if not updates:
+        raise HTTPException(status_code=400, detail="No fields to update")
+
+    updates.append("updated_at = now()")
+    set_clause = ", ".join(updates)
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(f"""
+                UPDATE conversation_patterns
+                SET {set_clause}
+                WHERE id = :id
+                RETURNING id, intent_label, pattern_type, guidance_note,
+                          is_active, tags, times_used, updated_at
+            """),
+            params,
+        )
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Pattern not found")
+
+    return {"item": dict(row._mapping), "message": "Pattern updated"}
+
+
+@router.delete("/patterns/{pattern_id}")
+async def delete_pattern(
+    pattern_id: UUID,
+    _: dict[str, Any] = _admin_dep,
+) -> dict[str, Any]:
+    """Delete a conversation pattern."""
+    engine = await _get_engine()
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("DELETE FROM conversation_patterns WHERE id = :id RETURNING id"),
+            {"id": str(pattern_id)},
+        )
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Pattern not found")
+
+    return {"message": "Pattern deleted"}
+
+
+@router.post("/patterns/search-test")
+async def test_pattern_search(
+    query: str = Query(..., min_length=1),
+    top_k: int = Query(3, ge=1, le=10),
+    min_similarity: float = Query(0.75, ge=0.0, le=1.0),
+    _: dict[str, Any] = _admin_dep,
+) -> dict[str, Any]:
+    """Test pattern search — find which patterns match a given query."""
+    from src.knowledge.embeddings import EmbeddingGenerator
+
+    settings = get_settings()
+    engine = await _get_engine()
+
+    generator = EmbeddingGenerator(settings.openai.api_key)
+    await generator.open()
+
+    try:
+        embedding = await generator.generate_single(query)
+        embedding_str = "[" + ",".join(str(v) for v in embedding) + "]"
+
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                text("""
+                    SELECT id, intent_label, pattern_type, customer_messages,
+                           guidance_note, rating, tags,
+                           1 - (embedding <=> :embedding::vector) AS similarity
+                    FROM conversation_patterns
+                    WHERE is_active = true
+                      AND embedding IS NOT NULL
+                      AND 1 - (embedding <=> :embedding::vector) >= :min_sim
+                    ORDER BY embedding <=> :embedding::vector
+                    LIMIT :top_k
+                """),
+                {
+                    "embedding": embedding_str,
+                    "min_sim": min_similarity,
+                    "top_k": top_k,
+                },
+            )
+            items = [dict(row._mapping) for row in result]
+    finally:
+        await generator.close()
+
+    return {"query": query, "results": items}

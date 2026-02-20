@@ -40,6 +40,7 @@ _DEFAULT_TEMPLATES: dict[str, str] = {
 
 if TYPE_CHECKING:
     from src.agent.agent import LLMAgent
+    from src.sandbox.patterns import PatternSearch
     from src.tts.base import TTSEngine
 
 logger = logging.getLogger(__name__)
@@ -66,6 +67,7 @@ class CallPipeline:
         session: CallSession,
         stt_config: STTConfig | None = None,
         templates: dict[str, str] | None = None,
+        pattern_search: PatternSearch | None = None,
     ) -> None:
         self._conn = conn
         self._stt = stt
@@ -74,6 +76,7 @@ class CallPipeline:
         self._session = session
         self._stt_config = stt_config or STTConfig()
         self._templates = templates or _DEFAULT_TEMPLATES
+        self._pattern_search = pattern_search
         self._speaking = False
         self._barge_in_event = asyncio.Event()
 
@@ -167,12 +170,36 @@ class CallPipeline:
             self._session.transition_to(CallState.PROCESSING)
             await self._speak(self._templates.get("wait", WAIT_TEXT))  # filler while processing
 
+            # Search for relevant conversation patterns
+            pattern_context = None
+            if self._pattern_search is not None:
+                try:
+                    patterns = await self._pattern_search.search(
+                        query=transcript.text,
+                        top_k=3,
+                        min_similarity=0.75,
+                    )
+                    pattern_context = await self._pattern_search.format_for_prompt(patterns)
+                    if patterns:
+                        await self._pattern_search.increment_usage(
+                            [p["id"] for p in patterns]
+                        )
+                        logger.info(
+                            "Pattern injection: call=%s, patterns_found=%d, intents=%s",
+                            self._session.channel_uuid,
+                            len(patterns),
+                            [p["intent_label"] for p in patterns],
+                        )
+                except Exception:
+                    logger.warning("Pattern search failed, continuing without", exc_info=True)
+
             start = time.monotonic()
             try:
                 response_text, _ = await asyncio.wait_for(
                     self._agent.process_message(
                         user_text=transcript.text,
                         conversation_history=self._session.messages_for_llm,
+                        pattern_context=pattern_context,
                     ),
                     timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                 )

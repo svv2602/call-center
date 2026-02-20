@@ -99,6 +99,7 @@ class LLMAgent:
         conversation_history: list[dict[str, Any]],
         caller_phone: str | None = None,
         order_id: str | None = None,
+        pattern_context: str | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         """Process a user message and return the agent's text response.
 
@@ -107,6 +108,7 @@ class LLMAgent:
             conversation_history: List of previous messages (mutated in place).
             caller_phone: CallerID phone number (if available).
             order_id: Current order draft ID (if in progress).
+            pattern_context: Optional pattern injection text for system prompt.
 
         Returns:
             Tuple of (response_text, updated_conversation_history).
@@ -129,7 +131,7 @@ class LLMAgent:
         masked_phone = caller_phone
         if self._pii_vault is not None and caller_phone:
             masked_phone = self._pii_vault.mask(caller_phone)
-        system = self._build_system_prompt(masked_phone, order_id)
+        system = self._build_system_prompt(masked_phone, order_id, pattern_context)
 
         response_text = ""
         tool_call_count = 0
@@ -267,6 +269,7 @@ class LLMAgent:
         self,
         caller_phone: str | None = None,
         order_id: str | None = None,
+        pattern_context: str | None = None,
     ) -> str:
         """Build system prompt with caller context and season hint appended."""
         parts = [self._system_prompt]
@@ -289,6 +292,9 @@ class LLMAgent:
                 parts.append(f"- CallerID клієнта: {caller_phone}")
             if order_id:
                 parts.append(f"- Поточне замовлення (чорновик): {order_id}")
+
+        if pattern_context:
+            parts.append(pattern_context)
 
         return "\n".join(parts)
 
