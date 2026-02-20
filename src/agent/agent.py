@@ -119,8 +119,18 @@ class LLMAgent:
         if self._pii_vault is not None:
             user_text = self._pii_vault.mask(user_text)
 
-        # Add user message
-        conversation_history.append({"role": "user", "content": user_text})
+        # Add user message (skip if already present — pipeline may pre-add)
+        if not (
+            conversation_history
+            and conversation_history[-1]["role"] == "user"
+            and conversation_history[-1].get("content") == user_text
+        ):
+            conversation_history.append({"role": "user", "content": user_text})
+
+        # Claude API requires first message to be user role.
+        # The greeting (assistant) may be first — prepend a synthetic turn.
+        if conversation_history and conversation_history[0]["role"] != "user":
+            conversation_history.insert(0, {"role": "user", "content": "(початок дзвінка)"})
 
         # Trim history if too long
         if len(conversation_history) > MAX_HISTORY_MESSAGES:

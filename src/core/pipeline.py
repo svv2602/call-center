@@ -255,12 +255,10 @@ class CallPipeline:
                     await self._speak(self._templates.get("silence_prompt", SILENCE_PROMPT_TEXT))
                     continue
 
-            # Got a final transcript — process it
-            self._session.add_user_turn(
-                content=transcript.text,
-                stt_confidence=transcript.confidence,
-                detected_language=transcript.language,
-            )
+            # Got a final transcript — reset timeout and track language
+            self._session.timeout_count = 0
+            if transcript.language:
+                self._session.detected_language = transcript.language
 
             # Search for relevant conversation patterns
             pattern_context = None
@@ -284,7 +282,12 @@ class CallPipeline:
                     logger.warning("Pattern search failed, continuing without", exc_info=True)
 
             if self._streaming_loop is not None:
-                # STREAMING PATH — audio starts immediately, no WAIT filler
+                # STREAMING PATH — add user turn to session (streaming loop uses separate _llm_history)
+                self._session.add_user_turn(
+                    content=transcript.text,
+                    stt_confidence=transcript.confidence,
+                    detected_language=transcript.language,
+                )
                 self._session.transition_to(CallState.SPEAKING)
                 start = time.monotonic()
                 try:
@@ -325,7 +328,8 @@ class CallPipeline:
                     self._session.add_assistant_turn(fallback)
                     await self._speak(fallback)
             else:
-                # BLOCKING PATH — existing code unchanged
+                # BLOCKING PATH — delay add_user_turn so process_message
+                # doesn't see it duplicated in messages_for_llm
                 self._session.transition_to(CallState.PROCESSING)
                 wait_default = self._templates.get("wait", WAIT_TEXT)
                 wait_msg = _select_wait_message(transcript.text, wait_default)
@@ -350,6 +354,13 @@ class CallPipeline:
                     response_text = ""
 
                 llm_latency_ms = int((time.monotonic() - start) * 1000)
+
+                # Now record the user turn in session (for DB/analytics)
+                self._session.add_user_turn(
+                    content=transcript.text,
+                    stt_confidence=transcript.confidence,
+                    detected_language=transcript.language,
+                )
 
                 logger.info(
                     "Turn completed: call=%s, user='%s', agent='%s', llm=%dms",

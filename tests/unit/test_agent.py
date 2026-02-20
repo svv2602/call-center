@@ -224,3 +224,109 @@ class TestSystemPrompt:
 
         agent = LLMAgent(api_key="test-key", prompt_version_name="v4.0-test")
         assert agent.prompt_version_name == "v4.0-test"
+
+
+class TestProcessMessageHistory:
+    """Test process_message conversation history handling."""
+
+    @pytest.mark.asyncio
+    async def test_no_duplicate_user_message(self) -> None:
+        """process_message should not duplicate user_text if already last in history."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.agent.agent import LLMAgent
+
+        agent = LLMAgent(api_key="test-key")
+
+        mock_response = MagicMock()
+        mock_response.stop_reason = "end_turn"
+        mock_response.usage = MagicMock(input_tokens=10, output_tokens=5)
+        text_block = MagicMock()
+        text_block.type = "text"
+        text_block.text = "Відповідь"
+        mock_response.content = [text_block]
+
+        agent._client = MagicMock()
+        agent._client.messages = MagicMock()
+        agent._client.messages.create = AsyncMock(return_value=mock_response)
+
+        # History already contains the user message (as pipeline would add)
+        history: list[dict[str, Any]] = [
+            {"role": "assistant", "content": "Привіт!"},
+            {"role": "user", "content": "шини"},
+        ]
+        await agent.process_message("шини", history)
+
+        # The messages sent to API should have user-first + greeting + one user msg
+        call_kwargs = agent._client.messages.create.call_args
+        messages = call_kwargs.kwargs["messages"]
+        user_msgs = [m for m in messages if m["role"] == "user" and m.get("content") == "шини"]
+        assert len(user_msgs) == 1, f"Expected 1 'шини' message, got {len(user_msgs)}"
+
+    @pytest.mark.asyncio
+    async def test_user_first_message_ensured(self) -> None:
+        """process_message should prepend synthetic user message when history starts with assistant."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.agent.agent import LLMAgent
+
+        agent = LLMAgent(api_key="test-key")
+
+        mock_response = MagicMock()
+        mock_response.stop_reason = "end_turn"
+        mock_response.usage = MagicMock(input_tokens=10, output_tokens=5)
+        text_block = MagicMock()
+        text_block.type = "text"
+        text_block.text = "Відповідь"
+        mock_response.content = [text_block]
+
+        agent._client = MagicMock()
+        agent._client.messages = MagicMock()
+        agent._client.messages.create = AsyncMock(return_value=mock_response)
+
+        # History starts with assistant (greeting)
+        history: list[dict[str, Any]] = [
+            {"role": "assistant", "content": "Добрий день!"},
+        ]
+        await agent.process_message("шини", history)
+
+        call_kwargs = agent._client.messages.create.call_args
+        messages = call_kwargs.kwargs["messages"]
+        assert messages[0]["role"] == "user", f"First message should be user, got {messages[0]}"
+        assert messages[1]["role"] == "assistant"
+        assert messages[1]["content"] == "Добрий день!"
+
+    @pytest.mark.asyncio
+    async def test_user_message_added_when_not_present(self) -> None:
+        """process_message should add user_text when not already in history."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        from src.agent.agent import LLMAgent
+
+        agent = LLMAgent(api_key="test-key")
+
+        mock_response = MagicMock()
+        mock_response.stop_reason = "end_turn"
+        mock_response.usage = MagicMock(input_tokens=10, output_tokens=5)
+        text_block = MagicMock()
+        text_block.type = "text"
+        text_block.text = "Відповідь"
+        mock_response.content = [text_block]
+
+        # Capture messages at call time (before they're mutated by assistant append)
+        captured_messages: list[dict[str, Any]] = []
+
+        async def capture_create(**kwargs: Any) -> MagicMock:
+            captured_messages.extend(list(kwargs["messages"]))
+            return mock_response
+
+        agent._client = MagicMock()
+        agent._client.messages = MagicMock()
+        agent._client.messages.create = AsyncMock(side_effect=capture_create)
+
+        # Empty history — process_message should add the user text
+        history: list[dict[str, Any]] = []
+        await agent.process_message("шини", history)
+
+        assert len(captured_messages) == 1
+        assert captured_messages[0] == {"role": "user", "content": "шини"}
