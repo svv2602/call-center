@@ -60,9 +60,22 @@ async function loadSystemStatus() {
     }
 }
 
+function loadFlower() {
+    const flowerUrl = `${window.location.protocol}//${window.location.hostname}:5555`;
+    const container = document.getElementById('flowerContainer');
+    const frame = document.getElementById('flowerFrame');
+    const link = document.getElementById('flowerExternalLink');
+    if (link) link.href = flowerUrl;
+    if (frame) frame.src = flowerUrl;
+    if (container) container.style.display = 'block';
+}
+
 export function init() {
+    // Set external Flower link on page load
+    const link = document.getElementById('flowerExternalLink');
+    if (link) link.href = `${window.location.protocol}//${window.location.hostname}:5555`;
     registerPageLoader('monitoring', () => loadSettings());
 }
 
 window._pages = window._pages || {};
-window._pages.monitoring = { loadSettings, loadSystemStatus };
+window._pages.monitoring = { loadSettings, loadSystemStatus, loadFlower };

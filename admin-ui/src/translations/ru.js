@@ -344,6 +344,8 @@ export default {
     'settings.openGrafana': 'Открыть Grafana',
     'settings.openPrometheus': 'Открыть Prometheus',
     'settings.openFlower': 'Открыть Flower',
+    'settings.celeryTasks': 'Задачи Celery (Flower)',
+    'settings.loadFlower': 'Загрузить Flower',
     'settings.appInfo': 'Информация о приложении',
     'settings.version': 'Версия',
     'settings.status': 'Статус',
