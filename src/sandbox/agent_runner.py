@@ -16,7 +16,11 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from src.agent.agent import LLMAgent
-from src.agent.prompt_manager import PromptManager
+from src.agent.prompt_manager import (
+    PromptManager,
+    get_pronunciation_rules,
+    inject_pronunciation_rules,
+)
 from src.agent.tool_loader import get_tools_with_overrides
 from src.config import get_settings
 from src.sandbox.mock_tools import build_mock_tool_router
@@ -62,6 +66,7 @@ async def create_sandbox_agent(
     model: str | None = None,
     llm_router: LLMRouter | None = None,
     provider_override: str | None = None,
+    redis: Any | None = None,
 ) -> LLMAgent:
     """Create an LLMAgent configured for sandbox testing.
 
@@ -73,6 +78,7 @@ async def create_sandbox_agent(
         llm_router: Optional LLM router for multi-provider routing.
         provider_override: If set with llm_router, routes all calls to
             this specific provider (e.g. "gemini-flash").
+        redis: Optional Redis client for loading pronunciation rules.
 
     Returns:
         Configured LLMAgent instance.
@@ -106,6 +112,11 @@ async def create_sandbox_agent(
         # For now, fall back to mock if Store API not available
         logger.warning("Live tool mode requested but using mock fallback in sandbox")
         tool_router = build_mock_tool_router()
+
+    # Inject pronunciation rules from Redis
+    if redis is not None and system_prompt is not None:
+        pron_rules = await get_pronunciation_rules(redis)
+        system_prompt = inject_pronunciation_rules(system_prompt, pron_rules)
 
     # Sandbox defaults to Haiku (cheap/fast) independently of ANTHROPIC_MODEL
     # which may be set to a more expensive model for production calls.

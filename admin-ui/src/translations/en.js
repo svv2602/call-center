@@ -214,6 +214,17 @@ export default {
     'prompts.deleteConfirm': 'Delete prompt "{name}"?',
     'prompts.deleted': 'Prompt deleted',
     'prompts.deleteFailed': 'Failed to delete prompt: {error}',
+    'prompts.pronunciationRules': 'Pronunciation Rules',
+    'prompts.pronunciationRulesDesc': 'TTS pronunciation rules — appended to the agent system prompt. Use to correct pronunciation of tire sizes, brands, models, etc.',
+    'prompts.pronunciationRulesSave': 'Save',
+    'prompts.pronunciationRulesSaved': 'Pronunciation rules saved',
+    'prompts.pronunciationRulesSaveFailed': 'Save failed: {error}',
+    'prompts.pronunciationRulesReset': 'Reset to defaults',
+    'prompts.pronunciationRulesResetConfirm': 'Reset pronunciation rules to factory defaults?',
+    'prompts.pronunciationRulesResetDone': 'Pronunciation rules reset to defaults',
+    'prompts.pronunciationRulesSource': 'Source: {source}',
+    'prompts.pronunciationRulesSourceRedis': 'Redis (custom)',
+    'prompts.pronunciationRulesSourceDefault': 'factory defaults',
 
     // Knowledge Base
     'knowledge.breadcrumb': 'Knowledge Base',

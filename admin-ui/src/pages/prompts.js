@@ -230,6 +230,7 @@ async function loadABTests() {
     } catch (e) {
         section.innerHTML = `<div class="${tw.emptyState}">${t('prompts.failedToLoadAB', {error: escapeHtml(e.message)})}</div>`;
     }
+    loadPronunciationRules();
 }
 
 function showCreateABTest() {
@@ -450,6 +451,68 @@ async function exportABReportCSV(testId) {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  Pronunciation Rules
+// ═══════════════════════════════════════════════════════════
+async function loadPronunciationRules() {
+    const container = document.getElementById('promptsContent');
+    const existing = document.getElementById('pronunciationRulesSection');
+    if (existing) existing.remove();
+
+    const section = document.createElement('div');
+    section.id = 'pronunciationRulesSection';
+    section.className = 'mt-6';
+    container.appendChild(section);
+
+    try {
+        const data = await api('/admin/agent/pronunciation-rules');
+        const sourceLabel = data.source === 'redis'
+            ? t('prompts.pronunciationRulesSourceRedis')
+            : t('prompts.pronunciationRulesSourceDefault');
+
+        section.innerHTML = `
+            <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-1">${t('prompts.pronunciationRules')}</h3>
+            <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3">
+                ${t('prompts.pronunciationRulesDesc')}
+                <span class="${tw.badge} ml-1">${t('prompts.pronunciationRulesSource', {source: sourceLabel})}</span>
+            </p>
+            <textarea id="pronunciationRulesText" rows="16"
+                class="w-full font-mono text-sm rounded border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 p-3 focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+            >${escapeHtml(data.rules || '')}</textarea>
+            <div class="mt-3 flex gap-2">
+                <button class="${tw.btnPrimary}" onclick="window._pages.prompts.savePronunciationRules()">${t('prompts.pronunciationRulesSave')}</button>
+                <button class="${tw.btnSecondary}" onclick="window._pages.prompts.resetPronunciationRules()">${t('prompts.pronunciationRulesReset')}</button>
+            </div>`;
+    } catch (e) {
+        section.innerHTML = `<div class="${tw.emptyState}">${t('prompts.pronunciationRulesSaveFailed', {error: escapeHtml(e.message)})}</div>`;
+    }
+}
+
+async function savePronunciationRules() {
+    const rules = document.getElementById('pronunciationRulesText').value;
+    try {
+        await api('/admin/agent/pronunciation-rules', {
+            method: 'PATCH',
+            body: JSON.stringify({ rules }),
+        });
+        showToast(t('prompts.pronunciationRulesSaved'));
+        loadPronunciationRules();
+    } catch (e) {
+        showToast(t('prompts.pronunciationRulesSaveFailed', {error: e.message}), 'error');
+    }
+}
+
+async function resetPronunciationRules() {
+    if (!confirm(t('prompts.pronunciationRulesResetConfirm'))) return;
+    try {
+        await api('/admin/agent/pronunciation-rules/reset', { method: 'POST' });
+        showToast(t('prompts.pronunciationRulesResetDone'));
+        loadPronunciationRules();
+    } catch (e) {
+        showToast(t('prompts.pronunciationRulesSaveFailed', {error: e.message}), 'error');
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  Init & exports
 // ═══════════════════════════════════════════════════════════
 export function init() {
@@ -461,4 +524,5 @@ window._pages.prompts = {
     loadPromptVersions, showCreatePrompt, createPrompt, activatePrompt,
     viewPrompt, loadDefaultPrompt, resetToDefault, deletePrompt,
     loadABTests, showCreateABTest, createABTest, stopABTest, deleteABTest, showABReport, exportABReportCSV,
+    loadPronunciationRules, savePronunciationRules, resetPronunciationRules,
 };

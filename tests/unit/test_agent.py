@@ -152,7 +152,7 @@ class TestSystemPrompt:
         assert "гривнях" in SYSTEM_PROMPT or "грн" in SYSTEM_PROMPT
 
     def test_prompt_version(self) -> None:
-        assert PROMPT_VERSION == "v3.2-checklists"
+        assert PROMPT_VERSION == "v3.3-pronunciation"
 
     def test_prompt_has_order_capabilities(self) -> None:
         assert "замовлення" in SYSTEM_PROMPT.lower()

@@ -19,7 +19,11 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 
 from src.agent.agent import LLMAgent, ToolRouter
-from src.agent.prompt_manager import PromptManager
+from src.agent.prompt_manager import (
+    PromptManager,
+    get_pronunciation_rules,
+    inject_pronunciation_rules,
+)
 from src.agent.tool_loader import get_tools_with_overrides
 from src.api.admin_users import router as admin_users_router
 from src.api.analytics import router as analytics_router
@@ -33,6 +37,7 @@ from src.api.middleware.security_headers import SecurityHeadersMiddleware
 from src.api.notifications import router as notifications_router
 from src.api.operators import router as operators_router
 from src.api.prompts import router as prompts_router
+from src.api.pronunciation import router as pronunciation_router
 from src.api.sandbox import router as sandbox_router
 from src.api.scraper import router as scraper_router
 from src.api.system import router as system_router
@@ -72,6 +77,7 @@ app.include_router(knowledge_router)
 app.include_router(llm_config_router)
 app.include_router(notifications_router)
 app.include_router(operators_router)
+app.include_router(pronunciation_router)
 app.include_router(prompts_router)
 app.include_router(sandbox_router)
 app.include_router(scraper_router)
@@ -288,6 +294,13 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                         )
             except Exception:
                 logger.warning("A/B test assignment failed, using default prompt", exc_info=True)
+
+        # Inject pronunciation rules from Redis into system prompt
+        if _redis is not None:
+            pron_rules = await get_pronunciation_rules(_redis)
+            if system_prompt is not None:
+                system_prompt = inject_pronunciation_rules(system_prompt, pron_rules)
+            # else: fallback SYSTEM_PROMPT already has rules baked in
 
         # Per-call tool router, PII vault, and LLM agent
         router = _build_tool_router(session)

@@ -17,6 +17,7 @@ from src.agent.prompts import (
     GREETING_TEXT,
     ORDER_CANCELLED_TEXT,
     PROMPT_VERSION,
+    PRONUNCIATION_RULES,
     SILENCE_PROMPT_TEXT,
     SYSTEM_PROMPT,
     TRANSFER_TEXT,
@@ -26,6 +27,7 @@ from src.agent.prompts import (
 if TYPE_CHECKING:
     from uuid import UUID
 
+    from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncEngine
 
 logger = logging.getLogger(__name__)
@@ -238,3 +240,34 @@ class PromptManager:
             )
             row = result.first()
             return dict(row._mapping) if row else None
+
+
+PRONUNCIATION_REDIS_KEY = "agent:pronunciation_rules"
+
+
+async def get_pronunciation_rules(redis: Redis) -> str:
+    """Get pronunciation rules from Redis, falling back to hardcoded default."""
+    import json
+
+    try:
+        raw = await redis.get(PRONUNCIATION_REDIS_KEY)
+        if raw:
+            # Handle both bytes (decode_responses=False) and str
+            text_val = raw.decode() if isinstance(raw, bytes) else raw
+            data = json.loads(text_val)
+            return data["rules"]
+    except Exception:
+        logger.warning("Failed to load pronunciation rules from Redis, using default")
+    return PRONUNCIATION_RULES
+
+
+def inject_pronunciation_rules(system_prompt: str, rules: str) -> str:
+    """Inject pronunciation rules into system prompt.
+
+    If the prompt contains {pronunciation_rules} placeholder, substitute it.
+    Otherwise append rules at the end.
+    """
+    if "{pronunciation_rules}" in system_prompt:
+        return system_prompt.replace("{pronunciation_rules}", rules)
+    # Prompt from DB may not have the placeholder — append
+    return system_prompt + "\n\n" + rules

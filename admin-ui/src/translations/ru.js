@@ -214,6 +214,17 @@ export default {
     'prompts.deleteConfirm': 'Удалить промпт «{name}»?',
     'prompts.deleted': 'Промпт удалён',
     'prompts.deleteFailed': 'Не удалось удалить промпт: {error}',
+    'prompts.pronunciationRules': 'Правила произношения',
+    'prompts.pronunciationRulesDesc': 'Правила произношения для TTS — добавляются в конец системного промпта агента. Используйте для коррекции произношения размеров, брендов, моделей шин и т.д.',
+    'prompts.pronunciationRulesSave': 'Сохранить',
+    'prompts.pronunciationRulesSaved': 'Правила произношения сохранены',
+    'prompts.pronunciationRulesSaveFailed': 'Ошибка сохранения: {error}',
+    'prompts.pronunciationRulesReset': 'Сбросить к заводским',
+    'prompts.pronunciationRulesResetConfirm': 'Сбросить правила произношения к заводским настройкам?',
+    'prompts.pronunciationRulesResetDone': 'Правила произношения сброшены к заводским',
+    'prompts.pronunciationRulesSource': 'Источник: {source}',
+    'prompts.pronunciationRulesSourceRedis': 'Redis (пользовательские)',
+    'prompts.pronunciationRulesSourceDefault': 'заводские (по умолчанию)',
 
     // Knowledge Base
     'knowledge.breadcrumb': 'База знаний',
