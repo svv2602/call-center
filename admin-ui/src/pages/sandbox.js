@@ -583,7 +583,7 @@ async function archiveConversation() {
 async function showNewConvModal() {
     document.getElementById('sandboxConvTitle').value = '';
     document.getElementById('sandboxConvTags').value = '';
-    document.getElementById('sandboxConvToolMode').value = 'mock';
+    document.getElementById('sandboxConvToolMode').value = 'live';
     document.getElementById('sandboxConvScenario').value = '';
 
     // Load prompt versions for select
