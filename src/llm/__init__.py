@@ -4,7 +4,19 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from src.llm.models import LLMResponse, LLMTask, ProviderType, ToolCall, Usage
+from src.llm.models import (
+    LLMResponse,
+    LLMTask,
+    ProviderType,
+    StreamDone,
+    StreamEvent,
+    TextDelta,
+    ToolCall,
+    ToolCallDelta,
+    ToolCallEnd,
+    ToolCallStart,
+    Usage,
+)
 from src.llm.router import LLMRouter
 
 if TYPE_CHECKING:
@@ -15,7 +27,13 @@ __all__ = [
     "LLMRouter",
     "LLMTask",
     "ProviderType",
+    "StreamDone",
+    "StreamEvent",
+    "TextDelta",
     "ToolCall",
+    "ToolCallDelta",
+    "ToolCallEnd",
+    "ToolCallStart",
     "Usage",
     "get_router",
     "set_router",

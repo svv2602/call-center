@@ -11,11 +11,19 @@ import json
 import logging
 import os
 import time
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from aiobreaker import CircuitBreaker
 
-from src.llm.models import DEFAULT_ROUTING_CONFIG, LLMResponse, LLMTask, ProviderType
+from src.llm.models import (
+    DEFAULT_ROUTING_CONFIG,
+    LLMResponse,
+    LLMTask,
+    ProviderType,
+    StreamDone,
+    StreamEvent,
+)
 from src.llm.providers.anthropic_provider import AnthropicProvider
 from src.llm.providers.openai_compat import OpenAICompatProvider
 
@@ -87,6 +95,28 @@ class LLMRouter:
         self._breakers.clear()
         await self.initialize(redis)
 
+    def _resolve_chain(self, task: LLMTask, provider_override: str | None) -> list[str]:
+        """Build ordered provider chain for a task."""
+        if provider_override is not None:
+            if provider_override not in self._providers:
+                raise RuntimeError(
+                    f"Provider override '{provider_override}' not found. "
+                    f"Available: {list(self._providers.keys())}"
+                )
+            return [provider_override]
+
+        task_config = self._config.get("tasks", {}).get(task.value, {})
+        primary = task_config.get("primary", "")
+        fallbacks = task_config.get("fallbacks", [])
+        chain = [key for key in [primary, *fallbacks] if key in self._providers]
+
+        if not chain:
+            raise RuntimeError(
+                f"No available providers for task {task.value}. "
+                f"Configured providers: {list(self._providers.keys())}"
+            )
+        return chain
+
     async def complete(
         self,
         task: LLMTask,
@@ -110,27 +140,7 @@ class LLMRouter:
         Tries primary provider first, then fallbacks in order.
         Raises RuntimeError if all providers fail.
         """
-        if provider_override is not None:
-            if provider_override not in self._providers:
-                raise RuntimeError(
-                    f"Provider override '{provider_override}' not found. "
-                    f"Available: {list(self._providers.keys())}"
-                )
-            chain = [provider_override]
-        else:
-            task_config = self._config.get("tasks", {}).get(task.value, {})
-            primary = task_config.get("primary", "")
-            fallbacks = task_config.get("fallbacks", [])
-
-            chain = [primary, *fallbacks]
-            # Filter to only providers that are actually available
-            chain = [key for key in chain if key in self._providers]
-
-        if not chain:
-            raise RuntimeError(
-                f"No available providers for task {task.value}. "
-                f"Configured providers: {list(self._providers.keys())}"
-            )
+        chain = self._resolve_chain(task, provider_override)
 
         last_error: Exception | None = None
         for idx, provider_key in enumerate(chain):
@@ -139,7 +149,6 @@ class LLMRouter:
                     provider_key, messages, system, tools, max_tokens
                 )
                 if idx > 0:
-                    # Log fallback activation
                     logger.warning(
                         "LLM fallback activated: task=%s, from=%s to=%s",
                         task.value,
@@ -162,6 +171,73 @@ class LLMRouter:
         raise RuntimeError(
             f"All providers failed for task {task.value}: {last_error}"
         ) from last_error
+
+    async def complete_stream(
+        self,
+        task: LLMTask,
+        messages: list[dict[str, Any]],
+        system: str | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int = 1024,
+        provider_override: str | None = None,
+    ) -> AsyncIterator[StreamEvent]:
+        """Streaming version of complete() with circuit breaker + fallback."""
+        chain = self._resolve_chain(task, provider_override)
+
+        last_error: Exception | None = None
+        for idx, provider_key in enumerate(chain):
+            try:
+                async for event in self._stream_provider(
+                    provider_key, messages, system, tools or [], max_tokens
+                ):
+                    yield event
+                # Stream completed successfully
+                if idx > 0:
+                    self._record_fallback(chain[0], provider_key, task)
+                self._record_success(provider_key, task)
+                return
+            except Exception as exc:
+                last_error = exc
+                logger.warning(
+                    "Stream provider %s failed for task %s: %s",
+                    provider_key,
+                    task.value,
+                    exc,
+                )
+                self._record_error(provider_key, task)
+
+        raise RuntimeError(
+            f"All providers failed streaming for task {task.value}: {last_error}"
+        ) from last_error
+
+    async def _stream_provider(
+        self,
+        provider_key: str,
+        messages: list[dict[str, Any]],
+        system: str | None,
+        tools: list[dict[str, Any]],
+        max_tokens: int,
+    ) -> AsyncIterator[StreamEvent]:
+        """Stream from a single provider with circuit breaker."""
+        provider = self._providers[provider_key]
+        breaker = self._breakers[provider_key]
+        start = time.monotonic()
+
+        gen = provider.stream_with_tools(messages, tools, system, max_tokens)
+
+        # Sentinel-first-event: await first event through circuit breaker
+        async def _get_first() -> StreamEvent:
+            return await gen.__anext__()
+
+        first_event = await breaker.call_async(_get_first)
+        yield first_event
+
+        # Remaining events — provider is alive, stream directly
+        async for event in gen:
+            yield event
+            if isinstance(event, StreamDone):
+                latency_ms = int((time.monotonic() - start) * 1000)
+                self._record_latency(provider_key, latency_ms)
 
     def get_available_models(self) -> list[dict[str, str]]:
         """Return list of available provider models for UI dropdowns.

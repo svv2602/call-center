@@ -6,7 +6,9 @@ No openai SDK dependency — consistent with src/knowledge/embeddings.py pattern
 
 from __future__ import annotations
 
+import json
 import logging
+from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
@@ -15,7 +17,9 @@ from src.llm.format_converter import (
     anthropic_messages_to_openai,
     anthropic_tools_to_openai,
     openai_response_to_llm_response,
+    openai_stream_chunk_to_events,
 )
+from src.llm.models import StreamEvent
 from src.llm.providers.base import AbstractProvider
 
 if TYPE_CHECKING:
@@ -92,6 +96,47 @@ class OpenAICompatProvider(AbstractProvider):
 
         data = await self._post_chat(body)
         return openai_response_to_llm_response(data, self._provider_key, self._model)
+
+    async def stream_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        system: str | None = None,
+        max_tokens: int = 300,
+    ) -> AsyncIterator[StreamEvent]:
+        openai_messages = anthropic_messages_to_openai(messages, system)
+        openai_tools = anthropic_tools_to_openai(tools)
+
+        body: dict[str, Any] = {
+            "model": self._model,
+            "max_tokens": max_tokens,
+            "messages": openai_messages,
+            "tools": openai_tools,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+
+        session = await self._get_session()
+        url = f"{self._base_url}/chat/completions"
+
+        async with session.post(url, json=body) as resp:
+            if resp.status != 200:
+                error_text = await resp.text()
+                raise RuntimeError(
+                    f"OpenAI-compat streaming error {resp.status}: {error_text[:300]}"
+                )
+            async for line in resp.content:
+                text = line.decode("utf-8").strip()
+                if not text or not text.startswith("data: "):
+                    continue
+                payload = text[6:]  # strip "data: "
+                if payload == "[DONE]":
+                    break
+                chunk = json.loads(payload)
+                for event in openai_stream_chunk_to_events(
+                    chunk, self._provider_key, self._model
+                ):
+                    yield event
 
     async def health_check(self) -> bool:
         try:

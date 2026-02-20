@@ -55,6 +55,49 @@ class LLMResponse:
 
 
 # Default routing configuration (used when Redis is empty)
+@dataclass(frozen=True)
+class TextDelta:
+    """Incremental text chunk from streaming."""
+
+    text: str
+
+
+@dataclass(frozen=True)
+class ToolCallStart:
+    """Tool call started — id and name known, arguments building."""
+
+    id: str
+    name: str
+
+
+@dataclass(frozen=True)
+class ToolCallDelta:
+    """Incremental JSON fragment for tool call arguments."""
+
+    id: str
+    arguments_chunk: str
+
+
+@dataclass(frozen=True)
+class ToolCallEnd:
+    """Tool call finished — arguments complete."""
+
+    id: str
+
+
+@dataclass(frozen=True)
+class StreamDone:
+    """Stream finished. Carries final aggregated metadata."""
+
+    stop_reason: str  # "end_turn" | "tool_use" | "max_tokens"
+    usage: Usage
+
+
+# Union type for type hints
+StreamEvent = TextDelta | ToolCallStart | ToolCallDelta | ToolCallEnd | StreamDone
+
+
+# Default routing configuration (used when Redis is empty)
 DEFAULT_ROUTING_CONFIG: dict[str, Any] = {
     "providers": {
         "anthropic-sonnet": {

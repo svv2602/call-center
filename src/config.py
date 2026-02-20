@@ -125,6 +125,7 @@ class WhisperSettings(BaseSettings):
 class FeatureFlagSettings(BaseSettings):
     stt_provider: str = "google"  # "google" or "whisper"
     llm_routing_enabled: bool = False
+    streaming_llm: bool = False  # FF_STREAMING_LLM
     whisper_rollout_percent: int = 0  # 0-100 gradual rollout
 
     model_config = {"env_prefix": "FF_"}

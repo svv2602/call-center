@@ -3,11 +3,22 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import AsyncIterator
 from typing import Any
 
 import anthropic
 
-from src.llm.models import LLMResponse, ToolCall, Usage
+from src.llm.models import (
+    LLMResponse,
+    StreamDone,
+    StreamEvent,
+    TextDelta,
+    ToolCall,
+    ToolCallDelta,
+    ToolCallEnd,
+    ToolCallStart,
+    Usage,
+)
 from src.llm.providers.base import AbstractProvider
 
 logger = logging.getLogger(__name__)
@@ -67,6 +78,56 @@ class AnthropicProvider(AbstractProvider):
 
     async def close(self) -> None:
         await self._client.close()
+
+    async def stream_with_tools(
+        self,
+        messages: list[dict[str, Any]],
+        tools: list[dict[str, Any]],
+        system: str | None = None,
+        max_tokens: int = 300,
+    ) -> AsyncIterator[StreamEvent]:
+        kwargs: dict[str, Any] = {
+            "model": self._model,
+            "max_tokens": max_tokens,
+            "messages": messages,
+            "tools": tools,
+        }
+        if system:
+            kwargs["system"] = system
+
+        async with self._client.messages.stream(**kwargs) as stream:
+            current_tool_id = ""
+            async for event in stream:
+                if event.type == "content_block_start":
+                    block = event.content_block
+                    if block.type == "tool_use":
+                        current_tool_id = block.id
+                        yield ToolCallStart(id=block.id, name=block.name)
+                elif event.type == "content_block_delta":
+                    delta = event.delta
+                    if delta.type == "text_delta":
+                        yield TextDelta(text=delta.text)
+                    elif delta.type == "input_json_delta":
+                        yield ToolCallDelta(
+                            id=current_tool_id,
+                            arguments_chunk=delta.partial_json,
+                        )
+                elif event.type == "content_block_stop":
+                    if current_tool_id:
+                        yield ToolCallEnd(id=current_tool_id)
+                        current_tool_id = ""
+                elif event.type == "message_delta":
+                    pass  # handled after loop
+
+            # After stream completes, emit StreamDone
+            final = stream.get_final_message()
+            yield StreamDone(
+                stop_reason=final.stop_reason or "end_turn",
+                usage=Usage(
+                    input_tokens=final.usage.input_tokens,
+                    output_tokens=final.usage.output_tokens,
+                ),
+            )
 
     def _parse_response(self, response: Any) -> LLMResponse:
         """Parse Anthropic SDK response into LLMResponse."""
