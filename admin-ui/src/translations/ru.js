@@ -851,4 +851,20 @@ export default {
     'sandbox.ratingCommentPlaceholder': 'Комментарий (Enter для сохранения)',
     'sandbox.convInfo': 'Параметры диалога',
     'sandbox.routerModel': 'router',
+
+    // Sandbox: Agent Phrases tab
+    'sandbox.tabPhrases': 'Фразы агента',
+    'sandbox.phrasesTitle': 'Захардкоженные фразы агента',
+    'sandbox.phrasesDescription': 'Эти фразы озвучиваются TTS напрямую, без участия LLM. Предзакешированы при старте сервера.',
+    'sandbox.phrasesCategory': 'Категория',
+    'sandbox.phrasesKey': 'Контекст',
+    'sandbox.phrasesText': 'Текст фразы',
+    'sandbox.phrasesSource': 'Источник',
+    'sandbox.phrasesSourceCode': 'код (prompts.py)',
+    'sandbox.phrasesSourceLLM': 'LLM (генерация)',
+    'sandbox.phrasesCatFixed': 'Фиксированные',
+    'sandbox.phrasesCatWait': 'Пулы ожидания',
+    'sandbox.phrasesPoolLabel': 'пул ({count} вариантов, ротация)',
+    'sandbox.phrasesLoadFailed': 'Не удалось загрузить фразы: {error}',
+    'sandbox.phrasesLlmNote': 'Все остальные ответы агента генерируются LLM в реальном времени.',
 };

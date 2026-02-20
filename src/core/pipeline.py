@@ -21,12 +21,13 @@ from src.agent.prompts import (
     GREETING_TEXT,
     SILENCE_PROMPT_TEXT,
     TRANSFER_TEXT,
-    WAIT_AVAILABILITY_TEXT,
-    WAIT_FITTING_TEXT,
-    WAIT_KNOWLEDGE_TEXT,
-    WAIT_ORDER_TEXT,
-    WAIT_SEARCH_TEXT,
-    WAIT_STATUS_TEXT,
+    WAIT_AVAILABILITY_POOL,
+    WAIT_DEFAULT_POOL,
+    WAIT_FITTING_POOL,
+    WAIT_KNOWLEDGE_POOL,
+    WAIT_ORDER_POOL,
+    WAIT_SEARCH_POOL,
+    WAIT_STATUS_POOL,
     WAIT_TEXT,
 )
 from src.core.audio_socket import AudioSocketConnection, PacketType
@@ -68,25 +69,37 @@ def _time_of_day_greeting() -> str:
     return "До́брий ве́чір"
 
 
-# --- Contextual wait-phrase selection ---
+# --- Contextual wait-phrase selection with rotation ---
 
-_WAIT_CONTEXT_PATTERNS: list[tuple[list[str], str]] = [
-    (["статус", "де замовлення", "де моє"], WAIT_STATUS_TEXT),
-    (["замовлення", "замовити", "оформити"], WAIT_ORDER_TEXT),
-    (["монтаж", "шиномонтаж", "запис"], WAIT_FITTING_TEXT),
-    (["наявність", "є в наявності", "склад"], WAIT_AVAILABILITY_TEXT),
-    (["шини", "шину", "підібрати", "розмір", "зимов", "літн"], WAIT_SEARCH_TEXT),
-    (["порівняти", "рекомендац", "відмінн"], WAIT_KNOWLEDGE_TEXT),
+_WAIT_CONTEXT_PATTERNS: list[tuple[list[str], list[str]]] = [
+    (["статус", "де замовлення", "де моє"], WAIT_STATUS_POOL),
+    (["замовлення", "замовити", "оформити"], WAIT_ORDER_POOL),
+    (["монтаж", "шиномонтаж", "запис"], WAIT_FITTING_POOL),
+    (["наявність", "є в наявності", "склад"], WAIT_AVAILABILITY_POOL),
+    (["шини", "шину", "підібрати", "розмір", "зимов", "літн"], WAIT_SEARCH_POOL),
+    (["порівняти", "рекомендац", "відмінн"], WAIT_KNOWLEDGE_POOL),
 ]
+
+# Per-pool rotation counters (round-robin within a call and across calls)
+_wait_counters: dict[int, int] = {}
 
 
 def _select_wait_message(user_text: str, default: str) -> str:
-    """Pick a contextual wait message based on keywords in user_text."""
+    """Pick a contextual wait message, rotating through the pool."""
     lowered = user_text.lower()
-    for keywords, message in _WAIT_CONTEXT_PATTERNS:
+    for keywords, pool in _WAIT_CONTEXT_PATTERNS:
         if any(kw in lowered for kw in keywords):
-            return message
-    return default
+            return _rotate(pool)
+    return _rotate(WAIT_DEFAULT_POOL)
+
+
+def _rotate(pool: list[str]) -> str:
+    """Round-robin selection from a phrase pool."""
+    pool_id = id(pool)
+    idx = _wait_counters.get(pool_id, 0)
+    phrase = pool[idx % len(pool)]
+    _wait_counters[pool_id] = idx + 1
+    return phrase
 
 
 # --- Contextual farewell prompt ---

@@ -243,18 +243,57 @@ WAIT_TEXT = "Зачека́йте, будь ла́ска, я дивлю́ся і
 
 ORDER_CANCELLED_TEXT = "Замо́влення скасо́вано. Чим ще мо́жу допомогти́?"
 
-# --- Contextual wait phrases (with stress marks) ---
+# --- Contextual wait phrase pools (with stress marks) ---
+# Each context has multiple variants; pipeline rotates through them.
 
 WAIT_SEARCH_TEXT = "Зачека́йте, підбира́ю підхо́дящі ши́ни для вас."
+WAIT_SEARCH_POOL = [
+    WAIT_SEARCH_TEXT,
+    "Секу́ндочку, дивлю́ся варіа́нти.",
+    "Зара́з підберу́, одну́ мить.",
+    "Переві́ряю, що є в на́явності.",
+]
 
 WAIT_AVAILABILITY_TEXT = "Зачека́йте, переві́ряю на́явність."
+WAIT_AVAILABILITY_POOL = [
+    WAIT_AVAILABILITY_TEXT,
+    "Секу́ндочку, дивлю́ся на скла́ді.",
+    "Зара́з переві́рю, одну́ мить.",
+]
 
 WAIT_ORDER_TEXT = "Зачека́йте, оформлю́ю замо́влення."
+WAIT_ORDER_POOL = [
+    WAIT_ORDER_TEXT,
+    "Секу́ндочку, зара́з оформлю́.",
+    "Одну́ мить, готу́ю замо́влення.",
+]
 
 WAIT_FITTING_TEXT = "Зачека́йте, переві́ряю ві́льні ча́си для за́пису."
+WAIT_FITTING_POOL = [
+    WAIT_FITTING_TEXT,
+    "Секу́ндочку, дивлю́ся ві́льні ча́си.",
+    "Зара́з переві́рю ро́зклад, одну́ мить.",
+]
 
 WAIT_STATUS_TEXT = "Зачека́йте, переві́ряю ста́тус замо́влення."
+WAIT_STATUS_POOL = [
+    WAIT_STATUS_TEXT,
+    "Секу́ндочку, дивлю́ся ста́тус.",
+    "Зара́з переві́рю, одну́ мить.",
+]
 
 WAIT_KNOWLEDGE_TEXT = "Зачека́йте, дивлю́ся інформа́цію з на́шої ба́зи зна́нь."
+WAIT_KNOWLEDGE_POOL = [
+    WAIT_KNOWLEDGE_TEXT,
+    "Секу́ндочку, переві́ряю інформа́цію.",
+    "Одну́ мить, дивлю́ся в ба́зі.",
+]
+
+WAIT_DEFAULT_POOL = [
+    WAIT_TEXT,
+    "Секу́ндочку, зара́з переві́рю.",
+    "Одну́ мить, будь ла́ска.",
+    "Дивлю́ся, зачека́йте.",
+]
 
 FAREWELL_ORDER_TEXT = "Дя́кую за замо́влення! До поба́чення!"

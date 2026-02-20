@@ -20,7 +20,7 @@ let _pendingRating = null;
 // ─── Tab switching ───────────────────────────────────────────
 function showTab(tab) {
     _activeTab = tab;
-    ['chat', 'regression', 'patterns'].forEach(t => {
+    ['chat', 'regression', 'patterns', 'phrases'].forEach(t => {
         const el = document.getElementById(`sandboxContent-${t}`);
         if (el) el.style.display = t === tab ? '' : 'none';
     });
@@ -31,6 +31,7 @@ function showTab(tab) {
     if (tab === 'chat') renderChat();
     if (tab === 'regression') loadRegressionRuns();
     if (tab === 'patterns') loadPatterns();
+    if (tab === 'phrases') loadPhrases();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -1014,6 +1015,89 @@ async function testSearch() {
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  Phrases Tab — read-only agent phrase reference
+// ═══════════════════════════════════════════════════════════
+
+async function loadPhrases() {
+    const container = document.getElementById('sandboxPhrasesContainer');
+    container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+
+    try {
+        const data = await api('/admin/sandbox/agent-phrases');
+        const fixed = data.fixed || [];
+        const pools = data.wait_pools || [];
+
+        // Fixed phrases table
+        const fixedRows = fixed.map(item => `
+            <tr class="${tw.trHover}">
+                <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(item.label)}</span></td>
+                <td class="${tw.td} font-mono text-xs whitespace-pre-wrap">${escapeHtml(item.text)}</td>
+                <td class="${tw.td}"><span class="${tw.badgeGreen}">${t('sandbox.phrasesSourceCode')}</span></td>
+            </tr>`).join('');
+
+        // Wait pool rows — each pool is expandable with all variants
+        const poolRows = pools.map(pool => {
+            const variants = pool.phrases.map((phrase, idx) => `
+                <div class="py-1 ${idx > 0 ? 'border-t border-neutral-100 dark:border-neutral-800' : ''}">
+                    <span class="${tw.mutedText} text-xs mr-2">#${idx + 1}</span>
+                    <span class="font-mono text-xs">${escapeHtml(phrase)}</span>
+                </div>`).join('');
+
+            return `
+                <tr class="${tw.trHover}">
+                    <td class="${tw.td}">
+                        <span class="${tw.badgeYellow}">${escapeHtml(pool.label)}</span>
+                        <div class="${tw.mutedText} text-xs mt-1">${t('sandbox.phrasesPoolLabel', { count: pool.phrases.length })}</div>
+                    </td>
+                    <td class="${tw.td}">
+                        <details>
+                            <summary class="cursor-pointer text-xs text-blue-600 dark:text-blue-400">${escapeHtml(pool.phrases[0])}</summary>
+                            <div class="mt-1 pl-2 border-l-2 border-blue-200 dark:border-blue-800">${variants}</div>
+                        </details>
+                    </td>
+                    <td class="${tw.td}"><span class="${tw.badgeGreen}">${t('sandbox.phrasesSourceCode')}</span></td>
+                </tr>`;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="mb-4">
+                <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-1">${t('sandbox.phrasesTitle')}</h2>
+                <p class="${tw.mutedText} text-xs mb-4">${t('sandbox.phrasesDescription')}</p>
+            </div>
+
+            <h3 class="text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-2">${t('sandbox.phrasesCatFixed')}</h3>
+            <div class="overflow-x-auto mb-6">
+                <table class="${tw.table}">
+                    <thead><tr>
+                        <th class="${tw.th}" style="width:200px">${t('sandbox.phrasesKey')}</th>
+                        <th class="${tw.th}">${t('sandbox.phrasesText')}</th>
+                        <th class="${tw.th}" style="width:140px">${t('sandbox.phrasesSource')}</th>
+                    </tr></thead>
+                    <tbody>${fixedRows}</tbody>
+                </table>
+            </div>
+
+            <h3 class="text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-2">${t('sandbox.phrasesCatWait')}</h3>
+            <div class="overflow-x-auto mb-6">
+                <table class="${tw.table}">
+                    <thead><tr>
+                        <th class="${tw.th}" style="width:200px">${t('sandbox.phrasesKey')}</th>
+                        <th class="${tw.th}">${t('sandbox.phrasesText')}</th>
+                        <th class="${tw.th}" style="width:140px">${t('sandbox.phrasesSource')}</th>
+                    </tr></thead>
+                    <tbody>${poolRows}</tbody>
+                </table>
+            </div>
+
+            <div class="p-3 bg-amber-50 dark:bg-amber-950/20 rounded-md border border-amber-200 dark:border-amber-800">
+                <p class="text-xs text-amber-700 dark:text-amber-300">${t('sandbox.phrasesLlmNote')}</p>
+            </div>`;
+    } catch (e) {
+        container.innerHTML = `<div class="${tw.emptyState}">${t('sandbox.phrasesLoadFailed', { error: escapeHtml(e.message) })}</div>`;
+    }
+}
+
 // ─── Init ────────────────────────────────────────────────────
 export function init() {
     registerPageLoader('sandbox', () => {
@@ -1053,4 +1137,6 @@ window._pages.sandbox = {
     togglePatternActive,
     deletePattern,
     testSearch,
+    // Phase 5: Agent Phrases
+    loadPhrases,
 };

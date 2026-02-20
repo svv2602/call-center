@@ -91,6 +91,54 @@ class PatternUpdate(BaseModel):
     tags: list[str] | None = None
 
 
+# ── Agent phrases (read-only reference) ──────────────────────
+
+
+@router.get("/agent-phrases")
+async def get_agent_phrases(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+    """Return all hardcoded agent phrases for admin reference.
+
+    These phrases are spoken by TTS directly, bypassing the LLM.
+    """
+    from src.agent.prompts import (
+        ERROR_TEXT,
+        FAREWELL_ORDER_TEXT,
+        FAREWELL_TEXT,
+        GREETING_TEXT,
+        SILENCE_PROMPT_TEXT,
+        TRANSFER_TEXT,
+        WAIT_AVAILABILITY_POOL,
+        WAIT_DEFAULT_POOL,
+        WAIT_FITTING_POOL,
+        WAIT_KNOWLEDGE_POOL,
+        WAIT_ORDER_POOL,
+        WAIT_SEARCH_POOL,
+        WAIT_STATUS_POOL,
+        WAIT_TEXT,
+    )
+
+    return {
+        "fixed": [
+            {"key": "greeting", "label": "Приветствие", "text": GREETING_TEXT},
+            {"key": "farewell", "label": "Прощание", "text": FAREWELL_TEXT},
+            {"key": "farewell_order", "label": "Прощание (заказ)", "text": FAREWELL_ORDER_TEXT},
+            {"key": "transfer", "label": "Переключение на оператора", "text": TRANSFER_TEXT},
+            {"key": "error", "label": "Техническая ошибка", "text": ERROR_TEXT},
+            {"key": "silence_prompt", "label": "Тишина (проверка)", "text": SILENCE_PROMPT_TEXT},
+            {"key": "wait_default", "label": "Ожидание (общее)", "text": WAIT_TEXT},
+        ],
+        "wait_pools": [
+            {"key": "search", "label": "Поиск шин", "phrases": WAIT_SEARCH_POOL},
+            {"key": "availability", "label": "Проверка наличия", "phrases": WAIT_AVAILABILITY_POOL},
+            {"key": "order", "label": "Оформление заказа", "phrases": WAIT_ORDER_POOL},
+            {"key": "status", "label": "Статус заказа", "phrases": WAIT_STATUS_POOL},
+            {"key": "fitting", "label": "Запись на шиномонтаж", "phrases": WAIT_FITTING_POOL},
+            {"key": "knowledge", "label": "Консультация (база знаний)", "phrases": WAIT_KNOWLEDGE_POOL},
+            {"key": "default", "label": "По умолчанию (fallback)", "phrases": WAIT_DEFAULT_POOL},
+        ],
+    }
+
+
 # ── Available models ─────────────────────────────────────────
 
 SANDBOX_MODELS = [

@@ -24,11 +24,18 @@ from src.agent.prompts import (
     ORDER_CANCELLED_TEXT,
     SILENCE_PROMPT_TEXT,
     TRANSFER_TEXT,
+    WAIT_AVAILABILITY_POOL,
     WAIT_AVAILABILITY_TEXT,
+    WAIT_DEFAULT_POOL,
+    WAIT_FITTING_POOL,
     WAIT_FITTING_TEXT,
+    WAIT_KNOWLEDGE_POOL,
     WAIT_KNOWLEDGE_TEXT,
+    WAIT_ORDER_POOL,
     WAIT_ORDER_TEXT,
+    WAIT_SEARCH_POOL,
     WAIT_SEARCH_TEXT,
+    WAIT_STATUS_POOL,
     WAIT_STATUS_TEXT,
     WAIT_TEXT,
 )
@@ -38,6 +45,7 @@ from src.core.pipeline import (
     CallPipeline,
     _select_wait_message,
     _time_of_day_greeting,
+    _wait_counters,
 )
 
 # ---------------------------------------------------------------------------
@@ -124,7 +132,7 @@ class TestStressMarks:
     def test_wait_specific_accents(self) -> None:
         assert "Зачека́йте" in WAIT_TEXT
         assert "ла́ска" in WAIT_TEXT
-        assert "шука́ю" in WAIT_TEXT
+        assert "дивлю́ся" in WAIT_TEXT
 
 
 # ---------------------------------------------------------------------------
@@ -133,43 +141,59 @@ class TestStressMarks:
 
 
 class TestContextualWaitPhrase:
-    """Test _select_wait_message() keyword matching."""
+    """Test _select_wait_message() keyword matching with pool rotation."""
 
     DEFAULT = "default wait"
 
+    @pytest.fixture(autouse=True)
+    def _reset_counters(self) -> None:
+        """Reset rotation counters so each test starts from pool[0]."""
+        _wait_counters.clear()
+
     def test_order_keywords(self) -> None:
-        assert _select_wait_message("Хочу оформити замовлення", self.DEFAULT) == WAIT_ORDER_TEXT
+        assert _select_wait_message("Хочу оформити замовлення", self.DEFAULT) in WAIT_ORDER_POOL
 
     def test_status_keywords(self) -> None:
-        assert _select_wait_message("Де моє замовлення?", self.DEFAULT) == WAIT_STATUS_TEXT
-        assert _select_wait_message("Перевірте статус", self.DEFAULT) == WAIT_STATUS_TEXT
+        assert _select_wait_message("Де моє замовлення?", self.DEFAULT) in WAIT_STATUS_POOL
+        assert _select_wait_message("Перевірте статус", self.DEFAULT) in WAIT_STATUS_POOL
 
     def test_fitting_keywords(self) -> None:
-        assert _select_wait_message("Запис на шиномонтаж", self.DEFAULT) == WAIT_FITTING_TEXT
+        assert _select_wait_message("Запис на шиномонтаж", self.DEFAULT) in WAIT_FITTING_POOL
 
     def test_availability_keywords(self) -> None:
-        assert _select_wait_message("Перевірте наявність", self.DEFAULT) == WAIT_AVAILABILITY_TEXT
+        assert _select_wait_message("Перевірте наявність", self.DEFAULT) in WAIT_AVAILABILITY_POOL
 
     def test_search_keywords(self) -> None:
-        assert _select_wait_message("Підібрати зимові шини", self.DEFAULT) == WAIT_SEARCH_TEXT
+        assert _select_wait_message("Підібрати зимові шини", self.DEFAULT) in WAIT_SEARCH_POOL
 
     def test_knowledge_keywords(self) -> None:
-        assert _select_wait_message("Порівняти бренди", self.DEFAULT) == WAIT_KNOWLEDGE_TEXT
+        assert _select_wait_message("Порівняти бренди", self.DEFAULT) in WAIT_KNOWLEDGE_POOL
 
-    def test_no_match_returns_default(self) -> None:
-        assert _select_wait_message("Привіт", self.DEFAULT) == self.DEFAULT
+    def test_no_match_returns_default_pool(self) -> None:
+        assert _select_wait_message("Привіт", self.DEFAULT) in WAIT_DEFAULT_POOL
 
     def test_case_insensitive(self) -> None:
-        assert _select_wait_message("ЗАМОВЛЕННЯ", self.DEFAULT) == WAIT_ORDER_TEXT
+        assert _select_wait_message("ЗАМОВЛЕННЯ", self.DEFAULT) in WAIT_ORDER_POOL
 
     def test_first_match_wins(self) -> None:
         # "статус" matches status pattern (first in list) before order's "замовлення"
         result = _select_wait_message("замовлення статус", self.DEFAULT)
-        assert result == WAIT_STATUS_TEXT
+        assert result in WAIT_STATUS_POOL
 
     def test_partial_keyword_match(self) -> None:
         # "зимов" should match as a substring
-        assert _select_wait_message("зимові шини 205/55", self.DEFAULT) == WAIT_SEARCH_TEXT
+        assert _select_wait_message("зимові шини 205/55", self.DEFAULT) in WAIT_SEARCH_POOL
+
+    def test_rotation_cycles_through_pool(self) -> None:
+        """Consecutive calls rotate through pool variants."""
+        results = [
+            _select_wait_message("Підібрати шини", self.DEFAULT)
+            for _ in range(len(WAIT_SEARCH_POOL) + 1)
+        ]
+        # First len(pool) calls should cover all variants
+        assert set(results[: len(WAIT_SEARCH_POOL)]) == set(WAIT_SEARCH_POOL)
+        # After cycling, it wraps around
+        assert results[len(WAIT_SEARCH_POOL)] == WAIT_SEARCH_POOL[0]
 
 
 # ---------------------------------------------------------------------------

@@ -166,7 +166,7 @@
         <div class="main-content ml-14 max-md:ml-0 p-6 max-md:p-4 min-h-screen">
             <!-- Dashboard -->
             <div id="page-dashboard">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="dashboard.breadcrumb">Дашборд</span></div>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="dashboard.breadcrumb">Дашборд</span></div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="dashboard.title">Дашборд</h1>
                 <div class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4 mb-6 max-md:grid-cols-2 max-[480px]:grid-cols-1" id="dashboardStats">
                     <div class="flex justify-center py-8"><div class="spinner"></div></div>
@@ -184,7 +184,7 @@
 
             <!-- Calls -->
             <div id="page-calls" style="display:none">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="calls.breadcrumb">Журнал звонков</span></div>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="calls.breadcrumb">Журнал звонков</span></div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="calls.title">Журнал звонков</h1>
                 <div class="flex flex-wrap items-center gap-2 mb-4">
                     <input type="date" id="filterDateFrom" onchange="window._pages.calls.loadCalls()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
@@ -237,14 +237,14 @@
 
             <!-- Prompts -->
             <div id="page-prompts" style="display:none">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.training">Обучение</span> / <span data-i18n="nav.prompts">Промпты</span></div>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.training">Обучение</span> / <span data-i18n="nav.prompts">Промпты</span></div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.prompts">Промпты</h1>
                 <div id="promptsContent" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
             </div>
 
             <!-- Knowledge (Articles + Sources) -->
             <div id="page-knowledge" style="display:none">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.training">Обучение</span> / <span data-i18n="nav.knowledge">База знаний</span></div>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.training">Обучение</span> / <span data-i18n="nav.knowledge">База знаний</span></div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.knowledge">База знаний</h1>
                 <div class="tab-bar flex border-b border-neutral-200 dark:border-neutral-700 mb-4 flex-wrap">
                     <button class="active px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="articles" onclick="window._pages.knowledge.showTab('articles')" data-i18n="training.tabKnowledge">Статьи</button>
@@ -317,7 +317,7 @@
 
             <!-- Scenarios (Templates + Dialogues + Safety) -->
             <div id="page-scenarios" style="display:none">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.training">Обучение</span> / <span data-i18n="nav.scenarios">Сценарии</span></div>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.training">Обучение</span> / <span data-i18n="nav.scenarios">Сценарии</span></div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.scenarios">Сценарии</h1>
                 <div class="tab-bar flex border-b border-neutral-200 dark:border-neutral-700 mb-4 flex-wrap">
                     <button class="active px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="templates" onclick="window._pages.scenarios.showTab('templates')" data-i18n="training.tabTemplates">Шаблоны ответов</button>
@@ -404,14 +404,14 @@
 
             <!-- Tools -->
             <div id="page-tools" style="display:none">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.training">Обучение</span> / <span data-i18n="nav.tools">Инструменты</span></div>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.training">Обучение</span> / <span data-i18n="nav.tools">Инструменты</span></div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.tools">Инструменты</h1>
                 <div id="toolsContent" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
             </div>
 
             <!-- Sandbox -->
             <div id="page-sandbox" style="display:none">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.training">Обучение</span> / <span data-i18n="nav.sandbox">Песочница</span></div>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.training">Обучение</span> / <span data-i18n="nav.sandbox">Песочница</span></div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.title">Песочница агента</h1>
                 <div class="flex gap-4" style="height: calc(100vh - 140px);">
                     <!-- LEFT: Sidebar -->
@@ -447,6 +447,7 @@
                             <button class="active px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="chat" onclick="window._pages.sandbox.showTab('chat')" data-i18n="sandbox.tabChat">Чат</button>
                             <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="regression" onclick="window._pages.sandbox.showTab('regression')" data-i18n="sandbox.tabRegression">Регрессия</button>
                             <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="patterns" onclick="window._pages.sandbox.showTab('patterns')" data-i18n="sandbox.patterns">Паттерны</button>
+                            <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="phrases" onclick="window._pages.sandbox.showTab('phrases')" data-i18n="sandbox.tabPhrases">Фразы агента</button>
                         </div>
                         <div id="sandboxContent-chat" class="flex-1 overflow-hidden">
                             <div id="sandboxChatContainer" class="h-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 overflow-y-auto"></div>
@@ -457,13 +458,16 @@
                         <div id="sandboxContent-patterns" style="display:none" class="flex-1 overflow-auto">
                             <div id="sandboxPatternsContainer" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5"></div>
                         </div>
+                        <div id="sandboxContent-phrases" style="display:none" class="flex-1 overflow-auto">
+                            <div id="sandboxPhrasesContainer" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5"></div>
+                        </div>
                     </div>
                 </div>
             </div>
 
             <!-- Operators -->
             <div id="page-operators" style="display:none">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="operators.breadcrumb">Операторы</span></div>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="operators.breadcrumb">Операторы</span></div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="operators.title">Операторы</h1>
                 <div class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4 mb-6 max-md:grid-cols-2 max-[480px]:grid-cols-1" id="operatorQueueStats"></div>
                 <div class="flex flex-wrap items-center gap-2 mb-4">
@@ -503,7 +507,7 @@
 
             <!-- Monitoring -->
             <div id="page-monitoring" style="display:none">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.monitoring">Мониторинг</span></div>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.monitoring">Мониторинг</span></div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.monitoring">Мониторинг</h1>
                 <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
                     <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.healthCheck">Проверка здоровья</h3>
@@ -537,7 +541,7 @@
 
             <!-- Configuration -->
             <div id="page-configuration" style="display:none">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.configuration">Конфигурация</span></div>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.configuration">Конфигурация</span></div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.configuration">Конфигурация</h1>
                 <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
                     <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.configuration">Конфигурация</h3>
@@ -555,7 +559,7 @@
 
             <!-- Notifications -->
             <div id="page-notifications" style="display:none">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.notifications">Уведомления</span></div>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.notifications">Уведомления</span></div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.notifications">Уведомления</h1>
                 <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
                     <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.telegram">Уведомления Telegram</h3>
@@ -566,7 +570,7 @@
 
             <!-- Users -->
             <div id="page-users" style="display:none">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="users.breadcrumb">Пользователи</span></div>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="users.breadcrumb">Пользователи</span></div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="users.title">Управление пользователями</h1>
                 <div class="flex flex-wrap items-center gap-2 mb-4">
                     <button onclick="window._pages.users.showCreateUser()"
@@ -579,7 +583,7 @@
 
             <!-- Audit Log -->
             <div id="page-audit" style="display:none">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="audit.breadcrumb">Аудит</span></div>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="audit.breadcrumb">Аудит</span></div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="audit.title">Журнал аудита</h1>
                 <div class="flex flex-wrap items-center gap-2 mb-4">
                     <input type="date" id="auditDateFrom" onchange="window._pages.audit.loadAuditLog()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
@@ -602,7 +606,7 @@
             <!-- Vehicles -->
             <div id="page-vehicles" style="display:none">
                 <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3">
-                    <a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> /
+                    <a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> /
                     <span data-i18n="vehicles.breadcrumb">База авто</span>
                 </div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="vehicles.title">База автомобилей</h1>

@@ -17,12 +17,13 @@ from src.agent.prompts import (
     GREETING_TEXT,
     SILENCE_PROMPT_TEXT,
     TRANSFER_TEXT,
-    WAIT_AVAILABILITY_TEXT,
-    WAIT_FITTING_TEXT,
-    WAIT_KNOWLEDGE_TEXT,
-    WAIT_ORDER_TEXT,
-    WAIT_SEARCH_TEXT,
-    WAIT_STATUS_TEXT,
+    WAIT_AVAILABILITY_POOL,
+    WAIT_DEFAULT_POOL,
+    WAIT_FITTING_POOL,
+    WAIT_KNOWLEDGE_POOL,
+    WAIT_ORDER_POOL,
+    WAIT_SEARCH_POOL,
+    WAIT_STATUS_POOL,
     WAIT_TEXT,
 )
 from src.monitoring.metrics import tts_cache_hits_total, tts_cache_misses_total
@@ -51,7 +52,7 @@ _BREAK_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r":(\s)"), r':<break time="200ms"/>\1'),
 ]
 
-# Phrases to pre-cache at startup (imported from prompts.py to ensure cache key match)
+# Phrases to pre-cache at startup — includes all wait pool variants
 CACHED_PHRASES = [
     GREETING_TEXT,
     WAIT_TEXT,
@@ -59,13 +60,14 @@ CACHED_PHRASES = [
     FAREWELL_TEXT,
     SILENCE_PROMPT_TEXT,
     ERROR_TEXT,
-    WAIT_SEARCH_TEXT,
-    WAIT_AVAILABILITY_TEXT,
-    WAIT_ORDER_TEXT,
-    WAIT_FITTING_TEXT,
-    WAIT_STATUS_TEXT,
-    WAIT_KNOWLEDGE_TEXT,
     FAREWELL_ORDER_TEXT,
+    *WAIT_SEARCH_POOL,
+    *WAIT_AVAILABILITY_POOL,
+    *WAIT_ORDER_POOL,
+    *WAIT_FITTING_POOL,
+    *WAIT_STATUS_POOL,
+    *WAIT_KNOWLEDGE_POOL,
+    *WAIT_DEFAULT_POOL,
 ]
 
 

@@ -39,7 +39,7 @@ class TestPacketParsing:
 
     @pytest.mark.asyncio
     async def test_parse_audio_packet(self) -> None:
-        audio_data = b"\x01\x02" * 320  # 640 bytes = 20ms frame
+        audio_data = b"\x01\x02" * 160  # 320 bytes = 20ms frame
         raw = _make_packet(PacketType.AUDIO, audio_data)
         reader = asyncio.StreamReader()
         reader.feed_data(raw)
