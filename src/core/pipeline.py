@@ -8,16 +8,25 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import datetime
 import logging
 import time
+import zoneinfo
 from typing import TYPE_CHECKING
 
 from src.agent.prompts import (
     ERROR_TEXT,
+    FAREWELL_ORDER_TEXT,
     FAREWELL_TEXT,
     GREETING_TEXT,
     SILENCE_PROMPT_TEXT,
     TRANSFER_TEXT,
+    WAIT_AVAILABILITY_TEXT,
+    WAIT_FITTING_TEXT,
+    WAIT_KNOWLEDGE_TEXT,
+    WAIT_ORDER_TEXT,
+    WAIT_SEARCH_TEXT,
+    WAIT_STATUS_TEXT,
     WAIT_TEXT,
 )
 from src.core.audio_socket import AudioSocketConnection, PacketType
@@ -28,6 +37,12 @@ from src.stt.base import STTConfig, STTEngine, Transcript
 # Max time to wait for LLM agent to produce a response (seconds)
 AGENT_PROCESSING_TIMEOUT_SEC = 30
 
+# Timeout for contextual farewell LLM call (seconds)
+_FAREWELL_LLM_TIMEOUT_SEC = 3
+
+# Minimum dialog turns before using contextual farewell
+_FAREWELL_MIN_TURNS = 3
+
 # Default template dict (used if no PromptManager or DB unavailable)
 _DEFAULT_TEMPLATES: dict[str, str] = {
     "greeting": GREETING_TEXT,
@@ -37,6 +52,49 @@ _DEFAULT_TEMPLATES: dict[str, str] = {
     "error": ERROR_TEXT,
     "wait": WAIT_TEXT,
 }
+
+# --- Time-of-day greeting ---
+
+_KYIV_TZ = zoneinfo.ZoneInfo("Europe/Kyiv")
+
+
+def _time_of_day_greeting() -> str:
+    """Return a Ukrainian greeting appropriate for the current Kyiv time."""
+    hour = datetime.datetime.now(tz=_KYIV_TZ).hour
+    if 6 <= hour < 12:
+        return "До́брий ра́нок"
+    if 12 <= hour < 18:
+        return "До́брий день"
+    return "До́брий ве́чір"
+
+
+# --- Contextual wait-phrase selection ---
+
+_WAIT_CONTEXT_PATTERNS: list[tuple[list[str], str]] = [
+    (["статус", "де замовлення", "де моє"], WAIT_STATUS_TEXT),
+    (["замовлення", "замовити", "оформити"], WAIT_ORDER_TEXT),
+    (["монтаж", "шиномонтаж", "запис"], WAIT_FITTING_TEXT),
+    (["наявність", "є в наявності", "склад"], WAIT_AVAILABILITY_TEXT),
+    (["шини", "шину", "підібрати", "розмір", "зимов", "літн"], WAIT_SEARCH_TEXT),
+    (["порівняти", "рекомендац", "відмінн"], WAIT_KNOWLEDGE_TEXT),
+]
+
+
+def _select_wait_message(user_text: str, default: str) -> str:
+    """Pick a contextual wait message based on keywords in user_text."""
+    lowered = user_text.lower()
+    for keywords, message in _WAIT_CONTEXT_PATTERNS:
+        if any(kw in lowered for kw in keywords):
+            return message
+    return default
+
+# --- Contextual farewell prompt ---
+
+_FAREWELL_SYSTEM_PROMPT = (
+    "Ти — голосовий асистент інтернет-магазину шин Олена. "
+    "Клієнт мовчить. Згенеруй коро́тке проща́ння (1 ре́чення українською), "
+    "підсумуй результа́т розмо́ви. Подя́куй за дзвіно́к."
+)
 
 if TYPE_CHECKING:
     from src.agent.agent import LLMAgent
@@ -117,8 +175,9 @@ class CallPipeline:
             self._session.transition_to(CallState.ENDED)
 
     async def _play_greeting(self) -> None:
-        """Play the greeting message."""
+        """Play the greeting message, adapted to the time of day."""
         greeting = self._templates.get("greeting", GREETING_TEXT)
+        greeting = greeting.replace("Добрий день", _time_of_day_greeting(), 1)
         self._session.transition_to(CallState.GREETING)
         await self._speak(greeting)
         self._session.add_assistant_turn(greeting)
@@ -153,7 +212,11 @@ class CallPipeline:
                 # Silence timeout
                 should_end = self._session.record_timeout()
                 if should_end:
-                    await self._speak(self._templates.get("farewell", FAREWELL_TEXT))
+                    farewell = await self._generate_contextual_farewell()
+                    if farewell is None:
+                        farewell = self._templates.get("farewell", FAREWELL_TEXT)
+                    self._session.add_assistant_turn(farewell)
+                    await self._speak(farewell)
                     break
                 else:
                     await self._speak(self._templates.get("silence_prompt", SILENCE_PROMPT_TEXT))
@@ -168,7 +231,9 @@ class CallPipeline:
 
             # Process through LLM
             self._session.transition_to(CallState.PROCESSING)
-            await self._speak(self._templates.get("wait", WAIT_TEXT))  # filler while processing
+            wait_default = self._templates.get("wait", WAIT_TEXT)
+            wait_msg = _select_wait_message(transcript.text, wait_default)
+            await self._speak(wait_msg)  # contextual filler while processing
 
             # Search for relevant conversation patterns
             pattern_context = None
@@ -238,6 +303,39 @@ class CallPipeline:
                 break
 
             self._session.transition_to(CallState.LISTENING)
+
+    async def _generate_contextual_farewell(self) -> str | None:
+        """Generate a contextual farewell based on conversation history.
+
+        Returns None if the conversation is too short or LLM fails,
+        so the caller can fall back to the standard template.
+        """
+        # Too short — use default template
+        if len(self._session.dialog_history) < _FAREWELL_MIN_TURNS:
+            return None
+
+        # Rule: if an order was placed, use a specific farewell
+        if self._session.order_id:
+            return FAREWELL_ORDER_TEXT
+
+        # LLM fallback: summarise the conversation in a farewell
+        history = self._session.messages_for_llm
+        try:
+            response_text, _ = await asyncio.wait_for(
+                self._agent.process_message(
+                    user_text=_FAREWELL_SYSTEM_PROMPT,
+                    conversation_history=history,
+                ),
+                timeout=_FAREWELL_LLM_TIMEOUT_SEC,
+            )
+            if response_text and response_text.strip():
+                return response_text.strip()
+        except TimeoutError:
+            logger.warning("Contextual farewell LLM timed out: %s", self._session.channel_uuid)
+        except Exception:
+            logger.warning("Contextual farewell LLM failed: %s", self._session.channel_uuid, exc_info=True)
+
+        return None
 
     async def _wait_for_final_transcript(self) -> Transcript | None:
         """Wait for a final transcript from STT, with silence timeout.

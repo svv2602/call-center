@@ -9,6 +9,21 @@ from typing import TYPE_CHECKING
 
 from google.cloud import texttospeech_v1 as texttospeech
 
+from src.agent.prompts import (
+    ERROR_TEXT,
+    FAREWELL_ORDER_TEXT,
+    FAREWELL_TEXT,
+    GREETING_TEXT,
+    SILENCE_PROMPT_TEXT,
+    TRANSFER_TEXT,
+    WAIT_AVAILABILITY_TEXT,
+    WAIT_FITTING_TEXT,
+    WAIT_KNOWLEDGE_TEXT,
+    WAIT_ORDER_TEXT,
+    WAIT_SEARCH_TEXT,
+    WAIT_STATUS_TEXT,
+    WAIT_TEXT,
+)
 from src.tts.base import TTSConfig
 
 if TYPE_CHECKING:
@@ -19,15 +34,21 @@ logger = logging.getLogger(__name__)
 # Sentence-splitting pattern (split on ., !, ? followed by space or end)
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
-# Phrases to pre-cache at startup
+# Phrases to pre-cache at startup (imported from prompts.py to ensure cache key match)
 CACHED_PHRASES = [
-    "Добрий день! Інтернет-магазин шин. Чим можу допомогти?",
-    "Зачекайте, будь ласка, я шукаю інформацію.",
-    "Зараз з'єдную вас з оператором. Залишайтесь на лінії.",
-    "Дякую за дзвінок! До побачення!",
-    "Ви ще на лінії?",
-    "Перепрошую, виникла технічна помилка. З'єдную з оператором.",
-    "Цей дзвінок обробляється автоматичною системою.",
+    GREETING_TEXT,
+    WAIT_TEXT,
+    TRANSFER_TEXT,
+    FAREWELL_TEXT,
+    SILENCE_PROMPT_TEXT,
+    ERROR_TEXT,
+    WAIT_SEARCH_TEXT,
+    WAIT_AVAILABILITY_TEXT,
+    WAIT_ORDER_TEXT,
+    WAIT_FITTING_TEXT,
+    WAIT_STATUS_TEXT,
+    WAIT_KNOWLEDGE_TEXT,
+    FAREWELL_ORDER_TEXT,
 ]
 
 
