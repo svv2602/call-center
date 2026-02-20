@@ -70,7 +70,7 @@ class TestBuildSystemPromptSecurity:
         assert "Підказка по сезону" in prompt
 
     def test_prompt_version_updated(self) -> None:
-        assert PROMPT_VERSION == "v3.1-checklists"
+        assert PROMPT_VERSION == "v3.2-checklists"
 
 
 class TestToolSchemaValidation:
