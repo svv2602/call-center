@@ -20,16 +20,15 @@ let _pendingRating = null;
 // ─── Tab switching ───────────────────────────────────────────
 function showTab(tab) {
     _activeTab = tab;
-    ['chat', 'history', 'regression', 'patterns'].forEach(t => {
+    ['chat', 'regression', 'patterns'].forEach(t => {
         const el = document.getElementById(`sandboxContent-${t}`);
-        if (el) el.style.display = t === tab ? 'block' : 'none';
+        if (el) el.style.display = t === tab ? '' : 'none';
     });
     document.querySelectorAll('#page-sandbox .tab-bar button').forEach(b => b.classList.remove('active'));
     const activeBtn = document.querySelector(`#page-sandbox .tab-bar button[data-tab="${tab}"]`);
     if (activeBtn) activeBtn.classList.add('active');
 
     if (tab === 'chat') renderChat();
-    if (tab === 'history') loadHistory();
     if (tab === 'regression') loadRegressionRuns();
     if (tab === 'patterns') loadPatterns();
 }
@@ -41,9 +40,8 @@ function renderChat() {
     const container = document.getElementById('sandboxChatContainer');
     if (!_currentConvId) {
         container.innerHTML = `
-            <div class="text-center py-12">
-                <p class="${tw.emptyState} mb-4">${t('sandbox.noConversation')}</p>
-                <button class="${tw.btnPrimary}" onclick="window._pages.sandbox.showNewConvModal()">${t('sandbox.newConversation')}</button>
+            <div class="flex items-center justify-center h-full">
+                <p class="${tw.emptyState}">${t('sandbox.noConversation')}</p>
             </div>`;
         return;
     }
@@ -156,30 +154,31 @@ function renderConversationView() {
     const prevInput = document.getElementById('sandboxInput')?.value || '';
 
     container.innerHTML = `
-        <div class="flex flex-wrap items-center gap-2 mb-4 pb-3 border-b border-neutral-200 dark:border-neutral-700">
-            <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mr-2">${escapeHtml(conv.title)}</h2>
-            ${promptBadge} ${toolBadge} ${modelBadge} ${scenarioBadge}
-            <div class="ml-auto flex flex-wrap gap-2">
-                <button class="${markingBtnClass} ${tw.btnSm}" onclick="window._pages.sandbox.toggleMarking()">${markingLabel}</button>
-                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.showNewConvModal()">${t('sandbox.newConversation')}</button>
-                ${isActive ? `<button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.archiveConversation()">${t('sandbox.archiveConversation')}</button>` : ''}
+        <div class="flex flex-col h-full">
+            <div class="flex flex-wrap items-center gap-2 mb-3 pb-3 border-b border-neutral-200 dark:border-neutral-700">
+                <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mr-2">${escapeHtml(conv.title)}</h2>
+                ${promptBadge} ${toolBadge} ${modelBadge} ${scenarioBadge}
+                <div class="ml-auto flex flex-wrap gap-2">
+                    <button class="${markingBtnClass} ${tw.btnSm}" onclick="window._pages.sandbox.toggleMarking()">${markingLabel}</button>
+                    ${isActive ? `<button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.archiveConversation()">${t('sandbox.archiveConversation')}</button>` : ''}
+                </div>
             </div>
-        </div>
-        ${groupsHtml}
-        ${markingToolbar}
-        <div id="sandboxMessages" class="max-h-[60vh] min-h-[250px] overflow-y-auto mb-4 space-y-2">
-            ${messagesHtml}
-        </div>
-        ${isActive ? `
-        <div class="flex gap-2 pt-3 border-t border-neutral-200 dark:border-neutral-700">
-            <input type="text" id="sandboxInput"
-                data-i18n-placeholder="sandbox.messagePlaceholder"
-                placeholder="${t('sandbox.messagePlaceholder')}"
-                class="${tw.formInput} flex-1"
-                onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();window._pages.sandbox.sendMessage();}">
-            <button id="sandboxAutoBtn" class="${tw.btnPurple} ${tw.btnSm}" title="${t('sandbox.autoCustomerHint')}" onclick="window._pages.sandbox.autoCustomer()">${t('sandbox.autoCustomer')}</button>
-            <button id="sandboxSendBtn" class="${tw.btnPrimary}" onclick="window._pages.sandbox.sendMessage()">${t('sandbox.sendMessage')}</button>
-        </div>` : ''}`;
+            ${groupsHtml}
+            ${markingToolbar}
+            <div id="sandboxMessages" class="flex-1 overflow-y-auto mb-3 space-y-2">
+                ${messagesHtml}
+            </div>
+            ${isActive ? `
+            <div class="flex gap-2 pt-3 border-t border-neutral-200 dark:border-neutral-700">
+                <input type="text" id="sandboxInput"
+                    data-i18n-placeholder="sandbox.messagePlaceholder"
+                    placeholder="${t('sandbox.messagePlaceholder')}"
+                    class="${tw.formInput} flex-1"
+                    onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();window._pages.sandbox.sendMessage();}">
+                <button id="sandboxAutoBtn" class="${tw.btnPurple} ${tw.btnSm}" title="${t('sandbox.autoCustomerHint')}" onclick="window._pages.sandbox.autoCustomer()">${t('sandbox.autoCustomer')}</button>
+                <button id="sandboxSendBtn" class="${tw.btnPrimary}" onclick="window._pages.sandbox.sendMessage()">${t('sandbox.sendMessage')}</button>
+            </div>` : ''}
+        </div>`;
 
     // Restore input value
     const newInput = document.getElementById('sandboxInput');
@@ -546,6 +545,7 @@ async function archiveConversation() {
         _currentConv = null;
         _turns = [];
         renderChat();
+        loadSidebar();
     } catch (e) {
         showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
     }
@@ -610,6 +610,7 @@ async function createConversation() {
         closeModal('sandboxNewConvModal');
         showToast(t('sandbox.created'));
         _currentConvId = result.item.id;
+        loadSidebar();
         showTab('chat');
     } catch (e) {
         showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
@@ -617,11 +618,12 @@ async function createConversation() {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  History Tab
+//  Sidebar — conversation list
 // ═══════════════════════════════════════════════════════════
-async function loadHistory() {
-    const container = document.getElementById('sandboxHistoryContainer');
-    container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+async function loadSidebar() {
+    const container = document.getElementById('sandboxSidebarList');
+    if (!container) return;
+    container.innerHTML = `<div class="flex justify-center py-6"><div class="spinner"></div></div>`;
 
     const search = document.getElementById('sandboxSearch')?.value?.trim() || '';
     const status = document.getElementById('sandboxFilterStatus')?.value || '';
@@ -638,69 +640,48 @@ async function loadHistory() {
         const items = data.items || [];
 
         if (items.length === 0) {
-            container.innerHTML = `
-                <div class="${tw.emptyState}">${t('sandbox.noConversations')}</div>
-                <div class="text-center mt-3">
-                    <button class="${tw.btnPrimary}" onclick="window._pages.sandbox.showNewConvModal()">${t('sandbox.newConversation')}</button>
-                </div>`;
+            container.innerHTML = `<div class="p-4 text-center ${tw.mutedText}">${t('sandbox.noConversations')}</div>`;
             return;
         }
 
-        const rows = items.map(item => {
-            const statusBadge = item.status === 'active'
-                ? `<span class="${tw.badgeGreen}">${t('sandbox.active')}</span>`
-                : `<span class="${tw.badgeGray}">${t('sandbox.archivedStatus')}</span>`;
+        container.innerHTML = items.map(item => {
+            const isActive = item.id === _currentConvId;
+            const activeCls = isActive
+                ? 'bg-blue-50 dark:bg-blue-950/30 border-l-2 border-blue-500'
+                : 'border-l-2 border-transparent hover:bg-neutral-50 dark:hover:bg-neutral-800';
             const toolBadge = item.tool_mode === 'mock'
-                ? `<span class="${tw.badgeYellow}">${t('sandbox.mock')}</span>`
-                : `<span class="${tw.badgeGreen}">${t('sandbox.live')}</span>`;
+                ? `<span class="text-[10px] px-1 rounded bg-amber-100 dark:bg-amber-900/40 text-amber-700 dark:text-amber-300">${t('sandbox.mock')}</span>`
+                : `<span class="text-[10px] px-1 rounded bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-300">${t('sandbox.live')}</span>`;
             const modelLabel = item.model
                 ? item.model.replace('claude-', '').replace(/-\d+$/, '')
-                : '-';
-            const avgRating = item.avg_rating != null
-                ? parseFloat(item.avg_rating).toFixed(1) + ' &#9733;'
-                : '-';
+                : '';
+            const dateStr = item.updated_at ? new Date(item.updated_at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) : '';
 
             return `
-                <tr class="${tw.trHover} cursor-pointer" onclick="window._pages.sandbox.openConversation('${item.id}')">
-                    <td class="${tw.td}">${escapeHtml(item.title)}</td>
-                    <td class="${tw.td}">${item.prompt_version_name ? `<span class="${tw.badgeBlue}">${escapeHtml(item.prompt_version_name)}</span>` : '-'}</td>
-                    <td class="${tw.td}">${item.scenario_type ? `<span class="${tw.badge}">${escapeHtml(item.scenario_type)}</span>` : '-'}</td>
-                    <td class="${tw.td}">${modelLabel}</td>
-                    <td class="${tw.td}">${toolBadge}</td>
-                    <td class="${tw.td}">${item.turns_count || 0}</td>
-                    <td class="${tw.td}">${avgRating}</td>
-                    <td class="${tw.td}">${formatDate(item.updated_at)}</td>
-                    <td class="${tw.td}">${statusBadge}</td>
-                    <td class="${tw.td}">
-                        <button class="${tw.btnDanger} ${tw.btnSm}" onclick="event.stopPropagation();window._pages.sandbox.deleteConversation('${item.id}', '${escapeHtml(item.title).replace(/'/g, "\\'")}')">${t('common.delete')}</button>
-                    </td>
-                </tr>`;
+                <div class="px-3 py-2 cursor-pointer ${activeCls} transition-colors" onclick="window._pages.sandbox.openConversation('${item.id}')">
+                    <div class="flex items-center gap-1">
+                        <span class="text-xs font-medium text-neutral-900 dark:text-neutral-100 truncate flex-1">${escapeHtml(item.title)}</span>
+                        <button class="text-neutral-400 hover:text-red-500 text-xs leading-none flex-shrink-0" onclick="event.stopPropagation();window._pages.sandbox.deleteConversation('${item.id}', '${escapeHtml(item.title).replace(/'/g, "\\'")}')" title="${t('common.delete')}">&times;</button>
+                    </div>
+                    <div class="flex items-center gap-1.5 mt-0.5 text-[10px] text-neutral-500 dark:text-neutral-400">
+                        <span>${dateStr}</span>
+                        <span>&middot;</span>
+                        <span>${item.turns_count || 0} ${t('sandbox.turnsCount').toLowerCase()}</span>
+                        ${toolBadge}
+                        ${modelLabel ? `<span class="text-neutral-400">${escapeHtml(modelLabel)}</span>` : ''}
+                    </div>
+                </div>`;
         }).join('');
-
-        container.innerHTML = `
-            <div class="mb-3">
-                <button class="${tw.btnPrimary}" onclick="window._pages.sandbox.showNewConvModal()">${t('sandbox.newConversation')}</button>
-            </div>
-            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr>
-                <th class="${tw.th}">${t('sandbox.conversationTitle')}</th>
-                <th class="${tw.th}">${t('sandbox.promptVersion')}</th>
-                <th class="${tw.th}">${t('sandbox.scenarioType')}</th>
-                <th class="${tw.th}">${t('sandbox.model')}</th>
-                <th class="${tw.th}">${t('sandbox.toolMode')}</th>
-                <th class="${tw.th}">${t('sandbox.turnsCount')}</th>
-                <th class="${tw.th}">${t('sandbox.avgRating')}</th>
-                <th class="${tw.th}">${t('sandbox.lastActivity')}</th>
-                <th class="${tw.th}">${t('sandbox.status')}</th>
-                <th class="${tw.th}"></th>
-            </tr></thead><tbody>${rows}</tbody></table></div>`;
     } catch (e) {
-        container.innerHTML = `<div class="${tw.emptyState}">${t('sandbox.loadFailed', { error: escapeHtml(e.message) })}</div>`;
+        container.innerHTML = `<div class="p-4 text-center ${tw.mutedText}">${t('sandbox.loadFailed', { error: escapeHtml(e.message) })}</div>`;
     }
 }
 
 function openConversation(convId) {
     _currentConvId = convId;
-    showTab('chat');
+    if (_activeTab !== 'chat') showTab('chat');
+    else renderChat();
+    loadSidebar();
 }
 
 async function deleteConversation(convId, title) {
@@ -712,8 +693,9 @@ async function deleteConversation(convId, title) {
             _currentConvId = null;
             _currentConv = null;
             _turns = [];
+            renderChat();
         }
-        loadHistory();
+        loadSidebar();
     } catch (e) {
         showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
     }
@@ -870,7 +852,7 @@ async function toggleBaseline(convId, isBaseline) {
             body: JSON.stringify({ is_baseline: !isBaseline }),
         });
         if (_currentConvId === convId) await loadConversation(convId);
-        else loadHistory();
+        else loadSidebar();
     } catch (e) {
         showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
     }
@@ -1007,13 +989,16 @@ async function testSearch() {
 
 // ─── Init ────────────────────────────────────────────────────
 export function init() {
-    registerPageLoader('sandbox', () => showTab(_activeTab));
+    registerPageLoader('sandbox', () => {
+        loadSidebar();
+        showTab(_activeTab);
+    });
 }
 
 window._pages = window._pages || {};
 window._pages.sandbox = {
     showTab,
-    loadHistory,
+    loadSidebar,
     openConversation,
     showNewConvModal,
     createConversation,

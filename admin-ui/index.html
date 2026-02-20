@@ -351,45 +351,51 @@
             <div id="page-sandbox" style="display:none">
                 <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#" onclick="window._app.showPage('dashboard')" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.training">Обучение</span> / <span data-i18n="nav.sandbox">Песочница</span></div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.title">Песочница агента</h1>
-                <div class="tab-bar flex border-b border-neutral-200 dark:border-neutral-700 mb-4 flex-wrap">
-                    <button class="active px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="chat" onclick="window._pages.sandbox.showTab('chat')" data-i18n="sandbox.tabChat">Чат</button>
-                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="history" onclick="window._pages.sandbox.showTab('history')" data-i18n="sandbox.tabHistory">История</button>
-                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="regression" onclick="window._pages.sandbox.showTab('regression')" data-i18n="sandbox.tabRegression">Регрессия</button>
-                    <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="patterns" onclick="window._pages.sandbox.showTab('patterns')" data-i18n="sandbox.patterns">Паттерны</button>
-                </div>
-                <div id="sandboxContent-chat">
-                    <div id="sandboxChatContainer" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
-                </div>
-                <div id="sandboxContent-history" style="display:none">
-                    <div class="flex flex-wrap items-center gap-2 mb-4">
-                        <input type="text" id="sandboxSearch" data-i18n-placeholder="sandbox.searchPlaceholder" placeholder="Поиск по названию..."
-                            onkeydown="if(event.key==='Enter')window._pages.sandbox.loadHistory()"
-                            class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
-                        <select id="sandboxFilterStatus" onchange="window._pages.sandbox.loadHistory()"
-                            class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
-                            <option value="" data-i18n="common.allStatuses">Все статусы</option>
-                            <option value="active" data-i18n="sandbox.active">Активный</option>
-                            <option value="archived" data-i18n="sandbox.archivedStatus">Архив</option>
-                        </select>
-                        <select id="sandboxFilterScenario" onchange="window._pages.sandbox.loadHistory()"
-                            class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
-                            <option value="" data-i18n="sandbox.allScenarios">Все сценарии</option>
-                            <option value="tire_search">tire_search</option>
-                            <option value="order_creation">order_creation</option>
-                            <option value="fitting_booking">fitting_booking</option>
-                            <option value="expert_consultation">expert_consultation</option>
-                            <option value="operator_transfer">operator_transfer</option>
-                        </select>
-                        <button onclick="window._pages.sandbox.loadHistory()"
-                            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.filter">Фильтровать</button>
+                <div class="flex gap-4" style="height: calc(100vh - 140px);">
+                    <!-- LEFT: Sidebar -->
+                    <div class="w-72 flex-shrink-0 flex flex-col border border-neutral-200 dark:border-neutral-800 rounded-lg bg-white dark:bg-neutral-900 overflow-hidden">
+                        <div class="p-3 border-b border-neutral-200 dark:border-neutral-700 space-y-2">
+                            <button class="w-full inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.sandbox.showNewConvModal()" data-i18n="sandbox.newConversation">+ Новый диалог</button>
+                            <input type="text" id="sandboxSearch" data-i18n-placeholder="sandbox.searchPlaceholder" placeholder="Поиск по названию..."
+                                onkeydown="if(event.key==='Enter')window._pages.sandbox.loadSidebar()"
+                                class="w-full px-2 py-1 text-xs border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <div class="flex gap-1">
+                                <select id="sandboxFilterStatus" onchange="window._pages.sandbox.loadSidebar()"
+                                    class="flex-1 px-1.5 py-1 text-xs border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <option value="" data-i18n="common.allStatuses">Все статусы</option>
+                                    <option value="active" data-i18n="sandbox.active">Активный</option>
+                                    <option value="archived" data-i18n="sandbox.archivedStatus">Архив</option>
+                                </select>
+                                <select id="sandboxFilterScenario" onchange="window._pages.sandbox.loadSidebar()"
+                                    class="flex-1 px-1.5 py-1 text-xs border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                    <option value="" data-i18n="common.all">Все</option>
+                                    <option value="tire_search">tire_search</option>
+                                    <option value="order_creation">order_creation</option>
+                                    <option value="fitting_booking">fitting_booking</option>
+                                    <option value="expert_consultation">expert_consultation</option>
+                                    <option value="operator_transfer">operator_transfer</option>
+                                </select>
+                            </div>
+                        </div>
+                        <div id="sandboxSidebarList" class="flex-1 overflow-y-auto"></div>
                     </div>
-                    <div id="sandboxHistoryContainer" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
-                </div>
-                <div id="sandboxContent-regression" style="display:none">
-                    <div id="sandboxRegressionContainer" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
-                </div>
-                <div id="sandboxContent-patterns" style="display:none">
-                    <div id="sandboxPatternsContainer" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
+                    <!-- RIGHT: Main area -->
+                    <div class="flex-1 flex flex-col min-w-0">
+                        <div class="tab-bar flex border-b border-neutral-200 dark:border-neutral-700 mb-3">
+                            <button class="active px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="chat" onclick="window._pages.sandbox.showTab('chat')" data-i18n="sandbox.tabChat">Чат</button>
+                            <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="regression" onclick="window._pages.sandbox.showTab('regression')" data-i18n="sandbox.tabRegression">Регрессия</button>
+                            <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="patterns" onclick="window._pages.sandbox.showTab('patterns')" data-i18n="sandbox.patterns">Паттерны</button>
+                        </div>
+                        <div id="sandboxContent-chat" class="flex-1 overflow-hidden">
+                            <div id="sandboxChatContainer" class="h-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 overflow-y-auto"></div>
+                        </div>
+                        <div id="sandboxContent-regression" style="display:none" class="flex-1 overflow-auto">
+                            <div id="sandboxRegressionContainer" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5"></div>
+                        </div>
+                        <div id="sandboxContent-patterns" style="display:none" class="flex-1 overflow-auto">
+                            <div id="sandboxPatternsContainer" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5"></div>
+                        </div>
+                    </div>
                 </div>
             </div>
 
