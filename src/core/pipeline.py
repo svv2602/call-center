@@ -31,7 +31,7 @@ from src.agent.prompts import (
 )
 from src.core.audio_socket import AudioSocketConnection, PacketType
 from src.core.call_session import SILENCE_TIMEOUT_SEC, CallSession, CallState
-from src.monitoring.metrics import audiosocket_to_stt_ms, tts_delivery_ms
+from src.monitoring.metrics import audiosocket_to_stt_ms, barge_in_total, tts_delivery_ms
 from src.stt.base import STTConfig, STTEngine, Transcript
 
 # Max time to wait for LLM agent to produce a response (seconds)
@@ -129,6 +129,7 @@ class CallPipeline:
         templates: dict[str, str] | None = None,
         pattern_search: PatternSearch | None = None,
         streaming_loop: StreamingAgentLoop | None = None,
+        barge_in_event: asyncio.Event | None = None,
     ) -> None:
         self._conn = conn
         self._stt = stt
@@ -141,7 +142,8 @@ class CallPipeline:
         self._streaming_loop = streaming_loop
         self._llm_history: list[dict] = []  # persistent LLM context for streaming path
         self._speaking = False
-        self._barge_in_event = asyncio.Event()
+        self._barge_in_event = barge_in_event or asyncio.Event()
+        self._final_transcript_queue: asyncio.Queue[Transcript | None] = asyncio.Queue()
 
     async def run(self) -> None:
         """Run the full call pipeline until hangup or transfer."""
@@ -155,12 +157,13 @@ class CallPipeline:
             # Main loop
             self._session.transition_to(CallState.LISTENING)
 
-            # Run audio reader and transcript processor concurrently
+            # Run audio reader, transcript reader (fan-out), and processor concurrently
             audio_task = asyncio.create_task(self._audio_reader_loop())
+            transcript_reader_task = asyncio.create_task(self._transcript_reader_loop())
             transcript_task = asyncio.create_task(self._transcript_processor_loop())
 
             _done, pending = await asyncio.wait(
-                [audio_task, transcript_task],
+                [audio_task, transcript_reader_task, transcript_task],
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
@@ -208,6 +211,29 @@ class CallPipeline:
             if packet.type == PacketType.ERROR:
                 logger.warning("AudioSocket error: %s", self._session.channel_uuid)
                 break
+
+    async def _transcript_reader_loop(self) -> None:
+        """Sole consumer of STT transcripts — fan-out to queue and barge-in.
+
+        - Final transcripts with text → ``_final_transcript_queue``
+        - Interim transcripts while ``_speaking`` → set ``_barge_in_event``
+        - On STT stream end → put ``None`` sentinel to unblock queue reader
+        """
+        try:
+            async for transcript in self._stt.get_transcripts():
+                if transcript.is_final and transcript.text.strip():
+                    await self._final_transcript_queue.put(transcript)
+                elif not transcript.is_final and transcript.text.strip() and self._speaking:
+                    self._barge_in_event.set()
+                    barge_in_total.inc()
+                    logger.info(
+                        "Barge-in signal: interim '%s' while speaking: %s",
+                        transcript.text[:30],
+                        self._session.channel_uuid,
+                    )
+        finally:
+            # Signal queue reader that STT stream has ended
+            await self._final_transcript_queue.put(None)
 
     async def _transcript_processor_loop(self) -> None:
         """Process STT transcripts and drive the LLM → TTS flow."""
@@ -401,14 +427,18 @@ class CallPipeline:
 
     async def _get_next_final_transcript(self) -> Transcript:
         """Block until a final transcript with non-empty text arrives."""
-        async for transcript in self._stt.get_transcripts():
-            if transcript.is_final and transcript.text.strip():
-                return transcript
-        # STT stream ended without a final transcript
-        raise asyncio.CancelledError
+        transcript = await self._final_transcript_queue.get()
+        if transcript is None:
+            # STT stream ended — sentinel from _transcript_reader_loop
+            raise asyncio.CancelledError
+        return transcript
 
     async def _speak(self, text: str) -> None:
-        """Synthesize text and send audio to AudioSocket."""
+        """Synthesize text and send audio to AudioSocket.
+
+        Supports barge-in: if the caller starts speaking during synthesis
+        or playback, audio sending is interrupted early.
+        """
         if self._conn.is_closed:
             return
 
@@ -418,9 +448,18 @@ class CallPipeline:
 
         try:
             audio = await self._tts.synthesize(text)
+
+            # Check if barge-in was detected during TTS synthesis
+            if self._barge_in_event.is_set():
+                logger.info("Barge-in during TTS synthesis: %s", self._session.channel_uuid)
+                return
+
             t0 = time.monotonic()
-            await self._conn.send_audio(audio)
+            interrupted = await self._conn.send_audio(audio, cancel_event=self._barge_in_event)
             tts_delivery_ms.observe((time.monotonic() - t0) * 1000)
+
+            if interrupted:
+                logger.info("Barge-in during audio send: %s", self._session.channel_uuid)
         except Exception:
             logger.exception("TTS/send error: %s", self._session.channel_uuid)
         finally:
@@ -429,7 +468,8 @@ class CallPipeline:
     async def _speak_streaming(self, text: str) -> None:
         """Synthesize and send audio sentence by sentence.
 
-        Supports barge-in: stops sending if the caller starts speaking.
+        Supports barge-in: stops sending if the caller starts speaking,
+        both between sentences (event check) and mid-chunk (cancel_event).
         """
         if self._conn.is_closed:
             return
@@ -440,15 +480,20 @@ class CallPipeline:
 
         try:
             async for audio_chunk in self._tts.synthesize_stream(text):
-                # Check for barge-in
+                # Check for barge-in between sentences
                 if self._barge_in_event.is_set():
-                    logger.info("Barge-in detected: %s", self._session.channel_uuid)
-                    self._barge_in_event.clear()
+                    logger.info("Barge-in between sentences: %s", self._session.channel_uuid)
                     break
 
                 t0 = time.monotonic()
-                await self._conn.send_audio(audio_chunk)
+                interrupted = await self._conn.send_audio(
+                    audio_chunk, cancel_event=self._barge_in_event
+                )
                 tts_delivery_ms.observe((time.monotonic() - t0) * 1000)
+
+                if interrupted:
+                    logger.info("Barge-in during chunk send: %s", self._session.channel_uuid)
+                    break
         except Exception:
             logger.exception("TTS streaming error: %s", self._session.channel_uuid)
         finally:

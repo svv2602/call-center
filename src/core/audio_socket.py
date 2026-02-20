@@ -113,27 +113,38 @@ class AudioSocketConnection:
 
         return packet
 
-    async def send_audio(self, audio_data: bytes) -> None:
+    async def send_audio(
+        self, audio_data: bytes, cancel_event: asyncio.Event | None = None
+    ) -> bool:
         """Send audio data back to Asterisk as 0x10 packets.
 
         Splits data into AUDIO_FRAME_BYTES-sized chunks with 20 ms pacing
         to match real-time playback rate and avoid Asterisk queue overflow.
+
+        If *cancel_event* is provided and becomes set, sending stops early
+        and the method returns ``True`` (interrupted).  Returns ``False``
+        when the full audio has been sent or the connection closed.
         """
         if self._closed:
-            return
+            return False
 
         offset = 0
         while offset < len(audio_data):
+            if cancel_event is not None and cancel_event.is_set():
+                return True
+
             chunk = audio_data[offset : offset + AUDIO_FRAME_BYTES]
             self.writer.write(build_audio_packet(chunk))
             try:
                 await self.writer.drain()
             except (ConnectionResetError, OSError):
                 self._closed = True
-                return
+                return False
             offset += AUDIO_FRAME_BYTES
             # Pace frames at ~20 ms to match real-time playback
             await asyncio.sleep(AUDIO_FRAME_DURATION_MS / 1000)
+
+        return False
 
     async def close(self) -> None:
         """Close the connection."""

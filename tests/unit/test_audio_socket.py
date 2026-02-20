@@ -9,6 +9,7 @@ import pytest
 from src.core.audio_socket import (
     AUDIO_FRAME_BYTES,
     HEADER_SIZE,
+    AudioSocketConnection,
     PacketType,
     build_audio_packet,
     parse_uuid,
@@ -141,3 +142,59 @@ class TestParseUUID:
         payload = expected.bytes + b"\x00" * 10  # extra bytes ignored
         result = parse_uuid(payload)
         assert result == expected
+
+
+class TestSendAudioCancelEvent:
+    """Test send_audio with cancel_event parameter."""
+
+    @pytest.mark.asyncio
+    async def test_send_audio_interrupted_by_cancel_event(self) -> None:
+        """send_audio returns True when cancel_event is set."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_writer = MagicMock()
+        mock_writer.write = MagicMock()
+        mock_writer.drain = AsyncMock()
+
+        conn = AudioSocketConnection(asyncio.StreamReader(), mock_writer, uuid.uuid4())
+
+        cancel = asyncio.Event()
+        cancel.set()  # pre-set — should interrupt immediately
+
+        # 640 bytes = 2 frames, but cancel_event is checked before first frame
+        result = await conn.send_audio(b"\x00" * 640, cancel_event=cancel)
+
+        assert result is True
+        # No frames should have been written
+        mock_writer.write.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_send_audio_without_cancel_event_returns_false(self) -> None:
+        """send_audio returns False (backward compat) when no cancel_event."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_writer = MagicMock()
+        mock_writer.write = MagicMock()
+        mock_writer.drain = AsyncMock()
+
+        conn = AudioSocketConnection(asyncio.StreamReader(), mock_writer, uuid.uuid4())
+
+        result = await conn.send_audio(b"\x00" * 320)
+
+        assert result is False
+        assert mock_writer.write.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_send_audio_none_cancel_event_returns_false(self) -> None:
+        """send_audio with cancel_event=None behaves like no event."""
+        from unittest.mock import AsyncMock, MagicMock
+
+        mock_writer = MagicMock()
+        mock_writer.write = MagicMock()
+        mock_writer.drain = AsyncMock()
+
+        conn = AudioSocketConnection(asyncio.StreamReader(), mock_writer, uuid.uuid4())
+
+        result = await conn.send_audio(b"\x00" * 320, cancel_event=None)
+
+        assert result is False

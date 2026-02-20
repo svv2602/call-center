@@ -329,6 +329,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             except Exception:
                 logger.debug("Pattern search init failed, continuing without", exc_info=True)
 
+        # Single shared barge-in event for the entire call
+        barge_in_event = asyncio.Event()
+
         # Create streaming loop if FF enabled and LLM router available
         streaming_loop = None
         ff = settings.feature_flags
@@ -340,7 +343,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 tool_router=router,
                 tts=_tts_engine,
                 conn=conn,
-                barge_in_event=asyncio.Event(),
+                barge_in_event=barge_in_event,
                 tools=tools,
                 system_prompt=system_prompt,
                 pii_vault=vault,
@@ -358,6 +361,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             templates,
             pattern_search=pattern_search,
             streaming_loop=streaming_loop,
+            barge_in_event=barge_in_event,
         )
         await pipeline.run()
 

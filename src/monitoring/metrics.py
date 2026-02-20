@@ -296,6 +296,13 @@ llm_fallbacks_total = Counter(
     ["from_provider", "to_provider", "task"],
 )
 
+# --- Barge-in metrics ---
+
+barge_in_total = Counter(
+    "callcenter_barge_in_total",
+    "Barge-in interruptions detected (caller spoke while agent was speaking)",
+)
+
 
 def get_metrics() -> bytes:
     """Generate Prometheus metrics output."""

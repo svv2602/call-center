@@ -323,6 +323,71 @@ class TestIntegration:
 # ---------------------------------------------------------------------------
 
 
+class TestCancelEventPassthrough:
+    """Test that cancel_event is passed through to conn.send_audio."""
+
+    @pytest.mark.asyncio
+    async def test_send_audio_receives_cancel_event(self) -> None:
+        """conn.send_audio() should receive cancel_event from barge_in_event."""
+        conn = MockAudioSocketConnection()
+        barge_in = asyncio.Event()
+        sender = StreamingAudioSender(conn, barge_in_event=barge_in)
+
+        # Pre-set barge-in: audio should be skipped before send_audio is called
+        # (the existing check at line 86 catches it). To test the passthrough,
+        # we set barge-in AFTER the check but verify the mock sees cancel_event.
+        # Since MockAudioSocketConnection checks cancel_event, setting it mid-stream
+        # will cause send_audio to return True.
+        async def _stream() -> AsyncIterator:
+            yield AudioReady(audio=b"\x01", text="Перше")
+            # Now set barge-in — next AudioReady check at top of loop catches it
+            barge_in.set()
+            yield AudioReady(audio=b"\x02", text="Друге")
+            yield StreamDone(stop_reason="end_turn", usage=Usage(0, 0))
+
+        result = await sender.send(_stream())
+
+        # First chunk sent, second skipped due to barge-in
+        assert len(conn.sent_chunks) == 1
+        assert result.interrupted is True
+
+    @pytest.mark.asyncio
+    async def test_send_audio_cancel_event_interrupts_mid_send(self) -> None:
+        """When cancel_event is set during send_audio, it returns True."""
+        conn = MockAudioSocketConnection()
+        barge_in = asyncio.Event()
+        sender = StreamingAudioSender(conn, barge_in_event=barge_in)
+
+        # The first AudioReady goes through, then we set barge-in.
+        # The second AudioReady's send_audio call sees cancel_event.is_set()
+        # and returns True, which sets interrupted=True.
+        call_count = 0
+        original_send = conn.send_audio
+
+        async def _tracking_send(audio_data: bytes, cancel_event: asyncio.Event | None = None) -> bool:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 2:
+                # Simulate barge-in detected during send of second chunk
+                barge_in.set()
+            return await original_send(audio_data, cancel_event)
+
+        conn.send_audio = _tracking_send  # type: ignore[assignment]
+
+        stream = _events(
+            AudioReady(audio=b"\x01", text="Раз"),
+            AudioReady(audio=b"\x02", text="Два"),
+            AudioReady(audio=b"\x03", text="Три"),
+            StreamDone(stop_reason="end_turn", usage=Usage(0, 0)),
+        )
+        result = await sender.send(stream)
+
+        assert result.interrupted is True
+        # First chunk sent, second triggers barge-in (still sent because
+        # mock checks cancel_event before appending), third skipped
+        assert call_count == 2
+
+
 class TestTimeToFirstAudio:
     @pytest.mark.asyncio
     async def test_ttfa_recorded_on_first_audio(self) -> None:

@@ -90,8 +90,13 @@ class StreamingAudioSender:
                     disconnected = True
                     continue
                 t0 = time.monotonic()
-                await self._conn.send_audio(event.audio)
+                was_interrupted = await self._conn.send_audio(
+                    event.audio, cancel_event=self._barge_in
+                )
                 tts_delivery_ms.observe((time.monotonic() - t0) * 1000)
+                if was_interrupted:
+                    interrupted = True
+                    continue
                 spoken_parts.append(event.text)
 
                 # Record time-to-first-audio once per turn
