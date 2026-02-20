@@ -102,7 +102,25 @@ function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('open');
 }
 
-document.querySelectorAll('.sidebar a').forEach(a => {
+// Expand/collapse sidebar (icon-only ↔ full)
+function toggleSidebarExpand() {
+    const sidebar = document.getElementById('sidebar');
+    const main = document.querySelector('.main-content');
+    const expanded = sidebar.classList.toggle('expanded');
+    if (main) {
+        main.style.marginLeft = expanded ? '14rem' : '';
+    }
+    localStorage.setItem('sidebar_expanded', expanded ? '1' : '0');
+}
+
+// Restore sidebar state on load
+if (localStorage.getItem('sidebar_expanded') === '1') {
+    document.getElementById('sidebar')?.classList.add('expanded');
+    const main = document.querySelector('.main-content');
+    if (main) main.style.marginLeft = '14rem';
+}
+
+document.querySelectorAll('.nav-item[data-page], .nav-flyout-link[data-page]').forEach(a => {
     a.addEventListener('click', () => {
         if (window.innerWidth <= 768) {
             document.getElementById('sidebar').classList.remove('open');
@@ -119,4 +137,4 @@ window.addEventListener('langchange', () => {
 });
 
 // Expose globals for onclick handlers in HTML
-window._app = { login, logout, showPage, closeModal, toggleSidebar, toggleTheme, toggleLang, toggleSidebarGroup };
+window._app = { login, logout, showPage, closeModal, toggleSidebar, toggleSidebarExpand, toggleTheme, toggleLang, toggleSidebarGroup };

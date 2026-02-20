@@ -13,7 +13,7 @@ export function clearRefreshTimer() {
 }
 
 export function toggleSidebarGroup(group) {
-    const el = document.querySelector(`.sidebar-group[data-group="${group}"]`);
+    const el = document.querySelector(`.nav-group[data-group="${group}"]`);
     if (el) el.classList.toggle('open');
 }
 
@@ -21,17 +21,20 @@ export function showPage(page) {
     document.querySelectorAll('[id^="page-"]').forEach(el => el.style.display = 'none');
     const pageEl = document.getElementById(`page-${page}`);
     if (pageEl) pageEl.style.display = 'block';
-    document.querySelectorAll('.sidebar a').forEach(a => a.classList.remove('active'));
-    const pageLink = document.querySelector(`[data-page="${page}"]`);
+
+    // Clear active state from all nav items and flyout links
+    document.querySelectorAll('.nav-item[data-page], .nav-flyout-link[data-page]').forEach(a => a.classList.remove('active'));
+    document.querySelectorAll('.nav-group-trigger').forEach(a => a.classList.remove('active'));
+
+    // Set active on the matching page link
+    const pageLink = document.querySelector(`.nav-item[data-page="${page}"], .nav-flyout-link[data-page="${page}"]`);
     if (pageLink) pageLink.classList.add('active');
 
-    // Sidebar group highlighting
-    document.querySelectorAll('.sidebar-group-toggle').forEach(a => a.classList.remove('group-active'));
-    const group = pageLink?.closest('.sidebar-group');
+    // If it's inside a group flyout, also highlight the group trigger
+    const group = pageLink?.closest('.nav-group');
     if (group) {
-        group.classList.add('open');
-        const toggle = group.querySelector('.sidebar-group-toggle');
-        if (toggle) toggle.classList.add('group-active');
+        const trigger = group.querySelector('.nav-group-trigger');
+        if (trigger) trigger.classList.add('active');
     }
 
     localStorage.setItem('admin_active_page', page);
