@@ -60,26 +60,13 @@ async function loadSystemStatus() {
     }
 }
 
-function loadFlower() {
-    const flowerUrl = `${window.location.origin}/flower/`;
-    const container = document.getElementById('flowerContainer');
-    const frame = document.getElementById('flowerFrame');
-    const link = document.getElementById('flowerExternalLink');
-    if (link) link.href = flowerUrl;
-    if (frame) frame.src = flowerUrl;
-    if (container) container.style.display = 'block';
-}
-
 function initToolLinks() {
     const host = window.location.hostname;
     const proto = window.location.protocol;
-    // Update external tool links: port-based get dynamic hostname, path-based stay as-is
+    // Update external tool links with dynamic hostname
     document.querySelectorAll('#externalToolsTable a[data-tool-port]').forEach(a => {
         a.href = `${proto}//${host}:${a.dataset.toolPort}`;
     });
-    // Flower iframe link (same origin via nginx proxy)
-    const link = document.getElementById('flowerExternalLink');
-    if (link) link.href = `${window.location.origin}/flower/`;
 }
 
 export function init() {
@@ -88,4 +75,4 @@ export function init() {
 }
 
 window._pages = window._pages || {};
-window._pages.monitoring = { loadSettings, loadSystemStatus, loadFlower };
+window._pages.monitoring = { loadSettings, loadSystemStatus };
