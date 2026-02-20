@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import abc
 import json
-from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from src.llm.models import (
     StreamDone,
-    StreamEvent,
     TextDelta,
     ToolCallDelta,
     ToolCallEnd,
@@ -17,7 +15,9 @@ from src.llm.models import (
 )
 
 if TYPE_CHECKING:
-    from src.llm.models import LLMResponse
+    from collections.abc import AsyncIterator
+
+    from src.llm.models import LLMResponse, StreamEvent
 
 
 class AbstractProvider(abc.ABC):

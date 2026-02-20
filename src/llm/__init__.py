@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 from src.llm.models import (
     LLMResponse,
     LLMTask,
@@ -18,9 +16,6 @@ from src.llm.models import (
     Usage,
 )
 from src.llm.router import LLMRouter
-
-if TYPE_CHECKING:
-    pass
 
 __all__ = [
     "LLMResponse",

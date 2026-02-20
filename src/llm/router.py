@@ -11,7 +11,6 @@ import json
 import logging
 import os
 import time
-from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 from aiobreaker import CircuitBreaker
@@ -22,12 +21,14 @@ from src.llm.models import (
     LLMTask,
     ProviderType,
     StreamDone,
-    StreamEvent,
 )
 from src.llm.providers.anthropic_provider import AnthropicProvider
 from src.llm.providers.openai_compat import OpenAICompatProvider
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from src.llm.models import StreamEvent
     from src.llm.providers.base import AbstractProvider
 
 logger = logging.getLogger(__name__)
@@ -84,9 +85,7 @@ class LLMRouter:
                 logger.info("LLM provider initialized: %s (%s)", key, provider_cfg.get("model"))
 
         self._initialized = True
-        logger.info(
-            "LLM router initialized: %d providers active", len(self._providers)
-        )
+        logger.info("LLM router initialized: %d providers active", len(self._providers))
 
     async def reload_config(self, redis: Any = None) -> None:
         """Reload config from Redis and reinitialize providers."""
@@ -248,12 +247,14 @@ class LLMRouter:
         models: list[dict[str, str]] = []
         for key, _provider in self._providers.items():
             cfg = self._config.get("providers", {}).get(key, {})
-            models.append({
-                "id": key,
-                "label": key,
-                "model": cfg.get("model", ""),
-                "type": cfg.get("type", ""),
-            })
+            models.append(
+                {
+                    "id": key,
+                    "label": key,
+                    "model": cfg.get("model", ""),
+                    "type": cfg.get("type", ""),
+                }
+            )
         return models
 
     async def health_check_all(self) -> dict[str, bool]:
@@ -319,9 +320,7 @@ class LLMRouter:
         return response
 
     @staticmethod
-    def _create_provider(
-        key: str, cfg: dict[str, Any], api_key: str
-    ) -> AbstractProvider | None:
+    def _create_provider(key: str, cfg: dict[str, Any], api_key: str) -> AbstractProvider | None:
         """Create a provider instance based on config type."""
         provider_type = cfg.get("type", "")
         model = cfg.get("model", "")
@@ -367,7 +366,9 @@ class LLMRouter:
                         config["tasks"].update(redis_config["tasks"])
                     logger.info("LLM routing config loaded from Redis")
             except Exception:
-                logger.warning("Failed to load LLM config from Redis, using defaults", exc_info=True)
+                logger.warning(
+                    "Failed to load LLM config from Redis, using defaults", exc_info=True
+                )
 
         return config
 

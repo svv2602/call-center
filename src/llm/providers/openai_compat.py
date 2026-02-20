@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator
 from typing import TYPE_CHECKING, Any
 
 import aiohttp
@@ -19,11 +18,12 @@ from src.llm.format_converter import (
     openai_response_to_llm_response,
     openai_stream_chunk_to_events,
 )
-from src.llm.models import StreamEvent
 from src.llm.providers.base import AbstractProvider
 
 if TYPE_CHECKING:
-    from src.llm.models import LLMResponse
+    from collections.abc import AsyncIterator
+
+    from src.llm.models import LLMResponse, StreamEvent
 
 logger = logging.getLogger(__name__)
 
@@ -133,9 +133,7 @@ class OpenAICompatProvider(AbstractProvider):
                 if payload == "[DONE]":
                     break
                 chunk = json.loads(payload)
-                for event in openai_stream_chunk_to_events(
-                    chunk, self._provider_key, self._model
-                ):
+                for event in openai_stream_chunk_to_events(chunk, self._provider_key, self._model):
                     yield event
 
     async def health_check(self) -> bool:

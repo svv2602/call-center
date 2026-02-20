@@ -30,14 +30,16 @@ def anthropic_tools_to_openai(tools: list[dict[str, Any]]) -> list[dict[str, Any
     """
     result = []
     for tool in tools:
-        result.append({
-            "type": "function",
-            "function": {
-                "name": tool["name"],
-                "description": tool.get("description", ""),
-                "parameters": tool.get("input_schema", {"type": "object", "properties": {}}),
-            },
-        })
+        result.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": tool.get("description", ""),
+                    "parameters": tool.get("input_schema", {"type": "object", "properties": {}}),
+                },
+            }
+        )
     return result
 
 
@@ -84,14 +86,16 @@ def _convert_assistant_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, An
         if block.get("type") == "text":
             text_parts.append(block["text"])
         elif block.get("type") == "tool_use":
-            tool_calls.append({
-                "id": block["id"],
-                "type": "function",
-                "function": {
-                    "name": block["name"],
-                    "arguments": json.dumps(block["input"]),
-                },
-            })
+            tool_calls.append(
+                {
+                    "id": block["id"],
+                    "type": "function",
+                    "function": {
+                        "name": block["name"],
+                        "arguments": json.dumps(block["input"]),
+                    },
+                }
+            )
 
     msg: dict[str, Any] = {"role": "assistant"}
     msg["content"] = "\n".join(text_parts) if text_parts else None
@@ -111,11 +115,13 @@ def _convert_user_blocks(blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
     for block in blocks:
         if block.get("type") == "tool_result":
-            tool_messages.append({
-                "role": "tool",
-                "tool_call_id": block["tool_use_id"],
-                "content": block.get("content", ""),
-            })
+            tool_messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": block["tool_use_id"],
+                    "content": block.get("content", ""),
+                }
+            )
         elif isinstance(block, str):
             text_parts.append(block)
         elif block.get("type") == "text":
@@ -147,11 +153,13 @@ def openai_response_to_llm_response(
                 arguments = json.loads(func["arguments"])
             except (json.JSONDecodeError, TypeError):
                 arguments = {}
-            tool_calls.append(ToolCall(
-                id=tc.get("id", str(uuid.uuid4())),
-                name=func["name"],
-                arguments=arguments,
-            ))
+            tool_calls.append(
+                ToolCall(
+                    id=tc.get("id", str(uuid.uuid4())),
+                    name=func["name"],
+                    arguments=arguments,
+                )
+            )
 
     # Map finish_reason to Anthropic-style stop_reason
     finish_reason = choice.get("finish_reason", "stop")
@@ -200,23 +208,27 @@ def openai_stream_chunk_to_events(
         if tc_id and func.get("name"):
             events.append(ToolCallStart(id=tc_id, name=func["name"]))
         if func.get("arguments"):
-            events.append(ToolCallDelta(
-                id=tc_id or "",
-                arguments_chunk=func["arguments"],
-            ))
+            events.append(
+                ToolCallDelta(
+                    id=tc_id or "",
+                    arguments_chunk=func["arguments"],
+                )
+            )
 
     # Stream done
     if finish_reason is not None:
         fr_map = {"tool_calls": "tool_use", "length": "max_tokens"}
         stop_reason = fr_map.get(finish_reason, "end_turn")
         usage_data = chunk.get("usage", {})
-        events.append(StreamDone(
-            stop_reason=stop_reason,
-            usage=Usage(
-                input_tokens=usage_data.get("prompt_tokens", 0),
-                output_tokens=usage_data.get("completion_tokens", 0),
-            ),
-        ))
+        events.append(
+            StreamDone(
+                stop_reason=stop_reason,
+                usage=Usage(
+                    input_tokens=usage_data.get("prompt_tokens", 0),
+                    output_tokens=usage_data.get("completion_tokens", 0),
+                ),
+            )
+        )
 
     return events
 
@@ -229,11 +241,13 @@ def llm_response_to_anthropic_blocks(response: LLMResponse) -> list[dict[str, An
         blocks.append({"type": "text", "text": response.text})
 
     for tc in response.tool_calls:
-        blocks.append({
-            "type": "tool_use",
-            "id": tc.id,
-            "name": tc.name,
-            "input": tc.arguments,
-        })
+        blocks.append(
+            {
+                "type": "tool_use",
+                "id": tc.id,
+                "name": tc.name,
+                "input": tc.arguments,
+            }
+        )
 
     return blocks
