@@ -67,11 +67,11 @@ async function loadCalls(offset = 0) {
 
 async function exportCallsCSV() {
     const params = new URLSearchParams();
-    const df = document.getElementById('filterDateFrom').value;
-    const dt = document.getElementById('filterDateTo').value;
-    const sc = document.getElementById('filterScenario').value;
-    const tr = document.getElementById('filterTransferred').value;
-    const qb = document.getElementById('filterQualityBelow').value;
+    const df = document.getElementById('filterDateFrom')?.value;
+    const dt = document.getElementById('filterDateTo')?.value;
+    const sc = document.getElementById('filterScenario')?.value;
+    const tr = document.getElementById('filterTransferred')?.value;
+    const qb = document.getElementById('filterQualityBelow')?.value;
     if (df) params.set('date_from', df);
     if (dt) params.set('date_to', dt);
     if (sc) params.set('scenario', sc);

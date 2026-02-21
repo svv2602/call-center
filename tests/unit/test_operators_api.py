@@ -244,7 +244,7 @@ class TestChangeOperatorStatus:
             headers={"Authorization": f"Bearer {_operator_token()}"},
             json={"status": "sleeping"},
         )
-        assert response.status_code == 400
+        assert response.status_code == 422
 
     @patch("src.api.auth.get_settings")
     @patch("src.api.operators._get_engine")

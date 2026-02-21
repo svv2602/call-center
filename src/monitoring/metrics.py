@@ -160,6 +160,12 @@ celery_workers_online = Gauge(
     "Number of Celery workers currently responding to ping",
 )
 
+celery_task_failures_total = Counter(
+    "callcenter_celery_task_failures_total",
+    "Celery task failures by task name",
+    ["task_name"],
+)
+
 # --- Operational metrics (backup / partition management) ---
 
 backup_last_success_timestamp = Gauge(

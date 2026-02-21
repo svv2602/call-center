@@ -5,8 +5,11 @@ Uses Redis as broker for background tasks (quality evaluation, daily stats).
 
 from __future__ import annotations
 
+from typing import Any
+
 from celery import Celery  # type: ignore[import-untyped]
 from celery.schedules import crontab  # type: ignore[import-untyped]
+from celery.signals import task_failure  # type: ignore[import-untyped]
 
 from src.config import get_settings
 
@@ -114,3 +117,17 @@ app.conf.beat_schedule = {
 
 # Note: autodiscover_tasks(["src.tasks"]) looks for src/tasks/tasks.py which doesn't exist.
 # Task modules are explicitly listed in the Celery `include` parameter above.
+
+
+# --- Celery signal: count task failures in Prometheus ---
+
+
+@task_failure.connect  # type: ignore[misc]
+def _on_task_failure(sender: Any = None, **kwargs: Any) -> None:
+    """Increment Prometheus counter on task failure."""
+    from src.monitoring.metrics import celery_task_failures_total
+
+    task_name = sender.name if sender else "unknown"
+    # Use short name (last segment) for cleaner metrics
+    short_name = task_name.rsplit(".", 1)[-1] if task_name else "unknown"
+    celery_task_failures_total.labels(task_name=short_name).inc()

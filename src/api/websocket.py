@@ -44,43 +44,47 @@ def _authenticate(token: str) -> dict[str, Any] | None:
 async def _subscribe_and_broadcast(redis_url: str) -> None:
     """Background task: subscribe to Redis Pub/Sub and broadcast to all clients."""
     r = Redis.from_url(redis_url, decode_responses=True)
-    pubsub = r.pubsub()
-    await pubsub.subscribe(CHANNEL)
-
     try:
-        async for message in pubsub.listen():
-            if message["type"] != "message":
-                continue
+        pubsub = r.pubsub()
+        await pubsub.subscribe(CHANNEL)
 
-            dead: list[WebSocket] = []
-            for ws in _clients.copy():
-                try:
-                    await ws.send_text(message["data"])
-                    admin_websocket_messages_sent_total.inc()
-                except Exception:
-                    dead.append(ws)
+        try:
+            async for message in pubsub.listen():
+                if message["type"] != "message":
+                    continue
 
-            for ws in dead:
-                _clients.discard(ws)
-                admin_websocket_connections_active.dec()
-    except asyncio.CancelledError:
-        pass
+                dead: list[WebSocket] = []
+                for ws in _clients.copy():
+                    try:
+                        await ws.send_text(message["data"])
+                        admin_websocket_messages_sent_total.inc()
+                    except Exception:
+                        dead.append(ws)
+
+                for ws in dead:
+                    _clients.discard(ws)
+                    admin_websocket_connections_active.dec()
+        except asyncio.CancelledError:
+            pass
+        finally:
+            await pubsub.unsubscribe(CHANNEL)
+            await pubsub.aclose()
     finally:
-        await pubsub.unsubscribe(CHANNEL)
-        await pubsub.aclose()
         await r.aclose()
 
 
 # Background subscriber task reference
 _subscriber_task: asyncio.Task | None = None
+_subscriber_lock = asyncio.Lock()
 
 
-def ensure_subscriber_started() -> None:
+async def ensure_subscriber_started() -> None:
     """Start the Redis subscriber task if not already running."""
     global _subscriber_task
-    if _subscriber_task is None or _subscriber_task.done():
-        settings = get_settings()
-        _subscriber_task = asyncio.create_task(_subscribe_and_broadcast(settings.redis.url))
+    async with _subscriber_lock:
+        if _subscriber_task is None or _subscriber_task.done():
+            settings = get_settings()
+            _subscriber_task = asyncio.create_task(_subscribe_and_broadcast(settings.redis.url))
 
 
 @router.websocket("/ws")
@@ -106,7 +110,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     )
 
     # Ensure Redis subscriber is running
-    ensure_subscriber_started()
+    await ensure_subscriber_started()
 
     try:
         while True:

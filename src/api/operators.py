@@ -6,10 +6,10 @@ CRUD for operators, queue monitoring, transfer history, and operator stats.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -36,27 +36,31 @@ async def _get_engine() -> AsyncEngine:
 
 
 # --- Request models ---
+_TIME_PATTERN = r"^\d{2}:\d{2}$"
 
 
 class CreateOperatorRequest(BaseModel):
-    name: str
-    extension: str
+    name: str = Field(min_length=1, max_length=100)
+    extension: str = Field(min_length=1, max_length=20)
     skills: list[str] = []
-    shift_start: str = "09:00"
-    shift_end: str = "18:00"
+    shift_start: str = Field(default="09:00", pattern=_TIME_PATTERN)
+    shift_end: str = Field(default="18:00", pattern=_TIME_PATTERN)
 
 
 class UpdateOperatorRequest(BaseModel):
-    name: str | None = None
-    extension: str | None = None
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    extension: str | None = Field(default=None, min_length=1, max_length=20)
     is_active: bool | None = None
     skills: list[str] | None = None
-    shift_start: str | None = None
-    shift_end: str | None = None
+    shift_start: str | None = Field(default=None, pattern=_TIME_PATTERN)
+    shift_end: str | None = Field(default=None, pattern=_TIME_PATTERN)
+
+
+OperatorStatus = Literal["online", "offline", "busy", "break"]
 
 
 class StatusChangeRequest(BaseModel):
-    status: str  # online, offline, busy, break
+    status: OperatorStatus
 
 
 # --- CRUD ---
@@ -220,12 +224,6 @@ async def change_operator_status(
     _: dict[str, Any] = _admin_or_operator_dep,
 ) -> dict[str, Any]:
     """Change operator status (online/offline/busy/break)."""
-    valid_statuses = ("online", "offline", "busy", "break")
-    if req.status not in valid_statuses:
-        raise HTTPException(
-            status_code=400, detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
-        )
-
     engine = await _get_engine()
 
     async with engine.begin() as conn:

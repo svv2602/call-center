@@ -121,6 +121,40 @@ app.add_middleware(RateLimitMiddleware)
 app.add_middleware(SecurityHeadersMiddleware)
 
 
+@app.on_event("shutdown")
+async def _dispose_api_engines() -> None:
+    """Dispose all module-level SQLAlchemy engines cached by API routers."""
+    from src.api import (
+        admin_users,
+        analytics,
+        auth,
+        export,
+        knowledge,
+        operators,
+        prompts,
+        sandbox,
+        scraper,
+        system,
+        training_dialogues,
+        training_safety,
+        training_templates,
+        training_tools,
+        vehicles,
+    )
+    from src.api.middleware import audit
+
+    modules = [
+        admin_users, analytics, auth, export, knowledge, operators,
+        prompts, sandbox, scraper, system, training_dialogues,
+        training_safety, training_templates, training_tools, vehicles, audit,
+    ]
+    for mod in modules:
+        engine = getattr(mod, "_engine", None)
+        if engine is not None:
+            await engine.dispose()
+    logger.info("API router engines disposed")
+
+
 # Admin UI: serve from dist/ (production build) or root (dev with Vite proxy)
 _admin_dist = Path("admin-ui/dist")
 _admin_root = Path("admin-ui")
