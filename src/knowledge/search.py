@@ -117,7 +117,7 @@ class KnowledgeSearch:
                     1 - (e.embedding <=> $1::vector) AS relevance
                 FROM knowledge_embeddings e
                 JOIN knowledge_articles a ON a.id = e.article_id
-                WHERE a.active = true AND a.category = $3{tenant_filter}
+                WHERE a.active = true AND (a.expires_at IS NULL OR a.expires_at > now()) AND a.category = $3{tenant_filter}
                 ORDER BY e.embedding <=> $1::vector
                 LIMIT $2
             ),
@@ -128,7 +128,7 @@ class KnowledgeSearch:
                     1 - (e.embedding <=> $1::vector) AS relevance
                 FROM knowledge_embeddings e
                 JOIN knowledge_articles a ON a.id = e.article_id
-                WHERE a.active = true{tenant_filter}
+                WHERE a.active = true AND (a.expires_at IS NULL OR a.expires_at > now()){tenant_filter}
                 ORDER BY e.embedding <=> $1::vector
                 LIMIT $4
             ),
@@ -193,7 +193,7 @@ class KnowledgeSearch:
                 1 - (e.embedding <=> $1::vector) AS relevance
             FROM knowledge_embeddings e
             JOIN knowledge_articles a ON a.id = e.article_id
-            WHERE a.active = true{extra_filters}
+            WHERE a.active = true AND (a.expires_at IS NULL OR a.expires_at > now()){extra_filters}
             ORDER BY e.embedding <=> $1::vector
             LIMIT $2
         """
@@ -244,7 +244,7 @@ class KnowledgeSearch:
                 e.chunk_text
             FROM knowledge_embeddings e
             JOIN knowledge_articles a ON a.id = e.article_id
-            WHERE a.active = true
+            WHERE a.active = true AND (a.expires_at IS NULL OR a.expires_at > now())
               AND (e.chunk_text ILIKE $1 OR a.title ILIKE $1)
               {extra_filters}
             LIMIT $2

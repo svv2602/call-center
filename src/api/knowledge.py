@@ -56,6 +56,7 @@ class ArticleCreateRequest(BaseModel):
     category: str = Field(min_length=1, max_length=50)
     content: str = Field(min_length=1)
     tenant_id: str | None = None
+    expires_at: str | None = None
 
 
 class ArticleUpdateRequest(BaseModel):
@@ -64,6 +65,7 @@ class ArticleUpdateRequest(BaseModel):
     content: str | None = Field(default=None, min_length=1)
     active: bool | None = None
     tenant_id: str | None = None
+    expires_at: str | None = None
 
 
 @router.get("/article-categories")
@@ -113,7 +115,7 @@ async def list_articles(
         result = await conn.execute(
             text(f"""
                 SELECT id, title, category, active, embedding_status, tenant_id,
-                       created_at, updated_at
+                       expires_at, created_at, updated_at
                 FROM knowledge_articles
                 WHERE {where_clause}
                 ORDER BY category, title
@@ -243,7 +245,7 @@ async def get_article(article_id: UUID, _: dict[str, Any] = _analyst_dep) -> dic
         result = await conn.execute(
             text("""
                 SELECT id, title, category, content, active, embedding_status, tenant_id,
-                       created_at, updated_at
+                       expires_at, created_at, updated_at
                 FROM knowledge_articles
                 WHERE id = :id
             """),
@@ -270,15 +272,18 @@ async def create_article(
         result = await conn.execute(
             text("""
                 INSERT INTO knowledge_articles
-                    (title, category, content, embedding_status, tenant_id)
-                VALUES (:title, :category, :content, 'pending', CAST(:tenant_id AS uuid))
-                RETURNING id, title, category, active, embedding_status, tenant_id, created_at
+                    (title, category, content, embedding_status, tenant_id, expires_at)
+                VALUES (:title, :category, :content, 'pending', CAST(:tenant_id AS uuid),
+                        CAST(:expires_at AS timestamptz))
+                RETURNING id, title, category, active, embedding_status, tenant_id,
+                          expires_at, created_at
             """),
             {
                 "title": request.title,
                 "category": request.category,
                 "content": request.content,
                 "tenant_id": request.tenant_id,
+                "expires_at": request.expires_at,
             },
         )
         row = result.first()
@@ -320,6 +325,12 @@ async def update_article(
     if request.tenant_id is not None:
         updates.append("tenant_id = CAST(:tenant_id AS uuid)")
         params["tenant_id"] = request.tenant_id if request.tenant_id else None
+    if request.expires_at is not None:
+        if request.expires_at == "":
+            updates.append("expires_at = NULL")
+        else:
+            updates.append("expires_at = CAST(:expires_at AS timestamptz)")
+            params["expires_at"] = request.expires_at
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")

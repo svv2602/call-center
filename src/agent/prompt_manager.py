@@ -462,6 +462,7 @@ async def fetch_tenant_promotions(
                     SELECT title, content
                     FROM knowledge_articles
                     WHERE active = true
+                      AND (expires_at IS NULL OR expires_at > now())
                       AND category = 'promotions'
                       AND (tenant_id IS NULL OR tenant_id = CAST(:tid AS uuid))
                     ORDER BY tenant_id NULLS LAST, title
