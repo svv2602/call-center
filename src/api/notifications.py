@@ -109,15 +109,15 @@ async def test_telegram(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
             aiohttp.ClientSession() as session,
             session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=10)) as resp,
         ):
-                latency_ms = int((time.monotonic() - start) * 1000)
-                body = await resp.json()
-                if resp.status == 200 and body.get("ok"):
-                    return {"success": True, "latency_ms": latency_ms}
-                return {
-                    "success": False,
-                    "latency_ms": latency_ms,
-                    "error": body.get("description", f"HTTP {resp.status}"),
-                }
+            latency_ms = int((time.monotonic() - start) * 1000)
+            body = await resp.json()
+            if resp.status == 200 and body.get("ok"):
+                return {"success": True, "latency_ms": latency_ms}
+            return {
+                "success": False,
+                "latency_ms": latency_ms,
+                "error": body.get("description", f"HTTP {resp.status}"),
+            }
     except Exception as exc:
         latency_ms = int((time.monotonic() - start) * 1000)
         return {"success": False, "latency_ms": latency_ms, "error": str(exc)[:200]}

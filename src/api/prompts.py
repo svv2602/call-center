@@ -142,9 +142,7 @@ async def delete_ab_test(test_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[
 
 
 @router.get("/ab-tests/{test_id}/report")
-async def get_ab_test_report(
-    test_id: UUID, _: dict[str, Any] = _analyst_dep
-) -> dict[str, Any]:
+async def get_ab_test_report(test_id: UUID, _: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
     """Get a detailed analytics report for an A/B test."""
     engine = await _get_engine()
     ab_manager = ABTestManager(engine)
@@ -156,9 +154,7 @@ async def get_ab_test_report(
 
 
 @router.get("/ab-tests/{test_id}/report/csv")
-async def export_ab_test_report_csv(
-    test_id: UUID, _: dict[str, Any] = _analyst_dep
-) -> Any:
+async def export_ab_test_report_csv(test_id: UUID, _: dict[str, Any] = _analyst_dep) -> Any:
     """Export A/B test report as CSV (daily rows + TOTAL)."""
     engine = await _get_engine()
     ab_manager = ABTestManager(engine)

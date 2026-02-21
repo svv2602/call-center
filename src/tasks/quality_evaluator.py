@@ -100,7 +100,13 @@ def _build_transcription_text(turns: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-@app.task(name="src.tasks.quality_evaluator.evaluate_call_quality", bind=True, max_retries=3, soft_time_limit=120, time_limit=150)  # type: ignore[untyped-decorator]
+@app.task(
+    name="src.tasks.quality_evaluator.evaluate_call_quality",
+    bind=True,
+    max_retries=3,
+    soft_time_limit=120,
+    time_limit=150,
+)  # type: ignore[untyped-decorator]
 def evaluate_call_quality(self: Any, call_id: str) -> dict[str, Any]:
     """Evaluate call quality using Claude Haiku.
 

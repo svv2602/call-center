@@ -64,9 +64,7 @@ class GenericHTMLFetcher:
             try:
                 async with self._session.get(listing_url) as resp:
                     if resp.status != 200:
-                        logger.warning(
-                            "Listing page %s returned %d", listing_url, resp.status
-                        )
+                        logger.warning("Listing page %s returned %d", listing_url, resp.status)
                         continue
                     html = await resp.text()
             except Exception:
@@ -97,9 +95,7 @@ class GenericHTMLFetcher:
         )
         return articles
 
-    def _extract_links(
-        self, html: str, listing_url: str
-    ) -> list[dict[str, str]]:
+    def _extract_links(self, html: str, listing_url: str) -> list[dict[str, str]]:
         """Extract article links from a listing page HTML."""
         soup = BeautifulSoup(html, "lxml")
         results: list[dict[str, str]] = []
@@ -139,11 +135,13 @@ class GenericHTMLFetcher:
             if not title or len(title) < 5:
                 continue
 
-            results.append({
-                "url": full_url,
-                "title": title,
-                "published": "",
-            })
+            results.append(
+                {
+                    "url": full_url,
+                    "title": title,
+                    "published": "",
+                }
+            )
 
         return results
 
@@ -151,9 +149,7 @@ class GenericHTMLFetcher:
         """Check if netloc belongs to the same site (domain or subdomain)."""
         return netloc == self._base_domain or netloc.endswith("." + self._base_domain)
 
-    async def fetch_article(
-        self, url: str, published: str | None = None
-    ) -> ScrapedArticle | None:
+    async def fetch_article(self, url: str, published: str | None = None) -> ScrapedArticle | None:
         """Fetch article page and extract content via trafilatura."""
         assert self._session is not None, "Call open() first"
 
@@ -197,9 +193,21 @@ def _is_non_article_url(path: str) -> bool:
     """Check if URL path looks like a non-article page."""
     path_lower = path.lower()
     skip_patterns = (
-        "/login", "/register", "/cart", "/checkout", "/search",
-        "/impressum", "/datenschutz", "/privacy", "/cookie",
-        "/kontakt", "/contact", "/sitemap", ".pdf", ".jpg", ".png",
+        "/login",
+        "/register",
+        "/cart",
+        "/checkout",
+        "/search",
+        "/impressum",
+        "/datenschutz",
+        "/privacy",
+        "/cookie",
+        "/kontakt",
+        "/contact",
+        "/sitemap",
+        ".pdf",
+        ".jpg",
+        ".png",
     )
     return any(pat in path_lower for pat in skip_patterns)
 

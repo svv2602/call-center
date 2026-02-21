@@ -35,6 +35,7 @@ def _format_tire_size(row: Any) -> str:
         size += " (зад)"
     return size
 
+
 # Retry config
 _MAX_RETRIES = 2
 _RETRY_DELAYS = [1.0, 2.0]  # exponential backoff

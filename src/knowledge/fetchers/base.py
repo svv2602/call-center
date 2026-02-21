@@ -29,9 +29,7 @@ class ContentFetcher(Protocol):
         """
         ...
 
-    async def fetch_article(
-        self, url: str, published: str | None = None
-    ) -> ScrapedArticle | None:
+    async def fetch_article(self, url: str, published: str | None = None) -> ScrapedArticle | None:
         """Fetch and parse a single article page."""
         ...
 

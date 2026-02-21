@@ -42,8 +42,8 @@ app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
-    task_soft_time_limit=300,   # 5 min default soft limit (SoftTimeLimitExceeded)
-    task_time_limit=360,        # 6 min default hard kill
+    task_soft_time_limit=300,  # 5 min default soft limit (SoftTimeLimitExceeded)
+    task_time_limit=360,  # 6 min default hard kill
     task_routes={
         "src.tasks.quality_evaluator.*": {"queue": "quality"},
         "src.tasks.daily_stats.*": {"queue": "stats"},
@@ -69,7 +69,9 @@ app.conf.beat_schedule = {
     },
     "ensure-partitions": {
         "task": "src.tasks.partition_manager.ensure_partitions",
-        "schedule": crontab(hour=2, minute=0, day_of_week="monday"),  # Weekly Monday 02:00 (idempotent, 3 months ahead)
+        "schedule": crontab(
+            hour=2, minute=0, day_of_week="monday"
+        ),  # Weekly Monday 02:00 (idempotent, 3 months ahead)
     },
     "backup-database": {
         "task": "src.tasks.backup.backup_database",
@@ -93,7 +95,9 @@ app.conf.beat_schedule = {
     },
     "rescrape-watched-pages": {
         "task": "src.tasks.scraper_tasks.rescrape_watched_pages",
-        "schedule": crontab(minute=30),  # Every hour at :30; actual timing per-page via next_scrape_at
+        "schedule": crontab(
+            minute=30
+        ),  # Every hour at :30; actual timing per-page via next_scrape_at
     },
     "run-all-content-sources": {
         "task": "src.tasks.scraper_tasks.run_all_sources",

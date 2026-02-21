@@ -32,14 +32,12 @@ def catalog_full_sync(self: Any) -> dict[str, Any]:
     """
     import asyncio
 
-    return asyncio.run(
-        _catalog_full_sync_async(self)
-    )
+    return asyncio.run(_catalog_full_sync_async(self))
 
 
 _LOCK_KEY = "catalog_sync:lock"
 _LOCK_TTL_FULL = 1800  # 30 min for full sync
-_LOCK_TTL_INCR = 300   # 5 min for incremental sync
+_LOCK_TTL_INCR = 300  # 5 min for incremental sync
 
 
 async def _catalog_full_sync_async(task: Any) -> dict[str, Any]:
@@ -56,7 +54,9 @@ async def _catalog_full_sync_async(task: Any) -> dict[str, Any]:
         logger.info("1C not configured (ONEC_USERNAME empty), skipping full sync")
         return {"status": "skipped", "reason": "onec_not_configured"}
 
-    engine = create_async_engine(settings.database.url, pool_size=5, max_overflow=5, pool_pre_ping=True)
+    engine = create_async_engine(
+        settings.database.url, pool_size=5, max_overflow=5, pool_pre_ping=True
+    )
     redis: Redis | None = None
     onec_client: OneCClient | None = None
 
@@ -123,9 +123,7 @@ def catalog_incremental_sync(self: Any) -> dict[str, Any]:
     """
     import asyncio
 
-    return asyncio.run(
-        _catalog_incremental_sync_async(self)
-    )
+    return asyncio.run(_catalog_incremental_sync_async(self))
 
 
 async def _catalog_incremental_sync_async(task: Any) -> dict[str, Any]:
@@ -142,7 +140,9 @@ async def _catalog_incremental_sync_async(task: Any) -> dict[str, Any]:
         logger.info("1C not configured (ONEC_USERNAME empty), skipping incremental sync")
         return {"status": "skipped", "reason": "onec_not_configured"}
 
-    engine = create_async_engine(settings.database.url, pool_size=5, max_overflow=5, pool_pre_ping=True)
+    engine = create_async_engine(
+        settings.database.url, pool_size=5, max_overflow=5, pool_pre_ping=True
+    )
     redis: Redis | None = None
     onec_client: OneCClient | None = None
 

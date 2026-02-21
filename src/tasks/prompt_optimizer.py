@@ -51,7 +51,9 @@ FAILED CALL TRANSCRIPTIONS:
 """
 
 
-@app.task(name="src.tasks.prompt_optimizer.analyze_failed_calls", soft_time_limit=300, time_limit=360)  # type: ignore[untyped-decorator]
+@app.task(
+    name="src.tasks.prompt_optimizer.analyze_failed_calls", soft_time_limit=300, time_limit=360
+)  # type: ignore[untyped-decorator]
 def analyze_failed_calls(
     days: int = 7, max_calls: int = 20, triggered_by: str = "manual"
 ) -> dict[str, Any]:
@@ -66,9 +68,7 @@ def analyze_failed_calls(
 
     loop = asyncio.new_event_loop()
     try:
-        return loop.run_until_complete(
-            _analyze_failed_calls_async(days, max_calls, triggered_by)
-        )
+        return loop.run_until_complete(_analyze_failed_calls_async(days, max_calls, triggered_by))
     finally:
         loop.close()
 

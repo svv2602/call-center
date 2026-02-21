@@ -320,6 +320,7 @@ async def run_regression_test(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     llm_router = None
     try:
         from src.llm import get_router
+
         llm_router = get_router()
     except Exception:
         pass
@@ -340,8 +341,11 @@ async def run_regression_test(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
 
         # Step 2: Judge whether agent response matches expected behavior
         judgement = await _judge_response(
-            trigger, expected, agent_response,
-            llm_router, settings.anthropic.api_key,
+            trigger,
+            expected,
+            agent_response,
+            llm_router,
+            settings.anthropic.api_key,
         )
 
         is_pass = judgement.get("passed", False)
@@ -350,16 +354,18 @@ async def run_regression_test(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
         else:
             failed += 1
 
-        results.append({
-            "rule_id": str(rule["id"]),
-            "title": rule["title"],
-            "severity": rule["severity"],
-            "passed": is_pass,
-            "trigger_input": trigger,
-            "expected": expected,
-            "actual": agent_response,
-            "reason": judgement.get("reason", ""),
-        })
+        results.append(
+            {
+                "rule_id": str(rule["id"]),
+                "title": rule["title"],
+                "severity": rule["severity"],
+                "passed": is_pass,
+                "trigger_input": trigger,
+                "expected": expected,
+                "actual": agent_response,
+                "reason": judgement.get("reason", ""),
+            }
+        )
 
     return {"results": results, "passed": passed, "failed": failed, "total": len(rules)}
 
@@ -393,6 +399,7 @@ async def _get_agent_response(
     if llm_router is not None:
         try:
             from src.llm.models import LLMTask
+
             resp = await llm_router.complete(
                 LLMTask.QUALITY_SCORING,
                 messages,
@@ -406,6 +413,7 @@ async def _get_agent_response(
     # Fallback: direct Anthropic
     try:
         import anthropic
+
         client = anthropic.AsyncAnthropic(api_key=api_key)
         resp = await client.messages.create(
             model=model,
@@ -443,6 +451,7 @@ async def _judge_response(
     if llm_router is not None:
         try:
             from src.llm.models import LLMTask
+
             resp = await llm_router.complete(
                 LLMTask.QUALITY_SCORING,
                 messages,
@@ -456,6 +465,7 @@ async def _judge_response(
         # Fallback: direct Anthropic
         try:
             import anthropic
+
             client = anthropic.AsyncAnthropic(api_key=api_key)
             resp = await client.messages.create(
                 model="claude-haiku-4-5-20251001",

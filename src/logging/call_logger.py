@@ -32,7 +32,9 @@ class CallLogger:
     """
 
     def __init__(self, database_url: str, redis: Redis | None = None) -> None:
-        self._engine = create_async_engine(database_url, pool_size=5, max_overflow=5, pool_pre_ping=True)
+        self._engine = create_async_engine(
+            database_url, pool_size=5, max_overflow=5, pool_pre_ping=True
+        )
         self._session_factory = async_sessionmaker(self._engine, expire_on_commit=False)
         self._redis = redis
         self._db_available = True

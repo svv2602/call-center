@@ -73,9 +73,7 @@ MOCK_RESPONSES: dict[str, Any] = {
             {
                 "order_id": "ORD-2026-0042",
                 "status": "shipped",
-                "items": [
-                    {"name": "Michelin Primacy 4+ 205/55 R16", "quantity": 4, "price": 3200}
-                ],
+                "items": [{"name": "Michelin Primacy 4+ 205/55 R16", "quantity": 4, "price": 3200}],
                 "total": 12800,
                 "created_at": "2026-02-15T10:30:00Z",
                 "estimated_delivery": "2026-02-20",
@@ -87,7 +85,12 @@ MOCK_RESPONSES: dict[str, Any] = {
         "order_id": "ORD-2026-0099",
         "status": "draft",
         "items": [
-            {"product_id": "tire-001", "name": "Michelin Primacy 4+ 205/55 R16", "quantity": 4, "price": 3200}
+            {
+                "product_id": "tire-001",
+                "name": "Michelin Primacy 4+ 205/55 R16",
+                "quantity": 4,
+                "price": 3200,
+            }
         ],
         "subtotal": 12800,
         "currency": "UAH",
@@ -153,7 +156,10 @@ MOCK_RESPONSES: dict[str, Any] = {
         "prices": {
             "tire_change": {"price": 600, "description": "Заміна 4 шин R16"},
             "balancing": {"price": 400, "description": "Балансування 4 коліс R16"},
-            "full_service": {"price": 900, "description": "Повний сервіс R16 (заміна + балансування)"},
+            "full_service": {
+                "price": 900,
+                "description": "Повний сервіс R16 (заміна + балансування)",
+            },
         },
         "currency": "UAH",
     },
@@ -178,7 +184,9 @@ def build_mock_tool_router() -> ToolRouter:
 
     for tool_name, mock_data in MOCK_RESPONSES.items():
 
-        async def _handler(_name: str = tool_name, _data: Any = mock_data, **_kwargs: object) -> Any:
+        async def _handler(
+            _name: str = tool_name, _data: Any = mock_data, **_kwargs: object
+        ) -> Any:
             return copy.deepcopy(_data)
 
         router.register(tool_name, _handler)

@@ -260,7 +260,6 @@ class ABTestManager:
                 tests.append(test)
             return tests
 
-
     async def delete_test(self, test_id: UUID) -> None:
         """Delete an A/B test. Cannot delete an active test."""
         async with self._engine.begin() as conn:
@@ -352,10 +351,18 @@ class ABTestManager:
                 "calls_b": int(s.calls_b or 0) if s else 0,
                 "quality_a": round(float(s.quality_a or 0), 4) if s and s.quality_a else None,
                 "quality_b": round(float(s.quality_b or 0), 4) if s and s.quality_b else None,
-                "avg_duration_a": round(float(s.avg_duration_a or 0), 1) if s and s.avg_duration_a else None,
-                "avg_duration_b": round(float(s.avg_duration_b or 0), 1) if s and s.avg_duration_b else None,
-                "transfer_rate_a": round(float(s.transfer_rate_a or 0), 4) if s and s.transfer_rate_a else None,
-                "transfer_rate_b": round(float(s.transfer_rate_b or 0), 4) if s and s.transfer_rate_b else None,
+                "avg_duration_a": round(float(s.avg_duration_a or 0), 1)
+                if s and s.avg_duration_a
+                else None,
+                "avg_duration_b": round(float(s.avg_duration_b or 0), 1)
+                if s and s.avg_duration_b
+                else None,
+                "transfer_rate_a": round(float(s.transfer_rate_a or 0), 4)
+                if s and s.transfer_rate_a
+                else None,
+                "transfer_rate_b": round(float(s.transfer_rate_b or 0), 4)
+                if s and s.transfer_rate_b
+                else None,
                 "significance": significance,
             }
 
@@ -382,13 +389,15 @@ class ABTestManager:
                     {**base_params, "criterion": criterion},
                 )
                 cr = cr_result.first()
-                per_criterion.append({
-                    "criterion": criterion,
-                    "avg_a": round(float(cr.avg_a), 4) if cr and cr.avg_a is not None else None,
-                    "avg_b": round(float(cr.avg_b), 4) if cr and cr.avg_b is not None else None,
-                    "count_a": int(cr.count_a) if cr else 0,
-                    "count_b": int(cr.count_b) if cr else 0,
-                })
+                per_criterion.append(
+                    {
+                        "criterion": criterion,
+                        "avg_a": round(float(cr.avg_a), 4) if cr and cr.avg_a is not None else None,
+                        "avg_b": round(float(cr.avg_b), 4) if cr and cr.avg_b is not None else None,
+                        "count_a": int(cr.count_a) if cr else 0,
+                        "count_b": int(cr.count_b) if cr else 0,
+                    }
+                )
 
             # 3. By scenario
             sc_result = await conn.execute(

@@ -199,7 +199,9 @@ async def process_sandbox_turn(
     try:
         start = time.monotonic()
         response_text, updated_history = await agent.process_message(
-            user_text, history_copy, pattern_context=pattern_context,
+            user_text,
+            history_copy,
+            pattern_context=pattern_context,
         )
         latency_ms = int((time.monotonic() - start) * 1000)
     finally:

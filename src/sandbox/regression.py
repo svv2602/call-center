@@ -80,7 +80,13 @@ async def run_regression(
         )
         source_conv = conv_result.first()
         if not source_conv:
-            return RegressionResult(turns_compared=0, avg_source_rating=None, avg_new_rating=None, score_diff=None, error="Source conversation not found")
+            return RegressionResult(
+                turns_compared=0,
+                avg_source_rating=None,
+                avg_new_rating=None,
+                score_diff=None,
+                error="Source conversation not found",
+            )
 
         # Load source turns (customer messages + agent responses)
         if branch_turn_ids:
@@ -92,7 +98,10 @@ async def run_regression(
                     WHERE id = ANY(:ids) AND conversation_id = :conv_id
                     ORDER BY turn_number, created_at
                 """),
-                {"ids": [str(tid) for tid in branch_turn_ids], "conv_id": str(source_conversation_id)},
+                {
+                    "ids": [str(tid) for tid in branch_turn_ids],
+                    "conv_id": str(source_conversation_id),
+                },
             )
         else:
             # Load main branch (all turns, no branching filter)
@@ -117,7 +126,13 @@ async def run_regression(
             source_responses.append(turn)
 
     if not customer_messages:
-        return RegressionResult(turns_compared=0, avg_source_rating=None, avg_new_rating=None, score_diff=None, error="No customer messages in source conversation")
+        return RegressionResult(
+            turns_compared=0,
+            avg_source_rating=None,
+            avg_new_rating=None,
+            score_diff=None,
+            error="No customer messages in source conversation",
+        )
 
     # Create new conversation for the regression
     async with engine.begin() as conn:
@@ -134,10 +149,12 @@ async def run_regression(
                 "prompt_version_id": str(new_prompt_version_id),
                 "tool_mode": source_conv.tool_mode,
                 "tags": ["regression", "auto"],
-                "metadata": json.dumps({
-                    "source_conversation_id": str(source_conversation_id),
-                    "regression": True,
-                }),
+                "metadata": json.dumps(
+                    {
+                        "source_conversation_id": str(source_conversation_id),
+                        "regression": True,
+                    }
+                ),
             },
         )
         new_conv_row = new_conv_result.first()
@@ -198,33 +215,41 @@ async def run_regression(
             source_text = source_resp["content"] if source_resp else ""
             source_rating = source_resp["rating"] if source_resp else None
 
-            diff = list(difflib.unified_diff(
-                source_text.splitlines(),
-                result.response_text.splitlines(),
-                fromfile="source",
-                tofile="new",
-                lineterm="",
-            ))
+            diff = list(
+                difflib.unified_diff(
+                    source_text.splitlines(),
+                    result.response_text.splitlines(),
+                    fromfile="source",
+                    tofile="new",
+                    lineterm="",
+                )
+            )
 
-            turn_diffs.append(TurnDiff(
-                turn_number=i + 1,
-                customer_message=msg,
-                source_response=source_text,
-                new_response=result.response_text,
-                source_rating=source_rating,
-                diff_lines=diff,
-            ))
+            turn_diffs.append(
+                TurnDiff(
+                    turn_number=i + 1,
+                    customer_message=msg,
+                    source_response=source_text,
+                    new_response=result.response_text,
+                    source_rating=source_rating,
+                    diff_lines=diff,
+                )
+            )
 
         except Exception:
             logger.exception("Regression turn %d failed", i + 1)
-            turn_diffs.append(TurnDiff(
-                turn_number=i + 1,
-                customer_message=msg,
-                source_response=source_responses[i]["content"] if i < len(source_responses) else "",
-                new_response="[ERROR]",
-                source_rating=None,
-                diff_lines=[],
-            ))
+            turn_diffs.append(
+                TurnDiff(
+                    turn_number=i + 1,
+                    customer_message=msg,
+                    source_response=source_responses[i]["content"]
+                    if i < len(source_responses)
+                    else "",
+                    new_response="[ERROR]",
+                    source_rating=None,
+                    diff_lines=[],
+                )
+            )
 
     # Compute aggregate scores
     source_ratings = [sr["rating"] for sr in source_responses if sr.get("rating") is not None]

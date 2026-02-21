@@ -254,8 +254,7 @@ async def generate_embeddings_inline(article_id: str) -> dict[str, Any]:
         # Fetch article
         async with pool.acquire() as conn:
             row = await conn.fetchrow(
-                "SELECT id, title, content FROM knowledge_articles "
-                "WHERE id = $1 AND active = true",
+                "SELECT id, title, content FROM knowledge_articles WHERE id = $1 AND active = true",
                 uuid.UUID(article_id),
             )
 

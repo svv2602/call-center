@@ -216,7 +216,12 @@ _VALID_TRANSITIONS: dict[CallState, set[CallState]] = {
         CallState.ENDED,
     },
     CallState.PROCESSING: {CallState.SPEAKING, CallState.TRANSFERRING, CallState.ENDED},
-    CallState.SPEAKING: {CallState.LISTENING, CallState.PROCESSING, CallState.SPEAKING, CallState.ENDED},
+    CallState.SPEAKING: {
+        CallState.LISTENING,
+        CallState.PROCESSING,
+        CallState.SPEAKING,
+        CallState.ENDED,
+    },
     CallState.TRANSFERRING: {CallState.ENDED},
 }
 

@@ -43,7 +43,5 @@ class ProKolesoFetcher:
         )
         return articles[:max_articles]
 
-    async def fetch_article(
-        self, url: str, published: str | None = None
-    ) -> ScrapedArticle | None:
+    async def fetch_article(self, url: str, published: str | None = None) -> ScrapedArticle | None:
         return await self._scraper.fetch_article(url, published=published)

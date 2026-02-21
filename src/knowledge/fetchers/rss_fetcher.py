@@ -96,11 +96,13 @@ class RSSFetcher:
                 except ValueError:
                     pass
 
-            articles.append({
-                "url": link,
-                "title": title,
-                "published": published,
-            })
+            articles.append(
+                {
+                    "url": link,
+                    "title": title,
+                    "published": published,
+                }
+            )
 
             if len(articles) >= max_articles:
                 break
@@ -108,9 +110,7 @@ class RSSFetcher:
         logger.info("RSS feed %s: %d entries matched", self._feed_url, len(articles))
         return articles
 
-    async def fetch_article(
-        self, url: str, published: str | None = None
-    ) -> ScrapedArticle | None:
+    async def fetch_article(self, url: str, published: str | None = None) -> ScrapedArticle | None:
         """Fetch article page and extract content via trafilatura."""
         assert self._session is not None, "Call open() first"
 

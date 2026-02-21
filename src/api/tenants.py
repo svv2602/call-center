@@ -43,6 +43,7 @@ async def _get_engine() -> AsyncEngine:
 
 # ─── Pydantic models ──────────────────────────────────────
 
+
 class TenantCreate(BaseModel):
     slug: str = Field(min_length=1, max_length=50, pattern=r"^[a-z0-9][a-z0-9-]*$")
     name: str = Field(min_length=1, max_length=200)
@@ -68,6 +69,7 @@ class TenantUpdate(BaseModel):
 
 # ─── Validation helpers ───────────────────────────────────
 
+
 def _validate_tools(tools: list[str]) -> None:
     """Raise 400 if any tool name is not in the canonical list."""
     invalid = [t for t in tools if t not in _VALID_TOOL_NAMES]
@@ -80,6 +82,7 @@ def _validate_tools(tools: list[str]) -> None:
 
 
 # ─── CRUD endpoints ──────────────────────────────────────
+
 
 @router.get("")
 async def list_tenants(
@@ -147,9 +150,7 @@ async def get_tenant(tenant_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[st
 
 
 @router.post("", status_code=201)
-async def create_tenant(
-    request: TenantCreate, _: dict[str, Any] = _admin_dep
-) -> dict[str, Any]:
+async def create_tenant(request: TenantCreate, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Create a new tenant."""
     if request.enabled_tools:
         _validate_tools(request.enabled_tools)

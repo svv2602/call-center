@@ -50,6 +50,7 @@ def content_hash(text: str) -> str:
     """Compute SHA-256 hash of content for change detection."""
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
+
 _USER_AGENT = "CallCenterAI-Scraper/1.0 (+https://github.com/call-center-ai; polite bot)"
 
 

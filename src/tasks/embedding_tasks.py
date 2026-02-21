@@ -37,9 +37,7 @@ def generate_article_embeddings(self: Any, article_id: str) -> dict[str, Any]:
     """
     import asyncio
 
-    return asyncio.run(
-        _generate_article_embeddings_async(self, article_id)
-    )
+    return asyncio.run(_generate_article_embeddings_async(self, article_id))
 
 
 async def _generate_article_embeddings_async(task: Any, article_id: str) -> dict[str, Any]:

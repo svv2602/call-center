@@ -192,11 +192,13 @@ class LLMAgent:
                     # Convert LLMResponse to Anthropic content blocks for history
                     assistant_content = llm_response_to_anthropic_blocks(llm_response)
                     for tc in llm_response.tool_calls:
-                        tool_uses.append({
-                            "id": tc.id,
-                            "name": tc.name,
-                            "input": tc.arguments,
-                        })
+                        tool_uses.append(
+                            {
+                                "id": tc.id,
+                                "name": tc.name,
+                                "input": tc.arguments,
+                            }
+                        )
                 except Exception as exc:
                     logger.exception("LLM router error: %s", exc)
                     return ERROR_TEXT, conversation_history

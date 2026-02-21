@@ -213,13 +213,9 @@ class GoogleTTSEngine:
                     self._config.voice_name,
                 )
 
-        return await self._call_tts_api(
-            texttospeech.SynthesisInput(text=text), text
-        )
+        return await self._call_tts_api(texttospeech.SynthesisInput(text=text), text)
 
-    async def _call_tts_api(
-        self, synthesis_input: texttospeech.SynthesisInput, text: str
-    ) -> bytes:
+    async def _call_tts_api(self, synthesis_input: texttospeech.SynthesisInput, text: str) -> bytes:
         """Send synthesis request to Google TTS and return raw PCM audio."""
         response = await self._client.synthesize_speech(  # type: ignore[union-attr]
             input=synthesis_input,

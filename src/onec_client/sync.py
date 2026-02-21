@@ -183,15 +183,17 @@ class CatalogSyncService:
             ref = city.get("Ref", "")
             if not ref:
                 continue
-            rows.append({
-                "ref": ref,
-                "description": city.get("Description", ""),
-                "description_ru": city.get("DescriptionRu", ""),
-                "city_id": city.get("CityID", ""),
-                "area_ref": city.get("Area", ""),
-                "settlement_type": city.get("SettlementTypeDescription", ""),
-                "is_branch": _safe_bool(city.get("IsBranch")),
-            })
+            rows.append(
+                {
+                    "ref": ref,
+                    "description": city.get("Description", ""),
+                    "description_ru": city.get("DescriptionRu", ""),
+                    "city_id": city.get("CityID", ""),
+                    "area_ref": city.get("Area", ""),
+                    "settlement_type": city.get("SettlementTypeDescription", ""),
+                    "is_branch": _safe_bool(city.get("IsBranch")),
+                }
+            )
 
         if not rows:
             return
@@ -224,22 +226,24 @@ class CatalogSyncService:
             ref = branch.get("Ref", "")
             if not ref:
                 continue
-            rows.append({
-                "ref": ref,
-                "description": branch.get("Description", ""),
-                "description_ru": branch.get("DescriptionRu", ""),
-                "short_address": branch.get("ShortAddress", ""),
-                "city_ref": branch.get("CityRef", ""),
-                "city_description": branch.get("CityDescription", ""),
-                "number": branch.get("Number", ""),
-                "phone": branch.get("Phone", ""),
-                "category": branch.get("CategoryOfWarehouse", ""),
-                "warehouse_status": branch.get("WarehouseStatus", ""),
-                "latitude": branch.get("Latitude", ""),
-                "longitude": branch.get("Longitude", ""),
-                "postal_code": branch.get("PostalCodeUA", ""),
-                "max_weight": _safe_int(branch.get("PlaceMaxWeightAllowed")),
-            })
+            rows.append(
+                {
+                    "ref": ref,
+                    "description": branch.get("Description", ""),
+                    "description_ru": branch.get("DescriptionRu", ""),
+                    "short_address": branch.get("ShortAddress", ""),
+                    "city_ref": branch.get("CityRef", ""),
+                    "city_description": branch.get("CityDescription", ""),
+                    "number": branch.get("Number", ""),
+                    "phone": branch.get("Phone", ""),
+                    "category": branch.get("CategoryOfWarehouse", ""),
+                    "warehouse_status": branch.get("WarehouseStatus", ""),
+                    "latitude": branch.get("Latitude", ""),
+                    "longitude": branch.get("Longitude", ""),
+                    "postal_code": branch.get("PostalCodeUA", ""),
+                    "max_weight": _safe_int(branch.get("PlaceMaxWeightAllowed")),
+                }
+            )
 
         if not rows:
             return
@@ -286,32 +290,36 @@ class CatalogSyncService:
             if not model_id:
                 continue
 
-            model_rows.append({
-                "id": model_id,
-                "name": ware.get("model", ""),
-                "manufacturer_id": ware.get("manufacturer_id", ""),
-                "manufacturer": ware.get("manufacturer", ""),
-                "seasonality": _normalize_season(ware.get("seasonality", "")),
-                "tread_pattern_type": ware.get("tread_pattern_type", ""),
-                "type_id": ware.get("type", ""),
-            })
+            model_rows.append(
+                {
+                    "id": model_id,
+                    "name": ware.get("model", ""),
+                    "manufacturer_id": ware.get("manufacturer_id", ""),
+                    "manufacturer": ware.get("manufacturer", ""),
+                    "seasonality": _normalize_season(ware.get("seasonality", "")),
+                    "tread_pattern_type": ware.get("tread_pattern_type", ""),
+                    "type_id": ware.get("type", ""),
+                }
+            )
 
             for product in ware.get("product", []):
                 sku = product.get("sku", "")
                 if not sku:
                     continue
-                product_rows.append({
-                    "sku": sku,
-                    "model_id": model_id,
-                    "diameter": _safe_int(product.get("diametr")),
-                    "width": _safe_int(product.get("profile_width")),
-                    "profile": _safe_int(product.get("profile_height")),
-                    "size": product.get("size", ""),
-                    "speed_rating": product.get("speed_rating", ""),
-                    "load_rating": product.get("load_rating", ""),
-                    "studded": _safe_bool(product.get("studded")),
-                    "description": product.get("text", ""),
-                })
+                product_rows.append(
+                    {
+                        "sku": sku,
+                        "model_id": model_id,
+                        "diameter": _safe_int(product.get("diametr")),
+                        "width": _safe_int(product.get("profile_width")),
+                        "profile": _safe_int(product.get("profile_height")),
+                        "size": product.get("size", ""),
+                        "speed_rating": product.get("speed_rating", ""),
+                        "load_rating": product.get("load_rating", ""),
+                        "studded": _safe_bool(product.get("studded")),
+                        "description": product.get("text", ""),
+                    }
+                )
 
         model_sql = text("""
             INSERT INTO tire_models (id, name, manufacturer_id, manufacturer,
@@ -362,15 +370,17 @@ class CatalogSyncService:
             sku = item.get("sku", "")
             if not sku:
                 continue
-            rows.append({
-                "sku": sku,
-                "network": network,
-                "price": _safe_int(item.get("price")),
-                "price_tshina": _safe_int(item.get("price_tshina")),
-                "stock_quantity": _safe_int(item.get("stock")),
-                "country": item.get("country", ""),
-                "year_issue": item.get("year_issue", ""),
-            })
+            rows.append(
+                {
+                    "sku": sku,
+                    "network": network,
+                    "price": _safe_int(item.get("price")),
+                    "price_tshina": _safe_int(item.get("price_tshina")),
+                    "stock_quantity": _safe_int(item.get("stock")),
+                    "country": item.get("country", ""),
+                    "year_issue": item.get("year_issue", ""),
+                }
+            )
 
         if not rows:
             return

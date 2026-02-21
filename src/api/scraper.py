@@ -83,7 +83,9 @@ class SourceConfigCreate(BaseModel):
 class SourceConfigUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     source_type: str | None = Field(default=None, min_length=1, max_length=30)
-    source_url: str | None = Field(default=None, min_length=1, max_length=2000, pattern=_URL_PATTERN)
+    source_url: str | None = Field(
+        default=None, min_length=1, max_length=2000, pattern=_URL_PATTERN
+    )
     language: str | None = Field(default=None, max_length=5)
     enabled: bool | None = None
     auto_approve: bool | None = None
@@ -113,12 +115,18 @@ async def get_scraper_config(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
             "max_pages": redis_config.get("max_pages", settings.scraper.max_pages),
             "request_delay": redis_config.get("request_delay", settings.scraper.request_delay),
             "llm_model": redis_config.get("llm_model", settings.scraper.llm_model),
-            "schedule_enabled": redis_config.get("schedule_enabled", settings.scraper.schedule_enabled),
+            "schedule_enabled": redis_config.get(
+                "schedule_enabled", settings.scraper.schedule_enabled
+            ),
             "schedule_hour": redis_config.get("schedule_hour", settings.scraper.schedule_hour),
-            "schedule_day_of_week": redis_config.get("schedule_day_of_week", settings.scraper.schedule_day_of_week),
+            "schedule_day_of_week": redis_config.get(
+                "schedule_day_of_week", settings.scraper.schedule_day_of_week
+            ),
             "min_date": redis_config.get("min_date", settings.scraper.min_date),
             "max_date": redis_config.get("max_date", settings.scraper.max_date),
-            "dedup_llm_check": redis_config.get("dedup_llm_check", settings.scraper.dedup_llm_check),
+            "dedup_llm_check": redis_config.get(
+                "dedup_llm_check", settings.scraper.dedup_llm_check
+            ),
         }
     }
 
@@ -441,9 +449,17 @@ async def update_source_config(
     params: dict[str, Any] = {"id": str(config_id)}
 
     for field_name in (
-        "name", "source_type", "source_url", "language", "enabled",
-        "auto_approve", "request_delay", "max_articles_per_run",
-        "schedule_enabled", "schedule_hour", "schedule_day_of_week",
+        "name",
+        "source_type",
+        "source_url",
+        "language",
+        "enabled",
+        "auto_approve",
+        "request_delay",
+        "max_articles_per_run",
+        "schedule_enabled",
+        "schedule_hour",
+        "schedule_day_of_week",
     ):
         value = getattr(request, field_name, None)
         if value is not None:
@@ -478,9 +494,7 @@ async def update_source_config(
 
 
 @router.delete("/source-configs/{config_id}")
-async def delete_source_config(
-    config_id: UUID, _: dict[str, Any] = _admin_dep
-) -> dict[str, Any]:
+async def delete_source_config(config_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Delete a content source configuration."""
     engine = await _get_engine()
 
@@ -501,9 +515,7 @@ async def delete_source_config(
 
 
 @router.post("/source-configs/{config_id}/run")
-async def trigger_source_run(
-    config_id: UUID, _: dict[str, Any] = _admin_dep
-) -> dict[str, Any]:
+async def trigger_source_run(config_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Trigger a manual scraper run for a single source."""
     engine = await _get_engine()
 
@@ -526,9 +538,7 @@ async def trigger_source_run(
         }
     except Exception as exc:
         logger.exception("Failed to dispatch source task for %s", config_id)
-        raise HTTPException(
-            status_code=500, detail="Failed to dispatch source task"
-        ) from exc
+        raise HTTPException(status_code=500, detail="Failed to dispatch source task") from exc
 
 
 # ═══════════════════════════════════════════════════════════
@@ -536,13 +546,29 @@ async def trigger_source_run(
 # ═══════════════════════════════════════════════════════════
 
 _VALID_CATEGORIES = {
-    "brands", "guides", "faq", "comparisons", "general",
-    "policies", "procedures", "returns", "warranty", "delivery",
+    "brands",
+    "guides",
+    "faq",
+    "comparisons",
+    "general",
+    "policies",
+    "procedures",
+    "returns",
+    "warranty",
+    "delivery",
 }
 
 KnowledgeCategory = Literal[
-    "brands", "guides", "faq", "comparisons", "general",
-    "policies", "procedures", "returns", "warranty", "delivery",
+    "brands",
+    "guides",
+    "faq",
+    "comparisons",
+    "general",
+    "policies",
+    "procedures",
+    "returns",
+    "warranty",
+    "delivery",
 ]
 
 
@@ -715,7 +741,9 @@ async def update_watched_page(
 
         if request.rescrape_interval_hours is not None:
             if request.rescrape_interval_hours < 1 or request.rescrape_interval_hours > 8760:
-                raise HTTPException(status_code=400, detail="Interval must be between 1 and 8760 hours")
+                raise HTTPException(
+                    status_code=400, detail="Interval must be between 1 and 8760 hours"
+                )
             await conn.execute(
                 text("""
                     UPDATE knowledge_sources
@@ -771,9 +799,7 @@ async def delete_watched_page(page_id: UUID, _: dict[str, Any] = _admin_dep) -> 
 
 
 @router.post("/watched-pages/{page_id}/scrape-now")
-async def scrape_watched_page_now(
-    page_id: UUID, _: dict[str, Any] = _admin_dep
-) -> dict[str, Any]:
+async def scrape_watched_page_now(page_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Scrape a single watched page immediately (inline, no Celery needed)."""
     from src.knowledge.article_processor import process_article
     from src.knowledge.scraper import ProKolesoScraper, content_hash

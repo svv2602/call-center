@@ -36,6 +36,7 @@ async def _get_engine() -> AsyncEngine:
 
 # ── Pydantic models ──────────────────────────────────────────
 
+
 class ConversationCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=300)
     prompt_version_id: UUID | None = None
@@ -123,17 +124,21 @@ async def get_agent_phrases(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     try:
         engine = await _get_engine()
         async with engine.begin() as conn:
-            result = await conn.execute(text(
-                "SELECT template_key, title, content, is_active, variant_number "
-                "FROM response_templates ORDER BY template_key, variant_number"
-            ))
+            result = await conn.execute(
+                text(
+                    "SELECT template_key, title, content, is_active, variant_number "
+                    "FROM response_templates ORDER BY template_key, variant_number"
+                )
+            )
             for row in result:
-                db_templates.setdefault(row.template_key, []).append({
-                    "title": row.title,
-                    "content": row.content,
-                    "is_active": row.is_active,
-                    "variant_number": row.variant_number,
-                })
+                db_templates.setdefault(row.template_key, []).append(
+                    {
+                        "title": row.title,
+                        "content": row.content,
+                        "is_active": row.is_active,
+                        "variant_number": row.variant_number,
+                    }
+                )
     except Exception:
         logger.warning("Failed to load DB templates for phrases tab", exc_info=True)
 
@@ -153,7 +158,11 @@ async def get_agent_phrases(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
             {"key": "order", "label": "Оформление заказа", "phrases": WAIT_ORDER_POOL},
             {"key": "status", "label": "Статус заказа", "phrases": WAIT_STATUS_POOL},
             {"key": "fitting", "label": "Запись на шиномонтаж", "phrases": WAIT_FITTING_POOL},
-            {"key": "knowledge", "label": "Консультация (база знаний)", "phrases": WAIT_KNOWLEDGE_POOL},
+            {
+                "key": "knowledge",
+                "label": "Консультация (база знаний)",
+                "phrases": WAIT_KNOWLEDGE_POOL,
+            },
             {"key": "default", "label": "По умолчанию (fallback)", "phrases": WAIT_DEFAULT_POOL},
         ],
         "db_templates": db_templates,
@@ -163,8 +172,18 @@ async def get_agent_phrases(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
 # ── Available models ─────────────────────────────────────────
 
 SANDBOX_MODELS = [
-    {"id": "claude-sonnet-4-5-20250929", "label": "Claude Sonnet 4.5", "speed": "slow", "quality": "best"},
-    {"id": "claude-haiku-4-5-20251001", "label": "Claude Haiku 4.5", "speed": "fast", "quality": "good"},
+    {
+        "id": "claude-sonnet-4-5-20250929",
+        "label": "Claude Sonnet 4.5",
+        "speed": "slow",
+        "quality": "best",
+    },
+    {
+        "id": "claude-haiku-4-5-20251001",
+        "label": "Claude Haiku 4.5",
+        "speed": "fast",
+        "quality": "good",
+    },
 ]
 
 
@@ -188,15 +207,17 @@ async def list_models(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
             existing_ids = {m["id"] for m in models}
             for rm in router_models:
                 if rm["id"] not in existing_ids:
-                    models.append({
-                        "id": rm["id"],
-                        "label": rm["label"],
-                        "speed": "",
-                        "quality": "",
-                        "source": "router",
-                        "model": rm.get("model", ""),
-                        "type": rm.get("type", ""),
-                    })
+                    models.append(
+                        {
+                            "id": rm["id"],
+                            "label": rm["label"],
+                            "speed": "",
+                            "quality": "",
+                            "source": "router",
+                            "model": rm.get("model", ""),
+                            "type": rm.get("type", ""),
+                        }
+                    )
     except Exception:
         logger.debug("LLM router not available for sandbox models", exc_info=True)
 
@@ -204,6 +225,7 @@ async def list_models(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
 
 
 # ── Conversation CRUD ────────────────────────────────────────
+
 
 @router.get("/conversations")
 async def list_conversations(
@@ -292,7 +314,9 @@ async def create_conversation(
             """),
             {
                 "title": request.title,
-                "prompt_version_id": str(request.prompt_version_id) if request.prompt_version_id else None,
+                "prompt_version_id": str(request.prompt_version_id)
+                if request.prompt_version_id
+                else None,
                 "prompt_version_name": prompt_version_name,
                 "tool_mode": request.tool_mode,
                 "model": request.model,
@@ -310,9 +334,7 @@ async def create_conversation(
 
 
 @router.get("/conversations/{conversation_id}")
-async def get_conversation(
-    conversation_id: UUID, _: dict[str, Any] = _admin_dep
-) -> dict[str, Any]:
+async def get_conversation(conversation_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Get conversation with all turns and tool calls."""
     engine = await _get_engine()
 
@@ -443,6 +465,7 @@ async def delete_conversation(
 
 
 # ── Send message ─────────────────────────────────────────────
+
 
 @router.post("/conversations/{conversation_id}/send")
 async def send_message(
@@ -621,7 +644,9 @@ async def send_message(
                     "turn_id": str(agent_turn["id"]),
                     "tool_name": tc.tool_name,
                     "tool_args": json.dumps(tc.tool_args),
-                    "tool_result": json.dumps(tc.tool_result) if not isinstance(tc.tool_result, str) else json.dumps({"result": tc.tool_result}),
+                    "tool_result": json.dumps(tc.tool_result)
+                    if not isinstance(tc.tool_result, str)
+                    else json.dumps({"result": tc.tool_result}),
                     "duration_ms": tc.duration_ms,
                     "is_mock": tc.is_mock,
                 },
@@ -651,6 +676,7 @@ async def send_message(
 
 
 # ── Rate turn ────────────────────────────────────────────────
+
 
 @router.patch("/turns/{turn_id}/rate")
 async def rate_turn(
@@ -683,6 +709,7 @@ async def rate_turn(
 
 
 # ── Phase 2: Branching + Tree ────────────────────────────────
+
 
 @router.get("/conversations/{conversation_id}/tree")
 async def get_conversation_tree(
@@ -740,6 +767,7 @@ async def update_turn_label(
 
 # ── Phase 2: Auto-customer ───────────────────────────────────
 
+
 class AutoCustomerRequest(BaseModel):
     persona: str = "neutral"
     context_hint: str | None = None
@@ -780,6 +808,7 @@ async def auto_customer(
 
 
 # ── Phase 2: Scenario starters CRUD ─────────────────────────
+
 
 class StarterCreate(BaseModel):
     title: str = Field(..., min_length=1, max_length=300)
@@ -834,9 +863,7 @@ async def list_starters(
 
 
 @router.post("/scenario-starters")
-async def create_starter(
-    request: StarterCreate, _: dict[str, Any] = _admin_dep
-) -> dict[str, Any]:
+async def create_starter(request: StarterCreate, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Create a new scenario starter."""
     engine = await _get_engine()
 
@@ -859,7 +886,9 @@ async def create_starter(
                 "tags": request.tags,
                 "customer_persona": request.customer_persona,
                 "description": request.description,
-                "mock_overrides": json.dumps(request.mock_overrides) if request.mock_overrides else None,
+                "mock_overrides": json.dumps(request.mock_overrides)
+                if request.mock_overrides
+                else None,
                 "sort_order": request.sort_order,
             },
         )
@@ -935,9 +964,7 @@ async def update_starter(
 
 
 @router.delete("/scenario-starters/{starter_id}")
-async def delete_starter(
-    starter_id: UUID, _: dict[str, Any] = _admin_dep
-) -> dict[str, Any]:
+async def delete_starter(starter_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Delete a scenario starter."""
     engine = await _get_engine()
 
@@ -954,6 +981,7 @@ async def delete_starter(
 
 
 # ── Phase 3: Regression runs ────────────────────────────────
+
 
 class ReplayRequest(BaseModel):
     new_prompt_version_id: UUID
@@ -1058,7 +1086,9 @@ async def replay_conversation(
                 """),
                 {"id": run_id, "error": str(exc)},
             )
-        raise HTTPException(status_code=500, detail="Regression failed. Check server logs.") from exc
+        raise HTTPException(
+            status_code=500, detail="Regression failed. Check server logs."
+        ) from exc
 
 
 @router.get("/regression-runs")
@@ -1071,9 +1101,7 @@ async def list_regression_runs(
     engine = await _get_engine()
 
     async with engine.begin() as conn:
-        count_result = await conn.execute(
-            text("SELECT COUNT(*) FROM sandbox_regression_runs")
-        )
+        count_result = await conn.execute(text("SELECT COUNT(*) FROM sandbox_regression_runs"))
         total = count_result.scalar()
 
         result = await conn.execute(
@@ -1098,9 +1126,7 @@ async def list_regression_runs(
 
 
 @router.get("/regression-runs/{run_id}")
-async def get_regression_run(
-    run_id: UUID, _: dict[str, Any] = _admin_dep
-) -> dict[str, Any]:
+async def get_regression_run(run_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Get regression run detail with per-turn diffs."""
     engine = await _get_engine()
 
@@ -1233,7 +1259,9 @@ async def update_turn_group(
         params["intent_label"] = request.intent_label
     if request.pattern_type is not None:
         if request.pattern_type not in ("positive", "negative"):
-            raise HTTPException(status_code=400, detail="pattern_type must be 'positive' or 'negative'")
+            raise HTTPException(
+                status_code=400, detail="pattern_type must be 'positive' or 'negative'"
+            )
         updates.append("pattern_type = :pattern_type")
         params["pattern_type"] = request.pattern_type
     if request.rating is not None:
@@ -1313,7 +1341,10 @@ async def export_turn_group(
 
     try:
         pattern = await export_group_to_pattern(
-            engine, generator, group_id, request.guidance_note,
+            engine,
+            generator,
+            group_id,
+            request.guidance_note,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

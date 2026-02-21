@@ -39,9 +39,7 @@ def run_scraper(self: Any, triggered_by: str = "manual") -> dict[str, Any]:
     """
     import asyncio
 
-    return asyncio.run(
-        _run_scraper_async(self, triggered_by=triggered_by)
-    )
+    return asyncio.run(_run_scraper_async(self, triggered_by=triggered_by))
 
 
 async def _run_scraper_async(task: Any, *, triggered_by: str = "manual") -> dict[str, Any]:
@@ -217,7 +215,9 @@ async def _run_scraper_async(task: Any, *, triggered_by: str = "manual") -> dict
                         f"(sim={dedup_result.get('similarity', 0):.2f})",
                     )
                     stats["skipped"] += 1
-                    logger.info("Duplicate article %s (sim=%.2f)", url, dedup_result.get("similarity", 0))
+                    logger.info(
+                        "Duplicate article %s (sim=%.2f)", url, dedup_result.get("similarity", 0)
+                    )
                     continue
                 if dedup_result["status"] == "suspect":
                     await _update_source_status(
@@ -228,7 +228,9 @@ async def _run_scraper_async(task: Any, *, triggered_by: str = "manual") -> dict
                         f"(sim={dedup_result.get('similarity', 0):.2f})",
                     )
                     stats["skipped"] += 1
-                    logger.info("Suspect duplicate %s (sim=%.2f)", url, dedup_result.get("similarity", 0))
+                    logger.info(
+                        "Suspect duplicate %s (sim=%.2f)", url, dedup_result.get("similarity", 0)
+                    )
                     continue
 
                 # Insert into knowledge_articles
@@ -404,7 +406,9 @@ async def _get_scraper_config(redis: Any, settings: Any) -> dict[str, Any]:
         "llm_model": redis_config.get("llm_model", settings.scraper.llm_model),
         "schedule_enabled": redis_config.get("schedule_enabled", settings.scraper.schedule_enabled),
         "schedule_hour": redis_config.get("schedule_hour", settings.scraper.schedule_hour),
-        "schedule_day_of_week": redis_config.get("schedule_day_of_week", settings.scraper.schedule_day_of_week),
+        "schedule_day_of_week": redis_config.get(
+            "schedule_day_of_week", settings.scraper.schedule_day_of_week
+        ),
         "min_date": redis_config.get("min_date", settings.scraper.min_date),
         "max_date": redis_config.get("max_date", settings.scraper.max_date),
         "dedup_llm_check": redis_config.get("dedup_llm_check", settings.scraper.dedup_llm_check),
@@ -527,9 +531,7 @@ def rescrape_watched_pages(self: Any) -> dict[str, Any]:
     """Check and rescrape watched pages that are due for update."""
     import asyncio
 
-    return asyncio.run(
-        _rescrape_watched_pages_async(self)
-    )
+    return asyncio.run(_rescrape_watched_pages_async(self))
 
 
 async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
@@ -588,9 +590,7 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
             # Discovery pages: discover child links and process each as a separate watched page
             if page.get("is_discovery"):
                 try:
-                    await _handle_discovery_page(
-                        scraper, engine, settings, config, page, stats
-                    )
+                    await _handle_discovery_page(scraper, engine, settings, config, page, stats)
                 except Exception:
                     logger.exception("Error processing discovery page %s", page_url)
                     stats["errors"] += 1
@@ -646,7 +646,9 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
                 )
 
                 if not processed.is_useful:
-                    logger.info("Watched page %s deemed not useful: %s", page_url, processed.skip_reason)
+                    logger.info(
+                        "Watched page %s deemed not useful: %s", page_url, processed.skip_reason
+                    )
                     async with engine.begin() as conn:
                         await conn.execute(
                             text("""
@@ -849,9 +851,7 @@ async def _handle_discovery_page(
         )
         children_to_scrape = [dict(row._mapping) for row in result]
 
-    logger.info(
-        "Discovery page %s: %d children to scrape", page_url, len(children_to_scrape)
-    )
+    logger.info("Discovery page %s: %d children to scrape", page_url, len(children_to_scrape))
 
     for child in children_to_scrape:
         child_url = child["url"]
@@ -1015,14 +1015,10 @@ def run_all_sources(self: Any, triggered_by: str = "manual") -> dict[str, Any]:
     """
     import asyncio
 
-    return asyncio.run(
-        _run_all_sources_async(self, triggered_by=triggered_by)
-    )
+    return asyncio.run(_run_all_sources_async(self, triggered_by=triggered_by))
 
 
-async def _run_all_sources_async(
-    task: Any, *, triggered_by: str = "manual"
-) -> dict[str, Any]:
+async def _run_all_sources_async(task: Any, *, triggered_by: str = "manual") -> dict[str, Any]:
     """Async implementation of run_all_sources."""
     settings = get_settings()
     engine = create_async_engine(settings.database.url, pool_pre_ping=True)
@@ -1080,9 +1076,7 @@ async def _run_all_sources_async(
     soft_time_limit=600,
     time_limit=660,
 )  # type: ignore[untyped-decorator]
-def run_source(
-    self: Any, source_config_id: str, triggered_by: str = "manual"
-) -> dict[str, Any]:
+def run_source(self: Any, source_config_id: str, triggered_by: str = "manual") -> dict[str, Any]:
     """Run the scraper pipeline for a single content source.
 
     Args:
@@ -1094,9 +1088,7 @@ def run_source(
     """
     import asyncio
 
-    return asyncio.run(
-        _run_source_async(self, source_config_id, triggered_by=triggered_by)
-    )
+    return asyncio.run(_run_source_async(self, source_config_id, triggered_by=triggered_by))
 
 
 async def _run_source_async(
@@ -1157,14 +1149,10 @@ async def _run_source_async(
             min_date=min_date,
         )
         stats["discovered"] = len(discovered)
-        logger.info(
-            "Source %s: discovered %d articles", config["name"], len(discovered)
-        )
+        logger.info("Source %s: discovered %d articles", config["name"], len(discovered))
 
         if not discovered:
-            await _update_source_config_run(
-                engine, source_config_id, "ok", stats
-            )
+            await _update_source_config_run(engine, source_config_id, "ok", stats)
             await engine.dispose()
             return {"status": "ok", **stats}
 
@@ -1210,13 +1198,9 @@ async def _run_source_async(
                     )
 
                 # Fetch article
-                scraped = await fetcher.fetch_article(
-                    url, published=item.get("published")
-                )
+                scraped = await fetcher.fetch_article(url, published=item.get("published"))
                 if scraped is None:
-                    await _update_source_status(
-                        engine, url, "error", skip_reason="Fetch failed"
-                    )
+                    await _update_source_status(engine, url, "error", skip_reason="Fetch failed")
                     stats["errors"] += 1
                     continue
 
@@ -1311,26 +1295,18 @@ async def _run_source_async(
                     _dispatch_embedding(article_id)
 
                 stats["processed"] += 1
-                logger.info(
-                    "Source %s: processed %s → %s", config["name"], url, article_id
-                )
+                logger.info("Source %s: processed %s → %s", config["name"], url, article_id)
 
             except Exception:
-                logger.exception(
-                    "Source %s: error processing %s", config["name"], url
-                )
-                await _update_source_status(
-                    engine, url, "error", skip_reason="Processing error"
-                )
+                logger.exception("Source %s: error processing %s", config["name"], url)
+                await _update_source_status(engine, url, "error", skip_reason="Processing error")
                 stats["errors"] += 1
 
         await _update_source_config_run(engine, source_config_id, "ok", stats)
 
     except Exception as exc:
         logger.exception("Source %s pipeline failed", config["name"])
-        await _update_source_config_run(
-            engine, source_config_id, "error", stats
-        )
+        await _update_source_config_run(engine, source_config_id, "error", stats)
         raise task.retry(countdown=300) from exc
     finally:
         await fetcher.close()
@@ -1363,6 +1339,4 @@ async def _update_source_config_run(
                 {"id": config_id, "status": status, "stats": json.dumps(stats)},
             )
     except Exception:
-        logger.warning(
-            "Failed to update run status for config %s", config_id, exc_info=True
-        )
+        logger.warning("Failed to update run status for config %s", config_id, exc_info=True)

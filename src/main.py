@@ -147,9 +147,23 @@ async def _dispose_api_engines() -> None:
     from src.api.middleware import audit
 
     modules = [
-        admin_users, analytics, auth, export, knowledge, operators,
-        prompts, sandbox, scraper, system, tenants, training_dialogues,
-        training_safety, training_templates, training_tools, vehicles, audit,
+        admin_users,
+        analytics,
+        auth,
+        export,
+        knowledge,
+        operators,
+        prompts,
+        sandbox,
+        scraper,
+        system,
+        tenants,
+        training_dialogues,
+        training_safety,
+        training_templates,
+        training_tools,
+        vehicles,
+        audit,
     ]
     for mod in modules:
         engine = getattr(mod, "_engine", None)
@@ -310,9 +324,7 @@ async def metrics_endpoint() -> Response:
     return Response(content=get_metrics(), media_type="text/plain; charset=utf-8")
 
 
-async def _resolve_tenant(
-    channel_uuid: str, db_engine: Any
-) -> dict[str, Any] | None:
+async def _resolve_tenant(channel_uuid: str, db_engine: Any) -> dict[str, Any] | None:
     """Resolve tenant for the current call.
 
     1. Try ARI channel variable TENANT_SLUG (set by Asterisk dialplan).
@@ -621,9 +633,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     )
 
 
-def _build_tool_router(
-    session: CallSession, store_client: StoreClient | None = None
-) -> ToolRouter:
+def _build_tool_router(session: CallSession, store_client: StoreClient | None = None) -> ToolRouter:
     """Build a ToolRouter with all canonical tools registered."""
     router = ToolRouter()
 
@@ -822,7 +832,9 @@ async def main() -> None:
         try:
             from sqlalchemy.ext.asyncio import create_async_engine
 
-            _db_engine = create_async_engine(settings.database.url, pool_size=5, max_overflow=5, pool_pre_ping=True)
+            _db_engine = create_async_engine(
+                settings.database.url, pool_size=5, max_overflow=5, pool_pre_ping=True
+            )
             logger.info("Database engine created: %s", settings.database.url.split("@")[-1])
 
             _onec_client = OneCClient(
@@ -854,7 +866,9 @@ async def main() -> None:
 
             # Convert SQLAlchemy URL to asyncpg DSN (replace +asyncpg driver prefix)
             dsn = settings.database.url.replace("postgresql+asyncpg://", "postgresql://")
-            _asyncpg_pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3, command_timeout=30)
+            _asyncpg_pool = await asyncpg.create_pool(
+                dsn, min_size=1, max_size=3, command_timeout=30
+            )
             logger.info("asyncpg pool created for pattern search")
         except Exception:
             logger.debug("asyncpg pool init failed — pattern search disabled", exc_info=True)

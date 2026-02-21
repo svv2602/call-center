@@ -80,9 +80,7 @@ async def get_llm_config(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
 
 
 @router.patch("/config")
-async def update_llm_config(
-    request: ConfigPatch, _: dict[str, Any] = _admin_dep
-) -> dict[str, Any]:
+async def update_llm_config(request: ConfigPatch, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
     """Update LLM routing config in Redis (merge patch)."""
     redis = await _get_redis()
 

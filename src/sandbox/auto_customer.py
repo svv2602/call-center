@@ -59,15 +59,18 @@ async def generate_customer_reply(
         content = msg.get("content", "")
         if isinstance(content, list):
             # Extract text from content blocks
-            texts = [b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"]
+            texts = [
+                b.get("text", "")
+                for b in content
+                if isinstance(b, dict) and b.get("type") == "text"
+            ]
             content = " ".join(texts)
         if role == "assistant":
             messages.append({"role": "user", "content": content})
         elif role == "user":
             # Skip tool_result messages
             if isinstance(msg.get("content"), list) and any(
-                isinstance(b, dict) and b.get("type") == "tool_result"
-                for b in msg["content"]
+                isinstance(b, dict) and b.get("type") == "tool_result" for b in msg["content"]
             ):
                 continue
             messages.append({"role": "assistant", "content": content})
@@ -77,7 +80,9 @@ async def generate_customer_reply(
         pass  # Good — last message is from "agent" (mapped as assistant)
     elif not messages:
         # Empty conversation — generate opening message
-        messages = [{"role": "user", "content": "Привіт, я менеджер шинного магазину. Чим можу допомогти?"}]
+        messages = [
+            {"role": "user", "content": "Привіт, я менеджер шинного магазину. Чим можу допомогти?"}
+        ]
 
     try:
         client = anthropic.AsyncAnthropic(api_key=settings.anthropic.api_key)
