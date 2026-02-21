@@ -32,10 +32,6 @@ function showTab(tab) {
     const activeBtn = document.querySelector(`#page-sandbox .tab-bar button[data-tab="${tab}"]`);
     if (activeBtn) activeBtn.classList.add('active');
 
-    // Sidebar only visible on Chat tab
-    const sidebar = document.getElementById('sandboxSidebar');
-    if (sidebar) sidebar.style.display = tab === 'chat' ? '' : 'none';
-
     if (tab === 'chat') renderChat();
     if (tab === 'regression') loadRegressionRuns();
     if (tab === 'patterns') loadPatterns();
