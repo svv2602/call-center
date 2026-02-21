@@ -96,9 +96,10 @@ class PatternUpdate(BaseModel):
 
 @router.get("/agent-phrases")
 async def get_agent_phrases(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
-    """Return all hardcoded agent phrases for admin reference.
+    """Return hardcoded agent phrases and active DB templates.
 
-    These phrases are spoken by TTS directly, bypassing the LLM.
+    Hardcoded phrases are fallbacks from prompts.py.
+    DB templates (response_templates) override them at runtime.
     """
     from src.agent.prompts import (
         ERROR_TEXT,
@@ -116,6 +117,25 @@ async def get_agent_phrases(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
         WAIT_STATUS_POOL,
         WAIT_TEXT,
     )
+
+    # Load DB templates (these override hardcoded at runtime)
+    db_templates: dict[str, list[dict[str, Any]]] = {}
+    try:
+        engine = await _get_engine()
+        async with engine.begin() as conn:
+            result = await conn.execute(text(
+                "SELECT template_key, title, content, is_active, variant_number "
+                "FROM response_templates ORDER BY template_key, variant_number"
+            ))
+            for row in result:
+                db_templates.setdefault(row.template_key, []).append({
+                    "title": row.title,
+                    "content": row.content,
+                    "is_active": row.is_active,
+                    "variant_number": row.variant_number,
+                })
+    except Exception:
+        logger.warning("Failed to load DB templates for phrases tab", exc_info=True)
 
     return {
         "fixed": [
@@ -136,6 +156,7 @@ async def get_agent_phrases(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
             {"key": "knowledge", "label": "Консультация (база знаний)", "phrases": WAIT_KNOWLEDGE_POOL},
             {"key": "default", "label": "По умолчанию (fallback)", "phrases": WAIT_DEFAULT_POOL},
         ],
+        "db_templates": db_templates,
     }
 
 

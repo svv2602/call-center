@@ -8,6 +8,7 @@ export const badgeGreen = `${_badge} bg-emerald-50 text-emerald-700 dark:bg-emer
 export const badgeYellow = `${_badge} bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-400`;
 export const badgeRed = `${_badge} bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-400`;
 export const badgeBlue = `${_badge} bg-blue-50 text-blue-700 dark:bg-blue-950 dark:text-blue-400`;
+export const badgePurple = `${_badge} bg-violet-50 text-violet-700 dark:bg-violet-950 dark:text-violet-400`;
 export const badgeGray = `${_badge} bg-neutral-100 text-neutral-600 dark:bg-neutral-800 dark:text-neutral-400`;
 
 // --- Buttons ---

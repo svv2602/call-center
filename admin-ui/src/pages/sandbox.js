@@ -1027,14 +1027,69 @@ async function loadPhrases() {
         const data = await api('/admin/sandbox/agent-phrases');
         const fixed = data.fixed || [];
         const pools = data.wait_pools || [];
+        const dbTemplates = data.db_templates || {};
+        const hasDbTemplates = Object.keys(dbTemplates).length > 0;
 
-        // Fixed phrases table
-        const fixedRows = fixed.map(item => `
-            <tr class="${tw.trHover}">
+        // ── DB templates section (active overrides) ─────────────
+        let dbSection = '';
+        if (hasDbTemplates) {
+            const dbRows = Object.entries(dbTemplates).map(([key, variants]) => {
+                const activeCount = variants.filter(v => v.is_active).length;
+                const variantItems = variants.map((v, idx) => `
+                    <div class="py-1.5 ${idx > 0 ? 'border-t border-neutral-100 dark:border-neutral-800' : ''}">
+                        <div class="flex items-center gap-2">
+                            <span class="${tw.mutedText} text-xs">#${v.variant_number}</span>
+                            ${!v.is_active ? `<span class="text-[10px] px-1.5 py-0.5 rounded bg-neutral-200 dark:bg-neutral-700 text-neutral-500 dark:text-neutral-400">${t('sandbox.phrasesInactive')}</span>` : ''}
+                            <span class="text-xs text-neutral-600 dark:text-neutral-400">${escapeHtml(v.title)}</span>
+                        </div>
+                        <div class="font-mono text-xs mt-0.5 ${!v.is_active ? 'opacity-40 line-through' : ''}">${escapeHtml(v.content)}</div>
+                    </div>`).join('');
+
+                return `
+                    <tr class="${tw.trHover}">
+                        <td class="${tw.td}">
+                            <span class="${tw.badgePurple}">${escapeHtml(key)}</span>
+                            <div class="${tw.mutedText} text-xs mt-1">${t('sandbox.phrasesDbVariants', { active: activeCount, total: variants.length })}</div>
+                        </td>
+                        <td class="${tw.td}">
+                            <details>
+                                <summary class="cursor-pointer text-xs text-blue-600 dark:text-blue-400">${escapeHtml(variants.find(v => v.is_active)?.content || variants[0].content)}</summary>
+                                <div class="mt-1 pl-2 border-l-2 border-purple-200 dark:border-purple-800">${variantItems}</div>
+                            </details>
+                        </td>
+                    </tr>`;
+            }).join('');
+
+            dbSection = `
+                <div class="mb-6 p-3 bg-purple-50 dark:bg-purple-950/20 rounded-md border border-purple-200 dark:border-purple-800">
+                    <h2 class="text-sm font-semibold text-purple-900 dark:text-purple-100 mb-1">${t('sandbox.phrasesDbTitle')}</h2>
+                    <p class="text-xs text-purple-700 dark:text-purple-300 mb-3">${t('sandbox.phrasesDbDescription')}</p>
+                    <div class="overflow-x-auto">
+                        <table class="${tw.table}">
+                            <thead><tr>
+                                <th class="${tw.th}" style="width:200px">${t('sandbox.phrasesKey')}</th>
+                                <th class="${tw.th}">${t('sandbox.phrasesText')}</th>
+                            </tr></thead>
+                            <tbody>${dbRows}</tbody>
+                        </table>
+                    </div>
+                </div>`;
+        }
+
+        // ── Fixed phrases table (hardcoded fallbacks) ───────────
+        const fixedRows = fixed.map(item => {
+            const hasOverride = !!dbTemplates[item.key];
+            return `
+            <tr class="${tw.trHover} ${hasOverride ? 'opacity-50' : ''}">
                 <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(item.label)}</span></td>
                 <td class="${tw.td} font-mono text-xs whitespace-pre-wrap">${escapeHtml(item.text)}</td>
-                <td class="${tw.td}"><span class="${tw.badgeGreen}">${t('sandbox.phrasesSourceCode')}</span></td>
-            </tr>`).join('');
+                <td class="${tw.td}">
+                    ${hasOverride
+                        ? `<span class="${tw.badgePurple}">${t('sandbox.phrasesOverridden')}</span>`
+                        : `<span class="${tw.badgeGreen}">${t('sandbox.phrasesActive')}</span>`}
+                </td>
+            </tr>`;
+        }).join('');
 
         // Wait pool rows — each pool is expandable with all variants
         const poolRows = pools.map(pool => {
@@ -1056,7 +1111,7 @@ async function loadPhrases() {
                             <div class="mt-1 pl-2 border-l-2 border-blue-200 dark:border-blue-800">${variants}</div>
                         </details>
                     </td>
-                    <td class="${tw.td}"><span class="${tw.badgeGreen}">${t('sandbox.phrasesSourceCode')}</span></td>
+                    <td class="${tw.td}"><span class="${tw.badgeGreen}">${t('sandbox.phrasesActive')}</span></td>
                 </tr>`;
         }).join('');
 
@@ -1066,13 +1121,15 @@ async function loadPhrases() {
                 <p class="${tw.mutedText} text-xs mb-4">${t('sandbox.phrasesDescription')}</p>
             </div>
 
+            ${dbSection}
+
             <h3 class="text-xs font-semibold text-neutral-700 dark:text-neutral-300 mb-2">${t('sandbox.phrasesCatFixed')}</h3>
             <div class="overflow-x-auto mb-6">
                 <table class="${tw.table}">
                     <thead><tr>
                         <th class="${tw.th}" style="width:200px">${t('sandbox.phrasesKey')}</th>
                         <th class="${tw.th}">${t('sandbox.phrasesText')}</th>
-                        <th class="${tw.th}" style="width:140px">${t('sandbox.phrasesSource')}</th>
+                        <th class="${tw.th}" style="width:140px">${t('sandbox.phrasesStatus')}</th>
                     </tr></thead>
                     <tbody>${fixedRows}</tbody>
                 </table>
@@ -1084,7 +1141,7 @@ async function loadPhrases() {
                     <thead><tr>
                         <th class="${tw.th}" style="width:200px">${t('sandbox.phrasesKey')}</th>
                         <th class="${tw.th}">${t('sandbox.phrasesText')}</th>
-                        <th class="${tw.th}" style="width:140px">${t('sandbox.phrasesSource')}</th>
+                        <th class="${tw.th}" style="width:140px">${t('sandbox.phrasesStatus')}</th>
                     </tr></thead>
                     <tbody>${poolRows}</tbody>
                 </table>
