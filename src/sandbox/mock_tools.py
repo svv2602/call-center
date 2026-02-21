@@ -186,19 +186,126 @@ MOCK_RESPONSES: dict[str, Any] = {
         },
         "currency": "UAH",
     },
-    "search_knowledge_base": {
-        "results": [
-            {
-                "title": "Порівняння Michelin vs Continental: що обрати?",
-                "content": "Michelin Primacy 4+ — преміальна літня шина з відмінним гальмуванням на мокрій поверхні. "
-                "Continental PremiumContact 6 — збалансований вибір з тихим ходом. "
-                "Для міського водіння обидва бренди — чудовий вибір.",
-                "category": "comparisons",
-                "relevance": 0.92,
-            }
-        ],
+    "search_knowledge_base": "dynamic",  # handled by _search_knowledge_mock
+}
+
+
+_KNOWLEDGE_BRAND_RESPONSES: dict[str, dict[str, Any]] = {
+    "michelin": {
+        "title": "Michelin — профіль бренду",
+        "content": (
+            "Michelin — французький преміум-бренд. "
+            "Літні: Primacy 4+ (комфорт, мокра дорога), Pilot Sport 5 (спорт). "
+            "Зимові: Alpin 6 (фрикційні, відмінне гальмування на снігу), "
+            "X-Ice Snow (для суворих зим). Сильні сторони: найвищий ресурс, "
+            "тиха їзда, гарантія Total Performance."
+        ),
+        "category": "brands",
+        "relevance": 0.95,
+    },
+    "bridgestone": {
+        "title": "Bridgestone — профіль бренду",
+        "content": (
+            "Bridgestone — японський преміум-бренд, найбільший виробник шин у світі. "
+            "Літні: Turanza T005 (комфорт), Potenza Sport (спорт). "
+            "Зимові: Blizzak LM005 (фрикційні, лідер на мокрій зимовій дорозі), "
+            "Blizzak Ice (зчеплення на льоду). Сильні сторони: якість виготовлення, "
+            "тихий хід, відмінні характеристики на мокрій дорозі."
+        ),
+        "category": "brands",
+        "relevance": 0.95,
+    },
+    "continental": {
+        "title": "Continental — профіль бренду",
+        "content": (
+            "Continental — німецький преміум-бренд. "
+            "Літні: PremiumContact 6 (збалансований), SportContact 7 (спорт). "
+            "Зимові: WinterContact TS 870 (фрикційні), IceContact 3 (шиповані). "
+            "Сильні сторони: найкоротший гальмівний шлях, технологія ContiSeal."
+        ),
+        "category": "brands",
+        "relevance": 0.95,
+    },
+    "nokian": {
+        "title": "Nokian — профіль бренду",
+        "content": (
+            "Nokian — фінський бренд, спеціаліст із зимових шин. "
+            "Зимові: Hakkapeliitta R5 (фрикційні, top-1), Hakkapeliitta 10 (шиповані). "
+            "Літні: Hakka Green 3 (екологічні), Wetproof 1. "
+            "Сильні сторони: найкращі зимові шини у світі, арамідні боковини."
+        ),
+        "category": "brands",
+        "relevance": 0.95,
     },
 }
+
+_KNOWLEDGE_FALLBACK: dict[str, Any] = {
+    "title": "Порівняння шин: загальні рекомендації",
+    "content": (
+        "При виборі шин враховуйте: сезон, розмір, стиль водіння та бюджет. "
+        "Преміум-бренди (Michelin, Continental, Bridgestone) — найкращі характеристики, "
+        "але вища ціна. Середній сегмент (Hankook, Kumho, Nexen) — оптимальне "
+        "співвідношення ціна/якість. Бюджетні (Triangle, Sailun) — прийнятна якість "
+        "за мінімальну ціну."
+    ),
+    "category": "comparisons",
+    "relevance": 0.80,
+}
+
+
+async def _search_knowledge_mock(**kwargs: object) -> dict[str, Any]:
+    """Context-aware mock for search_knowledge_base.
+
+    Returns brand-specific data when query mentions a known brand,
+    or a generic comparison result otherwise.
+    """
+    query = str(kwargs.get("query", "")).lower()
+    category = str(kwargs.get("category", ""))
+
+    # Check if query mentions a specific brand
+    results: list[dict[str, Any]] = []
+    for brand_key, brand_data in _KNOWLEDGE_BRAND_RESPONSES.items():
+        if brand_key in query:
+            results.append(copy.deepcopy(brand_data))
+
+    if results:
+        return {"results": results}
+
+    # Category-based fallback
+    if category == "faq":
+        return {
+            "results": [
+                {
+                    "title": "Що таке індекс навантаження та швидкості?",
+                    "content": (
+                        "Індекс навантаження — максимальна вага на одну шину (91 = 615 кг). "
+                        "Індекс швидкості — максимальна швидкість (T = 190 км/год, H = 210, V = 240). "
+                        "XL (Extra Load) — посилена конструкція для більшого навантаження."
+                    ),
+                    "category": "faq",
+                    "relevance": 0.88,
+                }
+            ]
+        }
+
+    if category == "guides":
+        return {
+            "results": [
+                {
+                    "title": "Як обрати зимові шини: повний гайд",
+                    "content": (
+                        "Фрикційні (липучки) — для міста та м'якої зими. "
+                        "Шиповані — для льоду та суворої зими. "
+                        "Маркування 3PMSF (сніжинка) — обов'язкове для справжніх зимових шин."
+                    ),
+                    "category": "guides",
+                    "relevance": 0.90,
+                }
+            ]
+        }
+
+    # Default fallback
+    return {"results": [copy.deepcopy(_KNOWLEDGE_FALLBACK)]}
 
 
 def build_mock_tool_router() -> ToolRouter:
@@ -206,6 +313,8 @@ def build_mock_tool_router() -> ToolRouter:
     router = ToolRouter()
 
     for tool_name, mock_data in MOCK_RESPONSES.items():
+        if mock_data == "dynamic":
+            continue  # handled separately below
 
         async def _handler(
             _name: str = tool_name, _data: Any = mock_data, **_kwargs: object
@@ -213,5 +322,8 @@ def build_mock_tool_router() -> ToolRouter:
             return copy.deepcopy(_data)
 
         router.register(tool_name, _handler)
+
+    # Register dynamic handlers
+    router.register("search_knowledge_base", _search_knowledge_mock)
 
     return router
