@@ -2,7 +2,7 @@
 
 ProKoleso: no fitting services (шиномонтаж) — 5 fitting tools removed,
            prompt_suffix instructs agent to decline fitting requests.
-Твоя шина (shinservice): all tools enabled, display name updated.
+Твоя Шина (tvoya-shina): all tools enabled, display name updated.
 
 Usage: python -m scripts.configure_tenants
 """
@@ -82,11 +82,11 @@ async def main() -> None:
                         enabled_tools = CAST(:enabled_tools AS text[]),
                         prompt_suffix = :prompt_suffix,
                         updated_at = now()
-                    WHERE slug = 'shinservice'
+                    WHERE slug = 'tvoya-shina'
                     RETURNING id, name, slug
                 """),
                 {
-                    "name": "Твоя шина",
+                    "name": "Твоя Шина",
                     "enabled_tools": [],
                     "prompt_suffix": None,
                 },
@@ -94,12 +94,12 @@ async def main() -> None:
             row = result.first()
             if row:
                 logger.info(
-                    "Updated Tshina → '%s' (id=%s): enabled_tools=[] (all), prompt_suffix cleared",
+                    "Updated Твоя Шина → '%s' (id=%s): enabled_tools=[] (all), prompt_suffix cleared",
                     row.name,
                     row.id,
                 )
             else:
-                logger.warning("Tenant 'shinservice' not found — skipping")
+                logger.warning("Tenant 'tvoya-shina' not found — skipping")
 
         # ── Verify ──
         async with engine.begin() as conn:
@@ -107,7 +107,7 @@ async def main() -> None:
                 text("""
                     SELECT slug, name, enabled_tools, prompt_suffix
                     FROM tenants
-                    WHERE slug IN ('prokoleso', 'shinservice')
+                    WHERE slug IN ('prokoleso', 'tvoya-shina')
                     ORDER BY slug
                 """)
             )

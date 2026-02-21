@@ -138,7 +138,7 @@ MOCK_RESPONSES: dict[str, Any] = {
         "stations": [
             {
                 "id": "station-001",
-                "name": "ШинСервіс Центральний",
+                "name": "Твоя Шина Центральний",
                 "address": "Київ, вул. Велика Васильківська, 100",
                 "phone": "+380441234567",
                 "rating": 4.8,
@@ -163,7 +163,7 @@ MOCK_RESPONSES: dict[str, Any] = {
     },
     "book_fitting": {
         "booking_id": "FIT-2026-0015",
-        "station": "ШинСервіс Центральний",
+        "station": "Твоя Шина Центральний",
         "address": "Київ, вул. Велика Васильківська, 100",
         "date": "2026-02-20",
         "time": "09:00",

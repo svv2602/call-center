@@ -330,12 +330,12 @@ class TestHandleCallTenantIntegration:
         """Tenant with greeting overrides templates dict."""
         import uuid
 
-        custom_greeting = "Вітаю! ШинСервис."
+        custom_greeting = "Вітаю! Твоя Шина."
         tenant = {
             "id": uuid.uuid4(),
-            "slug": "shinservice",
-            "name": "ШинСервис",
-            "network_id": "shinservice-net",
+            "slug": "tvoya-shina",
+            "name": "Твоя Шина",
+            "network_id": "Tshina",
             "agent_name": "Марія",
             "greeting": custom_greeting,
             "enabled_tools": [],
