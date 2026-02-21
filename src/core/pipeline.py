@@ -280,7 +280,7 @@ class CallPipeline:
                     patterns = await self._pattern_search.search(
                         query=transcript.text,
                         top_k=3,
-                        min_similarity=0.75,
+                        min_similarity=0.6,
                     )
                     pattern_context = await self._pattern_search.format_for_prompt(patterns)
                     if patterns:
