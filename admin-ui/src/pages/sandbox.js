@@ -1000,27 +1000,32 @@ async function loadPatterns() {
 
         const rows = items.map(item => {
             const typeBadge = item.pattern_type === 'positive'
-                ? `<span class="${tw.badgeGreen}">positive</span>`
-                : `<span class="${tw.badgeRed}">negative</span>`;
-            const activeBadge = item.is_active
-                ? `<span class="${tw.badgeGreen}">${t('sandbox.patternActive')}</span>`
-                : `<span class="${tw.badgeGray}">${t('sandbox.patternInactive')}</span>`;
-            const tagsHtml = (item.tags || []).map(tg => `<span class="${tw.badge}">${escapeHtml(tg)}</span>`).join(' ');
+                ? `<span class="${tw.badgeGreen}">+</span>`
+                : `<span class="${tw.badgeRed}">&minus;</span>`;
+            const activeDot = item.is_active
+                ? '<span class="inline-block w-2 h-2 rounded-full bg-emerald-500" title="Active"></span>'
+                : '<span class="inline-block w-2 h-2 rounded-full bg-neutral-300 dark:bg-neutral-600" title="Inactive"></span>';
+            const tagsTitle = (item.tags || []).join(', ');
             const rating = item.rating ? '&#9733;'.repeat(item.rating) : '-';
+            const toggleLabel = item.is_active ? t('common.deactivate') : t('common.activate');
 
             return `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}">${escapeHtml(item.intent_label)}</td>
-                    <td class="${tw.td}">${typeBadge}</td>
-                    <td class="${tw.td}"><div class="max-w-xs truncate text-xs">${escapeHtml(item.guidance_note)}</div></td>
-                    <td class="${tw.td}"><div class="max-w-xs truncate text-xs">${escapeHtml(item.customer_messages?.substring(0, 80) || '-')}</div></td>
-                    <td class="${tw.td}"><span class="text-amber-400">${rating}</span></td>
-                    <td class="${tw.td}">${item.times_used}</td>
-                    <td class="${tw.td}">${activeBadge}</td>
-                    <td class="${tw.td}">${tagsHtml}</td>
                     <td class="${tw.td}">
-                        <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.togglePatternActive('${item.id}', ${item.is_active})">${item.is_active ? t('common.deactivate') : t('common.activate')}</button>
-                        <button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.sandbox.deletePattern('${item.id}')">&times;</button>
+                        <div class="flex items-center gap-1.5">${activeDot} ${typeBadge} <span class="truncate" title="${escapeHtml(item.intent_label)}">${escapeHtml(item.intent_label)}</span></div>
+                    </td>
+                    <td class="${tw.td}"><div class="truncate text-xs" title="${escapeHtml(item.guidance_note)}">${escapeHtml(item.guidance_note)}</div></td>
+                    <td class="${tw.td}"><div class="truncate text-xs" title="${escapeHtml(item.customer_messages || '')}">${escapeHtml(item.customer_messages?.substring(0, 60) || '-')}</div></td>
+                    <td class="${tw.td} text-center"><span class="text-amber-400 text-xs">${rating}</span></td>
+                    <td class="${tw.td} text-center text-xs">${item.times_used}${tagsTitle ? ` <span class="text-neutral-400" title="${escapeHtml(tagsTitle)}">&#128196;</span>` : ''}</td>
+                    <td class="${tw.td} text-right">
+                        <div class="relative inline-block">
+                            <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
+                            <div class="hidden absolute right-0 z-20 mt-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="this.closest('.relative').querySelector('.hidden')||this.parentElement.classList.add('hidden');window._pages.sandbox.togglePatternActive('${item.id}', ${item.is_active})">${toggleLabel}</button>
+                                <button class="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer" onclick="this.closest('.relative').querySelector('.hidden')||this.parentElement.classList.add('hidden');window._pages.sandbox.deletePattern('${item.id}')">${t('common.delete')}</button>
+                            </div>
+                        </div>
                     </td>
                 </tr>`;
         }).join('');
@@ -1033,17 +1038,14 @@ async function loadPatterns() {
                 <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.testSearch()">${t('sandbox.testSearch')}</button>
             </div>
             <div id="patternSearchResults" class="mb-4"></div>
-            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr>
-                <th class="${tw.th}">${t('sandbox.intentLabel')}</th>
-                <th class="${tw.th}">${t('sandbox.patternType')}</th>
-                <th class="${tw.th}">${t('sandbox.guidanceNote')}</th>
-                <th class="${tw.th}">${t('sandbox.customerMessages')}</th>
-                <th class="${tw.th}">${t('sandbox.avgRating')}</th>
-                <th class="${tw.th}">${t('sandbox.timesUsed')}</th>
-                <th class="${tw.th}">${t('sandbox.status')}</th>
-                <th class="${tw.th}">${t('sandbox.tags')}</th>
-                <th class="${tw.th}"></th>
-            </tr></thead><tbody>${rows}</tbody></table></div>`;
+            <table class="${tw.table} table-fixed w-full"><thead><tr>
+                <th class="${tw.th}" style="width:20%">${t('sandbox.intentLabel')}</th>
+                <th class="${tw.th}" style="width:30%">${t('sandbox.guidanceNote')}</th>
+                <th class="${tw.th}" style="width:25%">${t('sandbox.customerMessages')}</th>
+                <th class="${tw.th} text-center" style="width:8%">${t('sandbox.avgRating')}</th>
+                <th class="${tw.th} text-center" style="width:9%">#</th>
+                <th class="${tw.th} text-right" style="width:8%"></th>
+            </tr></thead><tbody>${rows}</tbody></table>`;
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('sandbox.loadFailed', { error: escapeHtml(e.message) })}</div>`;
     }
@@ -1151,7 +1153,7 @@ async function loadPhrases() {
                         </td>
                         <td class="${tw.td}">
                             <details>
-                                <summary class="cursor-pointer text-xs text-blue-600 dark:text-blue-400">${escapeHtml(variants.find(v => v.is_active)?.content || variants[0].content)}</summary>
+                                <summary class="cursor-pointer text-xs text-blue-600 dark:text-blue-400">${escapeHtml(variants.find(v => v.is_active)?.content || variants[0]?.content || '')}</summary>
                                 <div class="mt-1 pl-2 border-l-2 border-purple-200 dark:border-purple-800">${variantItems}</div>
                             </details>
                         </td>
@@ -1434,6 +1436,13 @@ export function init() {
     registerPageLoader('sandbox', () => {
         loadSidebar();
         showTab(_activeTab);
+    });
+
+    // Close dropdown menus on click outside
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.relative')) {
+            document.querySelectorAll('#page-sandbox .relative > div:not(.hidden)').forEach(m => m.classList.add('hidden'));
+        }
     });
 }
 
