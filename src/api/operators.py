@@ -68,12 +68,17 @@ class StatusChangeRequest(BaseModel):
 
 @router.get("")
 async def list_operators(
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
     _: dict[str, Any] = _admin_dep,
 ) -> dict[str, Any]:
     """List all operators with their current status."""
     engine = await _get_engine()
 
     async with engine.begin() as conn:
+        count_result = await conn.execute(text("SELECT COUNT(*) FROM operators"))
+        total = count_result.scalar() or 0
+
         result = await conn.execute(
             text("""
                 SELECT o.id, o.name, o.extension, o.is_active, o.skills,
@@ -83,11 +88,13 @@ async def list_operators(
                         ORDER BY changed_at DESC LIMIT 1) AS current_status
                 FROM operators o
                 ORDER BY o.name
-            """)
+                LIMIT :limit OFFSET :offset
+            """),
+            {"limit": limit, "offset": offset},
         )
         operators = [dict(row._mapping) for row in result]
 
-    return {"operators": operators}
+    return {"operators": operators, "total": total}
 
 
 @router.post("")
@@ -356,6 +363,7 @@ async def get_operator_stats(
     operator_id: str,
     date_from: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
     date_to: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    history_limit: int = Query(20, ge=1, le=200, description="Max status history entries"),
     _: dict[str, Any] = _admin_dep,
 ) -> dict[str, Any]:
     """Statistics for a specific operator."""
@@ -378,9 +386,9 @@ async def get_operator_stats(
                 FROM operator_status_log
                 WHERE operator_id = :op_id
                 ORDER BY changed_at DESC
-                LIMIT 20
+                LIMIT :history_limit
             """),
-            {"op_id": operator_id},
+            {"op_id": operator_id, "history_limit": history_limit},
         )
         status_history = [dict(row._mapping) for row in status_result]
 

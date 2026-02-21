@@ -10,7 +10,7 @@ import logging
 from typing import Any
 from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
@@ -60,22 +60,31 @@ class TemplateUpdateRequest(BaseModel):
 
 
 @router.get("/")
-async def list_templates(_: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
+async def list_templates(
+    limit: int = Query(200, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    _: dict[str, Any] = _analyst_dep,
+) -> dict[str, Any]:
     """List all response templates, ordered by key and variant."""
     engine = await _get_engine()
 
     async with engine.begin() as conn:
+        count_result = await conn.execute(text("SELECT COUNT(*) FROM response_templates"))
+        total = count_result.scalar() or 0
+
         result = await conn.execute(
             text("""
                 SELECT id, template_key, variant_number, title, content, description,
                        is_active, created_at, updated_at
                 FROM response_templates
                 ORDER BY template_key, variant_number
-            """)
+                LIMIT :limit OFFSET :offset
+            """),
+            {"limit": limit, "offset": offset},
         )
         items = [dict(row._mapping) for row in result]
 
-    return {"items": items, "valid_keys": TEMPLATE_KEYS}
+    return {"items": items, "total": total, "valid_keys": TEMPLATE_KEYS}
 
 
 @router.get("/{template_id}")

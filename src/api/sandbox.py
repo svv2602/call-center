@@ -805,11 +805,18 @@ class StarterUpdate(BaseModel):
 
 
 @router.get("/scenario-starters")
-async def list_starters(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def list_starters(
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    _: dict[str, Any] = _admin_dep,
+) -> dict[str, Any]:
     """List all scenario starters."""
     engine = await _get_engine()
 
     async with engine.begin() as conn:
+        count_result = await conn.execute(text("SELECT COUNT(*) FROM sandbox_scenario_starters"))
+        total = count_result.scalar() or 0
+
         result = await conn.execute(
             text("""
                 SELECT id, title, first_message, scenario_type, tags,
@@ -817,11 +824,13 @@ async def list_starters(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
                        created_at, updated_at
                 FROM sandbox_scenario_starters
                 ORDER BY sort_order, created_at
-            """)
+                LIMIT :limit OFFSET :offset
+            """),
+            {"limit": limit, "offset": offset},
         )
         items = [dict(row._mapping) for row in result]
 
-    return {"items": items}
+    return {"items": items, "total": total}
 
 
 @router.post("/scenario-starters")

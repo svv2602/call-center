@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -326,11 +326,18 @@ async def reject_source(source_id: UUID, _: dict[str, Any] = _admin_dep) -> dict
 
 
 @router.get("/source-configs")
-async def list_source_configs(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def list_source_configs(
+    limit: int = Query(100, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    _: dict[str, Any] = _admin_dep,
+) -> dict[str, Any]:
     """List all content source configurations."""
     engine = await _get_engine()
 
     async with engine.begin() as conn:
+        count_result = await conn.execute(text("SELECT COUNT(*) FROM content_source_configs"))
+        total = count_result.scalar() or 0
+
         result = await conn.execute(
             text("""
                 SELECT id, name, source_type, source_url, language,
@@ -341,11 +348,13 @@ async def list_source_configs(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
                        created_at, updated_at
                 FROM content_source_configs
                 ORDER BY created_at
-            """)
+                LIMIT :limit OFFSET :offset
+            """),
+            {"limit": limit, "offset": offset},
         )
         configs = [dict(row._mapping) for row in result]
 
-    return {"configs": configs}
+    return {"configs": configs, "total": total}
 
 
 @router.post("/source-configs")
@@ -531,16 +540,21 @@ _VALID_CATEGORIES = {
     "policies", "procedures", "returns", "warranty", "delivery",
 }
 
+KnowledgeCategory = Literal[
+    "brands", "guides", "faq", "comparisons", "general",
+    "policies", "procedures", "returns", "warranty", "delivery",
+]
+
 
 class WatchedPageCreate(BaseModel):
     url: str = Field(min_length=1, max_length=2000, pattern=_URL_PATTERN)
-    category: str = Field(default="general", min_length=1, max_length=50)
+    category: KnowledgeCategory = "general"
     rescrape_interval_hours: int = Field(default=168, ge=1, le=8760)
     is_discovery: bool = False
 
 
 class WatchedPageUpdate(BaseModel):
-    category: str | None = Field(default=None, min_length=1, max_length=50)
+    category: KnowledgeCategory | None = None
     rescrape_interval_hours: int | None = Field(default=None, ge=1, le=8760)
     is_discovery: bool | None = None
 
@@ -579,13 +593,6 @@ async def add_watched_page(
 ) -> dict[str, Any]:
     """Add a new watched page for periodic rescraping."""
     url = request.url.strip()
-    if not url.startswith("http"):
-        raise HTTPException(status_code=400, detail="URL must start with http:// or https://")
-
-    category = request.category.strip().lower()
-    if category not in _VALID_CATEGORIES:
-        raise HTTPException(status_code=400, detail=f"Invalid category: {category}")
-
     interval = request.rescrape_interval_hours
     if interval < 1 or interval > 8760:
         raise HTTPException(status_code=400, detail="Interval must be between 1 and 8760 hours")
@@ -657,9 +664,7 @@ async def update_watched_page(
             )
 
         if request.category is not None:
-            category = request.category.strip().lower()
-            if category not in _VALID_CATEGORIES:
-                raise HTTPException(status_code=400, detail=f"Invalid category: {category}")
+            category = request.category
             # Update article category if linked
             if row.article_id:
                 await conn.execute(

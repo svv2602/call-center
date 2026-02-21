@@ -316,13 +316,14 @@ async def download_call_transcript(call_id: UUID, _: dict[str, Any] = _analyst_d
 async def get_summary(
     date_from: str | None = Query(None, description="Start date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
     date_to: str | None = Query(None, description="End date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    limit: int = Query(90, ge=1, le=365, description="Max days to return"),
     _: dict[str, Any] = _analyst_dep,
 ) -> dict[str, Any]:
     """Aggregated daily statistics from daily_stats table."""
     engine = await _get_engine()
 
     conditions = ["1=1"]
-    params: dict[str, Any] = {}
+    params: dict[str, Any] = {"limit": limit}
 
     if date_from:
         conditions.append("stat_date >= :date_from")
@@ -340,7 +341,7 @@ async def get_summary(
                 FROM daily_stats
                 WHERE {where_clause}
                 ORDER BY stat_date DESC
-                LIMIT 90
+                LIMIT :limit
             """),
             params,
         )

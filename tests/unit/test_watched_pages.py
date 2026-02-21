@@ -140,14 +140,16 @@ class TestWatchedPagesAPI:
 
     @pytest.mark.asyncio
     async def test_add_watched_page_validates_category(self) -> None:
-        """Category must be from valid set."""
-        from src.api.scraper import _VALID_CATEGORIES
+        """Category must be from valid set — Pydantic Literal rejects invalid values."""
+        from pydantic import ValidationError
+
+        from src.api.scraper import WatchedPageCreate, _VALID_CATEGORIES
 
         assert "delivery" in _VALID_CATEGORIES
-        assert "warranty" in _VALID_CATEGORIES
-        assert "returns" in _VALID_CATEGORIES
-        assert "policies" in _VALID_CATEGORIES
         assert "invalid_category" not in _VALID_CATEGORIES
+
+        with pytest.raises(ValidationError, match="category"):
+            WatchedPageCreate(url="https://example.com", category="invalid_category")
 
     @pytest.mark.asyncio
     async def test_add_watched_page_validates_interval(self) -> None:
