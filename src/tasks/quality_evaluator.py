@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import anthropic
 from sqlalchemy import text
+
+if TYPE_CHECKING:
+    from anthropic.types import MessageParam
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.config import get_settings
@@ -193,7 +196,7 @@ async def _evaluate_call_quality_async(task: Any, call_id: str) -> dict[str, Any
         if llm_router is not None:
             from src.llm.models import LLMTask
 
-            llm_response = await llm_router.complete(
+            llm_response = await llm_router.complete(  # type: ignore[attr-defined]
                 LLMTask.QUALITY_SCORING,
                 messages,
                 max_tokens=512,
@@ -204,7 +207,7 @@ async def _evaluate_call_quality_async(task: Any, call_id: str) -> dict[str, Any
             response = client.messages.create(
                 model=settings.quality.llm_model,
                 max_tokens=512,
-                messages=messages,
+                messages=cast("list[MessageParam]", messages),
             )
             content_block = response.content[0]
             response_text = content_block.text.strip() if hasattr(content_block, "text") else ""

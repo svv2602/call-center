@@ -10,7 +10,7 @@ from email.utils import parsedate_to_datetime
 
 import aiohttp
 import feedparser  # type: ignore[import-untyped]
-import trafilatura  # type: ignore[import-untyped]
+import trafilatura
 
 from src.knowledge.scraper import ScrapedArticle
 

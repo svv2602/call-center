@@ -194,7 +194,7 @@ async def process_sandbox_turn(
         )
         return result
 
-    agent.tool_router.execute = _capturing_execute  # type: ignore[assignment]
+    agent.tool_router.execute = _capturing_execute  # type: ignore[method-assign]
 
     try:
         start = time.monotonic()
@@ -206,7 +206,7 @@ async def process_sandbox_turn(
         latency_ms = int((time.monotonic() - start) * 1000)
     finally:
         # Restore original execute
-        agent.tool_router.execute = original_execute  # type: ignore[assignment]
+        agent.tool_router.execute = original_execute  # type: ignore[method-assign]
 
     # Estimate token counts from history changes
     # The real counts come from the Claude API response, but we approximate here

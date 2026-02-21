@@ -158,6 +158,7 @@ async def run_regression(
             },
         )
         new_conv_row = new_conv_result.first()
+        assert new_conv_row is not None
         new_conv_id = str(new_conv_row.id)
 
     # Create agent with new prompt

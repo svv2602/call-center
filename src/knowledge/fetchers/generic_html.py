@@ -8,8 +8,8 @@ import logging
 from urllib.parse import urljoin, urlparse
 
 import aiohttp
-import trafilatura  # type: ignore[import-untyped]
-from bs4 import BeautifulSoup  # type: ignore[import-untyped]
+import trafilatura
+from bs4 import BeautifulSoup
 
 from src.knowledge.scraper import ScrapedArticle
 
@@ -102,7 +102,7 @@ class GenericHTMLFetcher:
         listing_parsed = urlparse(listing_url)
 
         for link in soup.find_all("a", href=True):
-            href = link["href"]
+            href = str(link["href"])
             if not href or href.startswith("#") or href.startswith("javascript:"):
                 continue
 

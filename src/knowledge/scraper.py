@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from urllib.parse import urljoin
 
 import aiohttp
-from bs4 import BeautifulSoup  # type: ignore[import-untyped]
+from bs4 import BeautifulSoup, Tag
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +227,7 @@ class ProKolesoScraper:
 
         # prokoleso.ua uses article cards with links — try common patterns
         for link in soup.select("a[href*='/ua/info/']"):
-            href = link.get("href", "")
+            href = str(link.get("href", ""))
             if not href or href.endswith("/ua/info/") or "/page/" in href:
                 continue
 
@@ -283,7 +283,7 @@ class ProKolesoScraper:
         seen: set[str] = set()
 
         for a_tag in content_el.find_all("a", href=True):
-            href = a_tag["href"]
+            href = str(a_tag["href"])
             # Build absolute URL
             abs_url = href if href.startswith("http") else urljoin(self._base_url, href)
             abs_url = abs_url.rstrip("/")
@@ -384,11 +384,13 @@ class ProKolesoScraper:
 
         return title, text
 
-    def _html_to_markdown(self, el: BeautifulSoup) -> str:
+    def _html_to_markdown(self, el: BeautifulSoup | Tag) -> str:
         """Convert HTML element to simplified markdown text."""
         lines: list[str] = []
 
         for child in el.descendants:
+            if not isinstance(child, Tag):
+                continue
             if child.name in ("h2", "h3", "h4"):
                 prefix = "#" * (int(child.name[1]))
                 heading_text = child.get_text(strip=True)

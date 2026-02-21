@@ -122,7 +122,7 @@ class AnthropicProvider(AbstractProvider):
                     pass  # handled after loop
 
             # After stream completes, emit StreamDone
-            final = stream.get_final_message()
+            final = await stream.get_final_message()
             yield StreamDone(
                 stop_reason=final.stop_reason or "end_turn",
                 usage=Usage(

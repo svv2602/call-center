@@ -457,7 +457,7 @@ async def get_pronunciation_rules(redis: Redis) -> str:
             # Handle both bytes (decode_responses=False) and str
             text_val = raw.decode() if isinstance(raw, bytes) else raw
             data = json.loads(text_val)
-            return data["rules"]
+            return str(data["rules"])
     except Exception:
         logger.warning("Failed to load pronunciation rules from Redis, using default")
     return PRONUNCIATION_RULES

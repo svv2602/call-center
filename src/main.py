@@ -292,8 +292,10 @@ async def readiness_check() -> dict[str, object]:
     if _onec_client is not None and _onec_client._session is not None:
         try:
             # Lightweight stock request to check 1C connectivity
-            resp = await asyncio.wait_for(_onec_client.get_stock("ProKoleso"), timeout=5.0)
-            checks["onec_api"] = "reachable" if resp.get("success") else "error"
+            onec_resp: dict[str, Any] = await asyncio.wait_for(
+                _onec_client.get_stock("ProKoleso"), timeout=5.0
+            )
+            checks["onec_api"] = "reachable" if onec_resp.get("success") else "error"
         except Exception:
             checks["onec_api"] = "unreachable"
     else:
@@ -398,7 +400,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     session = CallSession(conn.channel_uuid)
 
     # Resolve tenant for this call
-    tenant = await _resolve_tenant(conn.channel_uuid, _db_engine)
+    tenant = await _resolve_tenant(str(conn.channel_uuid), _db_engine)
     tenant_store_client: StoreClient | None = None
     if tenant:
         session.tenant_id = str(tenant["id"])
@@ -553,7 +555,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             streaming_loop = StreamingAgentLoop(
                 llm_router=_llm_router,
                 tool_router=router,
-                tts=_tts_engine,
+                tts=_tts_engine,  # type: ignore[arg-type]
                 conn=conn,
                 barge_in_event=barge_in_event,
                 tools=tools,
@@ -667,9 +669,9 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
     router.register("get_fitting_price", client.get_fitting_price)
     router.register("search_knowledge_base", client.search_knowledge_base)
 
-    async def transfer_to_operator(**_: object) -> dict[str, str]:
+    async def transfer_to_operator(**kwargs: Any) -> dict[str, str]:
         session.transferred = True
-        session.transfer_reason = _.get("reason", "") if isinstance(_, dict) else ""
+        session.transfer_reason = str(kwargs.get("reason", ""))
         logger.warning(
             "Operator transfer requested for call %s (ARI not configured — "
             "flag set but no SIP transfer performed)",
@@ -862,7 +864,7 @@ async def main() -> None:
     # Initialize asyncpg pool for PatternSearch (pgvector direct queries)
     if settings.openai.api_key and _db_engine is not None:
         try:
-            import asyncpg
+            import asyncpg  # type: ignore[import-untyped]
 
             # Convert SQLAlchemy URL to asyncpg DSN (replace +asyncpg driver prefix)
             dsn = settings.database.url.replace("postgresql+asyncpg://", "postgresql://")

@@ -36,7 +36,7 @@ def _acquire_lock(lock_name: str, ttl: int) -> sync_redis.Redis | None:
     """Try to acquire a Redis distributed lock. Returns client if acquired, None if not."""
     try:
         settings = get_settings()
-        r = sync_redis.from_url(settings.redis.url)
+        r: sync_redis.Redis = sync_redis.from_url(settings.redis.url)  # type: ignore[no-untyped-call]
         if r.set(f"backup:{lock_name}:lock", "1", nx=True, ex=ttl):
             return r
         logger.info("Backup '%s' already running, skipping", lock_name)

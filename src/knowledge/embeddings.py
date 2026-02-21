@@ -234,7 +234,7 @@ async def generate_embeddings_inline(article_id: str) -> dict[str, Any]:
     Returns:
         Result dict with article_id, chunks count, and status.
     """
-    import asyncpg
+    import asyncpg  # type: ignore[import-untyped]
 
     from src.config import get_settings
 

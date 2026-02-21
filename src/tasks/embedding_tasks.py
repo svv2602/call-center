@@ -84,7 +84,7 @@ async def _generate_article_embeddings_async(task: Any, article_id: str) -> dict
 
         try:
             # Use asyncpg pool directly for process_article (it expects asyncpg, not SQLAlchemy)
-            import asyncpg
+            import asyncpg  # type: ignore[import-untyped]
 
             db_url = settings.database.url.replace("+asyncpg", "")
             pool = await asyncpg.create_pool(db_url)

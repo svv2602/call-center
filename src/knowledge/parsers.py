@@ -94,7 +94,7 @@ def parse_docx(content: bytes, filename: str) -> tuple[str, str]:
         text = para.text.strip()
         if not text:
             continue
-        if not title_found and para.style.name.startswith("Heading"):
+        if not title_found and para.style is not None and para.style.name.startswith("Heading"):
             title = text
             title_found = True
         else:

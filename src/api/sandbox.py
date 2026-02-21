@@ -1016,7 +1016,9 @@ async def replay_conversation(
                 "created_by": user_id,
             },
         )
-        run_id = str(run_result.first().id)
+        run_row = run_result.first()
+        assert run_row is not None
+        run_id = str(run_row.id)
 
     # Run regression
     try:
@@ -1215,6 +1217,7 @@ async def create_turn_group(
         )
         row = result.first()
 
+    assert row is not None
     return {"item": dict(row._mapping), "message": "Turn group created"}
 
 

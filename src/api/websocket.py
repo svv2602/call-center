@@ -74,7 +74,7 @@ async def _subscribe_and_broadcast(redis_url: str) -> None:
 
 
 # Background subscriber task reference
-_subscriber_task: asyncio.Task | None = None
+_subscriber_task: asyncio.Task[None] | None = None
 _subscriber_lock = asyncio.Lock()
 
 

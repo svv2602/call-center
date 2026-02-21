@@ -107,13 +107,13 @@ async def update_llm_config(request: ConfigPatch, _: dict[str, Any] = _admin_dep
     if request.tasks:
         if "tasks" not in config:
             config["tasks"] = {}
-        for task_name, update in request.tasks.items():
+        for task_name, task_update in request.tasks.items():
             if task_name not in config["tasks"]:
                 config["tasks"][task_name] = {}
-            if update.primary is not None:
-                config["tasks"][task_name]["primary"] = update.primary
-            if update.fallbacks is not None:
-                config["tasks"][task_name]["fallbacks"] = update.fallbacks
+            if task_update.primary is not None:
+                config["tasks"][task_name]["primary"] = task_update.primary
+            if task_update.fallbacks is not None:
+                config["tasks"][task_name]["fallbacks"] = task_update.fallbacks
 
     await redis.set(REDIS_CONFIG_KEY, json.dumps(config))
     logger.info("LLM routing config updated: %s", config)

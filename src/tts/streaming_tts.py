@@ -57,7 +57,7 @@ class StreamingTTSSynthesizer:
         pending_task: asyncio.Task[bytes] | None = None
         pending_text: str | None = None
 
-        async for event in stream:
+        async for event in stream:  # type: ignore[assignment]
             if isinstance(event, SentenceReady):
                 # Launch new task FIRST so it runs while we await the old one
                 new_task = asyncio.create_task(self._tts.synthesize(event.text))

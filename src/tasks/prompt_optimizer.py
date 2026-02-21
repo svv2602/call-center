@@ -9,10 +9,13 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import anthropic
 from sqlalchemy import text
+
+if TYPE_CHECKING:
+    from anthropic.types import MessageParam
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.config import get_settings
@@ -162,7 +165,7 @@ async def _analyze_failed_calls_async(
             response = client.messages.create(
                 model=settings.quality.llm_model,
                 max_tokens=1024,
-                messages=messages,
+                messages=cast("list[MessageParam]", messages),
             )
             content_block = response.content[0]
             response_text = content_block.text.strip() if hasattr(content_block, "text") else ""
@@ -183,7 +186,7 @@ async def _analyze_failed_calls_async(
         async with engine.begin() as conn:
             await _persist_result(conn, days, len(calls), analysis, triggered_by)
 
-        return analysis
+        return dict(analysis)
 
     except json.JSONDecodeError:
         logger.exception("Failed to parse optimization analysis response")

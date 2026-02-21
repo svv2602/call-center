@@ -7,11 +7,14 @@ in various personas: neutral, impatient, confused, angry, expert.
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 
 import anthropic
 
 from src.config import get_settings
+
+if TYPE_CHECKING:
+    from anthropic.types import MessageParam
 
 logger = logging.getLogger(__name__)
 
@@ -90,9 +93,10 @@ async def generate_customer_reply(
             model="claude-haiku-4-5-20251001",
             max_tokens=200,
             system=system,
-            messages=messages,
+            messages=cast("list[MessageParam]", messages),
         )
-        return response.content[0].text if response.content else ""
+        block = response.content[0] if response.content else None
+        return block.text if block and hasattr(block, "text") else ""
     except Exception:
         logger.exception("Failed to generate customer reply")
         return "Так, добре."

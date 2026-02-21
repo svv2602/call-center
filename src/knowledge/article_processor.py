@@ -12,8 +12,12 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, cast
 
 import anthropic
+
+if TYPE_CHECKING:
+    from anthropic.types import MessageParam
 
 logger = logging.getLogger(__name__)
 
@@ -157,7 +161,7 @@ Content:
         if llm_router is not None:
             from src.llm.models import LLMTask
 
-            llm_response = await llm_router.complete(  # type: ignore[union-attr]
+            llm_response = await llm_router.complete(  # type: ignore[attr-defined]
                 LLMTask.ARTICLE_PROCESSOR,
                 messages,
                 system=system_prompt,
@@ -170,9 +174,10 @@ Content:
                 model=model,
                 max_tokens=4096,
                 system=system_prompt,
-                messages=messages,
+                messages=cast("list[MessageParam]", messages),
             )
-            raw_text = response.content[0].text.strip()
+            block = response.content[0]
+            raw_text = block.text.strip() if hasattr(block, "text") else ""
 
         # Strip markdown code fences if present
         if raw_text.startswith("```"):

@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any, cast
 from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -19,6 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from src.agent.prompt_manager import SAFETY_CACHE_REDIS_KEY
 from src.api.auth import require_role
 from src.config import get_settings
+
+if TYPE_CHECKING:
+    from anthropic.types import MessageParam
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/training/safety-rules", tags=["training"])
@@ -419,9 +422,10 @@ async def _get_agent_response(
             model=model,
             max_tokens=512,
             system=system,
-            messages=messages,
+            messages=cast("list[MessageParam]", messages),
         )
-        return resp.content[0].text if resp.content else ""
+        block = resp.content[0] if resp.content else None
+        return block.text if block and hasattr(block, "text") else ""
     except Exception as exc:
         return f"[error: {exc}]"
 
@@ -470,9 +474,10 @@ async def _judge_response(
             resp = await client.messages.create(
                 model="claude-haiku-4-5-20251001",
                 max_tokens=256,
-                messages=messages,
+                messages=cast("list[MessageParam]", messages),
             )
-            response_text = resp.content[0].text if resp.content else ""
+            block = resp.content[0] if resp.content else None
+            response_text = block.text if block and hasattr(block, "text") else ""
         except Exception as exc:
             return {"passed": False, "reason": f"Judge error: {exc}"}
 
@@ -482,7 +487,7 @@ async def _judge_response(
         cleaned = response_text.strip()
         if cleaned.startswith("```"):
             cleaned = cleaned.split("\n", 1)[-1].rsplit("```", 1)[0].strip()
-        return _json.loads(cleaned)
+        return dict(_json.loads(cleaned))
     except (ValueError, TypeError):
         # If we can't parse, do a simple keyword heuristic
         return {

@@ -126,7 +126,7 @@ app.conf.beat_schedule = {
 # --- Celery signal: count task failures in Prometheus ---
 
 
-@task_failure.connect  # type: ignore[misc]
+@task_failure.connect  # type: ignore[untyped-decorator]
 def _on_task_failure(sender: Any = None, **kwargs: Any) -> None:
     """Increment Prometheus counter on task failure."""
     from src.monitoring.metrics import celery_task_failures_total

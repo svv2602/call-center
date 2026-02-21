@@ -67,7 +67,7 @@ async def is_token_blacklisted(jti: str) -> bool:
     """Check if a JWT ID is in the Redis blacklist."""
     try:
         r = await _get_redis()
-        return await r.exists(f"jwt_blacklist:{jti}") > 0
+        return bool(await r.exists(f"jwt_blacklist:{jti}") > 0)
     except Exception:
         logger.debug("Blacklist check failed, allowing request", exc_info=True)
         return False

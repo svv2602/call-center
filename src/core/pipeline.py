@@ -12,7 +12,7 @@ import datetime
 import logging
 import time
 import zoneinfo
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from src.agent.prompts import (
     ERROR_TEXT,
@@ -155,7 +155,7 @@ class CallPipeline:
         self._pattern_search = pattern_search
         self._streaming_loop = streaming_loop
         self._agent_name = agent_name
-        self._llm_history: list[dict] = []  # persistent LLM context for streaming path
+        self._llm_history: list[dict[str, Any]] = []  # persistent LLM context for streaming path
         self._speaking = False
         self._barge_in_event = barge_in_event or asyncio.Event()
         self._final_transcript_queue: asyncio.Queue[Transcript | None] = asyncio.Queue()
