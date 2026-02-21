@@ -83,9 +83,9 @@ class KnowledgeSearch:
         if not category:
             return await self._vector_search(query_embedding, embedding_str, "", limit, tenant_id)
 
-        # Dual search: category-focused (3 results) + cross-category (3 results)
-        cat_limit = min(limit, 3)
-        broad_limit = min(limit, 3)
+        # Dual search: category-focused (limit results) + cross-category (2 results)
+        cat_limit = limit
+        broad_limit = 2
         return await self._vector_search_dual(
             embedding_str, category, cat_limit, broad_limit, limit, tenant_id
         )
