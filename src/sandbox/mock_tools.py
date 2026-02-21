@@ -111,6 +111,29 @@ MOCK_RESPONSES: dict[str, Any] = {
         "payment_method": "cod",
         "message": "Замовлення підтверджено. Номер: ORD-2026-0099",
     },
+    "get_pickup_points": {
+        "total": 3,
+        "points": [
+            {
+                "id": "000000054",
+                "address": "вул. Академіка Заболотного 3",
+                "type": "Стороння точка",
+                "city": "Київ",
+            },
+            {
+                "id": "000000052",
+                "address": "вул. Богатирська 2-е",
+                "type": "Стороння точка",
+                "city": "Київ",
+            },
+            {
+                "id": "000000020",
+                "address": "вул. Кротова, 21К",
+                "type": "ОСПП",
+                "city": "Дніпро",
+            },
+        ],
+    },
     "get_fitting_stations": {
         "stations": [
             {
