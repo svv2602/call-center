@@ -915,4 +915,27 @@ export default {
     'sandbox.phrasesDbTitle': 'Шаблоны из БД (реально используются)',
     'sandbox.phrasesDbDescription': 'Эти фразы загружаются из таблицы response_templates и переопределяют захардкоженные. При каждом звонке случайно выбирается 1 активный вариант на ключ. Управление: Сценарии → Шаблоны.',
     'sandbox.phrasesDbVariants': '{active} акт. из {total}',
+
+    // Sandbox: Branch & Replay modals
+    'sandbox.branchMessage': 'Сообщение для ветки',
+    'sandbox.branchFromTurn': 'Ветка от хода {turn}',
+    'sandbox.submitBranch': 'Отправить',
+    'sandbox.selectPromptForReplay': 'Выберите версию промпта для регрессии',
+    'sandbox.submitReplay': 'Запустить',
+
+    // Sandbox: Persona selector
+    'sandbox.personaRushed': 'Спешащий',
+    'sandbox.personaDetailed': 'Дотошный',
+
+    // Sandbox: Scenario Starters
+    'sandbox.tabStarters': 'Шаблоны',
+    'sandbox.quickStart': 'Быстрый старт',
+    'sandbox.manageStarters': 'Управление шаблонами',
+    'sandbox.starterFirstMessage': 'Первое сообщение',
+    'sandbox.starterDescription': 'Описание',
+    'sandbox.starterPersona': 'Персона',
+    'sandbox.noStarters': 'Нет шаблонов старта',
+    'sandbox.deleteStarterConfirm': 'Удалить шаблон «{title}»?',
+    'sandbox.starterTitleRequired': 'Название и первое сообщение обязательны',
+    'sandbox.editStarter': 'Редактирование шаблона',
 };

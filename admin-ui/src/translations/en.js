@@ -915,4 +915,27 @@ export default {
     'sandbox.phrasesDbTitle': 'DB Templates (actually used)',
     'sandbox.phrasesDbDescription': 'These phrases are loaded from response_templates table and override hardcoded ones. A random active variant is picked per key on each call. Manage in: Scenarios → Templates.',
     'sandbox.phrasesDbVariants': '{active} active of {total}',
+
+    // Sandbox: Branch & Replay modals
+    'sandbox.branchMessage': 'Branch message',
+    'sandbox.branchFromTurn': 'Branch from turn {turn}',
+    'sandbox.submitBranch': 'Send',
+    'sandbox.selectPromptForReplay': 'Select prompt version for replay',
+    'sandbox.submitReplay': 'Run',
+
+    // Sandbox: Persona selector
+    'sandbox.personaRushed': 'Rushed',
+    'sandbox.personaDetailed': 'Detailed',
+
+    // Sandbox: Scenario Starters
+    'sandbox.tabStarters': 'Starters',
+    'sandbox.quickStart': 'Quick Start',
+    'sandbox.manageStarters': 'Manage Starters',
+    'sandbox.starterFirstMessage': 'First message',
+    'sandbox.starterDescription': 'Description',
+    'sandbox.starterPersona': 'Persona',
+    'sandbox.noStarters': 'No starter templates',
+    'sandbox.deleteStarterConfirm': 'Delete starter "{title}"?',
+    'sandbox.starterTitleRequired': 'Title and first message are required',
+    'sandbox.editStarter': 'Edit Starter',
 };

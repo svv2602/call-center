@@ -16,11 +16,15 @@ let _selectedTurnIds = new Set();
 let _turnGroups = [];
 let _ratingTurnId = null;
 let _pendingRating = null;
+let _branchTurnId = null;
+let _branchTurnNumber = null;
+let _replayConvId = null;
+let _starterCache = [];
 
 // ─── Tab switching ───────────────────────────────────────────
 function showTab(tab) {
     _activeTab = tab;
-    ['chat', 'regression', 'patterns', 'phrases'].forEach(t => {
+    ['chat', 'regression', 'patterns', 'phrases', 'starters'].forEach(t => {
         const el = document.getElementById(`sandboxContent-${t}`);
         if (el) el.style.display = t === tab ? '' : 'none';
     });
@@ -32,6 +36,7 @@ function showTab(tab) {
     if (tab === 'regression') loadRegressionRuns();
     if (tab === 'patterns') loadPatterns();
     if (tab === 'phrases') loadPhrases();
+    if (tab === 'starters') loadStarters();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -182,6 +187,7 @@ function renderConversationView() {
                     <div class="ml-auto flex flex-wrap gap-2">
                         <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="document.getElementById('sandboxConvInfo').toggleAttribute('open')" title="${t('sandbox.convInfo')}">&#9432;</button>
                         <button class="${markingBtnClass} ${tw.btnSm}" onclick="window._pages.sandbox.toggleMarking()">${markingLabel}</button>
+                        <button class="${conv.is_baseline ? tw.btnPrimary : tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.toggleBaseline('${conv.id}', ${!!conv.is_baseline})">${conv.is_baseline ? t('sandbox.unmarkBaseline') : t('sandbox.markBaseline')}</button>
                         ${isActive ? `<button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.archiveConversation()">${t('sandbox.archiveConversation')}</button>` : ''}
                     </div>
                 </div>
@@ -202,6 +208,13 @@ function renderConversationView() {
                     placeholder="${t('sandbox.messagePlaceholder')}"
                     class="${tw.formInput} flex-1"
                     onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();window._pages.sandbox.sendMessage();}">
+                <select id="sandboxPersonaSelect" class="px-1.5 py-1 text-xs border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500" title="${t('sandbox.persona')}">
+                    <option value="neutral">${t('sandbox.personaNeutral')}</option>
+                    <option value="angry">${t('sandbox.personaAngry')}</option>
+                    <option value="confused">${t('sandbox.personaConfused')}</option>
+                    <option value="rushed">${t('sandbox.personaRushed')}</option>
+                    <option value="detailed">${t('sandbox.personaDetailed')}</option>
+                </select>
                 <button id="sandboxAutoBtn" class="${tw.btnPurple} ${tw.btnSm}" title="${t('sandbox.autoCustomerHint')}" onclick="window._pages.sandbox.autoCustomer()">${t('sandbox.autoCustomer')}</button>
                 <button id="sandboxSendBtn" class="${tw.btnPrimary}" onclick="window._pages.sandbox.sendMessage()">${t('sandbox.sendMessage')}</button>
             </div>` : ''}
@@ -424,12 +437,16 @@ async function submitGroup() {
 
 async function deleteGroup(groupId) {
     if (!confirm(t('sandbox.deleteConfirm', { title: 'group' }))) return;
+    const btn = document.querySelector(`[onclick*="deleteGroup('${groupId}')"]`);
+    if (btn) { btn.disabled = true; btn.innerHTML = '<span class="spinner-sm"></span>'; }
     try {
         await api(`/admin/sandbox/turn-groups/${groupId}`, { method: 'DELETE' });
         showToast(t('sandbox.groupDeleted'));
         await loadConversation(_currentConvId);
     } catch (e) {
         showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '\u00d7'; }
     }
 }
 
@@ -466,6 +483,7 @@ async function sendMessage() {
     _sending = true;
     const btn = document.getElementById('sandboxSendBtn');
     if (btn) { btn.disabled = true; btn.textContent = t('sandbox.sending'); }
+    const savedMsg = msg;
     input.value = '';
 
     try {
@@ -476,6 +494,8 @@ async function sendMessage() {
         await loadConversation(_currentConvId);
     } catch (e) {
         showToast(t('sandbox.sendFailed', { error: e.message }), 'error');
+        const inp = document.getElementById('sandboxInput');
+        if (inp) inp.value = savedMsg;
     } finally {
         _sending = false;
         const curBtn = document.getElementById('sandboxSendBtn');
@@ -525,18 +545,34 @@ function cancelRating() {
 }
 
 function branchFrom(turnId, turnNumber) {
-    const msg = prompt(t('sandbox.branchFrom', { turn: turnNumber }));
-    if (!msg || !msg.trim()) return;
+    _branchTurnId = turnId;
+    _branchTurnNumber = turnNumber;
+    const titleEl = document.getElementById('sandboxBranchTitle');
+    if (titleEl) titleEl.textContent = t('sandbox.branchFromTurn', { turn: turnNumber });
+    const input = document.getElementById('sandboxBranchInput');
+    if (input) input.value = '';
+    document.getElementById('sandboxBranchModal').classList.add('show');
+    setTimeout(() => { if (input) input.focus(); }, 100);
+}
+
+async function submitBranch() {
+    const input = document.getElementById('sandboxBranchInput');
+    const msg = input?.value?.trim();
+    if (!msg || !_branchTurnId) return;
 
     _sending = true;
-    api(`/admin/sandbox/conversations/${_currentConvId}/send`, {
-        method: 'POST',
-        body: JSON.stringify({ message: msg.trim(), parent_turn_id: turnId }),
-    }).then(() => {
-        loadConversation(_currentConvId);
-    }).catch(e => {
+    try {
+        await api(`/admin/sandbox/conversations/${_currentConvId}/send`, {
+            method: 'POST',
+            body: JSON.stringify({ message: msg, parent_turn_id: _branchTurnId }),
+        });
+        closeModal('sandboxBranchModal');
+        await loadConversation(_currentConvId);
+    } catch (e) {
         showToast(t('sandbox.sendFailed', { error: e.message }), 'error');
-    }).finally(() => { _sending = false; });
+    } finally {
+        _sending = false;
+    }
 }
 
 async function autoCustomer() {
@@ -544,9 +580,10 @@ async function autoCustomer() {
     if (btn) { btn.disabled = true; btn.textContent = t('sandbox.generating'); }
 
     try {
+        const persona = document.getElementById('sandboxPersonaSelect')?.value || 'neutral';
         const data = await api(`/admin/sandbox/conversations/${_currentConvId}/auto-customer`, {
             method: 'POST',
-            body: JSON.stringify({ persona: 'neutral' }),
+            body: JSON.stringify({ persona }),
         });
         const input = document.getElementById('sandboxInput');
         if (input && data.suggested_message) {
@@ -562,6 +599,8 @@ async function autoCustomer() {
 
 async function archiveConversation() {
     if (!_currentConvId) return;
+    const btn = document.querySelector(`[onclick*="archiveConversation()"]`);
+    if (btn) { btn.disabled = true; btn.textContent = '...'; }
     try {
         await api(`/admin/sandbox/conversations/${_currentConvId}`, {
             method: 'PATCH',
@@ -575,6 +614,8 @@ async function archiveConversation() {
         loadSidebar();
     } catch (e) {
         showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = t('sandbox.archiveConversation'); }
     }
 }
 
@@ -586,6 +627,35 @@ async function showNewConvModal() {
     document.getElementById('sandboxConvTags').value = '';
     document.getElementById('sandboxConvToolMode').value = 'live';
     document.getElementById('sandboxConvScenario').value = '';
+
+    // Load starters into quick start section
+    try {
+        const sdata = await api('/admin/sandbox/scenario-starters?limit=20');
+        const starters = sdata.items || [];
+        _starterCache = starters;
+        const section = document.getElementById('sandboxStartersSection');
+        const cards = document.getElementById('sandboxStarterCards');
+        if (starters.length > 0) {
+            section.style.display = '';
+            cards.innerHTML = starters.map((s, idx) => {
+                const scenarioBadge = s.scenario_type
+                    ? `<span class="text-[10px] px-1 rounded bg-neutral-200 dark:bg-neutral-700 text-neutral-600 dark:text-neutral-300">${escapeHtml(s.scenario_type)}</span>`
+                    : '';
+                return `
+                    <div class="p-2 rounded-md border border-neutral-200 dark:border-neutral-700 hover:border-blue-400 dark:hover:border-blue-600 cursor-pointer transition-colors bg-neutral-50 dark:bg-neutral-800"
+                         onclick="window._pages.sandbox.useStarterByIndex(${idx})">
+                        <div class="text-xs font-medium text-neutral-900 dark:text-neutral-100 mb-1">${escapeHtml(s.title)}</div>
+                        <div class="text-[10px] text-neutral-500 dark:text-neutral-400 truncate mb-1">${escapeHtml(s.first_message)}</div>
+                        ${scenarioBadge}
+                    </div>`;
+            }).join('');
+        } else {
+            section.style.display = 'none';
+        }
+    } catch {
+        const section = document.getElementById('sandboxStartersSection');
+        if (section) section.style.display = 'none';
+    }
 
     // Load prompt versions for select
     try {
@@ -685,10 +755,15 @@ async function loadSidebar() {
                 : '';
             const dateStr = item.updated_at ? new Date(item.updated_at).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' }) : '';
 
+            const baselineBadge = item.is_baseline
+                ? '<span class="text-[10px] px-1 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 font-semibold">B</span>'
+                : '';
+
             return `
                 <div class="px-3 py-2 cursor-pointer ${activeCls} transition-colors" onclick="window._pages.sandbox.openConversation('${item.id}')">
                     <div class="flex items-center gap-1">
                         <span class="text-xs font-medium text-neutral-900 dark:text-neutral-100 truncate flex-1">${escapeHtml(item.title)}</span>
+                        ${baselineBadge}
                         <button class="text-neutral-400 hover:text-red-500 text-xs leading-none flex-shrink-0" onclick="event.stopPropagation();window._pages.sandbox.deleteConversation('${item.id}', '${escapeHtml(item.title).replace(/'/g, "\\'")}')" title="${t('common.delete')}">&times;</button>
                     </div>
                     <div class="flex items-center gap-1.5 mt-0.5 text-[10px] text-neutral-500 dark:text-neutral-400">
@@ -714,6 +789,8 @@ function openConversation(convId) {
 
 async function deleteConversation(convId, title) {
     if (!confirm(t('sandbox.deleteConfirm', { title }))) return;
+    const btn = document.querySelector(`[onclick*="deleteConversation('${convId}'"]`);
+    if (btn) { btn.disabled = true; btn.innerHTML = '...'; }
     try {
         await api(`/admin/sandbox/conversations/${convId}`, { method: 'DELETE' });
         showToast(t('sandbox.deleted'));
@@ -726,6 +803,7 @@ async function deleteConversation(convId, title) {
         loadSidebar();
     } catch (e) {
         showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
+        if (btn) { btn.disabled = false; btn.innerHTML = '&times;'; }
     }
 }
 
@@ -841,35 +919,52 @@ async function showRegressionDetail(runId) {
 }
 
 async function replayConversation(convId) {
-    // Load prompt versions and show a simple selection
-    let versions = [];
+    _replayConvId = convId;
+    document.getElementById('sandboxReplayConvId').value = convId;
+
+    const select = document.getElementById('sandboxReplayPrompt');
+    select.innerHTML = '';
+
     try {
         const data = await api('/prompts');
-        versions = data.versions || data.items || [];
-    } catch { /* ignore */ }
-
-    if (versions.length === 0) {
-        showToast(t('sandbox.regressionFailed', { error: 'No prompt versions available' }), 'error');
+        const versions = data.versions || data.items || [];
+        if (versions.length === 0) {
+            showToast(t('sandbox.regressionFailed', { error: 'No prompt versions available' }), 'error');
+            return;
+        }
+        for (const v of versions) {
+            const activeLabel = v.is_active ? ' *' : '';
+            select.innerHTML += `<option value="${v.id}">${escapeHtml(v.name)}${activeLabel}</option>`;
+        }
+    } catch {
+        showToast(t('sandbox.regressionFailed', { error: 'Failed to load versions' }), 'error');
         return;
     }
 
-    const options = versions.map(v => `${v.name} (${v.id})`).join('\n');
-    const choice = prompt(`${t('sandbox.selectPromptVersion')}:\n${options}`);
-    if (!choice) return;
+    document.getElementById('sandboxReplayModal').classList.add('show');
+}
 
-    // Find the selected version
-    const selected = versions.find(v => choice.includes(v.id) || choice.includes(v.name));
-    if (!selected) { showToast(t('sandbox.regressionFailed', { error: 'Version not found' }), 'error'); return; }
+async function submitReplay() {
+    const select = document.getElementById('sandboxReplayPrompt');
+    const convId = document.getElementById('sandboxReplayConvId').value;
+    const versionId = select?.value;
+    if (!versionId || !convId) return;
+
+    const btn = document.querySelector('#sandboxReplayModal button[onclick*="submitReplay"]');
+    if (btn) { btn.disabled = true; btn.textContent = '...'; }
 
     try {
-        const result = await api(`/admin/sandbox/conversations/${convId}/replay`, {
+        await api(`/admin/sandbox/conversations/${convId}/replay`, {
             method: 'POST',
-            body: JSON.stringify({ new_prompt_version_id: selected.id }),
+            body: JSON.stringify({ new_prompt_version_id: versionId }),
         });
+        closeModal('sandboxReplayModal');
         showToast(t('sandbox.regressionStarted'));
         showTab('regression');
     } catch (e) {
         showToast(t('sandbox.regressionFailed', { error: e.message }), 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = t('sandbox.submitReplay'); }
     }
 }
 
@@ -968,11 +1063,14 @@ async function togglePatternActive(patternId, currentActive) {
 
 async function deletePattern(patternId) {
     if (!confirm(t('sandbox.deleteConfirm', { title: 'pattern' }))) return;
+    const btn = document.querySelector(`[onclick*="deletePattern('${patternId}')"]`);
+    if (btn) { btn.disabled = true; btn.innerHTML = '...'; }
     try {
         await api(`/admin/sandbox/patterns/${patternId}`, { method: 'DELETE' });
         loadPatterns();
     } catch (e) {
         showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
+        if (btn) { btn.disabled = false; btn.innerHTML = '&times;'; }
     }
 }
 
@@ -1155,6 +1253,182 @@ async function loadPhrases() {
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  Scenario Starters Tab (Phase 5)
+// ═══════════════════════════════════════════════════════════
+
+async function loadStarters() {
+    const container = document.getElementById('sandboxStartersContainer');
+    container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+
+    try {
+        const data = await api('/admin/sandbox/scenario-starters?limit=100');
+        const items = data.items || [];
+
+        if (items.length === 0) {
+            container.innerHTML = `
+                <div class="flex items-center justify-between mb-4">
+                    <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50">${t('sandbox.starters')}</h2>
+                    <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.showStarterModal()">${t('sandbox.newStarter')}</button>
+                </div>
+                <div class="${tw.emptyState}">${t('sandbox.noStarters')}</div>`;
+            return;
+        }
+
+        const rows = items.map(item => {
+            const scenarioBadge = item.scenario_type
+                ? `<span class="${tw.badge}">${escapeHtml(item.scenario_type)}</span>`
+                : '';
+            const personaBadge = item.persona
+                ? `<span class="${tw.badgeBlue}">${escapeHtml(item.persona)}</span>`
+                : '';
+            return `
+                <tr class="${tw.trHover}">
+                    <td class="${tw.td}"><span class="font-medium">${escapeHtml(item.title)}</span></td>
+                    <td class="${tw.td}"><div class="max-w-xs truncate text-xs">${escapeHtml(item.first_message)}</div></td>
+                    <td class="${tw.td}">${scenarioBadge}</td>
+                    <td class="${tw.td}">${personaBadge}</td>
+                    <td class="${tw.td}"><div class="max-w-xs truncate text-xs">${escapeHtml(item.description || '')}</div></td>
+                    <td class="${tw.td}">
+                        <div class="flex gap-1">
+                            <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.showStarterModal('${item.id}')">${t('common.edit')}</button>
+                            <button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.sandbox.deleteStarter('${item.id}', '${escapeHtml(item.title).replace(/'/g, "\\'")}')">&times;</button>
+                        </div>
+                    </td>
+                </tr>`;
+        }).join('');
+
+        container.innerHTML = `
+            <div class="flex items-center justify-between mb-4">
+                <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50">${t('sandbox.starters')} (${items.length})</h2>
+                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.showStarterModal()">${t('sandbox.newStarter')}</button>
+            </div>
+            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr>
+                <th class="${tw.th}">${t('sandbox.starterTitle')}</th>
+                <th class="${tw.th}">${t('sandbox.starterFirstMessage')}</th>
+                <th class="${tw.th}">${t('sandbox.scenarioType')}</th>
+                <th class="${tw.th}">${t('sandbox.starterPersona')}</th>
+                <th class="${tw.th}">${t('sandbox.starterDescription')}</th>
+                <th class="${tw.th}"></th>
+            </tr></thead><tbody>${rows}</tbody></table></div>`;
+    } catch (e) {
+        container.innerHTML = `<div class="${tw.emptyState}">${t('sandbox.loadFailed', { error: escapeHtml(e.message) })}</div>`;
+    }
+}
+
+async function showStarterModal(starterId) {
+    document.getElementById('sandboxStarterEditId').value = starterId || '';
+    document.getElementById('sandboxStarterTitle').value = '';
+    document.getElementById('sandboxStarterFirstMsg').value = '';
+    document.getElementById('sandboxStarterDesc').value = '';
+    document.getElementById('sandboxStarterScenario').value = '';
+    document.getElementById('sandboxStarterPersona').value = 'neutral';
+
+    const titleEl = document.getElementById('sandboxStarterModalTitle');
+
+    if (starterId) {
+        titleEl.textContent = t('sandbox.editStarter');
+        try {
+            const data = await api(`/admin/sandbox/scenario-starters/${starterId}`);
+            const item = data.item || data;
+            document.getElementById('sandboxStarterTitle').value = item.title || '';
+            document.getElementById('sandboxStarterFirstMsg').value = item.first_message || '';
+            document.getElementById('sandboxStarterDesc').value = item.description || '';
+            document.getElementById('sandboxStarterScenario').value = item.scenario_type || '';
+            document.getElementById('sandboxStarterPersona').value = item.persona || 'neutral';
+        } catch { /* new starter fallback */ }
+    } else {
+        titleEl.textContent = t('sandbox.newStarter');
+    }
+
+    document.getElementById('sandboxStarterModal').classList.add('show');
+}
+
+async function saveStarter() {
+    const editId = document.getElementById('sandboxStarterEditId').value;
+    const title = document.getElementById('sandboxStarterTitle').value.trim();
+    const firstMessage = document.getElementById('sandboxStarterFirstMsg').value.trim();
+    if (!title || !firstMessage) { showToast(t('sandbox.starterTitleRequired'), 'error'); return; }
+
+    const body = {
+        title,
+        first_message: firstMessage,
+        description: document.getElementById('sandboxStarterDesc').value.trim() || null,
+        scenario_type: document.getElementById('sandboxStarterScenario').value || null,
+        persona: document.getElementById('sandboxStarterPersona').value || 'neutral',
+    };
+
+    try {
+        if (editId) {
+            await api(`/admin/sandbox/scenario-starters/${editId}`, {
+                method: 'PUT',
+                body: JSON.stringify(body),
+            });
+        } else {
+            await api('/admin/sandbox/scenario-starters', {
+                method: 'POST',
+                body: JSON.stringify(body),
+            });
+        }
+        closeModal('sandboxStarterModal');
+        showToast(t('sandbox.starterSaved'));
+        loadStarters();
+    } catch (e) {
+        showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
+    }
+}
+
+async function deleteStarter(starterId, title) {
+    if (!confirm(t('sandbox.deleteStarterConfirm', { title }))) return;
+    const btn = document.querySelector(`[onclick*="deleteStarter('${starterId}'"]`);
+    if (btn) { btn.disabled = true; btn.innerHTML = '...'; }
+    try {
+        await api(`/admin/sandbox/scenario-starters/${starterId}`, { method: 'DELETE' });
+        showToast(t('sandbox.starterDeleted'));
+        loadStarters();
+    } catch (e) {
+        showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
+        if (btn) { btn.disabled = false; btn.innerHTML = '&times;'; }
+    }
+}
+
+function useStarterByIndex(idx) {
+    const starter = _starterCache[idx];
+    if (starter) useStarter(starter);
+}
+
+async function useStarter(starter) {
+    // Create conversation from starter and send first message
+    const body = {
+        title: starter.title,
+        tool_mode: 'mock',
+        tags: [],
+    };
+    if (starter.scenario_type) body.scenario_type = starter.scenario_type;
+
+    try {
+        const result = await api('/admin/sandbox/conversations', {
+            method: 'POST',
+            body: JSON.stringify(body),
+        });
+        const convId = result.item.id;
+        _currentConvId = convId;
+
+        // Send the first message
+        await api(`/admin/sandbox/conversations/${convId}/send`, {
+            method: 'POST',
+            body: JSON.stringify({ message: starter.first_message }),
+        });
+
+        closeModal('sandboxNewConvModal');
+        showToast(t('sandbox.created'));
+        loadSidebar();
+        showTab('chat');
+    } catch (e) {
+        showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
+    }
+}
+
 // ─── Init ────────────────────────────────────────────────────
 export function init() {
     registerPageLoader('sandbox', () => {
@@ -1177,10 +1451,12 @@ window._pages.sandbox = {
     archiveConversation,
     deleteConversation,
     branchFrom,
+    submitBranch,
     autoCustomer,
     loadRegressionRuns,
     showRegressionDetail,
     replayConversation,
+    submitReplay,
     toggleBaseline,
     // Phase 4: Turn Groups + Patterns
     toggleMarking,
@@ -1196,4 +1472,11 @@ window._pages.sandbox = {
     testSearch,
     // Phase 5: Agent Phrases
     loadPhrases,
+    // Phase 6: Scenario Starters
+    loadStarters,
+    showStarterModal,
+    saveStarter,
+    deleteStarter,
+    useStarter,
+    useStarterByIndex,
 };

@@ -13,8 +13,8 @@
             }
         })();
     </script>
-  <script type="module" crossorigin src="/assets/index-8vPWqp1B.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-BzqNjHHx.css">
+  <script type="module" crossorigin src="/assets/index-CxPdRg18.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-DH8E1qKj.css">
 </head>
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-50 font-sans antialiased">
     <!-- Toast container -->
@@ -450,6 +450,7 @@
                             <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="regression" onclick="window._pages.sandbox.showTab('regression')" data-i18n="sandbox.tabRegression">Регрессия</button>
                             <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="patterns" onclick="window._pages.sandbox.showTab('patterns')" data-i18n="sandbox.patterns">Паттерны</button>
                             <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="phrases" onclick="window._pages.sandbox.showTab('phrases')" data-i18n="sandbox.tabPhrases">Фразы агента</button>
+                            <button class="px-4 py-2 text-sm text-neutral-500 dark:text-neutral-400 border-b-2 border-transparent -mb-px cursor-pointer transition-colors hover:text-neutral-700 dark:hover:text-neutral-200" data-tab="starters" onclick="window._pages.sandbox.showTab('starters')" data-i18n="sandbox.tabStarters">Шаблоны</button>
                         </div>
                         <div id="sandboxContent-chat" class="flex-1 overflow-hidden">
                             <div id="sandboxChatContainer" class="h-full bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 overflow-y-auto"></div>
@@ -462,6 +463,9 @@
                         </div>
                         <div id="sandboxContent-phrases" style="display:none" class="flex-1 overflow-auto">
                             <div id="sandboxPhrasesContainer" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5"></div>
+                        </div>
+                        <div id="sandboxContent-starters" style="display:none" class="flex-1 overflow-auto">
+                            <div id="sandboxStartersContainer" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5"></div>
                         </div>
                     </div>
                 </div>
@@ -637,6 +641,10 @@
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-md w-[90%] max-h-[80vh] overflow-y-auto">
             <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxNewConvModal')">&times;</span>
             <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.newConversation">Новый диалог</h3>
+            <div id="sandboxStartersSection" class="mb-4" style="display:none">
+                <div class="text-xs font-semibold text-neutral-500 dark:text-neutral-400 mb-2" data-i18n="sandbox.quickStart">Быстрый старт</div>
+                <div id="sandboxStarterCards" class="grid grid-cols-2 gap-2 mb-2"></div>
+            </div>
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.conversationTitle">Название</label>
                 <input type="text" id="sandboxConvTitle" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -729,6 +737,76 @@
             </div>
             <input type="hidden" id="sandboxExportGroupId">
             <button onclick="window._pages.sandbox.submitExport()" class="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="sandbox.exportToPatterns">Экспорт в паттерны</button>
+        </div>
+    </div>
+
+    <!-- Branch Modal -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxBranchModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-md w-[90%] max-h-[80vh] overflow-y-auto">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxBranchModal')">&times;</span>
+            <h3 id="sandboxBranchTitle" class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.branchMessage">Сообщение для ветки</h3>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.branchMessage">Сообщение</label>
+                <textarea id="sandboxBranchInput" rows="3" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+            </div>
+            <button onclick="window._pages.sandbox.submitBranch()" class="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="sandbox.submitBranch">Отправить</button>
+        </div>
+    </div>
+
+    <!-- Replay Modal -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxReplayModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-md w-[90%] max-h-[80vh] overflow-y-auto">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxReplayModal')">&times;</span>
+            <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.selectPromptForReplay">Выберите версию промпта для регрессии</h3>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.promptVersion">Версия промпта</label>
+                <select id="sandboxReplayPrompt" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500"></select>
+            </div>
+            <input type="hidden" id="sandboxReplayConvId">
+            <button onclick="window._pages.sandbox.submitReplay()" class="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="sandbox.submitReplay">Запустить</button>
+        </div>
+    </div>
+
+    <!-- Starter Modal (CRUD) -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxStarterModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-md w-[90%] max-h-[80vh] overflow-y-auto">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxStarterModal')">&times;</span>
+            <h3 id="sandboxStarterModalTitle" class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.newStarter">Новый шаблон</h3>
+            <input type="hidden" id="sandboxStarterEditId">
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.starterTitle">Название</label>
+                <input type="text" id="sandboxStarterTitle" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.starterFirstMessage">Первое сообщение</label>
+                <textarea id="sandboxStarterFirstMsg" rows="3" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.starterDescription">Описание</label>
+                <input type="text" id="sandboxStarterDesc" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.scenarioType">Тип сценария</label>
+                <select id="sandboxStarterScenario" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="" data-i18n="sandbox.scenarioNone">Без типа</option>
+                    <option value="tire_search">tire_search</option>
+                    <option value="order_creation">order_creation</option>
+                    <option value="fitting_booking">fitting_booking</option>
+                    <option value="expert_consultation">expert_consultation</option>
+                    <option value="operator_transfer">operator_transfer</option>
+                </select>
+            </div>
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.starterPersona">Персона</label>
+                <select id="sandboxStarterPersona" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="neutral" data-i18n="sandbox.personaNeutral">Нейтральный</option>
+                    <option value="angry" data-i18n="sandbox.personaAngry">Раздражённый</option>
+                    <option value="confused" data-i18n="sandbox.personaConfused">Растерянный</option>
+                    <option value="rushed" data-i18n="sandbox.personaRushed">Спешащий</option>
+                    <option value="detailed" data-i18n="sandbox.personaDetailed">Дотошный</option>
+                </select>
+            </div>
+            <button onclick="window._pages.sandbox.saveStarter()" class="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="common.save">Сохранить</button>
         </div>
     </div>
 
