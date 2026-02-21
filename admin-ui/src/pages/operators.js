@@ -39,16 +39,18 @@ async function loadOperators() {
                 <td class="${tw.td}">${o.shift_start || '09:00'} - ${o.shift_end || '18:00'}</td>
                 <td class="${tw.td}">${o.is_active ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
                 <td class="${tw.td}">
-                    <div class="flex flex-wrap items-center gap-1">
-                        <select onchange="window._pages.operators.changeOperatorStatus('${o.id}', this.value); this.selectedIndex=0" class="${tw.selectSm}">
-                            <option value="">${t('operators.statusSelect')}</option>
-                            <option value="online">${t('operators.statusOnline')}</option>
-                            <option value="offline">${t('operators.statusOffline')}</option>
-                            <option value="busy">${t('operators.statusBusy')}</option>
-                            <option value="break">${t('operators.statusBreak')}</option>
-                        </select>
-                        <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.operators.editOperator('${o.id}')">${t('operators.editBtn')}</button>
-                        ${o.is_active ? `<button class="${tw.btnDanger} ${tw.btnSm}" data-id="${escapeHtml(o.id)}" data-name="${escapeHtml(o.name)}" onclick="window._pages.operators.deactivateOperator(this.dataset.id, this.dataset.name)">×</button>` : ''}
+                    <div class="relative inline-block">
+                        <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
+                        <div class="hidden absolute right-0 z-20 mt-1 w-44 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
+                            <div class="px-3 py-1 text-xs text-neutral-400 uppercase">${t('operators.statusSelect')}</div>
+                            <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.operators.changeOperatorStatus('${o.id}', 'online')">${t('operators.statusOnline')}</button>
+                            <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.operators.changeOperatorStatus('${o.id}', 'offline')">${t('operators.statusOffline')}</button>
+                            <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.operators.changeOperatorStatus('${o.id}', 'busy')">${t('operators.statusBusy')}</button>
+                            <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.operators.changeOperatorStatus('${o.id}', 'break')">${t('operators.statusBreak')}</button>
+                            <div class="border-t border-neutral-200 dark:border-neutral-700 my-1"></div>
+                            <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.operators.editOperator('${o.id}')">${t('operators.editBtn')}</button>
+                            ${o.is_active ? `<button class="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer" data-id="${escapeHtml(o.id)}" data-name="${escapeHtml(o.name)}" onclick="window._pages.operators.deactivateOperator(this.dataset.id, this.dataset.name)">${t('common.deactivate')}</button>` : ''}
+                        </div>
                     </div>
                 </td>
             </tr>
@@ -149,6 +151,11 @@ export function init() {
         loadOperators();
         loadQueueStatus();
         setRefreshTimer(() => { loadOperators(); loadQueueStatus(); }, 10000);
+    });
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.relative')) {
+            document.querySelectorAll('#page-operators .relative > div:not(.hidden)').forEach(m => m.classList.add('hidden'));
+        }
     });
 }
 

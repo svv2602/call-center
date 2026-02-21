@@ -40,10 +40,13 @@ async function loadPromptVersions() {
                     <td class="${tw.td}">${v.is_active ? `<span class="${tw.badgeGreen}">${t('prompts.activeLabel')}</span>` : ''}</td>
                     <td class="${tw.td}" data-sort-value="${v.created_at || ''}">${formatDate(v.created_at)}</td>
                     <td class="${tw.td}">
-                        <div class="flex flex-wrap gap-1">
-                            ${!v.is_active ? `<button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.prompts.activatePrompt('${v.id}')">${t('prompts.activateBtn')}</button>` : ''}
-                            ${!v.is_active ? `<button class="${tw.btnDanger} ${tw.btnSm}" data-id="${escapeHtml(v.id)}" data-name="${escapeHtml(v.name)}" onclick="window._pages.prompts.deletePrompt(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>` : ''}
-                        </div>
+                        ${!v.is_active ? `<div class="relative inline-block">
+                            <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
+                            <div class="hidden absolute right-0 z-20 mt-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.prompts.activatePrompt('${v.id}')">${t('prompts.activateBtn')}</button>
+                                <button class="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer" data-id="${escapeHtml(v.id)}" data-name="${escapeHtml(v.name)}" onclick="window._pages.prompts.deletePrompt(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>
+                            </div>
+                        </div>` : ''}
                     </td>
                 </tr>
             `).join('')}
@@ -207,10 +210,20 @@ async function loadABTests() {
 
                 let actionHtml = '';
                 if (test.status === 'active') {
-                    actionHtml = `<button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.prompts.stopABTest('${test.id}')">${t('prompts.stopBtn')}</button>`;
+                    actionHtml = `<div class="relative inline-block">
+                        <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
+                        <div class="hidden absolute right-0 z-20 mt-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
+                            <button class="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer" onclick="window._pages.prompts.stopABTest('${test.id}')">${t('prompts.stopBtn')}</button>
+                        </div>
+                    </div>`;
                 } else {
                     actionHtml = (test.significance ? _significanceBadge(test.significance) + ' ' : '')
-                        + `<button class="${tw.btnDanger} ${tw.btnSm}" data-id="${escapeHtml(test.id)}" data-name="${escapeHtml(test.test_name)}" onclick="window._pages.prompts.deleteABTest(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>`;
+                        + `<div class="relative inline-block">
+                        <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
+                        <div class="hidden absolute right-0 z-20 mt-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
+                            <button class="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer" data-id="${escapeHtml(test.id)}" data-name="${escapeHtml(test.test_name)}" onclick="window._pages.prompts.deleteABTest(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>
+                        </div>
+                    </div>`;
                 }
 
                 html += `<tr class="${tw.trHover}">
@@ -660,6 +673,11 @@ function showOptimizerDetail(id) {
 // ═══════════════════════════════════════════════════════════
 export function init() {
     registerPageLoader('prompts', loadPromptVersions);
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.relative')) {
+            document.querySelectorAll('#page-prompts .relative > div:not(.hidden)').forEach(m => m.classList.add('hidden'));
+        }
+    });
 }
 
 window._pages = window._pages || {};

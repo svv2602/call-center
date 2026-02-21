@@ -25,15 +25,17 @@ async function loadUsers() {
                     <td class="${tw.td}">${u.is_active ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
                     <td class="${tw.td}" data-sort-value="${u.last_login_at || ''}">${formatDate(u.last_login_at)}</td>
                     <td class="${tw.td}">
-                        <div class="flex flex-wrap items-center gap-1">
-                            <select onchange="window._pages.users.changeRole('${u.id}', this.value)" class="${tw.selectSm}">
-                                <option value="">${t('users.changeRole')}</option>
-                                <option value="admin">${t('users.roleAdmin')}</option>
-                                <option value="analyst">${t('users.roleAnalyst')}</option>
-                                <option value="operator">${t('users.roleOperator')}</option>
-                            </select>
-                            <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.users.toggleUser('${u.id}', ${u.is_active})">${u.is_active ? t('common.deactivate') : t('common.activate')}</button>
-                            <button class="${tw.btnPurple} ${tw.btnSm}" data-id="${escapeHtml(u.id)}" data-name="${escapeHtml(u.username)}" onclick="window._pages.users.resetUserPassword(this.dataset.id, this.dataset.name)">${t('users.resetPwd')}</button>
+                        <div class="relative inline-block">
+                            <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
+                            <div class="hidden absolute right-0 z-20 mt-1 w-44 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
+                                <div class="px-3 py-1 text-xs text-neutral-400 uppercase">${t('users.changeRole')}</div>
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.users.changeRole('${u.id}', 'admin')">${t('users.roleAdmin')}</button>
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.users.changeRole('${u.id}', 'analyst')">${t('users.roleAnalyst')}</button>
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.users.changeRole('${u.id}', 'operator')">${t('users.roleOperator')}</button>
+                                <div class="border-t border-neutral-200 dark:border-neutral-700 my-1"></div>
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.users.toggleUser('${u.id}', ${u.is_active})">${u.is_active ? t('common.deactivate') : t('common.activate')}</button>
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" data-id="${escapeHtml(u.id)}" data-name="${escapeHtml(u.username)}" onclick="window._pages.users.resetUserPassword(this.dataset.id, this.dataset.name)">${t('users.resetPwd')}</button>
+                            </div>
                         </div>
                     </td>
                 </tr>
@@ -95,6 +97,11 @@ async function resetUserPassword(userId, username) {
 
 export function init() {
     registerPageLoader('users', () => loadUsers());
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.relative')) {
+            document.querySelectorAll('#page-users .relative > div:not(.hidden)').forEach(m => m.classList.add('hidden'));
+        }
+    });
 }
 
 window._pages = window._pages || {};

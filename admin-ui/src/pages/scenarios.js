@@ -89,9 +89,12 @@ async function loadTemplates() {
                     <td class="${tw.td}"><span class="${tw.mutedText}">${escapeHtml((item.content || '').substring(0, 80))}${(item.content || '').length > 80 ? '...' : ''}</span></td>
                     <td class="${tw.td}">${item.is_active !== false ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
                     <td class="${tw.td}">
-                        <div class="flex flex-wrap gap-1">
-                            <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.scenarios.editTemplate('${item.id}')">${t('common.edit')}</button>
-                            ${variantCount > 1 ? `<button class="${tw.btnDanger} ${tw.btnSm}" data-id="${escapeHtml(item.id)}" data-name="${escapeHtml(item.title)}" onclick="window._pages.scenarios.deleteTemplate(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>` : ''}
+                        <div class="relative inline-block">
+                            <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
+                            <div class="hidden absolute right-0 z-20 mt-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.scenarios.editTemplate('${item.id}')">${t('common.edit')}</button>
+                                ${variantCount > 1 ? `<button class="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer" data-id="${escapeHtml(item.id)}" data-name="${escapeHtml(item.title)}" onclick="window._pages.scenarios.deleteTemplate(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>` : ''}
+                            </div>
                         </div>
                     </td>
                 </tr>`;
@@ -213,9 +216,12 @@ async function loadDialogues(offset) {
                     <td class="${tw.td}">${(item.tools_used || []).map(t => `<span class="${tw.badgeGray}">${escapeHtml(t)}</span>`).join(' ')}</td>
                     <td class="${tw.td}">${item.is_active !== false ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
                     <td class="${tw.td}">
-                        <div class="flex flex-wrap gap-1">
-                            <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.scenarios.editDialogue('${item.id}')">${t('common.edit')}</button>
-                            <button class="${tw.btnDanger} ${tw.btnSm}" data-id="${escapeHtml(item.id)}" data-name="${escapeHtml(item.title)}" onclick="window._pages.scenarios.deleteDialogue(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>
+                        <div class="relative inline-block">
+                            <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
+                            <div class="hidden absolute right-0 z-20 mt-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.scenarios.editDialogue('${item.id}')">${t('common.edit')}</button>
+                                <button class="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer" data-id="${escapeHtml(item.id)}" data-name="${escapeHtml(item.title)}" onclick="window._pages.scenarios.deleteDialogue(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>
+                            </div>
                         </div>
                     </td>
                 </tr>
@@ -344,9 +350,12 @@ async function loadSafetyRules(offset) {
                     <td class="${tw.td}"><span class="${tw.mutedText}">${escapeHtml((item.trigger_input || '').substring(0, 60))}${(item.trigger_input || '').length > 60 ? '...' : ''}</span></td>
                     <td class="${tw.td}">${item.is_active !== false ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
                     <td class="${tw.td}">
-                        <div class="flex flex-wrap gap-1">
-                            <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.scenarios.editSafetyRule('${item.id}')">${t('common.edit')}</button>
-                            <button class="${tw.btnDanger} ${tw.btnSm}" data-id="${escapeHtml(item.id)}" data-name="${escapeHtml(item.title)}" onclick="window._pages.scenarios.deleteSafetyRule(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>
+                        <div class="relative inline-block">
+                            <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
+                            <div class="hidden absolute right-0 z-20 mt-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.scenarios.editSafetyRule('${item.id}')">${t('common.edit')}</button>
+                                <button class="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer" data-id="${escapeHtml(item.id)}" data-name="${escapeHtml(item.title)}" onclick="window._pages.scenarios.deleteSafetyRule(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>
+                            </div>
                         </div>
                     </td>
                 </tr>
@@ -509,6 +518,11 @@ function closeRegressionModal() {
 // ─── Init ────────────────────────────────────────────────────
 export function init() {
     registerPageLoader('scenarios', () => showTab(_activeTab));
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.relative')) {
+            document.querySelectorAll('#page-scenarios .relative > div:not(.hidden)').forEach(m => m.classList.add('hidden'));
+        }
+    });
 }
 
 window._pages = window._pages || {};

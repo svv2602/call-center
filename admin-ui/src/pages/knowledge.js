@@ -120,11 +120,14 @@ async function loadArticles(offset) {
                     <td class="${tw.td}">${a.active !== false ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
                     <td class="${tw.td}" data-sort-value="${a.updated_at || a.created_at || ''}">${formatDate(a.updated_at || a.created_at)}</td>
                     <td class="${tw.td}">
-                        <div class="flex flex-wrap gap-1">
-                            <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.knowledge.editArticle('${a.id}')">${t('knowledge.editBtn')}</button>
-                            <button class="${tw.btnGreen} ${tw.btnSm}" onclick="window._pages.knowledge.reindexArticle('${a.id}')">${t('knowledge.reindexBtn')}</button>
-                            <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.knowledge.toggleArticle('${a.id}', ${a.active !== false})">${a.active !== false ? t('common.deactivate') : t('common.activate')}</button>
-                            <button class="${tw.btnDanger} ${tw.btnSm}" data-id="${escapeHtml(a.id)}" data-name="${escapeHtml(a.title)}" onclick="window._pages.knowledge.deleteArticle(this.dataset.id, this.dataset.name)">×</button>
+                        <div class="relative inline-block">
+                            <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
+                            <div class="hidden absolute right-0 z-20 mt-1 w-40 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.knowledge.editArticle('${a.id}')">${t('knowledge.editBtn')}</button>
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.knowledge.reindexArticle('${a.id}')">${t('knowledge.reindexBtn')}</button>
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.knowledge.toggleArticle('${a.id}', ${a.active !== false})">${a.active !== false ? t('common.deactivate') : t('common.activate')}</button>
+                                <button class="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer" data-id="${escapeHtml(a.id)}" data-name="${escapeHtml(a.title)}" onclick="window._pages.knowledge.deleteArticle(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>
+                            </div>
                         </div>
                     </td>
                 </tr>
@@ -386,10 +389,13 @@ async function loadSourceConfigs() {
                         ${statsText ? `<br><span class="${tw.mutedText} text-xs">${statsText}</span>` : ''}
                     </td>
                     <td class="${tw.td}">
-                        <div class="flex flex-wrap gap-1">
-                            <button class="${tw.btnGreen} ${tw.btnSm}" onclick="window._pages.knowledge.runSourceConfig('${c.id}')">${t('sources.runSource')}</button>
-                            <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.knowledge.editSourceConfig('${c.id}')">${t('common.edit')}</button>
-                            <button class="${tw.btnDanger} ${tw.btnSm}" data-id="${escapeHtml(c.id)}" data-name="${escapeHtml(c.name)}" onclick="window._pages.knowledge.deleteSourceConfig(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>
+                        <div class="relative inline-block">
+                            <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
+                            <div class="hidden absolute right-0 z-20 mt-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.knowledge.runSourceConfig('${c.id}')">${t('sources.runSource')}</button>
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.knowledge.editSourceConfig('${c.id}')">${t('common.edit')}</button>
+                                <button class="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer" data-id="${escapeHtml(c.id)}" data-name="${escapeHtml(c.name)}" onclick="window._pages.knowledge.deleteSourceConfig(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>
+                            </div>
                         </div>
                     </td>
                 </tr>`;
@@ -523,13 +529,15 @@ async function loadSources(offset) {
                     <td class="${tw.td}" data-sort-value="${escapeHtml(s.status || '')}">${sourceStatusBadge(s.status)}${s.skip_reason ? `<br><span class="${tw.mutedText} text-xs">${escapeHtml(s.skip_reason)}</span>` : ''}</td>
                     <td class="${tw.td}" data-sort-value="${s.created_at || ''}">${formatDate(s.created_at)}</td>
                     <td class="${tw.td}">
-                        <div class="flex flex-wrap gap-1">
-                            ${s.status === 'processed' && s.article_id ? `
-                                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.knowledge.viewSourceArticle('${s.article_id}')">${t('sources.viewArticle')}</button>
-                                ${s.article_active === false ? `<button class="${tw.btnGreen} ${tw.btnSm}" onclick="window._pages.knowledge.approveSource('${s.id}')">${t('sources.approve')}</button>` : ''}
-                                <button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.knowledge.rejectSource('${s.id}')">${t('sources.reject')}</button>
-                            ` : ''}
-                        </div>
+                        ${s.status === 'processed' && s.article_id ? `
+                        <div class="relative inline-block">
+                            <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
+                            <div class="hidden absolute right-0 z-20 mt-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.knowledge.viewSourceArticle('${s.article_id}')">${t('sources.viewArticle')}</button>
+                                ${s.article_active === false ? `<button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.knowledge.approveSource('${s.id}')">${t('sources.approve')}</button>` : ''}
+                                <button class="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer" onclick="window._pages.knowledge.rejectSource('${s.id}')">${t('sources.reject')}</button>
+                            </div>
+                        </div>` : ''}
                     </td>
                 </tr>
             `).join('')}
@@ -711,10 +719,13 @@ async function loadWatchedPages() {
                     <td class="${tw.td}">${p.fetched_at ? formatDate(p.fetched_at) : `<span class="${tw.mutedText} text-xs">${t('sources.neverScraped')}</span>`}</td>
                     <td class="${tw.td}">${p.next_scrape_at ? formatDate(p.next_scrape_at) : '-'}</td>
                     <td class="${tw.td}">
-                        <div class="flex flex-wrap gap-1">
-                            ${!isDiscovery && p.article_id ? `<button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.knowledge.viewSourceArticle('${p.article_id}')">${t('sources.watchedArticle')}</button>` : ''}
-                            <button class="${tw.btnGreen} ${tw.btnSm}" onclick="window._pages.knowledge.scrapeWatchedNow('${p.id}')">${t('sources.scrapeNow')}</button>
-                            <button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.knowledge.deleteWatchedPage('${p.id}')">${t('sources.deleteWatched')}</button>
+                        <div class="relative inline-block">
+                            <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
+                            <div class="hidden absolute right-0 z-20 mt-1 w-40 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
+                                ${!isDiscovery && p.article_id ? `<button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.knowledge.viewSourceArticle('${p.article_id}')">${t('sources.watchedArticle')}</button>` : ''}
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.knowledge.scrapeWatchedNow('${p.id}')">${t('sources.scrapeNow')}</button>
+                                <button class="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer" onclick="window._pages.knowledge.deleteWatchedPage('${p.id}')">${t('sources.deleteWatched')}</button>
+                            </div>
                         </div>
                     </td>
                 </tr>`;
@@ -731,9 +742,7 @@ async function loadWatchedPages() {
                         <td class="${tw.td}">${c.fetched_at ? formatDate(c.fetched_at) : `<span class="${tw.mutedText} text-xs">${t('sources.neverScraped')}</span>`}</td>
                         <td class="${tw.td}">${c.next_scrape_at ? formatDate(c.next_scrape_at) : '-'}</td>
                         <td class="${tw.td}">
-                            <div class="flex flex-wrap gap-1">
-                                ${c.article_id ? `<button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.knowledge.viewSourceArticle('${c.article_id}')">${t('sources.watchedArticle')}</button>` : ''}
-                            </div>
+                            ${c.article_id ? `<button class="text-xs text-blue-600 dark:text-blue-400 hover:underline cursor-pointer" onclick="window._pages.knowledge.viewSourceArticle('${c.article_id}')">${t('sources.watchedArticle')}</button>` : ''}
                         </td>
                     </tr>`;
                 }
@@ -821,6 +830,11 @@ async function deleteWatchedPage(pageId) {
 // ═══════════════════════════════════════════════════════════
 export function init() {
     registerPageLoader('knowledge', () => showTab(_activeTab));
+    document.addEventListener('click', (e) => {
+        if (!e.target.closest('.relative')) {
+            document.querySelectorAll('#page-knowledge .relative > div:not(.hidden)').forEach(m => m.classList.add('hidden'));
+        }
+    });
 }
 
 window._pages = window._pages || {};
