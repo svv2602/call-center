@@ -42,6 +42,14 @@ _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 # Chirp3-HD rejects them outright — strip only for Chirp voices.
 _COMBINING_ACUTE = "\u0301"
 
+# TTS pronunciation substitutions — applied before SSML conversion.
+# Fixes words that the TTS engine reads with incorrect stress or as
+# a single word when they should be two separate words.
+_TTS_SUBSTITUTIONS: list[tuple[re.Pattern[str], str]] = [
+    # "Проколесо" / "ПроКолесо" → two words for correct TTS pronunciation
+    (re.compile(r"(?i)проколесо"), "Про Колесо"),
+]
+
 # SSML break insertion patterns (applied after XML escaping)
 _BREAK_RULES: list[tuple[re.Pattern[str], str]] = [
     # After comma + space: subtle pause extending natural comma break
@@ -200,6 +208,9 @@ class GoogleTTSEngine:
 
         if self._strip_stress_marks:
             text = text.replace(_COMBINING_ACUTE, "")
+
+        for pattern, replacement in _TTS_SUBSTITUTIONS:
+            text = pattern.sub(replacement, text)
 
         if self._ssml_supported:
             try:
