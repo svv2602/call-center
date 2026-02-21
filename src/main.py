@@ -22,7 +22,9 @@ from sqlalchemy import text
 from src.agent.agent import LLMAgent, ToolRouter
 from src.agent.prompt_manager import (
     PromptManager,
+    fetch_tenant_promotions,
     format_few_shot_section,
+    format_promotions_context,
     format_safety_rules_section,
     get_few_shot_examples,
     get_pronunciation_rules,
@@ -491,6 +493,12 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 system_prompt = inject_pronunciation_rules(system_prompt, pron_rules)
             # else: fallback SYSTEM_PROMPT already has rules baked in
 
+        # Load tenant promotions into prompt context
+        promotions_context = None
+        if _db_engine is not None and session.tenant_id:
+            promos = await fetch_tenant_promotions(_db_engine, str(session.tenant_id))
+            promotions_context = format_promotions_context(promos)
+
         # Apply tenant overrides (tools filter, greeting, prompt suffix)
         if tenant:
             if tenant.get("enabled_tools"):
@@ -531,6 +539,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             prompt_version_name=prompt_version_name,
             few_shot_context=few_shot_context,
             safety_context=safety_context,
+            promotions_context=promotions_context,
         )
 
         # Initialize pattern search (if asyncpg pool available)

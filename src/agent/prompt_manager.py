@@ -444,6 +444,69 @@ def format_safety_rules_section(
     return "\n".join(parts)
 
 
+async def fetch_tenant_promotions(
+    engine: AsyncEngine,
+    tenant_id: str,
+) -> list[dict[str, str]]:
+    """Fetch active promotions for a tenant (tenant-specific + shared).
+
+    Returns list of dicts with 'title' and 'content' keys.
+    """
+    if not tenant_id:
+        return []
+
+    try:
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                text("""
+                    SELECT title, content
+                    FROM knowledge_articles
+                    WHERE active = true
+                      AND category = 'promotions'
+                      AND (tenant_id IS NULL OR tenant_id = CAST(:tid AS uuid))
+                    ORDER BY tenant_id NULLS LAST, title
+                    LIMIT 10
+                """),
+                {"tid": tenant_id},
+            )
+            return [dict(r._mapping) for r in result]
+    except Exception:
+        logger.warning("Failed to load tenant promotions", exc_info=True)
+        return []
+
+
+def format_promotions_context(
+    promos: list[dict[str, str]],
+) -> str | None:
+    """Format promotions as a system prompt section.
+
+    Returns None if no promotions available.
+    """
+    if not promos:
+        return None
+
+    parts: list[str] = [
+        "\n## Актуальні акції та спецпропозиції",
+        "Ця інформація завантажена з бази — використовуй її в розмові.",
+    ]
+    for p in promos:
+        # Use first 500 chars of content to keep prompt compact
+        content = p.get("content", "")
+        if len(content) > 500:
+            content = content[:500] + "…"
+        parts.append(f"\n### {p['title']}\n{content}")
+
+    parts.append(
+        "\n### Як використовувати акції в розмові\n"
+        "- Згадуй ТІЛЬКИ релевантну акцію, коли клієнт обирає відповідні шини\n"
+        "- Будь ненав'язливим: «до речі, на ці шини зараз діє безкоштовна доставка»\n"
+        "- НЕ перераховуй всі акції одразу — лише ту, що стосується поточного вибору\n"
+        "- Якщо клієнт прямо питає про акції — тоді перерахуй ВСІ"
+    )
+
+    return "\n".join(parts)
+
+
 PRONUNCIATION_REDIS_KEY = "agent:pronunciation_rules"
 
 

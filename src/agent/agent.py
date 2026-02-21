@@ -82,6 +82,7 @@ class LLMAgent:
         provider_override: str | None = None,
         few_shot_context: str | None = None,
         safety_context: str | None = None,
+        promotions_context: str | None = None,
     ) -> None:
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._model = model
@@ -94,6 +95,7 @@ class LLMAgent:
         self._provider_override = provider_override
         self._few_shot_context = few_shot_context
         self._safety_context = safety_context
+        self._promotions_context = promotions_context
 
     @property
     def tool_router(self) -> ToolRouter:
@@ -297,11 +299,13 @@ class LLMAgent:
         """Build system prompt with caller context and season hint appended."""
         parts = [self._system_prompt]
 
-        # Safety rules and few-shot examples (before dynamic per-turn sections)
+        # Safety rules, few-shot examples, and promotions context
         if self._safety_context:
             parts.append(self._safety_context)
         if self._few_shot_context:
             parts.append(self._few_shot_context)
+        if self._promotions_context:
+            parts.append(self._promotions_context)
 
         # Dynamic season hint
         month = datetime.date.today().month
