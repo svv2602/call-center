@@ -15,6 +15,7 @@ CATEGORIES: list[dict[str, str]] = [
     {"value": "returns", "label": "Returns"},
     {"value": "warranty", "label": "Warranty"},
     {"value": "delivery", "label": "Delivery"},
+    {"value": "promotions", "label": "Promotions"},
     {"value": "general", "label": "General"},
 ]
 
