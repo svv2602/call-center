@@ -10,18 +10,19 @@ from src.agent.tools import ALL_TOOLS, FITTING_TOOLS, MVP_TOOLS, ORDER_TOOLS
 class TestOrderToolsList:
     """Test ORDER_TOOLS list structure."""
 
-    def test_four_order_tools_defined(self) -> None:
+    def test_order_tools_defined(self) -> None:
         tool_names = {t["name"] for t in ORDER_TOOLS}
         assert tool_names == {
             "get_order_status",
             "create_order_draft",
             "update_order_delivery",
             "confirm_order",
+            "get_pickup_points",
         }
 
     def test_all_tools_is_combined(self) -> None:
         assert ALL_TOOLS == MVP_TOOLS + ORDER_TOOLS + FITTING_TOOLS
-        assert len(ALL_TOOLS) == 14
+        assert len(ALL_TOOLS) == 15
 
     def test_canonical_tool_names(self) -> None:
         """Tool names must match canonical list from 00-overview.md."""
@@ -36,6 +37,7 @@ class TestOrderToolsList:
             "create_order_draft",  # NOT create_order
             "update_order_delivery",
             "confirm_order",
+            "get_pickup_points",
             "get_fitting_stations",
             "get_fitting_slots",
             "book_fitting",

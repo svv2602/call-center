@@ -2,6 +2,7 @@
 
 import asyncio
 import contextlib
+import json
 import logging
 import os
 import signal
@@ -662,6 +663,55 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
     router.register("create_order_draft", _create_order_with_metric)
     router.register("update_order_delivery", client.update_delivery)
     router.register("confirm_order", client.confirm_order)
+
+    async def _get_pickup_points(city: str = "") -> dict[str, Any]:
+        network = session.network_id or "ProKoleso"
+        cache_key = f"onec:points:{network}"
+
+        # 1. Redis cache
+        if _redis:
+            try:
+                raw = await _redis.get(cache_key)
+                if raw:
+                    all_points = json.loads(raw if isinstance(raw, str) else raw.decode())
+                    if city:
+                        all_points = [
+                            p for p in all_points if city.lower() in p.get("city", "").lower()
+                        ]
+                    return {"total": len(all_points), "points": all_points[:15]}
+            except Exception:
+                pass
+
+        # 2. 1C API
+        if _onec_client is not None:
+            try:
+                data = await _onec_client.get_pickup_points(network)
+                raw_points = data.get("data", [])
+                all_points = [
+                    {
+                        "id": p.get("id", ""),
+                        "address": p.get("point", ""),
+                        "type": p.get("point_type", ""),
+                        "city": p.get("City", ""),
+                    }
+                    for p in raw_points
+                ]
+                if _redis:
+                    await _redis.setex(
+                        cache_key, 3600, json.dumps(all_points, ensure_ascii=False)
+                    )
+                if city:
+                    all_points = [
+                        p for p in all_points if city.lower() in p.get("city", "").lower()
+                    ]
+                return {"total": len(all_points), "points": all_points[:15]}
+            except Exception:
+                logger.warning("1C pickup points unavailable for %s", network, exc_info=True)
+
+        # 3. Fallback to Store API
+        return await client.get_pickup_points(city)
+
+    router.register("get_pickup_points", _get_pickup_points)
     router.register("get_fitting_stations", client.get_fitting_stations)
     router.register("get_fitting_slots", client.get_fitting_slots)
     router.register("book_fitting", _book_fitting_with_metric)

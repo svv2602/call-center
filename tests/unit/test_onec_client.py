@@ -130,6 +130,45 @@ class TestOneCClientRequests:
             assert result["data"][0]["Ref"] == "xyz"
 
 
+    @pytest.mark.asyncio
+    async def test_get_pickup_points(self, onec_client: OneCClient) -> None:
+        mock_response = {
+            "success": True,
+            "data": [
+                {
+                    "id": "000000054",
+                    "point": "вул. Академіка Заболотного 3",
+                    "point_type": "Стороння точка",
+                    "City": "Київ",
+                    "CityRef": "8d5a980d-0000-0000-0000-000000000000",
+                }
+            ],
+            "errors": [],
+        }
+        with patch.object(
+            onec_client, "_get", new_callable=AsyncMock, return_value=mock_response
+        ) as mock_get:
+            result = await onec_client.get_pickup_points("ProKoleso")
+            mock_get.assert_called_once_with(
+                "/Trade/hs/site/points/",
+                params={"TradingNetwork": "ProKoleso"},
+            )
+            assert result["success"] is True
+            assert result["data"][0]["id"] == "000000054"
+            assert result["data"][0]["City"] == "Київ"
+
+    @pytest.mark.asyncio
+    async def test_get_pickup_points_tshina(self, onec_client: OneCClient) -> None:
+        with patch.object(
+            onec_client, "_get", new_callable=AsyncMock, return_value={"success": True, "data": []}
+        ) as mock_get:
+            await onec_client.get_pickup_points("Tshina")
+            mock_get.assert_called_once_with(
+                "/Trade/hs/site/points/",
+                params={"TradingNetwork": "Tshina"},
+            )
+
+
 class TestOneCAPIError:
     def test_error_message(self) -> None:
         err = OneCAPIError(401, "Unauthorized")

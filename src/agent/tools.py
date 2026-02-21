@@ -232,6 +232,24 @@ ORDER_TOOLS: list[dict] = [  # type: ignore[type-arg]
             "required": ["order_id", "payment_method"],
         },
     },
+    {
+        "name": "get_pickup_points",
+        "description": (
+            "Отримати список пунктів видачі (самовивозу) для поточної мережі. "
+            "Використовуй, коли клієнт обирає самовивіз як спосіб доставки. "
+            "Після вибору пункту клієнтом — передай його id в update_order_delivery(pickup_point_id=...)."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "city": {
+                    "type": "string",
+                    "description": "Місто для фільтрації пунктів (наприклад, 'Київ')",
+                },
+            },
+            "required": [],
+        },
+    },
 ]
 
 # Phase 3: Fitting and knowledge base tools

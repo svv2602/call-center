@@ -23,7 +23,7 @@ class TestFittingToolsList:
 
     def test_all_tools_is_combined(self) -> None:
         assert ALL_TOOLS == MVP_TOOLS + ORDER_TOOLS + FITTING_TOOLS
-        assert len(ALL_TOOLS) == 14
+        assert len(ALL_TOOLS) == 15
 
     def test_canonical_tool_names(self) -> None:
         """Tool names must match canonical list from 00-overview.md."""
@@ -39,6 +39,7 @@ class TestFittingToolsList:
             "create_order_draft",
             "update_order_delivery",
             "confirm_order",
+            "get_pickup_points",
             # Phase 3
             "get_fitting_stations",
             "get_fitting_slots",

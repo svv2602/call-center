@@ -114,6 +114,18 @@ class OneCClient:
         """
         return await self._get(f"/Trade/hs/site/get_stock/{network}")
 
+    # --- Pickup points ---
+
+    async def get_pickup_points(self, network: str) -> dict[str, Any]:
+        """Get pickup/delivery points for a trading network.
+
+        GET /Trade/hs/site/points/?TradingNetwork={network}
+        """
+        return await self._get(
+            "/Trade/hs/site/points/",
+            params={"TradingNetwork": network},
+        )
+
     # --- Nova Poshta reference data ---
 
     async def get_novapost_cities(self) -> dict[str, Any]:
