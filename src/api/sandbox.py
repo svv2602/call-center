@@ -587,6 +587,7 @@ async def send_message(
     # Pass live infrastructure for "live" tool mode
     onec_client = None
     redis_client = None
+    knowledge_search = None
     if conv.tool_mode == "live":
         try:
             # Use sys.modules to get the actual running main module
@@ -597,6 +598,7 @@ async def send_message(
             if main_mod:
                 onec_client = getattr(main_mod, "_onec_client", None)
                 redis_client = getattr(main_mod, "_redis", None)
+                knowledge_search = getattr(main_mod, "_knowledge_search", None)
         except Exception:
             logger.debug("Could not get live clients from main module", exc_info=True)
 
@@ -610,6 +612,8 @@ async def send_message(
         onec_client=onec_client,
         redis_client=redis_client,
         tenant=tenant,
+        knowledge_search=knowledge_search,
+        tenant_id=str(conv.tenant_id) if conv.tenant_id else "",
     )
 
     result = await process_sandbox_turn(agent, request.message, history, is_mock=is_mock)

@@ -73,8 +73,24 @@ def _register_live_tools(
     onec_client: OneCClient | None = None,
     redis_client: Redis | None = None,
     network: str = "ProKoleso",
+    knowledge_search: Any = None,
+    tenant_id: str = "",
 ) -> None:
     """Override mock handlers with real 1C-backed handlers where available."""
+    # Register real knowledge search (pgvector) if available
+    if knowledge_search is not None:
+
+        async def _search_kb(**kwargs: Any) -> dict[str, Any]:
+            results = await knowledge_search.search(
+                query=kwargs.get("query", ""),
+                category=kwargs.get("category", ""),
+                tenant_id=tenant_id,
+            )
+            return {"total": len(results), "articles": results}
+
+        router.register("search_knowledge_base", _search_kb)
+        logger.info("Live tool registered: search_knowledge_base (pgvector)")
+
     if onec_client is None:
         logger.warning("Live tool mode: no OneCClient — all tools remain mock")
         return
@@ -132,6 +148,8 @@ async def create_sandbox_agent(
     onec_client: OneCClient | None = None,
     redis_client: Redis | None = None,
     tenant: dict[str, Any] | None = None,
+    knowledge_search: Any = None,
+    tenant_id: str = "",
 ) -> LLMAgent:
     """Create an LLMAgent configured for sandbox testing.
 
@@ -147,6 +165,7 @@ async def create_sandbox_agent(
         onec_client: Optional 1C client for live tool mode.
         redis_client: Optional Redis client for tool caching.
         tenant: Optional tenant dict with enabled_tools/prompt_suffix.
+        knowledge_search: Optional KnowledgeSearch for pgvector-backed search.
 
     Returns:
         Configured LLMAgent instance.
@@ -178,7 +197,13 @@ async def create_sandbox_agent(
     else:
         # Live mode: start with mock, overlay real handlers where available
         tool_router = build_mock_tool_router()
-        _register_live_tools(tool_router, onec_client=onec_client, redis_client=redis_client)
+        _register_live_tools(
+            tool_router,
+            onec_client=onec_client,
+            redis_client=redis_client,
+            knowledge_search=knowledge_search,
+            tenant_id=tenant_id,
+        )
 
     # Inject pronunciation rules from Redis
     if redis is not None and system_prompt is not None:

@@ -812,7 +812,7 @@ async def scrape_watched_page_now(page_id: UUID, _: dict[str, Any] = _admin_dep)
         result = await conn.execute(
             text("""
                 SELECT id, url, article_id, content_hash, rescrape_interval_hours,
-                       COALESCE(is_discovery, false) AS is_discovery
+                       COALESCE(is_discovery, false) AS is_discovery, tenant_id
                 FROM knowledge_sources
                 WHERE id = :id AND source_type = 'watched_page'
             """),
@@ -904,12 +904,15 @@ async def scrape_watched_page_now(page_id: UUID, _: dict[str, Any] = _admin_dep)
 
         article_id = page["article_id"]
 
+        page_tenant_id = str(page["tenant_id"]) if page.get("tenant_id") else None
+
         if article_id:
             async with engine.begin() as conn:
                 await conn.execute(
                     text("""
                         UPDATE knowledge_articles
                         SET title = :title, category = :category, content = :content,
+                            tenant_id = CAST(:tenant_id AS uuid),
                             embedding_status = 'pending', updated_at = now()
                         WHERE id = CAST(:article_id AS uuid)
                     """),
@@ -918,6 +921,7 @@ async def scrape_watched_page_now(page_id: UUID, _: dict[str, Any] = _admin_dep)
                         "title": processed.title,
                         "category": processed.category,
                         "content": processed.content,
+                        "tenant_id": page_tenant_id,
                     },
                 )
             async with engine.begin() as conn:
@@ -936,14 +940,16 @@ async def scrape_watched_page_now(page_id: UUID, _: dict[str, Any] = _admin_dep)
                 result = await conn.execute(
                     text("""
                         INSERT INTO knowledge_articles
-                            (title, category, content, active, embedding_status)
-                        VALUES (:title, :category, :content, true, 'pending')
+                            (title, category, content, active, embedding_status, tenant_id)
+                        VALUES (:title, :category, :content, true, 'pending',
+                                CAST(:tenant_id AS uuid))
                         RETURNING id
                     """),
                     {
                         "title": processed.title,
                         "category": processed.category,
                         "content": processed.content,
+                        "tenant_id": page_tenant_id,
                     },
                 )
                 article_row = result.first()
@@ -1008,7 +1014,8 @@ async def _scrape_discovery_page_inline(
         )
         existing_urls = {row.url for row in result}
 
-    # Create new children
+    # Create new children (inherit parent's tenant_id)
+    parent_tenant_id = str(page["tenant_id"]) if page.get("tenant_id") else None
     new_urls = set(discovered_links) - existing_urls
     for child_url in new_urls:
         async with engine.begin() as conn:
@@ -1016,12 +1023,18 @@ async def _scrape_discovery_page_inline(
                 text("""
                     INSERT INTO knowledge_sources
                         (url, source_site, source_type, status, rescrape_interval_hours,
-                         original_title, parent_id, next_scrape_at)
+                         original_title, parent_id, next_scrape_at, tenant_id)
                     VALUES (:url, 'prokoleso.ua', 'watched_page', 'new',
-                            :interval, :url, CAST(:parent_id AS uuid), now())
+                            :interval, :url, CAST(:parent_id AS uuid), now(),
+                            CAST(:tenant_id AS uuid))
                     ON CONFLICT (url) DO NOTHING
                 """),
-                {"url": child_url, "interval": interval, "parent_id": source_id},
+                {
+                    "url": child_url,
+                    "interval": interval,
+                    "parent_id": source_id,
+                    "tenant_id": parent_tenant_id,
+                },
             )
 
     # Remove stale
@@ -1040,7 +1053,7 @@ async def _scrape_discovery_page_inline(
     async with engine.begin() as conn:
         result = await conn.execute(
             text("""
-                SELECT id, url, article_id, content_hash, rescrape_interval_hours
+                SELECT id, url, article_id, content_hash, rescrape_interval_hours, tenant_id
                 FROM knowledge_sources WHERE parent_id = CAST(:pid AS uuid)
             """),
             {"pid": source_id},
@@ -1101,12 +1114,14 @@ async def _scrape_discovery_page_inline(
                 continue
 
             article_id = child["article_id"]
+            child_tenant_id = str(child["tenant_id"]) if child.get("tenant_id") else None
             if article_id:
                 async with engine.begin() as conn:
                     await conn.execute(
                         text("""
                             UPDATE knowledge_articles
                             SET title = :title, category = :category, content = :content,
+                                tenant_id = CAST(:tenant_id AS uuid),
                                 embedding_status = 'pending', updated_at = now()
                             WHERE id = CAST(:article_id AS uuid)
                         """),
@@ -1115,6 +1130,7 @@ async def _scrape_discovery_page_inline(
                             "title": processed.title,
                             "category": processed.category,
                             "content": processed.content,
+                            "tenant_id": child_tenant_id,
                         },
                     )
                 async with engine.begin() as conn:
@@ -1133,14 +1149,16 @@ async def _scrape_discovery_page_inline(
                     result = await conn.execute(
                         text("""
                             INSERT INTO knowledge_articles
-                                (title, category, content, active, embedding_status)
-                            VALUES (:title, :category, :content, true, 'pending')
+                                (title, category, content, active, embedding_status, tenant_id)
+                            VALUES (:title, :category, :content, true, 'pending',
+                                    CAST(:tenant_id AS uuid))
                             RETURNING id
                         """),
                         {
                             "title": processed.title,
                             "category": processed.category,
                             "content": processed.content,
+                            "tenant_id": child_tenant_id,
                         },
                     )
                     article_row = result.first()

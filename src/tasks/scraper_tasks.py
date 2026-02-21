@@ -557,7 +557,7 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
         result = await conn.execute(
             text("""
                 SELECT id, url, article_id, content_hash, rescrape_interval_hours,
-                       COALESCE(is_discovery, false) AS is_discovery
+                       COALESCE(is_discovery, false) AS is_discovery, tenant_id
                 FROM knowledge_sources
                 WHERE source_type = 'watched_page'
                   AND parent_id IS NULL
@@ -662,6 +662,7 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
                     continue
 
                 article_id = page["article_id"]
+                page_tenant_id = str(page["tenant_id"]) if page.get("tenant_id") else None
 
                 if article_id:
                     # Update existing article
@@ -670,6 +671,7 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
                             text("""
                                 UPDATE knowledge_articles
                                 SET title = :title, category = :category, content = :content,
+                                    tenant_id = CAST(:tenant_id AS uuid),
                                     embedding_status = 'pending', updated_at = now()
                                 WHERE id = CAST(:article_id AS uuid)
                             """),
@@ -678,6 +680,7 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
                                 "title": processed.title,
                                 "category": processed.category,
                                 "content": processed.content,
+                                "tenant_id": page_tenant_id,
                             },
                         )
                     # Update source hash
@@ -698,14 +701,16 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
                         result = await conn.execute(
                             text("""
                                 INSERT INTO knowledge_articles
-                                    (title, category, content, active, embedding_status)
-                                VALUES (:title, :category, :content, true, 'pending')
+                                    (title, category, content, active, embedding_status, tenant_id)
+                                VALUES (:title, :category, :content, true, 'pending',
+                                        CAST(:tenant_id AS uuid))
                                 RETURNING id
                             """),
                             {
                                 "title": processed.title,
                                 "category": processed.category,
                                 "content": processed.content,
+                                "tenant_id": page_tenant_id,
                             },
                         )
                         article_row = result.first()
@@ -789,7 +794,7 @@ async def _handle_discovery_page(
     async with engine.begin() as conn:
         result = await conn.execute(
             text("""
-                SELECT id, url, article_id, content_hash, rescrape_interval_hours
+                SELECT id, url, article_id, content_hash, rescrape_interval_hours, tenant_id
                 FROM knowledge_sources
                 WHERE parent_id = CAST(:parent_id AS uuid)
             """),
@@ -821,7 +826,8 @@ async def _handle_discovery_page(
                 {"id": str(child["id"])},
             )
 
-    # Create new children
+    # Create new children (inherit parent's tenant_id)
+    parent_tenant_id = str(page["tenant_id"]) if page.get("tenant_id") else None
     new_urls = discovered_set - set(existing_children.keys())
     for child_url in new_urls:
         logger.info("Discovery page %s: adding new child %s", page_url, child_url)
@@ -830,19 +836,25 @@ async def _handle_discovery_page(
                 text("""
                     INSERT INTO knowledge_sources
                         (url, source_site, source_type, status, rescrape_interval_hours,
-                         original_title, parent_id, next_scrape_at)
+                         original_title, parent_id, next_scrape_at, tenant_id)
                     VALUES (:url, 'prokoleso.ua', 'watched_page', 'new',
-                            :interval, :url, CAST(:parent_id AS uuid), now())
+                            :interval, :url, CAST(:parent_id AS uuid), now(),
+                            CAST(:tenant_id AS uuid))
                     ON CONFLICT (url) DO NOTHING
                 """),
-                {"url": child_url, "interval": interval, "parent_id": source_id},
+                {
+                    "url": child_url,
+                    "interval": interval,
+                    "parent_id": source_id,
+                    "tenant_id": parent_tenant_id,
+                },
             )
 
     # Now scrape all current children (new + existing that are due)
     async with engine.begin() as conn:
         result = await conn.execute(
             text("""
-                SELECT id, url, article_id, content_hash, rescrape_interval_hours
+                SELECT id, url, article_id, content_hash, rescrape_interval_hours, tenant_id
                 FROM knowledge_sources
                 WHERE parent_id = CAST(:parent_id AS uuid)
                   AND (next_scrape_at IS NULL OR next_scrape_at <= now())
@@ -921,6 +933,7 @@ async def _handle_discovery_page(
                 continue
 
             article_id = child["article_id"]
+            child_tenant_id = str(child["tenant_id"]) if child.get("tenant_id") else None
 
             if article_id:
                 # Update existing article
@@ -929,6 +942,7 @@ async def _handle_discovery_page(
                         text("""
                             UPDATE knowledge_articles
                             SET title = :title, category = :category, content = :content,
+                                tenant_id = CAST(:tenant_id AS uuid),
                                 embedding_status = 'pending', updated_at = now()
                             WHERE id = CAST(:article_id AS uuid)
                         """),
@@ -937,6 +951,7 @@ async def _handle_discovery_page(
                             "title": processed.title,
                             "category": processed.category,
                             "content": processed.content,
+                            "tenant_id": child_tenant_id,
                         },
                     )
                 async with engine.begin() as conn:
@@ -955,14 +970,16 @@ async def _handle_discovery_page(
                     result = await conn.execute(
                         text("""
                             INSERT INTO knowledge_articles
-                                (title, category, content, active, embedding_status)
-                            VALUES (:title, :category, :content, true, 'pending')
+                                (title, category, content, active, embedding_status, tenant_id)
+                            VALUES (:title, :category, :content, true, 'pending',
+                                    CAST(:tenant_id AS uuid))
                             RETURNING id
                         """),
                         {
                             "title": processed.title,
                             "category": processed.category,
                             "content": processed.content,
+                            "tenant_id": child_tenant_id,
                         },
                     )
                     article_row = result.first()

@@ -198,6 +198,8 @@ _embedding_task: asyncio.Task | None = None  # type: ignore[type-arg]
 _db_engine: Any = None
 _llm_router: Any = None  # LLMRouter when FF_LLM_ROUTING_ENABLED=true
 _asyncpg_pool: Any = None  # asyncpg pool for PatternSearch (pgvector)
+_knowledge_search: Any = None  # KnowledgeSearch (pgvector) for search_knowledge_base tool
+_search_embedding_gen: Any = None  # EmbeddingGenerator shared by KnowledgeSearch
 
 
 @app.get("/health")
@@ -726,7 +728,17 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
     router.register("book_fitting", _book_fitting_with_metric)
     router.register("cancel_fitting", client.cancel_fitting)
     router.register("get_fitting_price", client.get_fitting_price)
-    router.register("search_knowledge_base", client.search_knowledge_base)
+    async def _search_knowledge(**kwargs: Any) -> dict[str, Any]:
+        if _knowledge_search is not None:
+            results = await _knowledge_search.search(
+                query=kwargs.get("query", ""),
+                category=kwargs.get("category", ""),
+                tenant_id=session.tenant_id or "",
+            )
+            return {"total": len(results), "articles": results}
+        return await client.search_knowledge_base(**kwargs)
+
+    router.register("search_knowledge_base", _search_knowledge)
 
     async def transfer_to_operator(**kwargs: Any) -> dict[str, str]:
         session.transferred = True
@@ -809,6 +821,7 @@ async def main() -> None:
     """Main application entry point."""
     global _audio_server, _redis, _store_client, _tts_engine
     global _onec_client, _embedding_task, _db_engine, _llm_router, _asyncpg_pool
+    global _knowledge_search, _search_embedding_gen
 
     settings = get_settings()
 
@@ -935,6 +948,24 @@ async def main() -> None:
             logger.debug("asyncpg pool init failed — pattern search disabled", exc_info=True)
             _asyncpg_pool = None
 
+    # Initialize KnowledgeSearch for search_knowledge_base tool (pgvector)
+    if _asyncpg_pool is not None and settings.openai.api_key:
+        try:
+            from src.knowledge.embeddings import EmbeddingGenerator
+            from src.knowledge.search import KnowledgeSearch
+
+            _search_embedding_gen = EmbeddingGenerator(settings.openai.api_key)
+            await _search_embedding_gen.open()
+            _knowledge_search = KnowledgeSearch(_asyncpg_pool, _search_embedding_gen)
+            logger.info("KnowledgeSearch initialized (pgvector)")
+        except Exception:
+            logger.debug("KnowledgeSearch init failed — tool will use StoreClient fallback", exc_info=True)
+            _knowledge_search = None
+            if _search_embedding_gen is not None:
+                with contextlib.suppress(Exception):
+                    await _search_embedding_gen.close()
+                _search_embedding_gen = None
+
     # Initialize shared components (TTS is shared across calls, StoreClient too)
     _store_client = StoreClient(
         base_url=settings.store_api.url,
@@ -1004,6 +1035,10 @@ async def main() -> None:
     if _onec_client is not None:
         await _onec_client.close()
         logger.info("OneCClient closed")
+
+    if _search_embedding_gen is not None:
+        await _search_embedding_gen.close()
+        logger.info("Search embedding generator closed")
 
     if _asyncpg_pool is not None:
         await _asyncpg_pool.close()

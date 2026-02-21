@@ -55,6 +55,7 @@ class ArticleCreateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     category: str = Field(min_length=1, max_length=50)
     content: str = Field(min_length=1)
+    tenant_id: str | None = None
 
 
 class ArticleUpdateRequest(BaseModel):
@@ -62,6 +63,7 @@ class ArticleUpdateRequest(BaseModel):
     category: str | None = Field(default=None, min_length=1, max_length=50)
     content: str | None = Field(default=None, min_length=1)
     active: bool | None = None
+    tenant_id: str | None = None
 
 
 @router.get("/article-categories")
@@ -75,6 +77,7 @@ async def list_articles(
     category: str | None = Query(None),
     active: bool | None = Query(None),
     search: str | None = Query(None, description="Full-text search in title and content"),
+    tenant_id: str | None = Query(None, description="Filter by tenant UUID (NULL = shared articles)"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     _: dict[str, Any] = _analyst_dep,
@@ -94,6 +97,9 @@ async def list_articles(
     if search:
         conditions.append("(title ILIKE :search OR content ILIKE :search)")
         params["search"] = f"%{search}%"
+    if tenant_id:
+        conditions.append("(tenant_id IS NULL OR tenant_id = CAST(:tenant_id AS uuid))")
+        params["tenant_id"] = tenant_id
 
     where_clause = " AND ".join(conditions)
 
@@ -106,7 +112,8 @@ async def list_articles(
 
         result = await conn.execute(
             text(f"""
-                SELECT id, title, category, active, embedding_status, created_at, updated_at
+                SELECT id, title, category, active, embedding_status, tenant_id,
+                       created_at, updated_at
                 FROM knowledge_articles
                 WHERE {where_clause}
                 ORDER BY category, title
@@ -235,7 +242,8 @@ async def get_article(article_id: UUID, _: dict[str, Any] = _analyst_dep) -> dic
     async with engine.begin() as conn:
         result = await conn.execute(
             text("""
-                SELECT id, title, category, content, active, embedding_status, created_at, updated_at
+                SELECT id, title, category, content, active, embedding_status, tenant_id,
+                       created_at, updated_at
                 FROM knowledge_articles
                 WHERE id = :id
             """),
@@ -261,14 +269,16 @@ async def create_article(
     async with engine.begin() as conn:
         result = await conn.execute(
             text("""
-                INSERT INTO knowledge_articles (title, category, content, embedding_status)
-                VALUES (:title, :category, :content, 'pending')
-                RETURNING id, title, category, active, embedding_status, created_at
+                INSERT INTO knowledge_articles
+                    (title, category, content, embedding_status, tenant_id)
+                VALUES (:title, :category, :content, 'pending', CAST(:tenant_id AS uuid))
+                RETURNING id, title, category, active, embedding_status, tenant_id, created_at
             """),
             {
                 "title": request.title,
                 "category": request.category,
                 "content": request.content,
+                "tenant_id": request.tenant_id,
             },
         )
         row = result.first()
@@ -307,6 +317,9 @@ async def update_article(
     if request.active is not None:
         updates.append("active = :active")
         params["active"] = request.active
+    if request.tenant_id is not None:
+        updates.append("tenant_id = CAST(:tenant_id AS uuid)")
+        params["tenant_id"] = request.tenant_id if request.tenant_id else None
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")

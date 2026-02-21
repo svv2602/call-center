@@ -33,6 +33,7 @@ class KnowledgeSearch:
         query: str,
         category: str = "",
         limit: int = 5,
+        tenant_id: str = "",
     ) -> list[dict[str, Any]]:
         """Search knowledge base by semantic similarity.
 
@@ -40,6 +41,8 @@ class KnowledgeSearch:
             query: User's question or search query.
             category: Optional category filter (brands, guides, faq, comparisons).
             limit: Maximum number of results (default 5).
+            tenant_id: Optional tenant UUID. When set, returns only shared
+                (tenant_id IS NULL) and tenant-specific articles.
 
         Returns:
             List of matching articles with relevance scores.
@@ -49,29 +52,37 @@ class KnowledgeSearch:
             return []
 
         try:
-            return await self._vector_search(query, category, limit)
+            return await self._vector_search(query, category, limit, tenant_id)
         except Exception as exc:
             logger.warning("Vector search failed, falling back to text search: %s", exc)
-            return await self._text_search(query, category, limit)
+            return await self._text_search(query, category, limit, tenant_id)
 
     async def _vector_search(
         self,
         query: str,
         category: str,
         limit: int,
+        tenant_id: str = "",
     ) -> list[dict[str, Any]]:
         """Perform vector similarity search using pgvector."""
         # Generate embedding for the query
         query_embedding = await self._generator.generate_single(query)
         embedding_str = "[" + ",".join(str(v) for v in query_embedding) + "]"
 
-        # Build SQL with optional category filter
-        category_filter = ""
+        # Build SQL with optional category and tenant filters
+        extra_filters = ""
         params: list[Any] = [embedding_str, limit]
+        param_idx = 3
 
         if category:
-            category_filter = "AND a.category = $3"
+            extra_filters += f" AND a.category = ${param_idx}"
             params.append(category)
+            param_idx += 1
+
+        if tenant_id:
+            extra_filters += f" AND (a.tenant_id IS NULL OR a.tenant_id = ${param_idx}::uuid)"
+            params.append(tenant_id)
+            param_idx += 1
 
         sql = f"""
             SELECT
@@ -83,7 +94,7 @@ class KnowledgeSearch:
                 1 - (e.embedding <=> $1::vector) AS relevance
             FROM knowledge_embeddings e
             JOIN knowledge_articles a ON a.id = e.article_id
-            WHERE a.active = true {category_filter}
+            WHERE a.active = true{extra_filters}
             ORDER BY e.embedding <=> $1::vector
             LIMIT $2
         """
@@ -107,16 +118,24 @@ class KnowledgeSearch:
         query: str,
         category: str,
         limit: int,
+        tenant_id: str = "",
     ) -> list[dict[str, Any]]:
         """Fallback text search using ILIKE."""
         search_term = f"%{query}%"
 
-        category_filter = ""
+        extra_filters = ""
         params: list[Any] = [search_term, limit]
+        param_idx = 3
 
         if category:
-            category_filter = "AND a.category = $3"
+            extra_filters += f" AND a.category = ${param_idx}"
             params.append(category)
+            param_idx += 1
+
+        if tenant_id:
+            extra_filters += f" AND (a.tenant_id IS NULL OR a.tenant_id = ${param_idx}::uuid)"
+            params.append(tenant_id)
+            param_idx += 1
 
         sql = f"""
             SELECT
@@ -128,7 +147,7 @@ class KnowledgeSearch:
             JOIN knowledge_articles a ON a.id = e.article_id
             WHERE a.active = true
               AND (e.chunk_text ILIKE $1 OR a.title ILIKE $1)
-              {category_filter}
+              {extra_filters}
             LIMIT $2
         """
 
