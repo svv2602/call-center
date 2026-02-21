@@ -5,6 +5,10 @@ import { registerPageLoader, setRefreshTimer } from '../router.js';
 import { t } from '../i18n.js';
 import * as tw from '../tw.js';
 
+const _BASE_INTERVAL = 30_000;  // 30s normal refresh
+const _MAX_INTERVAL = 300_000;  // 5min max backoff
+let _currentInterval = _BASE_INTERVAL;
+
 async function loadDashboard() {
     try {
         const data = await api('/analytics/summary');
@@ -20,11 +24,19 @@ async function loadDashboard() {
             <div class="${tw.card} text-center"><div class="${tw.statValue}">${(latest.avg_quality_score || 0).toFixed(2)}</div><div class="${tw.statLabel}">${t('dashboard.avgQuality')}</div></div>
             <div class="${tw.card} text-center"><div class="${tw.statValue}">$${(latest.total_cost_usd || 0).toFixed(2)}</div><div class="${tw.statLabel}">${t('dashboard.costToday')}</div></div>
         `;
+        // Reset backoff on success
+        if (_currentInterval !== _BASE_INTERVAL) {
+            _currentInterval = _BASE_INTERVAL;
+            setRefreshTimer(loadDashboard, _currentInterval);
+        }
     } catch (e) {
         document.getElementById('dashboardStats').innerHTML = `
             <div class="${tw.emptyState}">${t('dashboard.failedToLoad', {error: escapeHtml(e.message)})}
             <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.dashboard.loadDashboard()">${t('common.retry')}</button></div>
         `;
+        // Exponential backoff on failure
+        _currentInterval = Math.min(_currentInterval * 2, _MAX_INTERVAL);
+        setRefreshTimer(loadDashboard, _currentInterval);
     }
 }
 

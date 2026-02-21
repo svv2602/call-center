@@ -23,7 +23,7 @@ prompts_app = typer.Typer(help="Prompt version management")
 
 async def _get_engine() -> AsyncEngine:
     settings = get_settings()
-    return create_async_engine(settings.database.url)
+    return create_async_engine(settings.database.url, pool_pre_ping=True)
 
 
 async def _list_versions() -> list[dict[str, Any]]:

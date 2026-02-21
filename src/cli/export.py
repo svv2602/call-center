@@ -28,7 +28,7 @@ _MAX_EXPORT_ROWS = 10000
 
 async def _get_engine() -> AsyncEngine:
     settings = get_settings()
-    return create_async_engine(settings.database.url)
+    return create_async_engine(settings.database.url, pool_pre_ping=True)
 
 
 async def _export_calls_csv(

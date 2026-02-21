@@ -37,6 +37,11 @@ def catalog_full_sync(self: Any) -> dict[str, Any]:
     )
 
 
+_LOCK_KEY = "catalog_sync:lock"
+_LOCK_TTL_FULL = 1800  # 30 min for full sync
+_LOCK_TTL_INCR = 300   # 5 min for incremental sync
+
+
 async def _catalog_full_sync_async(task: Any) -> dict[str, Any]:
     """Async implementation of full catalog sync."""
     from redis.asyncio import Redis
@@ -51,7 +56,7 @@ async def _catalog_full_sync_async(task: Any) -> dict[str, Any]:
         logger.info("1C not configured (ONEC_USERNAME empty), skipping full sync")
         return {"status": "skipped", "reason": "onec_not_configured"}
 
-    engine = create_async_engine(settings.database.url, pool_size=5, max_overflow=5)
+    engine = create_async_engine(settings.database.url, pool_size=5, max_overflow=5, pool_pre_ping=True)
     redis: Redis | None = None
     onec_client: OneCClient | None = None
 
@@ -63,6 +68,13 @@ async def _catalog_full_sync_async(task: Any) -> dict[str, Any]:
             logger.warning("Redis unavailable for catalog sync")
             await redis.aclose()
             redis = None
+
+        # Distributed lock to prevent concurrent syncs
+        if redis is not None:
+            acquired = await redis.set(_LOCK_KEY, "full", nx=True, ex=_LOCK_TTL_FULL)
+            if not acquired:
+                logger.warning("Catalog sync already running, skipping full sync")
+                return {"status": "skipped", "reason": "already_running"}
 
         # Use full_sync_timeout for the heavy UploadingAll call
         onec_client = OneCClient(
@@ -88,6 +100,8 @@ async def _catalog_full_sync_async(task: Any) -> dict[str, Any]:
         logger.exception("Full catalog sync failed")
         raise task.retry(countdown=300) from exc
     finally:
+        if redis is not None:
+            await redis.delete(_LOCK_KEY)
         if onec_client is not None:
             await onec_client.close()
         if redis is not None:
@@ -128,7 +142,7 @@ async def _catalog_incremental_sync_async(task: Any) -> dict[str, Any]:
         logger.info("1C not configured (ONEC_USERNAME empty), skipping incremental sync")
         return {"status": "skipped", "reason": "onec_not_configured"}
 
-    engine = create_async_engine(settings.database.url, pool_size=5, max_overflow=5)
+    engine = create_async_engine(settings.database.url, pool_size=5, max_overflow=5, pool_pre_ping=True)
     redis: Redis | None = None
     onec_client: OneCClient | None = None
 
@@ -140,6 +154,13 @@ async def _catalog_incremental_sync_async(task: Any) -> dict[str, Any]:
             logger.warning("Redis unavailable for catalog sync")
             await redis.aclose()
             redis = None
+
+        # Distributed lock to prevent concurrent syncs
+        if redis is not None:
+            acquired = await redis.set(_LOCK_KEY, "incremental", nx=True, ex=_LOCK_TTL_INCR)
+            if not acquired:
+                logger.info("Catalog sync already running, skipping incremental sync")
+                return {"status": "skipped", "reason": "already_running"}
 
         onec_client = OneCClient(
             base_url=settings.onec.url,
@@ -164,6 +185,8 @@ async def _catalog_incremental_sync_async(task: Any) -> dict[str, Any]:
         logger.exception("Incremental catalog sync failed")
         raise task.retry(countdown=60) from exc
     finally:
+        if redis is not None:
+            await redis.delete(_LOCK_KEY)
         if onec_client is not None:
             await onec_client.close()
         if redis is not None:

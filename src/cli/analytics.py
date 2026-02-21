@@ -26,7 +26,7 @@ calls_app = typer.Typer(help="Call inspection commands")
 async def _get_engine() -> AsyncEngine:
     """Create async database engine from settings."""
     settings = get_settings()
-    return create_async_engine(settings.database.url)
+    return create_async_engine(settings.database.url, pool_pre_ping=True)
 
 
 async def _fetch_today_stats() -> dict[str, Any]:

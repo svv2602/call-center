@@ -100,7 +100,7 @@ def _build_transcription_text(turns: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-@app.task(name="src.tasks.quality_evaluator.evaluate_call_quality", bind=True, max_retries=3)  # type: ignore[untyped-decorator]
+@app.task(name="src.tasks.quality_evaluator.evaluate_call_quality", bind=True, max_retries=3, soft_time_limit=120, time_limit=150)  # type: ignore[untyped-decorator]
 def evaluate_call_quality(self: Any, call_id: str) -> dict[str, Any]:
     """Evaluate call quality using Claude Haiku.
 
@@ -118,7 +118,7 @@ def evaluate_call_quality(self: Any, call_id: str) -> dict[str, Any]:
 async def _evaluate_call_quality_async(task: Any, call_id: str) -> dict[str, Any]:
     """Async implementation of quality evaluation."""
     settings = get_settings()
-    engine = create_async_engine(settings.database.url)
+    engine = create_async_engine(settings.database.url, pool_pre_ping=True)
 
     try:
         # Fetch call turns from database

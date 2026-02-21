@@ -135,7 +135,7 @@ async def generate_weekly_report(
     dispose = False
     if engine is None:
         settings = get_settings()
-        engine = create_async_engine(settings.database.url)
+        engine = create_async_engine(settings.database.url, pool_pre_ping=True)
         dispose = True
 
     try:

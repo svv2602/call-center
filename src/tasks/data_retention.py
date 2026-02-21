@@ -37,7 +37,7 @@ def cleanup_expired_data() -> dict[str, Any]:
 
 async def _cleanup_async() -> dict[str, Any]:
     settings = get_settings()
-    engine = create_async_engine(settings.database.url)
+    engine = create_async_engine(settings.database.url, pool_pre_ping=True)
 
     results: dict[str, Any] = {}
 

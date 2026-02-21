@@ -73,7 +73,7 @@ def ensure_partitions() -> dict[str, Any]:
 
 async def _ensure_partitions_async() -> dict[str, Any]:
     settings = get_settings()
-    engine = create_async_engine(settings.database.url)
+    engine = create_async_engine(settings.database.url, pool_pre_ping=True)
 
     results: dict[str, Any] = {"created": [], "dropped": []}
 

@@ -24,6 +24,8 @@ logger = logging.getLogger(__name__)
     name="src.tasks.scraper_tasks.run_scraper",
     bind=True,
     max_retries=3,
+    soft_time_limit=900,
+    time_limit=960,
 )  # type: ignore[untyped-decorator]
 def run_scraper(self: Any, triggered_by: str = "manual") -> dict[str, Any]:
     """Run the article scraper pipeline.
@@ -52,7 +54,7 @@ async def _run_scraper_async(task: Any, *, triggered_by: str = "manual") -> dict
     from src.knowledge.scraper import ProKolesoScraper
 
     settings = get_settings()
-    engine = create_async_engine(settings.database.url)
+    engine = create_async_engine(settings.database.url, pool_pre_ping=True)
 
     # Read config from Redis (with env fallback)
     redis = Redis.from_url(settings.redis.url, decode_responses=True)
@@ -290,6 +292,8 @@ async def _run_scraper_async(task: Any, *, triggered_by: str = "manual") -> dict
     name="src.tasks.scraper_tasks.scrape_single_url",
     bind=True,
     max_retries=3,
+    soft_time_limit=600,
+    time_limit=660,
 )  # type: ignore[untyped-decorator]
 def scrape_single_url(
     self: Any, url: str, *, is_promotion: bool = False, is_shop_info: bool = False
@@ -312,7 +316,7 @@ async def _scrape_single_url_async(
     from src.knowledge.scraper import ProKolesoScraper
 
     settings = get_settings()
-    engine = create_async_engine(settings.database.url)
+    engine = create_async_engine(settings.database.url, pool_pre_ping=True)
 
     redis = Redis.from_url(settings.redis.url, decode_responses=True)
     try:
@@ -516,6 +520,8 @@ def _dispatch_embedding(article_id: str) -> None:
     name="src.tasks.scraper_tasks.rescrape_watched_pages",
     bind=True,
     max_retries=2,
+    soft_time_limit=900,
+    time_limit=960,
 )  # type: ignore[untyped-decorator]
 def rescrape_watched_pages(self: Any) -> dict[str, Any]:
     """Check and rescrape watched pages that are due for update."""
@@ -534,7 +540,7 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
     from src.knowledge.scraper import ProKolesoScraper, content_hash
 
     settings = get_settings()
-    engine = create_async_engine(settings.database.url)
+    engine = create_async_engine(settings.database.url, pool_pre_ping=True)
 
     redis = Redis.from_url(settings.redis.url, decode_responses=True)
     try:
@@ -994,6 +1000,8 @@ async def _handle_discovery_page(
     name="src.tasks.scraper_tasks.run_all_sources",
     bind=True,
     max_retries=2,
+    soft_time_limit=900,
+    time_limit=960,
 )  # type: ignore[untyped-decorator]
 def run_all_sources(self: Any, triggered_by: str = "manual") -> dict[str, Any]:
     """Dispatch per-source scraping tasks for all enabled content sources.
@@ -1017,7 +1025,7 @@ async def _run_all_sources_async(
 ) -> dict[str, Any]:
     """Async implementation of run_all_sources."""
     settings = get_settings()
-    engine = create_async_engine(settings.database.url)
+    engine = create_async_engine(settings.database.url, pool_pre_ping=True)
 
     try:
         async with engine.begin() as conn:
@@ -1069,6 +1077,8 @@ async def _run_all_sources_async(
     name="src.tasks.scraper_tasks.run_source",
     bind=True,
     max_retries=3,
+    soft_time_limit=600,
+    time_limit=660,
 )  # type: ignore[untyped-decorator]
 def run_source(
     self: Any, source_config_id: str, triggered_by: str = "manual"
@@ -1102,7 +1112,7 @@ async def _run_source_async(
     from src.knowledge.fetchers import create_fetcher
 
     settings = get_settings()
-    engine = create_async_engine(settings.database.url)
+    engine = create_async_engine(settings.database.url, pool_pre_ping=True)
 
     # Load source config from DB
     async with engine.begin() as conn:

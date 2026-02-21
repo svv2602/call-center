@@ -87,7 +87,7 @@ def _rotate_backups(backup_dir: Path, pattern: str, retention_days: int) -> int:
     return deleted
 
 
-@app.task(name="src.tasks.backup.backup_database")  # type: ignore[untyped-decorator]
+@app.task(name="src.tasks.backup.backup_database", soft_time_limit=1800, time_limit=1860)  # type: ignore[untyped-decorator]
 def backup_database() -> dict[str, Any]:
     """Create a compressed PostgreSQL backup with rotation.
 
@@ -201,7 +201,7 @@ def verify_backup(filepath: str | Path) -> dict[str, Any]:
         return {"status": "error", "error": str(e), "file": str(path)}
 
 
-@app.task(name="src.tasks.backup.verify_latest_backup")  # type: ignore[untyped-decorator]
+@app.task(name="src.tasks.backup.verify_latest_backup", soft_time_limit=120, time_limit=150)  # type: ignore[untyped-decorator]
 def verify_latest_backup() -> dict[str, Any]:
     """Verify the most recent backup file.
 
@@ -232,7 +232,7 @@ def verify_latest_backup() -> dict[str, Any]:
     return result
 
 
-@app.task(name="src.tasks.backup.backup_redis")  # type: ignore[untyped-decorator]
+@app.task(name="src.tasks.backup.backup_redis", soft_time_limit=600, time_limit=660)  # type: ignore[untyped-decorator]
 def backup_redis() -> dict[str, Any]:
     """Create a Redis RDB snapshot backup with rotation.
 
@@ -312,7 +312,7 @@ def backup_redis() -> dict[str, Any]:
         return {"status": "error", "error": str(e)}
 
 
-@app.task(name="src.tasks.backup.backup_knowledge_base")  # type: ignore[untyped-decorator]
+@app.task(name="src.tasks.backup.backup_knowledge_base", soft_time_limit=600, time_limit=660)  # type: ignore[untyped-decorator]
 def backup_knowledge_base() -> dict[str, Any]:
     """Create a tar.gz archive of the knowledge_base directory.
 

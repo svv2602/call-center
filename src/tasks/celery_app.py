@@ -39,6 +39,8 @@ app.conf.update(
     task_track_started=True,
     task_acks_late=True,
     worker_prefetch_multiplier=1,
+    task_soft_time_limit=300,   # 5 min default soft limit (SoftTimeLimitExceeded)
+    task_time_limit=360,        # 6 min default hard kill
     task_routes={
         "src.tasks.quality_evaluator.*": {"queue": "quality"},
         "src.tasks.daily_stats.*": {"queue": "stats"},

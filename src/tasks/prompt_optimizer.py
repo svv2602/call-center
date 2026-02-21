@@ -51,7 +51,7 @@ FAILED CALL TRANSCRIPTIONS:
 """
 
 
-@app.task(name="src.tasks.prompt_optimizer.analyze_failed_calls")  # type: ignore[untyped-decorator]
+@app.task(name="src.tasks.prompt_optimizer.analyze_failed_calls", soft_time_limit=300, time_limit=360)  # type: ignore[untyped-decorator]
 def analyze_failed_calls(
     days: int = 7, max_calls: int = 20, triggered_by: str = "manual"
 ) -> dict[str, Any]:
@@ -78,7 +78,7 @@ async def _analyze_failed_calls_async(
 ) -> dict[str, Any]:
     """Async implementation of failed calls analysis."""
     settings = get_settings()
-    engine = create_async_engine(settings.database.url)
+    engine = create_async_engine(settings.database.url, pool_pre_ping=True)
 
     try:
         async with engine.begin() as conn:

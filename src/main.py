@@ -104,11 +104,15 @@ app.include_router(websocket_router)
 # Middleware order (last added = outermost = runs first):
 # SecurityHeaders → RateLimit → CORS → Audit
 app.add_middleware(AuditMiddleware)
+_DEFAULT_CORS_ORIGINS = [
+    "http://localhost:5173",  # Vite dev server
+    "http://localhost:8080",  # Backend (same-origin, but explicit)
+]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=os.environ.get("CORS_ALLOWED_ORIGINS", "").split(",")
     if os.environ.get("CORS_ALLOWED_ORIGINS")
-    else [],
+    else _DEFAULT_CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE"],
     allow_headers=["Authorization", "Content-Type"],
@@ -582,6 +586,13 @@ async def main() -> None:
         print(f"\n{len(validation.errors)} configuration error(s). Fix them and restart.")
         sys.exit(1)
 
+    # Block startup with default JWT secret when running in Docker (production)
+    _in_docker = Path("/app/venv").exists()
+    if _in_docker and settings.admin.jwt_secret == "change-me-in-production":
+        print("\u274c ADMIN_JWT_SECRET is set to the insecure default.")
+        print("  Set ADMIN_JWT_SECRET to a random string in your .env file.")
+        sys.exit(1)
+
     # Configure structured logging
     setup_logging(level=settings.logging.level, format_type=settings.logging.format)
 
@@ -647,7 +658,7 @@ async def main() -> None:
         try:
             from sqlalchemy.ext.asyncio import create_async_engine
 
-            _db_engine = create_async_engine(settings.database.url, pool_size=5, max_overflow=5)
+            _db_engine = create_async_engine(settings.database.url, pool_size=5, max_overflow=5, pool_pre_ping=True)
             logger.info("Database engine created: %s", settings.database.url.split("@")[-1])
 
             _onec_client = OneCClient(

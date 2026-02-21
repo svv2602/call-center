@@ -36,7 +36,7 @@ def calculate_daily_stats(target_date: str | None = None) -> dict[str, Any]:
 async def _calculate_daily_stats_async(target_date: str | None = None) -> dict[str, Any]:
     """Async implementation of daily stats calculation."""
     settings = get_settings()
-    engine = create_async_engine(settings.database.url)
+    engine = create_async_engine(settings.database.url, pool_pre_ping=True)
 
     stat_date = date.fromisoformat(target_date) if target_date else date.today() - timedelta(days=1)
 

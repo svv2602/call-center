@@ -23,6 +23,8 @@ logger = logging.getLogger(__name__)
     name="src.tasks.embedding_tasks.generate_article_embeddings",
     bind=True,
     max_retries=3,
+    soft_time_limit=120,
+    time_limit=150,
 )  # type: ignore[untyped-decorator]
 def generate_article_embeddings(self: Any, article_id: str) -> dict[str, Any]:
     """Generate embeddings for a single article.
@@ -43,7 +45,7 @@ def generate_article_embeddings(self: Any, article_id: str) -> dict[str, Any]:
 async def _generate_article_embeddings_async(task: Any, article_id: str) -> dict[str, Any]:
     """Async implementation of embedding generation."""
     settings = get_settings()
-    engine = create_async_engine(settings.database.url)
+    engine = create_async_engine(settings.database.url, pool_pre_ping=True)
 
     try:
         # Set status to processing
@@ -147,6 +149,8 @@ async def _generate_article_embeddings_async(task: Any, article_id: str) -> dict
 @app.task(
     name="src.tasks.embedding_tasks.reindex_all_articles",
     bind=True,
+    soft_time_limit=1800,
+    time_limit=1860,
 )  # type: ignore[untyped-decorator]
 def reindex_all_articles(self: Any) -> dict[str, Any]:
     """Reindex all active articles by dispatching individual tasks.
@@ -162,7 +166,7 @@ def reindex_all_articles(self: Any) -> dict[str, Any]:
 async def _reindex_all_articles_async() -> dict[str, Any]:
     """Async implementation of reindex-all."""
     settings = get_settings()
-    engine = create_async_engine(settings.database.url)
+    engine = create_async_engine(settings.database.url, pool_pre_ping=True)
 
     try:
         async with engine.begin() as conn:
