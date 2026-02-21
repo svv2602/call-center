@@ -44,6 +44,7 @@ class ConversationCreate(BaseModel):
     model: str | None = None
     tags: list[str] = Field(default_factory=list)
     scenario_type: str | None = None
+    tenant_id: UUID | None = None
 
 
 class ConversationUpdate(BaseModel):
@@ -306,11 +307,13 @@ async def create_conversation(
         result = await conn.execute(
             text("""
                 INSERT INTO sandbox_conversations
-                    (title, prompt_version_id, prompt_version_name, tool_mode, model, tags, scenario_type, created_by)
+                    (title, prompt_version_id, prompt_version_name, tool_mode, model, tags,
+                     scenario_type, created_by, tenant_id)
                 VALUES
-                    (:title, :prompt_version_id, :prompt_version_name, :tool_mode, :model, :tags, :scenario_type, :created_by)
+                    (:title, :prompt_version_id, :prompt_version_name, :tool_mode, :model, :tags,
+                     :scenario_type, :created_by, CAST(:tenant_id AS uuid))
                 RETURNING id, title, prompt_version_id, prompt_version_name, tool_mode, model, tags,
-                          scenario_type, status, is_baseline, metadata, created_at, updated_at
+                          scenario_type, status, is_baseline, metadata, tenant_id, created_at, updated_at
             """),
             {
                 "title": request.title,
@@ -323,6 +326,7 @@ async def create_conversation(
                 "tags": request.tags,
                 "scenario_type": request.scenario_type,
                 "created_by": user_id,
+                "tenant_id": str(request.tenant_id) if request.tenant_id else None,
             },
         )
         row = result.first()
@@ -486,7 +490,7 @@ async def send_message(
     async with engine.begin() as conn:
         conv_result = await conn.execute(
             text("""
-                SELECT id, prompt_version_id, tool_mode, model, status
+                SELECT id, prompt_version_id, tool_mode, model, status, tenant_id
                 FROM sandbox_conversations
                 WHERE id = :id
             """),
@@ -497,6 +501,21 @@ async def send_message(
             raise HTTPException(status_code=404, detail="Conversation not found")
         if conv.status != "active":
             raise HTTPException(status_code=400, detail="Conversation is archived")
+
+    # Load tenant config if set
+    tenant: dict[str, Any] | None = None
+    if conv.tenant_id:
+        async with engine.begin() as conn:
+            tenant_result = await conn.execute(
+                text("""
+                    SELECT slug, name, enabled_tools, prompt_suffix
+                    FROM tenants WHERE id = :id AND is_active = true
+                """),
+                {"id": str(conv.tenant_id)},
+            )
+            tenant_row = tenant_result.first()
+            if tenant_row:
+                tenant = dict(tenant_row._mapping)
 
     # Determine conversation history
     history: list[dict[str, Any]] = []
@@ -590,6 +609,7 @@ async def send_message(
         provider_override=provider_override,
         onec_client=onec_client,
         redis_client=redis_client,
+        tenant=tenant,
     )
 
     result = await process_sandbox_turn(agent, request.message, history, is_mock=is_mock)

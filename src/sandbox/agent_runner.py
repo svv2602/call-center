@@ -131,6 +131,7 @@ async def create_sandbox_agent(
     redis: Any | None = None,
     onec_client: OneCClient | None = None,
     redis_client: Redis | None = None,
+    tenant: dict[str, Any] | None = None,
 ) -> LLMAgent:
     """Create an LLMAgent configured for sandbox testing.
 
@@ -145,6 +146,7 @@ async def create_sandbox_agent(
         redis: Optional Redis client for loading pronunciation rules.
         onec_client: Optional 1C client for live tool mode.
         redis_client: Optional Redis client for tool caching.
+        tenant: Optional tenant dict with enabled_tools/prompt_suffix.
 
     Returns:
         Configured LLMAgent instance.
@@ -196,6 +198,15 @@ async def create_sandbox_agent(
         safety_context = format_safety_rules_section(safety_rules)
     except Exception:
         logger.debug("Sandbox: safety rules loading failed", exc_info=True)
+
+    # Apply tenant overrides (same logic as src/main.py)
+    if tenant:
+        if tenant.get("enabled_tools"):
+            allowed = set(tenant["enabled_tools"])
+            if tools:
+                tools = [t for t in tools if t["name"] in allowed]
+        if tenant.get("prompt_suffix") and system_prompt:
+            system_prompt = system_prompt + "\n\n" + tenant["prompt_suffix"]
 
     # Sandbox defaults to Haiku (cheap/fast) independently of ANTHROPIC_MODEL
     # which may be set to a more expensive model for production calls.
