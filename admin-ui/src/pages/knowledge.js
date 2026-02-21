@@ -52,6 +52,17 @@ function embeddingBadge(status) {
     }
 }
 
+function expiresAtBadge(expiresAt) {
+    if (!expiresAt) return `<span class="${tw.mutedText} text-xs">—</span>`;
+    const d = new Date(expiresAt);
+    const now = new Date();
+    const formatted = formatDate(expiresAt);
+    if (d < now) return `<span class="${tw.badgeRed}" title="${formatted}">${t('knowledge.expired')}</span>`;
+    const daysLeft = Math.ceil((d - now) / 86400000);
+    if (daysLeft <= 7) return `<span class="${tw.badgeYellow}" title="${formatted}">${formatted}</span>`;
+    return `<span class="text-xs" title="${formatted}">${formatted}</span>`;
+}
+
 function populateCategorySelect(selectEl, categories, includeAll) {
     selectEl.innerHTML = '';
     if (includeAll) {
@@ -113,13 +124,14 @@ async function loadArticles(offset) {
             return;
         }
         container.innerHTML = `
-            <div class="overflow-x-auto"><table class="${tw.table}" id="articlesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('knowledge.articleTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.category')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.embedding')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.activeCol')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.updated')}</th><th class="${tw.th}">${t('knowledge.actions')}</th></tr></thead><tbody>
+            <div class="overflow-x-auto"><table class="${tw.table}" id="articlesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('knowledge.articleTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.category')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.embedding')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.activeCol')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.expiresAt')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.updated')}</th><th class="${tw.th}">${t('knowledge.actions')}</th></tr></thead><tbody>
             ${articles.map(a => `
                 <tr class="${tw.trHover}">
                     <td class="${tw.td}" data-label="${t('knowledge.articleTitle')}">${escapeHtml(a.title)}</td>
                     <td class="${tw.td}" data-label="${t('knowledge.category')}"><span class="${tw.badgeBlue}">${escapeHtml(a.category)}</span></td>
                     <td class="${tw.td}" data-label="${t('knowledge.embedding')}">${embeddingBadge(a.embedding_status)}</td>
                     <td class="${tw.td}" data-label="${t('knowledge.activeCol')}">${a.active !== false ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
+                    <td class="${tw.td}" data-label="${t('knowledge.expiresAt')}" data-sort-value="${a.expires_at || ''}">${expiresAtBadge(a.expires_at)}</td>
                     <td class="${tw.td}" data-label="${t('knowledge.updated')}" data-sort-value="${a.updated_at || a.created_at || ''}">${formatDate(a.updated_at || a.created_at)}</td>
                     <td class="${tw.tdActions}">
                         <div class="relative inline-block">
@@ -156,6 +168,7 @@ function showCreateArticle() {
     document.getElementById('articleTitle').value = '';
     document.getElementById('articleCategory').value = 'faq';
     document.getElementById('articleContent').value = '';
+    document.getElementById('articleExpiresAt').value = '';
     document.getElementById('createArticleModal').classList.add('show');
 }
 
@@ -168,6 +181,14 @@ async function editArticle(id) {
         document.getElementById('articleTitle').value = a.title || '';
         document.getElementById('articleCategory').value = a.category || 'faq';
         document.getElementById('articleContent').value = a.content || '';
+        // Format expires_at for datetime-local input (YYYY-MM-DDTHH:MM)
+        const expiresEl = document.getElementById('articleExpiresAt');
+        if (a.expires_at) {
+            const d = new Date(a.expires_at);
+            expiresEl.value = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0') + 'T' + String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+        } else {
+            expiresEl.value = '';
+        }
         document.getElementById('createArticleModal').classList.add('show');
     } catch (e) { showToast(t('knowledge.loadFailed', {error: e.message}), 'error'); }
 }
@@ -177,13 +198,18 @@ async function saveArticle() {
     const title = document.getElementById('articleTitle').value.trim();
     const category = document.getElementById('articleCategory').value;
     const content = document.getElementById('articleContent').value.trim();
+    const expiresAtRaw = document.getElementById('articleExpiresAt').value;
     if (!title || !content) { showToast(t('knowledge.titleRequired'), 'error'); return; }
+    // Convert datetime-local to ISO string, or empty string to clear
+    const expires_at = expiresAtRaw ? new Date(expiresAtRaw).toISOString() : '';
     try {
         if (id) {
-            await api(`/knowledge/articles/${id}`, { method: 'PATCH', body: JSON.stringify({ title, category, content }) });
+            await api(`/knowledge/articles/${id}`, { method: 'PATCH', body: JSON.stringify({ title, category, content, expires_at }) });
             showToast(t('knowledge.articleUpdated'));
         } else {
-            await api('/knowledge/articles', { method: 'POST', body: JSON.stringify({ title, category, content }) });
+            const body = { title, category, content };
+            if (expires_at) body.expires_at = expires_at;
+            await api('/knowledge/articles', { method: 'POST', body: JSON.stringify(body) });
             showToast(t('knowledge.articleCreated'));
         }
         closeModal('createArticleModal');
