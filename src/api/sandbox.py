@@ -570,12 +570,16 @@ async def send_message(
     redis_client = None
     if conv.tool_mode == "live":
         try:
-            from src.main import _onec_client, _redis
+            # Use sys.modules to get the actual running main module
+            # (avoids __main__ vs src.main module identity issue)
+            import sys
 
-            onec_client = _onec_client
-            redis_client = _redis
+            main_mod = sys.modules.get("__main__") or sys.modules.get("src.main")
+            if main_mod:
+                onec_client = getattr(main_mod, "_onec_client", None)
+                redis_client = getattr(main_mod, "_redis", None)
         except Exception:
-            logger.debug("Could not import live clients from main", exc_info=True)
+            logger.debug("Could not get live clients from main module", exc_info=True)
 
     agent = await create_sandbox_agent(
         engine,
