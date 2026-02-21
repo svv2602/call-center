@@ -185,6 +185,8 @@ class LLMAgent:
                     )
 
                     if llm_response.text:
+                        if response_text:
+                            response_text += "\n\n"
                         response_text += llm_response.text
 
                     # Convert LLMResponse to Anthropic content blocks for history
@@ -223,6 +225,8 @@ class LLMAgent:
 
                 for block in response.content:
                     if block.type == "text":
+                        if response_text:
+                            response_text += "\n\n"
                         response_text += block.text
                         assistant_content.append({"type": "text", "text": block.text})
                     elif block.type == "tool_use":
