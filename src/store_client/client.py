@@ -101,7 +101,7 @@ class StoreClient:
 
     # --- MVP Tool Handlers ---
 
-    async def search_tires(self, **params: Any) -> dict[str, Any]:
+    async def search_tires(self, network: str = "", **params: Any) -> dict[str, Any]:
         """Search tires by parameters.
 
         If db_engine is available, queries PostgreSQL catalog (synced from 1C).
@@ -109,7 +109,7 @@ class StoreClient:
         """
         # MVP: use PostgreSQL catalog if available
         if self._db_engine is not None:
-            return await self._search_tires_db(**params)
+            return await self._search_tires_db(network=network, **params)
 
         # Fallback: HTTP Store API
         if any(k in params for k in ("vehicle_make", "vehicle_model", "vehicle_year")):
@@ -131,7 +131,7 @@ class StoreClient:
         return self._format_tire_results(data)
 
     async def check_availability(
-        self, product_id: str = "", query: str = "", **_: Any
+        self, product_id: str = "", query: str = "", network: str = "", **_: Any
     ) -> dict[str, Any]:
         """Check tire availability.
 
@@ -140,7 +140,7 @@ class StoreClient:
         """
         # MVP: use Redis/PostgreSQL if available
         if self._db_engine is not None:
-            return await self._check_availability_1c(product_id, query)
+            return await self._check_availability_1c(product_id, query, network=network)
 
         # Fallback: HTTP Store API
         if not product_id and query:
@@ -689,7 +689,7 @@ class StoreClient:
 
     # --- 1C / PostgreSQL / Redis helpers (MVP) ---
 
-    async def _search_tires_db(self, **params: Any) -> dict[str, Any]:
+    async def _search_tires_db(self, network: str = "", **params: Any) -> dict[str, Any]:
         """Search tires in PostgreSQL catalog (synced from 1C)."""
         from sqlalchemy import text
 
@@ -701,11 +701,14 @@ class StoreClient:
                 "message": "Для пошуку за авто спочатку виклич get_vehicle_tire_sizes, потім search_tires з розміром",
             }
 
+        if not network:
+            network = "ProKoleso"
+
         engine = self._db_engine
 
         # Build WHERE clauses dynamically
         conditions = []
-        bind_params: dict[str, Any] = {}
+        bind_params: dict[str, Any] = {"network": network}
 
         if params.get("width"):
             conditions.append("p.width = :width")
@@ -732,7 +735,7 @@ class StoreClient:
                    COALESCE(s.stock_quantity, 0) AS stock_quantity
             FROM tire_products p
             JOIN tire_models m ON p.model_id = m.id
-            LEFT JOIN tire_stock s ON p.sku = s.sku
+            LEFT JOIN tire_stock s ON p.sku = s.sku AND s.trading_network = :network
             WHERE {where_clause}
             ORDER BY s.price ASC NULLS LAST
             LIMIT 5
@@ -760,14 +763,19 @@ class StoreClient:
             "items": items,
         }
 
-    async def _check_availability_1c(self, product_id: str, query: str) -> dict[str, Any]:
+    async def _check_availability_1c(
+        self, product_id: str, query: str, network: str = ""
+    ) -> dict[str, Any]:
         """Check availability via Redis cache → PostgreSQL fallback."""
         from sqlalchemy import text
+
+        if not network:
+            network = "ProKoleso"
 
         sku = product_id
         if not sku and query:
             # Try to find SKU by searching
-            search = await self._search_tires_db(brand=query)
+            search = await self._search_tires_db(brand=query, network=network)
             items = search.get("items", [])
             if not items:
                 return {"available": False, "message": "Товар не знайдено"}
@@ -777,7 +785,7 @@ class StoreClient:
             return {"available": False, "message": "Потрібен ID товару або запит"}
 
         # 1) Try Redis cache first (fastest)
-        stock_data = await self._get_stock_from_redis(sku)
+        stock_data = await self._get_stock_from_redis(sku, network=network)
         if stock_data is not None:
             return stock_data
 
@@ -789,11 +797,11 @@ class StoreClient:
                     SELECT s.price, s.stock_quantity, s.country, s.year_issue,
                            s.trading_network
                     FROM tire_stock s
-                    WHERE s.sku = :sku
+                    WHERE s.sku = :sku AND s.trading_network = :network
                     ORDER BY s.stock_quantity DESC
                     LIMIT 1
                 """),
-                {"sku": sku},
+                {"sku": sku, "network": network},
             )
             row = result.mappings().first()
 
@@ -808,23 +816,25 @@ class StoreClient:
             "year": row["year_issue"],
         }
 
-    async def _get_stock_from_redis(self, sku: str) -> dict[str, Any] | None:
-        """Try to get stock data from Redis cache."""
+    async def _get_stock_from_redis(self, sku: str, network: str = "") -> dict[str, Any] | None:
+        """Try to get stock data from Redis cache for a specific network."""
         if self._redis is None:
             return None
 
-        for network in ("ProKoleso", "Tshina"):
-            key = f"onec:stock:{network}"
-            raw = await self._redis.hget(key, sku)
-            if raw is not None:
-                data = json.loads(raw)
-                return {
-                    "available": data["stock"] > 0,
-                    "quantity": data["stock"],
-                    "price": data["price"],
-                    "country": data.get("country", ""),
-                    "year": data.get("year_issue", ""),
-                }
+        if not network:
+            network = "ProKoleso"
+
+        key = f"onec:stock:{network}"
+        raw = await self._redis.hget(key, sku)
+        if raw is not None:
+            data = json.loads(raw)
+            return {
+                "available": data["stock"] > 0,
+                "quantity": data["stock"],
+                "price": data["price"],
+                "country": data.get("country", ""),
+                "year": data.get("year_issue", ""),
+            }
 
         return None
 

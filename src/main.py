@@ -644,8 +644,17 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
     assert client is not None, "StoreClient must be initialized before handling calls"
 
     router.register("get_vehicle_tire_sizes", client.get_vehicle_tire_sizes)
-    router.register("search_tires", client.search_tires)
-    router.register("check_availability", client.check_availability)
+
+    async def _search_tires(**params: Any) -> dict[str, Any]:
+        network = session.network_id or "ProKoleso"
+        return await client.search_tires(network=network, **params)
+
+    async def _check_availability(product_id: str = "", query: str = "", **kw: Any) -> dict[str, Any]:
+        network = session.network_id or "ProKoleso"
+        return await client.check_availability(product_id, query, network=network, **kw)
+
+    router.register("search_tires", _search_tires)
+    router.register("check_availability", _check_availability)
     router.register("get_order_status", client.search_orders)
 
     async def _create_order_with_metric(**kwargs: Any) -> Any:

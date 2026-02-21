@@ -106,7 +106,10 @@ class TestOneCClientRequests:
             onec_client, "_get", new_callable=AsyncMock, return_value=mock_response
         ) as mock_get:
             result = await onec_client.get_stock("ProKoleso")
-            mock_get.assert_called_once_with("/Trade/hs/site/get_stock/ProKoleso")
+            mock_get.assert_called_once_with(
+                "/Trade/hs/site/get_stock/",
+                params={"TradingNetwork": "ProKoleso"},
+            )
             assert result["data"][0]["sku"] == "00000000023"
 
     @pytest.mark.asyncio

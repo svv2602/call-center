@@ -110,9 +110,12 @@ class OneCClient:
     async def get_stock(self, network: str) -> dict[str, Any]:
         """Get stock and prices for a trading network.
 
-        GET /Trade/hs/site/get_stock/{network}
+        GET /Trade/hs/site/get_stock/?TradingNetwork={network}
         """
-        return await self._get(f"/Trade/hs/site/get_stock/{network}")
+        return await self._get(
+            "/Trade/hs/site/get_stock/",
+            params={"TradingNetwork": network},
+        )
 
     # --- Pickup points ---
 
