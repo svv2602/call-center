@@ -9,7 +9,9 @@ Captures tool calls and token metrics per turn.
 
 from __future__ import annotations
 
+import contextlib
 import copy
+import json
 import logging
 import time
 from dataclasses import dataclass, field
@@ -32,9 +34,12 @@ from src.sandbox.mock_tools import build_mock_tool_router
 if TYPE_CHECKING:
     from uuid import UUID
 
+    from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncEngine
 
+    from src.agent.agent import ToolRouter
     from src.llm.router import LLMRouter
+    from src.onec_client.client import OneCClient
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +68,59 @@ class SandboxTurnResult:
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
 
 
+def _register_live_tools(
+    router: ToolRouter,
+    onec_client: OneCClient | None = None,
+    redis_client: Redis | None = None,
+    network: str = "ProKoleso",
+) -> None:
+    """Override mock handlers with real 1C-backed handlers where available."""
+    if onec_client is None:
+        logger.warning("Live tool mode: no OneCClient — all tools remain mock")
+        return
+
+    async def _get_pickup_points(city: str = "") -> dict[str, Any]:
+        cache_key = f"onec:points:{network}"
+
+        # 1. Redis cache
+        if redis_client:
+            try:
+                raw = await redis_client.get(cache_key)
+                if raw:
+                    all_points = json.loads(raw if isinstance(raw, str) else raw.decode())
+                    if city:
+                        all_points = [
+                            p for p in all_points if city.lower() in p.get("city", "").lower()
+                        ]
+                    return {"total": len(all_points), "points": all_points[:15]}
+            except Exception:
+                pass
+
+        # 2. 1C API
+        data = await onec_client.get_pickup_points(network)
+        raw_points = data.get("data", [])
+        all_points = [
+            {
+                "id": p.get("id", ""),
+                "address": p.get("point", ""),
+                "type": p.get("point_type", ""),
+                "city": p.get("City", ""),
+            }
+            for p in raw_points
+        ]
+        if redis_client:
+            with contextlib.suppress(Exception):
+                await redis_client.setex(
+                    cache_key, 3600, json.dumps(all_points, ensure_ascii=False)
+                )
+        if city:
+            all_points = [p for p in all_points if city.lower() in p.get("city", "").lower()]
+        return {"total": len(all_points), "points": all_points[:15]}
+
+    router.register("get_pickup_points", _get_pickup_points)
+    logger.info("Live tool registered: get_pickup_points (network=%s)", network)
+
+
 async def create_sandbox_agent(
     engine: AsyncEngine,
     prompt_version_id: UUID | None = None,
@@ -71,6 +129,8 @@ async def create_sandbox_agent(
     llm_router: LLMRouter | None = None,
     provider_override: str | None = None,
     redis: Any | None = None,
+    onec_client: OneCClient | None = None,
+    redis_client: Redis | None = None,
 ) -> LLMAgent:
     """Create an LLMAgent configured for sandbox testing.
 
@@ -83,6 +143,8 @@ async def create_sandbox_agent(
         provider_override: If set with llm_router, routes all calls to
             this specific provider (e.g. "gemini-flash").
         redis: Optional Redis client for loading pronunciation rules.
+        onec_client: Optional 1C client for live tool mode.
+        redis_client: Optional Redis client for tool caching.
 
     Returns:
         Configured LLMAgent instance.
@@ -112,10 +174,9 @@ async def create_sandbox_agent(
     if tool_mode == "mock":
         tool_router = build_mock_tool_router()
     else:
-        # Live mode: create a minimal StoreClient-backed router
-        # For now, fall back to mock if Store API not available
-        logger.warning("Live tool mode requested but using mock fallback in sandbox")
+        # Live mode: start with mock, overlay real handlers where available
         tool_router = build_mock_tool_router()
+        _register_live_tools(tool_router, onec_client=onec_client, redis_client=redis_client)
 
     # Inject pronunciation rules from Redis
     if redis is not None and system_prompt is not None:

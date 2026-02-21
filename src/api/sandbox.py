@@ -564,6 +564,19 @@ async def send_message(
 
     # Create sandbox agent and process
     prompt_version_id = conv.prompt_version_id
+
+    # Pass live infrastructure for "live" tool mode
+    onec_client = None
+    redis_client = None
+    if conv.tool_mode == "live":
+        try:
+            from src.main import _onec_client, _redis
+
+            onec_client = _onec_client
+            redis_client = _redis
+        except Exception:
+            logger.debug("Could not import live clients from main", exc_info=True)
+
     agent = await create_sandbox_agent(
         engine,
         prompt_version_id=prompt_version_id,
@@ -571,6 +584,8 @@ async def send_message(
         model=model_for_agent,
         llm_router=llm_router,
         provider_override=provider_override,
+        onec_client=onec_client,
+        redis_client=redis_client,
     )
 
     result = await process_sandbox_turn(agent, request.message, history, is_mock=is_mock)

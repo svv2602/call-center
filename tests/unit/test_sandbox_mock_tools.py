@@ -11,7 +11,7 @@ class TestMockResponses:
     """Test mock response data completeness."""
 
     def test_all_canonical_tools_have_mocks(self) -> None:
-        """All 14 canonical tools should have mock data."""
+        """All 15 canonical tools should have mock data."""
         expected_tools = {
             "get_vehicle_tire_sizes",
             "search_tires",
@@ -21,6 +21,7 @@ class TestMockResponses:
             "create_order_draft",
             "update_order_delivery",
             "confirm_order",
+            "get_pickup_points",
             "get_fitting_stations",
             "get_fitting_slots",
             "book_fitting",
