@@ -414,8 +414,8 @@
                 <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.training">Обучение</span> / <span data-i18n="nav.sandbox">Песочница</span></div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.title">Песочница агента</h1>
                 <div class="flex gap-4" style="height: calc(100vh - 140px);">
-                    <!-- LEFT: Sidebar -->
-                    <div class="w-72 flex-shrink-0 flex flex-col border border-neutral-200 dark:border-neutral-800 rounded-lg bg-white dark:bg-neutral-900 overflow-hidden">
+                    <!-- LEFT: Sidebar (only visible on Chat tab) -->
+                    <div id="sandboxSidebar" class="w-72 flex-shrink-0 flex flex-col border border-neutral-200 dark:border-neutral-800 rounded-lg bg-white dark:bg-neutral-900 overflow-hidden">
                         <div class="p-3 border-b border-neutral-200 dark:border-neutral-700 space-y-2">
                             <button class="w-full inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.sandbox.showNewConvModal()" data-i18n="sandbox.newConversation">+ Новый диалог</button>
                             <input type="text" id="sandboxSearch" data-i18n-placeholder="sandbox.searchPlaceholder" placeholder="Поиск по названию..."
