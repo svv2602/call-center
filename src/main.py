@@ -45,6 +45,7 @@ from src.api.pronunciation import router as pronunciation_router
 from src.api.sandbox import router as sandbox_router
 from src.api.scraper import router as scraper_router
 from src.api.system import router as system_router
+from src.api.tenants import router as tenants_router
 from src.api.training_dialogues import router as training_dialogues_router
 from src.api.training_safety import router as training_safety_router
 from src.api.training_templates import router as training_templates_router
@@ -95,6 +96,7 @@ app.include_router(prompts_router)
 app.include_router(sandbox_router)
 app.include_router(scraper_router)
 app.include_router(system_router)
+app.include_router(tenants_router)
 app.include_router(training_dialogues_router)
 app.include_router(training_safety_router)
 app.include_router(training_templates_router)
@@ -135,6 +137,7 @@ async def _dispose_api_engines() -> None:
         sandbox,
         scraper,
         system,
+        tenants,
         training_dialogues,
         training_safety,
         training_templates,
@@ -145,7 +148,7 @@ async def _dispose_api_engines() -> None:
 
     modules = [
         admin_users, analytics, auth, export, knowledge, operators,
-        prompts, sandbox, scraper, system, training_dialogues,
+        prompts, sandbox, scraper, system, tenants, training_dialogues,
         training_safety, training_templates, training_tools, vehicles, audit,
     ]
     for mod in modules:
