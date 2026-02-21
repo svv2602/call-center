@@ -130,12 +130,13 @@ class TestWatchedPagesAPI:
 
     @pytest.mark.asyncio
     async def test_add_watched_page_validates_url(self) -> None:
-        """URL must start with http."""
+        """URL must start with http — Pydantic rejects invalid values."""
+        from pydantic import ValidationError
+
         from src.api.scraper import WatchedPageCreate
 
-        request = WatchedPageCreate(url="not-a-url", category="delivery", rescrape_interval_hours=24)
-        assert request.url == "not-a-url"
-        # The API will reject it because it doesn't start with http
+        with pytest.raises(ValidationError):
+            WatchedPageCreate(url="not-a-url", category="delivery", rescrape_interval_hours=24)
 
     @pytest.mark.asyncio
     async def test_add_watched_page_validates_category(self) -> None:

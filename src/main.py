@@ -196,6 +196,17 @@ async def readiness_check() -> dict[str, object]:
     else:
         checks["postgresql"] = "not_initialized"
 
+    # asyncpg pool (pattern search / pgvector)
+    if _asyncpg_pool is not None:
+        try:
+            async with _asyncpg_pool.acquire() as conn:
+                await conn.fetchval("SELECT 1")
+            checks["asyncpg_pool"] = "connected"
+        except Exception:
+            checks["asyncpg_pool"] = "disconnected"
+    else:
+        checks["asyncpg_pool"] = "not_initialized"
+
     # Store API — lightweight HEAD request to base URL
     if _store_client is not None and _store_client._session is not None:
         try:
@@ -690,7 +701,7 @@ async def main() -> None:
 
             # Convert SQLAlchemy URL to asyncpg DSN (replace +asyncpg driver prefix)
             dsn = settings.database.url.replace("postgresql+asyncpg://", "postgresql://")
-            _asyncpg_pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3)
+            _asyncpg_pool = await asyncpg.create_pool(dsn, min_size=1, max_size=3, command_timeout=30)
             logger.info("asyncpg pool created for pattern search")
         except Exception:
             logger.debug("asyncpg pool init failed — pattern search disabled", exc_info=True)

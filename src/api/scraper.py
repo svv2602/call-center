@@ -62,12 +62,13 @@ class ScraperConfigUpdate(BaseModel):
 # ─── Source Config models ──────────────────────────────────
 _VALID_SOURCE_TYPES = {"prokoleso", "rss", "generic_html"}
 _VALID_LANGUAGES = {"uk", "de", "en", "fr", "pl"}
+_URL_PATTERN = r"^https?://.+"
 
 
 class SourceConfigCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
     source_type: str = Field(min_length=1, max_length=30)
-    source_url: str = Field(min_length=1, max_length=2000)
+    source_url: str = Field(min_length=1, max_length=2000, pattern=_URL_PATTERN)
     language: str = Field(default="uk", max_length=5)
     enabled: bool = False
     auto_approve: bool = False
@@ -82,7 +83,7 @@ class SourceConfigCreate(BaseModel):
 class SourceConfigUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     source_type: str | None = Field(default=None, min_length=1, max_length=30)
-    source_url: str | None = Field(default=None, min_length=1, max_length=2000)
+    source_url: str | None = Field(default=None, min_length=1, max_length=2000, pattern=_URL_PATTERN)
     language: str | None = Field(default=None, max_length=5)
     enabled: bool | None = None
     auto_approve: bool | None = None
@@ -364,9 +365,6 @@ async def create_source_config(
             detail=f"Invalid language: {request.language}. "
             f"Must be one of: {', '.join(sorted(_VALID_LANGUAGES))}",
         )
-    if not request.source_url.startswith("http"):
-        raise HTTPException(status_code=400, detail="source_url must start with http")
-
     engine = await _get_engine()
 
     try:
@@ -535,7 +533,7 @@ _VALID_CATEGORIES = {
 
 
 class WatchedPageCreate(BaseModel):
-    url: str = Field(min_length=1, max_length=2000)
+    url: str = Field(min_length=1, max_length=2000, pattern=_URL_PATTERN)
     category: str = Field(default="general", min_length=1, max_length=50)
     rescrape_interval_hours: int = Field(default=168, ge=1, le=8760)
     is_discovery: bool = False

@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
+import redis as sync_redis
+
 from src.config import get_settings
 from src.monitoring.metrics import (
     backup_duration_seconds,
@@ -28,6 +30,32 @@ from src.monitoring.metrics import (
 from src.tasks.celery_app import app
 
 logger = logging.getLogger(__name__)
+
+
+def _acquire_lock(lock_name: str, ttl: int) -> sync_redis.Redis | None:
+    """Try to acquire a Redis distributed lock. Returns client if acquired, None if not."""
+    try:
+        settings = get_settings()
+        r = sync_redis.from_url(settings.redis.url)
+        if r.set(f"backup:{lock_name}:lock", "1", nx=True, ex=ttl):
+            return r
+        logger.info("Backup '%s' already running, skipping", lock_name)
+        r.close()
+        return None
+    except Exception:
+        # Redis unavailable — proceed without lock (best effort)
+        logger.debug("Redis unavailable for backup lock, proceeding without lock")
+        return None
+
+
+def _release_lock(r: sync_redis.Redis | None, lock_name: str) -> None:
+    """Release a Redis distributed lock."""
+    if r is not None:
+        try:
+            r.delete(f"backup:{lock_name}:lock")
+            r.close()
+        except Exception:
+            pass
 
 
 def _parse_database_url(url: str) -> dict[str, str]:
@@ -62,7 +90,7 @@ def _run_pg_dump(db_params: dict[str, str], output_path: Path) -> None:
     if db_params["password"]:
         env["PGPASSWORD"] = db_params["password"]
 
-    subprocess.run(cmd, env=env, check=True, capture_output=True, text=True)
+    subprocess.run(cmd, env=env, check=True, capture_output=True, text=True, timeout=1800)
 
 
 def _compress_file(source: Path) -> Path:
@@ -93,6 +121,10 @@ def backup_database() -> dict[str, Any]:
 
     Called by Celery Beat daily at 04:00 Kyiv time.
     """
+    lock = _acquire_lock("database", ttl=1860)
+    if lock is None:
+        return {"status": "skipped", "reason": "already_running"}
+
     start = time.monotonic()
     settings = get_settings()
     db_params = _parse_database_url(settings.database.url)
@@ -143,6 +175,8 @@ def backup_database() -> dict[str, Any]:
         logger.error("pg_dump failed: %s", e.stderr.strip() if e.stderr else str(e))
         backup_errors_total.labels(component="postgres").inc()
         return {"status": "error", "error": str(e)}
+    finally:
+        _release_lock(lock, "database")
 
 
 def verify_backup(filepath: str | Path) -> dict[str, Any]:
@@ -239,6 +273,10 @@ def backup_redis() -> dict[str, Any]:
     Called by Celery Beat daily at 04:15 Kyiv time.
     Uses redis-cli to trigger BGSAVE and copies the dump.rdb file.
     """
+    lock = _acquire_lock("redis", ttl=660)
+    if lock is None:
+        return {"status": "skipped", "reason": "already_running"}
+
     start = time.monotonic()
     settings = get_settings()
     redis_url = settings.redis.url
@@ -262,6 +300,7 @@ def backup_redis() -> dict[str, Any]:
             check=True,
             capture_output=True,
             text=True,
+            timeout=30,
         )
 
         # Wait briefly for BGSAVE to complete
@@ -275,6 +314,7 @@ def backup_redis() -> dict[str, Any]:
             check=True,
             capture_output=True,
             text=True,
+            timeout=10,
         )
         redis_dir_lines = result_info.stdout.strip().split("\n")
         redis_dir = redis_dir_lines[1] if len(redis_dir_lines) > 1 else "/data"
@@ -291,6 +331,7 @@ def backup_redis() -> dict[str, Any]:
                 ["cp", str(rdb_source), str(rdb_dest_path)],
                 check=True,
                 capture_output=True,
+                timeout=60,
             )
 
         gz_path = _compress_file(rdb_dest)
@@ -310,6 +351,8 @@ def backup_redis() -> dict[str, Any]:
         backup_errors_total.labels(component="redis").inc()
         logger.error("Redis backup failed: %s", e)
         return {"status": "error", "error": str(e)}
+    finally:
+        _release_lock(lock, "redis")
 
 
 @app.task(name="src.tasks.backup.backup_knowledge_base", soft_time_limit=600, time_limit=660)  # type: ignore[untyped-decorator]
@@ -318,6 +361,10 @@ def backup_knowledge_base() -> dict[str, Any]:
 
     Called by Celery Beat weekly on Sunday at 01:00 Kyiv time.
     """
+    lock = _acquire_lock("knowledge", ttl=660)
+    if lock is None:
+        return {"status": "skipped", "reason": "already_running"}
+
     start = time.monotonic()
     settings = get_settings()
 
@@ -354,3 +401,5 @@ def backup_knowledge_base() -> dict[str, Any]:
         backup_errors_total.labels(component="knowledge").inc()
         logger.error("Knowledge base backup failed: %s", e)
         return {"status": "error", "error": str(e)}
+    finally:
+        _release_lock(lock, "knowledge")
