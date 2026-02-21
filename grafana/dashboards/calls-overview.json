@@ -1,0 +1,232 @@
+{
+  "uid": "calls-overview",
+  "title": "Calls Overview",
+  "description": "Call volume, quality, scenarios, and cost overview with tenant breakdown",
+  "tags": ["call-center", "calls", "overview"],
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "5m",
+  "schemaVersion": 39,
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m", "30m", "1h"]
+  },
+  "timezone": "browser",
+  "templating": {
+    "list": [
+      {
+        "name": "tenant",
+        "label": "Tenant",
+        "type": "query",
+        "datasource": {
+          "type": "grafana-postgresql-datasource",
+          "uid": "postgresql"
+        },
+        "query": "SELECT slug AS __text, id::text AS __value FROM tenants WHERE is_active = true ORDER BY name",
+        "includeAll": true,
+        "allValue": "",
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": "$__all"
+        },
+        "refresh": 1,
+        "multi": false,
+        "hide": 0,
+        "skipUrlSync": false
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Call Volume Over Time",
+      "description": "Number of calls per day, grouped by tenant",
+      "type": "timeseries",
+      "gridPos": { "h": 9, "w": 16, "x": 0, "y": 0 },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgresql"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT DATE_TRUNC('day', c.started_at) AS time, COALESCE(t.name, 'Unknown') AS tenant, COUNT(*) AS calls FROM calls c LEFT JOIN tenants t ON c.tenant_id = t.id WHERE c.started_at BETWEEN $__timeFrom() AND $__timeTo() AND ('$tenant' = '' OR '$tenant' = '$__all' OR c.tenant_id::text = '$tenant') GROUP BY 1, 2 ORDER BY 1",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 20 }
+        }
+      }
+    },
+    {
+      "id": 2,
+      "title": "Total Calls",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 16, "y": 0 },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgresql"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT COUNT(*) AS total FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND ('$tenant' = '' OR '$tenant' = '$__all' OR tenant_id::text = '$tenant')",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "thresholds": {
+            "steps": [
+              { "color": "blue", "value": null },
+              { "color": "green", "value": 100 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 3,
+      "title": "Transfer Rate",
+      "type": "stat",
+      "gridPos": { "h": 4, "w": 4, "x": 20, "y": 0 },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgresql"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE transferred_to_operator) / NULLIF(COUNT(*), 0), 1) AS pct FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND ('$tenant' = '' OR '$tenant' = '$__all' OR tenant_id::text = '$tenant')",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percent",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 20 },
+              { "color": "red", "value": 40 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 4,
+      "title": "Avg Call Duration",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 4, "x": 16, "y": 4 },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgresql"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT ROUND(AVG(duration_seconds)) AS avg_sec FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND ('$tenant' = '' OR '$tenant' = '$__all' OR tenant_id::text = '$tenant')",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 180 },
+              { "color": "red", "value": 300 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Avg Cost per Call",
+      "type": "stat",
+      "gridPos": { "h": 5, "w": 4, "x": 20, "y": 4 },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgresql"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT ROUND(AVG(total_cost_usd)::numeric, 3) AS avg_cost FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND total_cost_usd IS NOT NULL AND ('$tenant' = '' OR '$tenant' = '$__all' OR tenant_id::text = '$tenant')",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "currencyUSD",
+          "thresholds": {
+            "steps": [
+              { "color": "green", "value": null },
+              { "color": "yellow", "value": 0.05 },
+              { "color": "red", "value": 0.1 }
+            ]
+          }
+        }
+      }
+    },
+    {
+      "id": 6,
+      "title": "Quality Score Distribution",
+      "description": "Histogram of call quality scores",
+      "type": "histogram",
+      "gridPos": { "h": 9, "w": 12, "x": 0, "y": 9 },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgresql"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT quality_score FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND quality_score IS NOT NULL AND ('$tenant' = '' OR '$tenant' = '$__all' OR tenant_id::text = '$tenant')",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": {
+        "bucketCount": 20,
+        "fillOpacity": 80
+      }
+    },
+    {
+      "id": 7,
+      "title": "Scenario Breakdown",
+      "description": "Distribution of call scenarios",
+      "type": "piechart",
+      "gridPos": { "h": 9, "w": 12, "x": 12, "y": 9 },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgresql"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT COALESCE(scenario, 'unknown') AS scenario, COUNT(*) AS count FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND ('$tenant' = '' OR '$tenant' = '$__all' OR tenant_id::text = '$tenant') GROUP BY scenario ORDER BY count DESC",
+          "format": "table"
+        }
+      ],
+      "options": {
+        "legend": { "displayMode": "table", "placement": "right" },
+        "pieType": "donut"
+      }
+    }
+  ]
+}

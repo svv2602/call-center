@@ -7,6 +7,31 @@ import { makeSortable } from '../sorting.js';
 import * as tw from '../tw.js';
 
 let callsOffset = 0;
+let _tenants = [];
+
+async function _loadTenants() {
+    try {
+        const data = await api('/admin/tenants?is_active=true&limit=100');
+        _tenants = data.tenants || [];
+    } catch {
+        _tenants = [];
+    }
+}
+
+function _populateTenantFilter() {
+    const sel = document.getElementById('filterTenant');
+    if (!sel || _tenants.length === 0) return;
+    // Keep "All" option, add tenants
+    const current = sel.value;
+    sel.innerHTML = `<option value="">${t('dashboard.allNetworks')}</option>`;
+    for (const ten of _tenants) {
+        const opt = document.createElement('option');
+        opt.value = ten.id;
+        opt.textContent = ten.name;
+        if (ten.id === current) opt.selected = true;
+        sel.appendChild(opt);
+    }
+}
 
 async function loadCalls(offset = 0) {
     callsOffset = offset;
@@ -21,12 +46,14 @@ async function loadCalls(offset = 0) {
     const tr = document.getElementById('filterTransferred')?.value;
     const qb = document.getElementById('filterQualityBelow')?.value;
     const search = document.getElementById('filterSearch')?.value;
+    const tenantId = document.getElementById('filterTenant')?.value;
     if (df) params.set('date_from', df);
     if (dt) params.set('date_to', dt);
     if (sc) params.set('scenario', sc);
     if (tr) params.set('transferred', tr);
     if (qb) params.set('quality_below', qb);
     if (search) params.set('search', search);
+    if (tenantId) params.set('tenant_id', tenantId);
 
     try {
         const data = await api(`/analytics/calls?${params}`);
@@ -72,11 +99,13 @@ async function exportCallsCSV() {
     const sc = document.getElementById('filterScenario')?.value;
     const tr = document.getElementById('filterTransferred')?.value;
     const qb = document.getElementById('filterQualityBelow')?.value;
+    const tenantId = document.getElementById('filterTenant')?.value;
     if (df) params.set('date_from', df);
     if (dt) params.set('date_to', dt);
     if (sc) params.set('scenario', sc);
     if (tr) params.set('transferred', tr);
     if (qb) params.set('min_quality', qb);
+    if (tenantId) params.set('tenant_id', tenantId);
 
     try {
         const res = await fetchWithAuth(`/analytics/calls/export?${params}`);
@@ -169,7 +198,11 @@ function closeCallModal() {
 export function getCallsOffset() { return callsOffset; }
 
 export function init() {
-    registerPageLoader('calls', () => loadCalls());
+    registerPageLoader('calls', async () => {
+        await _loadTenants();
+        _populateTenantFilter();
+        loadCalls();
+    });
 }
 
 window._pages = window._pages || {};

@@ -79,6 +79,8 @@ export default {
     'dashboard.pdfDownloaded': 'PDF-отчёт скачан',
     'dashboard.pdfFailed': 'Ошибка скачивания PDF: {error}',
     'dashboard.failedToLoad': 'Не удалось загрузить дашборд: {error}',
+    'dashboard.filterByNetwork': 'Сеть:',
+    'dashboard.allNetworks': 'Все сети',
 
     // Calls
     'calls.breadcrumb': 'Журнал звонков',
@@ -705,6 +707,10 @@ export default {
     'sources.nameUrlRequired': 'Укажите название и URL',
     'sources.invalidSettingsJson': 'Некорректный JSON в настройках',
     'sources.processed': 'Обработано',
+    'sources.bulkImport': 'Массовый импорт',
+    'sources.bulkImportTitle': 'Массовый импорт отслеживаемых страниц',
+    'sources.bulkUrlsPlaceholder': 'Введите URL-адреса (по одному на строку)...',
+    'sources.bulkImportResult': 'Добавлено: {added}, пропущено: {skipped}',
 
     // Tenants
     'tenants.title': 'Сети',

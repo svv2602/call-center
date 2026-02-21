@@ -40,6 +40,7 @@ async def get_quality_report(
     date_from: str | None = Query(None, description="Start date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
     date_to: str | None = Query(None, description="End date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
     scenario: str | None = Query(None, description="Filter by scenario"),
+    tenant_id: str | None = Query(None, description="Filter by tenant UUID"),
     _: dict[str, Any] = _analyst_dep,
 ) -> dict[str, Any]:
     """Aggregated quality report with averages by criteria."""
@@ -57,6 +58,9 @@ async def get_quality_report(
     if scenario:
         conditions.append("scenario = :scenario")
         params["scenario"] = scenario
+    if tenant_id:
+        conditions.append("tenant_id = CAST(:tenant_id AS uuid)")
+        params["tenant_id"] = tenant_id
 
     where_clause = " AND ".join(conditions)
 
@@ -111,6 +115,7 @@ async def get_calls_list(
     date_to: str | None = Query(None, description="End date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
     search: str | None = Query(None, description="Full-text search in transcriptions"),
     sort_by: str | None = Query(None, description="Sort by: date, quality, cost"),
+    tenant_id: str | None = Query(None, description="Filter by tenant UUID"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     _: dict[str, Any] = _analyst_dep,
@@ -142,6 +147,9 @@ async def get_calls_list(
             "WHERE to_tsvector('simple', content) @@ plainto_tsquery('simple', :search))"
         )
         params["search"] = search
+    if tenant_id:
+        conditions.append("tenant_id = CAST(:tenant_id AS uuid)")
+        params["tenant_id"] = tenant_id
 
     where_clause = " AND ".join(conditions)
 
@@ -166,7 +174,7 @@ async def get_calls_list(
                 SELECT
                     id, caller_id, started_at, ended_at, duration_seconds,
                     scenario, transferred_to_operator, transfer_reason,
-                    quality_score, total_cost_usd
+                    quality_score, total_cost_usd, tenant_id
                 FROM calls
                 WHERE {where_clause}
                 ORDER BY {order_by}
@@ -316,14 +324,54 @@ async def download_call_transcript(call_id: UUID, _: dict[str, Any] = _analyst_d
 async def get_summary(
     date_from: str | None = Query(None, description="Start date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
     date_to: str | None = Query(None, description="End date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    tenant_id: str | None = Query(None, description="Filter by tenant UUID"),
     limit: int = Query(90, ge=1, le=365, description="Max days to return"),
     _: dict[str, Any] = _analyst_dep,
 ) -> dict[str, Any]:
-    """Aggregated daily statistics from daily_stats table."""
+    """Aggregated daily statistics from daily_stats table or live from calls."""
     engine = await _get_engine()
 
+    # When tenant_id is provided, aggregate live from calls (daily_stats has no tenant column)
+    if tenant_id:
+        conditions = ["1=1"]
+        params: dict[str, Any] = {"limit": limit, "tenant_id": tenant_id}
+        conditions.append("tenant_id = CAST(:tenant_id AS uuid)")
+
+        if date_from:
+            conditions.append("started_at >= :date_from")
+            params["date_from"] = date_from
+        if date_to:
+            conditions.append("started_at < CAST(:date_to AS date) + interval '1 day'")
+            params["date_to"] = date_to
+
+        where_clause = " AND ".join(conditions)
+
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                text(f"""
+                    SELECT
+                        DATE(started_at) AS stat_date,
+                        COUNT(*) AS total_calls,
+                        COUNT(*) FILTER (WHERE NOT transferred_to_operator) AS resolved_by_bot,
+                        COUNT(*) FILTER (WHERE transferred_to_operator) AS transferred,
+                        AVG(duration_seconds) AS avg_duration_seconds,
+                        AVG(quality_score) AS avg_quality_score,
+                        SUM(total_cost_usd) AS total_cost_usd
+                    FROM calls
+                    WHERE {where_clause}
+                    GROUP BY DATE(started_at)
+                    ORDER BY stat_date DESC
+                    LIMIT :limit
+                """),
+                params,
+            )
+            stats = [dict(row._mapping) for row in result]
+
+        return {"daily_stats": stats}
+
+    # Default: use daily_stats table
     conditions = ["1=1"]
-    params: dict[str, Any] = {"limit": limit}
+    params = {"limit": limit}
 
     if date_from:
         conditions.append("stat_date >= :date_from")

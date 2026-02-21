@@ -639,6 +639,61 @@ async def add_watched_page(
     return {"message": "Watched page added", "id": page_id}
 
 
+class BulkWatchedPageCreate(BaseModel):
+    urls: list[str] = Field(min_length=1, max_length=500)
+    category: KnowledgeCategory = "general"
+    rescrape_interval_hours: int = Field(default=168, ge=1, le=8760)
+    tenant_id: str | None = None
+
+
+@router.post("/watched-pages/bulk")
+async def bulk_add_watched_pages(
+    request: BulkWatchedPageCreate, _: dict[str, Any] = _admin_dep
+) -> dict[str, Any]:
+    """Bulk-add watched pages. Skips duplicates."""
+    engine = await _get_engine()
+    added = 0
+    skipped = 0
+    errors: list[str] = []
+
+    for raw_url in request.urls:
+        url = raw_url.strip()
+        if not url:
+            continue
+
+        try:
+            async with engine.begin() as conn:
+                result = await conn.execute(
+                    text("""
+                        INSERT INTO knowledge_sources
+                            (url, source_site, source_type, status,
+                             rescrape_interval_hours, original_title,
+                             next_scrape_at, tenant_id)
+                        VALUES (:url, 'prokoleso.ua', 'watched_page', 'new',
+                                :interval, :url, now(),
+                                CAST(:tenant_id AS uuid))
+                        ON CONFLICT (url) DO NOTHING
+                        RETURNING id
+                    """),
+                    {
+                        "url": url,
+                        "interval": request.rescrape_interval_hours,
+                        "tenant_id": request.tenant_id,
+                    },
+                )
+                row = result.first()
+                if row:
+                    added += 1
+                else:
+                    skipped += 1
+        except Exception as exc:
+            skipped += 1
+            errors.append(f"{url}: {exc!s}"[:200])
+
+    logger.info("Bulk watched pages: added=%d, skipped=%d", added, skipped)
+    return {"added": added, "skipped": skipped, "errors": errors}
+
+
 @router.patch("/watched-pages/{page_id}")
 async def update_watched_page(
     page_id: UUID, request: WatchedPageUpdate, _: dict[str, Any] = _admin_dep

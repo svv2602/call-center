@@ -140,3 +140,18 @@ class TestCallSessionSerialization:
         assert len(restored.dialog_history) == 2
         assert restored.dialog_history[0].content == "Шукаю шини"
         assert restored.dialog_history[0].stt_confidence == 0.9
+
+    def test_tenant_fields_round_trip(self) -> None:
+        """Tenant fields survive serialize → deserialize."""
+        session = CallSession(uuid.uuid4())
+        tenant_id = str(uuid.uuid4())
+        session.tenant_id = tenant_id
+        session.tenant_slug = "prokoleso"
+        session.network_id = "prokoleso-net"
+
+        raw = session.serialize()
+        restored = CallSession.deserialize(raw)
+
+        assert restored.tenant_id == tenant_id
+        assert restored.tenant_slug == "prokoleso"
+        assert restored.network_id == "prokoleso-net"

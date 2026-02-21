@@ -710,6 +710,7 @@ async function loadWatchedPages() {
                     </label>
                 </div>
                 <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.knowledge.addWatchedPage()">${t('sources.addWatchedPage')}</button>
+                <button class="${tw.btnPrimary} ${tw.btnSm} ml-2" onclick="window._pages.knowledge.showBulkImportModal()">${t('sources.bulkImport')}</button>
             </div>`;
 
         if (pages.length === 0) {
@@ -858,6 +859,88 @@ async function deleteWatchedPage(pageId) {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  Bulk Import Modal
+// ═══════════════════════════════════════════════════════════
+function showBulkImportModal() {
+    // Build tenant options
+    let tenantOptions = '<option value="">—</option>';
+    for (const ten of _tenantsList) {
+        tenantOptions += `<option value="${escapeHtml(ten.id)}">${escapeHtml(ten.name)}</option>`;
+    }
+
+    const modalHtml = `
+        <div id="bulkImportOverlay" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onclick="if(event.target===this)this.remove()">
+            <div class="bg-white dark:bg-neutral-800 rounded-lg shadow-xl w-full max-w-lg mx-4 p-6">
+                <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">${t('sources.bulkImportTitle')}</h3>
+                <textarea id="bulkUrls" rows="8" class="w-full border rounded px-3 py-2 text-sm dark:bg-neutral-700 dark:border-neutral-600 mb-3" placeholder="${t('sources.bulkUrlsPlaceholder')}"></textarea>
+                <div class="grid grid-cols-3 gap-3 mb-4">
+                    <div>
+                        <label class="block text-xs ${tw.mutedText} mb-1">${t('sources.watchedCategory')}</label>
+                        <select id="bulkCategory" class="w-full border rounded px-2 py-1.5 text-sm dark:bg-neutral-700 dark:border-neutral-600">
+                            <option value="general">general</option>
+                            <option value="faq">faq</option>
+                            <option value="guides">guides</option>
+                            <option value="comparisons">comparisons</option>
+                            <option value="brands">brands</option>
+                            <option value="procedures">procedures</option>
+                            <option value="delivery">delivery</option>
+                            <option value="warranty">warranty</option>
+                            <option value="returns">returns</option>
+                            <option value="policies">policies</option>
+                            <option value="promotions">promotions</option>
+                            <option value="news">news</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs ${tw.mutedText} mb-1">${t('sources.watchedInterval')}</label>
+                        <select id="bulkInterval" class="w-full border rounded px-2 py-1.5 text-sm dark:bg-neutral-700 dark:border-neutral-600">
+                            <option value="6">${t('sources.intervalHours.6')}</option>
+                            <option value="12">${t('sources.intervalHours.12')}</option>
+                            <option value="24">${t('sources.intervalHours.24')}</option>
+                            <option value="168" selected>${t('sources.intervalHours.168')}</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label class="block text-xs ${tw.mutedText} mb-1">${t('sources.tenant')}</label>
+                        <select id="bulkTenant" class="w-full border rounded px-2 py-1.5 text-sm dark:bg-neutral-700 dark:border-neutral-600">${tenantOptions}</select>
+                    </div>
+                </div>
+                <div class="flex justify-end gap-2">
+                    <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="document.getElementById('bulkImportOverlay').remove()">${t('common.cancel')}</button>
+                    <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.knowledge.submitBulkImport()">${t('sources.bulkImport')}</button>
+                </div>
+            </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', modalHtml);
+}
+
+async function submitBulkImport() {
+    const raw = document.getElementById('bulkUrls')?.value || '';
+    const urls = raw.split('\n').map(u => u.trim()).filter(Boolean);
+    if (urls.length === 0) return;
+
+    const interval = parseInt(document.getElementById('bulkInterval')?.value || '168', 10);
+    const tenant_id = document.getElementById('bulkTenant')?.value || null;
+
+    try {
+        const result = await api('/admin/scraper/watched-pages/bulk', {
+            method: 'POST',
+            body: JSON.stringify({
+                urls,
+                category: document.getElementById('bulkCategory')?.value || 'general',
+                rescrape_interval_hours: interval,
+                tenant_id,
+            }),
+        });
+        showToast(t('sources.bulkImportResult', {added: result.added, skipped: result.skipped}));
+        document.getElementById('bulkImportOverlay')?.remove();
+        loadWatchedPages();
+    } catch (e) {
+        showToast(t('sources.watchedPageAddFailed', {error: e.message}), 'error');
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  Init & exports
 // ═══════════════════════════════════════════════════════════
 export function init() {
@@ -884,4 +967,5 @@ window._pages.knowledge = {
     runScraperNow, approveSource, rejectSource, viewSourceArticle,
     // Watched pages
     loadWatchedPages, addWatchedPage, updateWatchedInterval, scrapeWatchedNow, deleteWatchedPage, filterWatchedByTenant,
+    showBulkImportModal, submitBulkImport,
 };

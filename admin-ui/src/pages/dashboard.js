@@ -8,15 +8,49 @@ import * as tw from '../tw.js';
 const _BASE_INTERVAL = 30_000;  // 30s normal refresh
 const _MAX_INTERVAL = 300_000;  // 5min max backoff
 let _currentInterval = _BASE_INTERVAL;
+let _selectedTenantId = '';
+let _tenants = [];
+
+async function _loadTenants() {
+    try {
+        const data = await api('/admin/tenants?is_active=true&limit=100');
+        _tenants = data.tenants || [];
+    } catch {
+        _tenants = [];
+    }
+}
+
+function _renderTenantFilter() {
+    const container = document.getElementById('dashboardTenantFilter');
+    if (!container) return;
+    let html = `<label class="text-sm font-medium text-neutral-600 dark:text-neutral-400 mr-2">${t('dashboard.filterByNetwork')}</label>`;
+    html += `<select id="dashboardTenantSelect" class="${tw.selectSm} w-auto" onchange="window._pages.dashboard.onTenantChange(this.value)">`;
+    html += `<option value="">${t('dashboard.allNetworks')}</option>`;
+    for (const ten of _tenants) {
+        const sel = ten.id === _selectedTenantId ? ' selected' : '';
+        html += `<option value="${escapeHtml(ten.id)}"${sel}>${escapeHtml(ten.name)}</option>`;
+    }
+    html += '</select>';
+    container.innerHTML = html;
+}
+
+function onTenantChange(tenantId) {
+    _selectedTenantId = tenantId;
+    loadDashboard();
+}
 
 async function loadDashboard() {
     try {
-        const data = await api('/analytics/summary');
+        const params = _selectedTenantId ? `?tenant_id=${_selectedTenantId}` : '';
+        const data = await api(`/analytics/summary${params}`);
         const stats = data.daily_stats || [];
         const latest = stats[0] || {};
         const total = latest.total_calls || 0;
         const resolved = latest.resolved_by_bot || 0;
         const resolvedPct = total > 0 ? (resolved / total * 100).toFixed(1) : '0.0';
+
+        _renderTenantFilter();
+
         document.getElementById('dashboardStats').innerHTML = `
             <div class="${tw.card} text-center"><div class="${tw.statValue}">${total}</div><div class="${tw.statLabel}">${t('dashboard.callsToday')}</div></div>
             <div class="${tw.card} text-center"><div class="${tw.statValue}">${resolved}<small class="text-xs text-neutral-500 dark:text-neutral-400"> (${resolvedPct}%)</small></div><div class="${tw.statLabel}">${t('dashboard.resolvedByBot')}</div></div>
@@ -42,7 +76,8 @@ async function loadDashboard() {
 
 async function exportStatsCSV() {
     try {
-        const res = await fetchWithAuth('/analytics/summary/export');
+        const params = _selectedTenantId ? `?tenant_id=${_selectedTenantId}` : '';
+        const res = await fetchWithAuth(`/analytics/summary/export${params}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const blob = await res.blob();
         const disposition = res.headers.get('Content-Disposition') || '';
@@ -76,7 +111,9 @@ async function downloadPdfReport() {
 }
 
 export function init() {
-    registerPageLoader('dashboard', () => {
+    registerPageLoader('dashboard', async () => {
+        await _loadTenants();
+        _renderTenantFilter();
         loadDashboard();
         setRefreshTimer(loadDashboard, 30000);
     });
@@ -84,4 +121,4 @@ export function init() {
 
 // Expose for onclick handlers in HTML
 window._pages = window._pages || {};
-window._pages.dashboard = { loadDashboard, exportStatsCSV, downloadPdfReport };
+window._pages.dashboard = { loadDashboard, exportStatsCSV, downloadPdfReport, onTenantChange };

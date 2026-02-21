@@ -425,6 +425,20 @@ async def seed(engine: AsyncEngine) -> None:
     calls = get_calls()
     logger.info("Seeding %d sample calls...", len(calls))
 
+    # Look up prokoleso tenant_id (if exists)
+    prokoleso_tenant_id: str | None = None
+    try:
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                text("SELECT id FROM tenants WHERE slug = 'prokoleso' AND is_active = true LIMIT 1")
+            )
+            row = result.first()
+            if row:
+                prokoleso_tenant_id = str(row[0])
+                logger.info("Found prokoleso tenant: %s", prokoleso_tenant_id)
+    except Exception:
+        logger.info("No tenants table or no prokoleso tenant — seeding without tenant_id")
+
     for call_data in calls:
         call_id = uuid.uuid4()
         started_at = call_data["started_at"]
@@ -438,12 +452,13 @@ async def seed(engine: AsyncEngine) -> None:
                         id, caller_id, started_at, ended_at, duration_seconds,
                         scenario, transferred_to_operator, transfer_reason,
                         quality_score, quality_details, cost_breakdown,
-                        total_cost_usd, prompt_version
+                        total_cost_usd, prompt_version, tenant_id
                     ) VALUES (
                         :id, :caller_id, :started_at, :ended_at, :duration_seconds,
                         :scenario, :transferred_to_operator, :transfer_reason,
                         :quality_score, :quality_details, :cost_breakdown,
-                        :total_cost_usd, :prompt_version
+                        :total_cost_usd, :prompt_version,
+                        CAST(:tenant_id AS uuid)
                     )
                 """),
                 {
@@ -460,6 +475,7 @@ async def seed(engine: AsyncEngine) -> None:
                     "cost_breakdown": json.dumps(call_data["cost_breakdown"]) if call_data.get("cost_breakdown") else None,
                     "total_cost_usd": call_data.get("total_cost_usd"),
                     "prompt_version": call_data.get("prompt_version"),
+                    "tenant_id": prokoleso_tenant_id,
                 },
             )
 

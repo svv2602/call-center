@@ -50,12 +50,14 @@ class CallLogger:
         customer_id: str | None,
         started_at: datetime,
         prompt_version: str,
+        tenant_id: str | None = None,
     ) -> None:
         """Log the start of a call."""
         await self._execute(
             """
-            INSERT INTO calls (id, caller_id, customer_id, started_at, prompt_version)
-            VALUES (:id, :caller_id, :customer_id, :started_at, :prompt_version)
+            INSERT INTO calls (id, caller_id, customer_id, started_at, prompt_version, tenant_id)
+            VALUES (:id, :caller_id, :customer_id, :started_at, :prompt_version,
+                    CAST(:tenant_id AS uuid))
             """,
             {
                 "id": str(call_id),
@@ -63,6 +65,7 @@ class CallLogger:
                 "customer_id": customer_id,
                 "started_at": started_at,
                 "prompt_version": prompt_version,
+                "tenant_id": tenant_id,
             },
         )
 

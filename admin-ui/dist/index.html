@@ -13,8 +13,8 @@
             }
         })();
     </script>
-  <script type="module" crossorigin src="/assets/index-C5M4m0tI.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-I7o7FLG8.css">
+  <script type="module" crossorigin src="/assets/index-CY-Fa4jy.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-4Oh3wOys.css">
 </head>
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-50 font-sans antialiased">
     <!-- Toast container -->
@@ -119,7 +119,7 @@
                         </a>
                         <a href="#" class="nav-flyout-link" data-page="tenants" onclick="window._app.showPage('tenants')">
                             <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21"/></svg>
-                            <span data-i18n="nav.tenants">Тенанты</span>
+                            <span data-i18n="nav.tenants">Сети</span>
                         </a>
                         <a href="#" class="nav-flyout-link" data-page="notifications" onclick="window._app.showPage('notifications')">
                             <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
@@ -174,6 +174,7 @@
             <div id="page-dashboard">
                 <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="dashboard.breadcrumb">Дашборд</span></div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="dashboard.title">Дашборд</h1>
+                <div class="flex items-center gap-3 mb-4" id="dashboardTenantFilter"></div>
                 <div class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4 mb-6 max-md:grid-cols-2 max-[480px]:grid-cols-1" id="dashboardStats">
                     <div class="flex justify-center py-8"><div class="spinner"></div></div>
                 </div>
@@ -214,6 +215,9 @@
                     <input type="number" id="filterQualityBelow" data-i18n-placeholder="calls.qualityBelow" placeholder="Качество ниже" step="0.1" min="0" max="1"
                         onchange="window._pages.calls.loadCalls()"
                         class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                    <select id="filterTenant" onchange="window._pages.calls.loadCalls()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
+                        <option value="" data-i18n="dashboard.allNetworks">Все сети</option>
+                    </select>
                     <button onclick="window._pages.calls.loadCalls()"
                         class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.filter">Фильтровать</button>
                     <button onclick="window._pages.calls.exportCallsCSV()"
@@ -578,8 +582,8 @@
 
             <!-- Tenants -->
             <div id="page-tenants" style="display:none">
-                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.tenants">Тенанты</span></div>
-                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="tenants.title">Тенанты</h1>
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.tenants">Сети</span></div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="tenants.title">Сети</h1>
                 <div class="flex flex-wrap items-center gap-2 mb-4">
                     <select id="tenantsActiveFilter" onchange="window._pages.tenants.loadTenants()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                         <option value="" data-i18n="common.all">Все</option>
@@ -587,7 +591,7 @@
                         <option value="false" data-i18n="tenants.inactive">Неактивные</option>
                     </select>
                     <button onclick="window._pages.tenants.showCreateTenant()"
-                        class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="tenants.newTenant">+ Новый тенант</button>
+                        class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="tenants.newTenant">+ Новая сеть</button>
                 </div>
                 <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="tenantsContainer">
                     <div class="flex justify-center py-8"><div class="spinner"></div></div>
@@ -596,9 +600,9 @@
             </div>
 
             <!-- Tenant Modal -->
-            <div class="modal-overlay" id="tenantModal">
+            <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="tenantModal">
                 <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl shadow-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
-                    <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" id="tenantModalTitle">Новый тенант</h2>
+                    <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" id="tenantModalTitle">Новая сеть</h2>
                     <input type="hidden" id="editTenantId">
                     <div class="space-y-3">
                         <div>

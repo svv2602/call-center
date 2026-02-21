@@ -216,6 +216,25 @@ services:
           cpus: "0.5"
           memory: 256M
 
+  whisper:
+    image: onerahmet/openai-whisper-asr-webservice:latest-gpu
+    ports:
+      - "9000:9000"
+    environment:
+      - ASR_MODEL=large-v3
+      - ASR_ENGINE=faster_whisper
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities: [gpu]
+        limits:
+          cpus: "4.0"
+          memory: 8G
+    restart: unless-stopped
+    profiles:
+      - gpu
+
 volumes:
   pgdata:
   redisdata:

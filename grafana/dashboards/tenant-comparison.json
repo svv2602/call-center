@@ -1,0 +1,185 @@
+{
+  "uid": "tenant-comparison",
+  "title": "Tenant Comparison",
+  "description": "Per-tenant comparison of call volume, quality, and transfer rates",
+  "tags": ["call-center", "tenants", "comparison"],
+  "editable": true,
+  "graphTooltip": 1,
+  "refresh": "5m",
+  "schemaVersion": 39,
+  "time": {
+    "from": "now-7d",
+    "to": "now"
+  },
+  "timepicker": {
+    "refresh_intervals": ["5s", "10s", "30s", "1m", "5m", "15m", "30m", "1h"]
+  },
+  "timezone": "browser",
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "id": 1,
+      "title": "Calls per Tenant",
+      "description": "Total number of calls by tenant in the selected period",
+      "type": "barchart",
+      "gridPos": { "h": 10, "w": 8, "x": 0, "y": 0 },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgresql"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT COALESCE(t.name, 'No Tenant') AS tenant, COUNT(*) AS calls FROM calls c LEFT JOIN tenants t ON c.tenant_id = t.id WHERE c.started_at BETWEEN $__timeFrom() AND $__timeTo() GROUP BY t.name ORDER BY calls DESC",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" }
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "barWidth": 0.6
+      }
+    },
+    {
+      "id": 2,
+      "title": "Avg Quality by Tenant",
+      "description": "Average quality score per tenant",
+      "type": "barchart",
+      "gridPos": { "h": 10, "w": 8, "x": 8, "y": 0 },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgresql"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT COALESCE(t.name, 'No Tenant') AS tenant, ROUND(AVG(c.quality_score)::numeric, 2) AS avg_quality FROM calls c LEFT JOIN tenants t ON c.tenant_id = t.id WHERE c.started_at BETWEEN $__timeFrom() AND $__timeTo() AND c.quality_score IS NOT NULL GROUP BY t.name ORDER BY avg_quality DESC",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "min": 0,
+          "max": 1
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "barWidth": 0.6
+      }
+    },
+    {
+      "id": 3,
+      "title": "Transfer Rate by Tenant",
+      "description": "Percentage of calls transferred to operator per tenant",
+      "type": "barchart",
+      "gridPos": { "h": 10, "w": 8, "x": 16, "y": 0 },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgresql"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT COALESCE(t.name, 'No Tenant') AS tenant, ROUND(100.0 * COUNT(*) FILTER (WHERE c.transferred_to_operator) / NULLIF(COUNT(*), 0), 1) AS transfer_pct FROM calls c LEFT JOIN tenants t ON c.tenant_id = t.id WHERE c.started_at BETWEEN $__timeFrom() AND $__timeTo() GROUP BY t.name ORDER BY transfer_pct DESC",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "percent"
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "barWidth": 0.6
+      }
+    },
+    {
+      "id": 4,
+      "title": "Calls per Tenant Over Time",
+      "description": "Daily call volume per tenant",
+      "type": "timeseries",
+      "gridPos": { "h": 10, "w": 24, "x": 0, "y": 10 },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgresql"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT DATE_TRUNC('day', c.started_at) AS time, COALESCE(t.name, 'No Tenant') AS tenant, COUNT(*) AS calls FROM calls c LEFT JOIN tenants t ON c.tenant_id = t.id WHERE c.started_at BETWEEN $__timeFrom() AND $__timeTo() GROUP BY 1, 2 ORDER BY 1",
+          "format": "time_series"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "custom": { "fillOpacity": 15, "stacking": { "mode": "normal" } }
+        }
+      }
+    },
+    {
+      "id": 5,
+      "title": "Avg Cost per Call by Tenant",
+      "description": "Average cost per call for each tenant",
+      "type": "barchart",
+      "gridPos": { "h": 10, "w": 12, "x": 0, "y": 20 },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgresql"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT COALESCE(t.name, 'No Tenant') AS tenant, ROUND(AVG(c.total_cost_usd)::numeric, 4) AS avg_cost FROM calls c LEFT JOIN tenants t ON c.tenant_id = t.id WHERE c.started_at BETWEEN $__timeFrom() AND $__timeTo() AND c.total_cost_usd IS NOT NULL GROUP BY t.name ORDER BY avg_cost DESC",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "currencyUSD"
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "barWidth": 0.6
+      }
+    },
+    {
+      "id": 6,
+      "title": "Avg Duration by Tenant",
+      "description": "Average call duration (seconds) per tenant",
+      "type": "barchart",
+      "gridPos": { "h": 10, "w": 12, "x": 12, "y": 20 },
+      "datasource": {
+        "type": "grafana-postgresql-datasource",
+        "uid": "postgresql"
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "rawSql": "SELECT COALESCE(t.name, 'No Tenant') AS tenant, ROUND(AVG(c.duration_seconds)) AS avg_duration FROM calls c LEFT JOIN tenants t ON c.tenant_id = t.id WHERE c.started_at BETWEEN $__timeFrom() AND $__timeTo() GROUP BY t.name ORDER BY avg_duration DESC",
+          "format": "table"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "palette-classic" },
+          "unit": "s"
+        }
+      },
+      "options": {
+        "orientation": "horizontal",
+        "barWidth": 0.6
+      }
+    }
+  ]
+}

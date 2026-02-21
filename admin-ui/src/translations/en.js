@@ -79,6 +79,8 @@ export default {
     'dashboard.pdfDownloaded': 'PDF report downloaded',
     'dashboard.pdfFailed': 'PDF download failed: {error}',
     'dashboard.failedToLoad': 'Failed to load dashboard: {error}',
+    'dashboard.filterByNetwork': 'Network:',
+    'dashboard.allNetworks': 'All networks',
 
     // Calls
     'calls.breadcrumb': 'Call Journal',
@@ -705,6 +707,10 @@ export default {
     'sources.nameUrlRequired': 'Name and URL are required',
     'sources.invalidSettingsJson': 'Invalid JSON in settings',
     'sources.processed': 'Processed',
+    'sources.bulkImport': 'Bulk Import',
+    'sources.bulkImportTitle': 'Bulk Import Watched Pages',
+    'sources.bulkUrlsPlaceholder': 'Enter URLs (one per line)...',
+    'sources.bulkImportResult': 'Added: {added}, skipped: {skipped}',
 
     // Tenants
     'tenants.title': 'Networks',

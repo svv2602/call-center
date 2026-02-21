@@ -115,10 +115,12 @@ class QualitySettings(BaseSettings):
 
 
 class WhisperSettings(BaseSettings):
+    url: str = "http://localhost:9000"
     model_size: str = "large-v3"
     device: str = "cuda"
     compute_type: str = "float16"
     language: str = "uk"
+    enabled: bool = False
 
     model_config = {"env_prefix": "WHISPER_"}
 
