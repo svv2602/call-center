@@ -6,8 +6,8 @@ are only visible to that tenant.
 
 Backfills tenant_id from linked knowledge_sources (watched pages).
 
-Revision ID: 034
-Revises: 033
+Revision ID: 035
+Revises: 034
 Create Date: 2026-02-21
 """
 
@@ -15,8 +15,8 @@ from collections.abc import Sequence
 
 from alembic import op
 
-revision: str = "034"
-down_revision: str | None = "033"
+revision: str = "035"
+down_revision: str | None = "034"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
