@@ -266,10 +266,12 @@ async def create_conversation(
     """Create a new sandbox conversation."""
     engine = await _get_engine()
 
-    # Resolve prompt version name if ID provided
-    prompt_version_name = None
-    if request.prompt_version_id:
-        async with engine.begin() as conn:
+    user_id = user.get("user_id")
+
+    async with engine.begin() as conn:
+        # Resolve prompt version name if ID provided (same transaction as INSERT)
+        prompt_version_name = None
+        if request.prompt_version_id:
             pv_result = await conn.execute(
                 text("SELECT name FROM prompt_versions WHERE id = :id"),
                 {"id": str(request.prompt_version_id)},
@@ -279,9 +281,6 @@ async def create_conversation(
                 raise HTTPException(status_code=400, detail="Prompt version not found")
             prompt_version_name = pv_row.name
 
-    user_id = user.get("user_id")
-
-    async with engine.begin() as conn:
         result = await conn.execute(
             text("""
                 INSERT INTO sandbox_conversations
@@ -571,7 +570,11 @@ async def send_message(
                 "content": request.message,
             },
         )
-        customer_turn = dict(cust_result.first()._mapping)
+        cust_row = cust_result.first()
+        if cust_row is None:
+            msg = "Expected row from INSERT RETURNING"
+            raise RuntimeError(msg)
+        customer_turn = dict(cust_row._mapping)
 
         # Agent turn
         agent_result = await conn.execute(
@@ -597,7 +600,11 @@ async def send_message(
                 "history": json.dumps(result.updated_history),
             },
         )
-        agent_turn = dict(agent_result.first()._mapping)
+        agent_row = agent_result.first()
+        if agent_row is None:
+            msg = "Expected row from INSERT RETURNING"
+            raise RuntimeError(msg)
+        agent_turn = dict(agent_row._mapping)
 
         # Tool calls
         tool_calls_saved = []
@@ -619,7 +626,11 @@ async def send_message(
                     "is_mock": tc.is_mock,
                 },
             )
-            tool_calls_saved.append(dict(tc_result.first()._mapping))
+            tc_row = tc_result.first()
+            if tc_row is None:
+                msg = "Expected row from INSERT RETURNING"
+                raise RuntimeError(msg)
+            tool_calls_saved.append(dict(tc_row._mapping))
 
         # Update conversation timestamp
         await conn.execute(
@@ -1028,6 +1039,7 @@ async def replay_conversation(
         }
 
     except Exception as exc:
+        logger.exception("Regression run %s failed", run_id)
         async with engine.begin() as conn:
             await conn.execute(
                 text("""
@@ -1037,7 +1049,7 @@ async def replay_conversation(
                 """),
                 {"id": run_id, "error": str(exc)},
             )
-        raise HTTPException(status_code=500, detail=f"Regression failed: {exc}") from exc
+        raise HTTPException(status_code=500, detail="Regression failed. Check server logs.") from exc
 
 
 @router.get("/regression-runs")

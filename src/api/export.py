@@ -69,8 +69,8 @@ def _csv_streaming_response(
 
 @router.get("/calls/export")
 async def export_calls_csv(
-    date_from: str | None = Query(None, description="Start date (YYYY-MM-DD)"),
-    date_to: str | None = Query(None, description="End date (YYYY-MM-DD)"),
+    date_from: str | None = Query(None, description="Start date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    date_to: str | None = Query(None, description="End date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
     scenario: str | None = Query(None, description="Filter by scenario"),
     transferred: bool | None = Query(None, description="Filter transferred calls"),
     min_quality: float | None = Query(None, description="Minimum quality score"),
@@ -155,8 +155,8 @@ async def export_calls_csv(
 
 @router.get("/summary/export")
 async def export_summary_csv(
-    date_from: str | None = Query(None, description="Start date (YYYY-MM-DD)"),
-    date_to: str | None = Query(None, description="End date (YYYY-MM-DD)"),
+    date_from: str | None = Query(None, description="Start date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    date_to: str | None = Query(None, description="End date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
     _: dict[str, Any] = _analyst_dep,
 ) -> StreamingResponse:
     """Export daily statistics as CSV."""
@@ -236,8 +236,8 @@ async def export_summary_csv(
 
 @router.get("/report/pdf")
 async def download_report_pdf(
-    date_from: str = Query(..., description="Start date (YYYY-MM-DD)"),
-    date_to: str = Query(..., description="End date (YYYY-MM-DD)"),
+    date_from: str = Query(..., description="Start date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    date_to: str = Query(..., description="End date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
     _: dict[str, Any] = _analyst_dep,
 ) -> Response:
     """Generate and download a PDF report for the given date range."""

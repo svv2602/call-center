@@ -33,7 +33,7 @@ async function loadUsers() {
                                 <option value="operator">${t('users.roleOperator')}</option>
                             </select>
                             <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.users.toggleUser('${u.id}', ${u.is_active})">${u.is_active ? t('common.deactivate') : t('common.activate')}</button>
-                            <button class="${tw.btnPurple} ${tw.btnSm}" onclick="window._pages.users.resetUserPassword('${u.id}', '${escapeHtml(u.username)}')">${t('users.resetPwd')}</button>
+                            <button class="${tw.btnPurple} ${tw.btnSm}" data-id="${escapeHtml(u.id)}" data-name="${escapeHtml(u.username)}" onclick="window._pages.users.resetUserPassword(this.dataset.id, this.dataset.name)">${t('users.resetPwd')}</button>
                         </div>
                     </td>
                 </tr>

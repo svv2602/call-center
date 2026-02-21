@@ -37,8 +37,8 @@ async def _get_engine() -> AsyncEngine:
 
 @router.get("/quality")
 async def get_quality_report(
-    date_from: str | None = Query(None, description="Start date (YYYY-MM-DD)"),
-    date_to: str | None = Query(None, description="End date (YYYY-MM-DD)"),
+    date_from: str | None = Query(None, description="Start date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    date_to: str | None = Query(None, description="End date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
     scenario: str | None = Query(None, description="Filter by scenario"),
     _: dict[str, Any] = _analyst_dep,
 ) -> dict[str, Any]:
@@ -107,8 +107,8 @@ async def get_calls_list(
     quality_below: float | None = Query(None, description="Filter calls with quality below"),
     scenario: str | None = Query(None, description="Filter by scenario"),
     transferred: bool | None = Query(None, description="Filter transferred calls"),
-    date_from: str | None = Query(None, description="Start date (YYYY-MM-DD)"),
-    date_to: str | None = Query(None, description="End date (YYYY-MM-DD)"),
+    date_from: str | None = Query(None, description="Start date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    date_to: str | None = Query(None, description="End date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
     search: str | None = Query(None, description="Full-text search in transcriptions"),
     sort_by: str | None = Query(None, description="Sort by: date, quality, cost"),
     limit: int = Query(50, ge=1, le=200),
@@ -314,8 +314,8 @@ async def download_call_transcript(call_id: UUID, _: dict[str, Any] = _analyst_d
 
 @router.get("/summary")
 async def get_summary(
-    date_from: str | None = Query(None, description="Start date (YYYY-MM-DD)"),
-    date_to: str | None = Query(None, description="End date (YYYY-MM-DD)"),
+    date_from: str | None = Query(None, description="Start date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    date_to: str | None = Query(None, description="End date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
     _: dict[str, Any] = _analyst_dep,
 ) -> dict[str, Any]:
     """Aggregated daily statistics from daily_stats table."""

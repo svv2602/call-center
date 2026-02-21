@@ -449,11 +449,27 @@ class TestImportVehicleDb:
 
         response = client.post(
             "/admin/vehicles/import",
-            json={"csv_dir": "/nonexistent/path/to/csvs"},
+            json={"csv_dir": "/tmp/nonexistent/path/to/csvs"},
             headers={"Authorization": f"Bearer {_admin_token()}"},
         )
         assert response.status_code == 400
         assert "not found" in response.json()["detail"].lower()
+
+    @patch("src.api.auth.get_settings")
+    def test_import_path_traversal_blocked(
+        self,
+        mock_settings: MagicMock,
+        client: TestClient,
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = "test-secret"
+
+        response = client.post(
+            "/admin/vehicles/import",
+            json={"csv_dir": "/etc/passwd"},
+            headers={"Authorization": f"Bearer {_admin_token()}"},
+        )
+        assert response.status_code == 400
+        assert "must be under" in response.json()["detail"].lower()
 
     @patch("src.api.auth.get_settings")
     def test_import_operator_forbidden(

@@ -300,8 +300,8 @@ async def get_queue_status(
 
 @router.get("/transfers")
 async def get_transfers(
-    date_from: str | None = Query(None),
-    date_to: str | None = Query(None),
+    date_from: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    date_to: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
     reason: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
@@ -354,8 +354,8 @@ async def get_transfers(
 @router.get("/{operator_id}/stats")
 async def get_operator_stats(
     operator_id: str,
-    date_from: str | None = Query(None),
-    date_to: str | None = Query(None),
+    date_from: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    date_to: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
     _: dict[str, Any] = _admin_dep,
 ) -> dict[str, Any]:
     """Statistics for a specific operator."""

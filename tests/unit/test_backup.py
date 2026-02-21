@@ -201,7 +201,11 @@ class TestBackupKnowledgeBase:
 
                 reload(backup_mod)
 
-                with patch.object(backup_mod, "get_settings", return_value=settings):
+                with (
+                    patch.object(backup_mod, "get_settings", return_value=settings),
+                    patch.object(backup_mod, "_acquire_lock", return_value=MagicMock()),
+                    patch.object(backup_mod, "_release_lock"),
+                ):
                     result = backup_mod.backup_knowledge_base()
             finally:
                 os.chdir(old_cwd)

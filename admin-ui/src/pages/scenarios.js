@@ -91,7 +91,7 @@ async function loadTemplates() {
                     <td class="${tw.td}">
                         <div class="flex flex-wrap gap-1">
                             <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.scenarios.editTemplate('${item.id}')">${t('common.edit')}</button>
-                            ${variantCount > 1 ? `<button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.scenarios.deleteTemplate('${item.id}', '${escapeHtml(item.title).replace(/'/g, "\\'")}')">${t('common.delete')}</button>` : ''}
+                            ${variantCount > 1 ? `<button class="${tw.btnDanger} ${tw.btnSm}" data-id="${escapeHtml(item.id)}" data-name="${escapeHtml(item.title)}" onclick="window._pages.scenarios.deleteTemplate(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>` : ''}
                         </div>
                     </td>
                 </tr>`;
@@ -215,7 +215,7 @@ async function loadDialogues(offset) {
                     <td class="${tw.td}">
                         <div class="flex flex-wrap gap-1">
                             <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.scenarios.editDialogue('${item.id}')">${t('common.edit')}</button>
-                            <button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.scenarios.deleteDialogue('${item.id}', '${escapeHtml(item.title).replace(/'/g, "\\'")}')">${t('common.delete')}</button>
+                            <button class="${tw.btnDanger} ${tw.btnSm}" data-id="${escapeHtml(item.id)}" data-name="${escapeHtml(item.title)}" onclick="window._pages.scenarios.deleteDialogue(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>
                         </div>
                     </td>
                 </tr>
@@ -346,7 +346,7 @@ async function loadSafetyRules(offset) {
                     <td class="${tw.td}">
                         <div class="flex flex-wrap gap-1">
                             <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.scenarios.editSafetyRule('${item.id}')">${t('common.edit')}</button>
-                            <button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.scenarios.deleteSafetyRule('${item.id}', '${escapeHtml(item.title).replace(/'/g, "\\'")}')">${t('common.delete')}</button>
+                            <button class="${tw.btnDanger} ${tw.btnSm}" data-id="${escapeHtml(item.id)}" data-name="${escapeHtml(item.title)}" onclick="window._pages.scenarios.deleteSafetyRule(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>
                         </div>
                     </td>
                 </tr>

@@ -48,7 +48,7 @@ async function loadOperators() {
                             <option value="break">${t('operators.statusBreak')}</option>
                         </select>
                         <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.operators.editOperator('${o.id}')">${t('operators.editBtn')}</button>
-                        ${o.is_active ? `<button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.operators.deactivateOperator('${o.id}', '${escapeHtml(o.name).replace(/'/g, "\\'")}')">×</button>` : ''}
+                        ${o.is_active ? `<button class="${tw.btnDanger} ${tw.btnSm}" data-id="${escapeHtml(o.id)}" data-name="${escapeHtml(o.name)}" onclick="window._pages.operators.deactivateOperator(this.dataset.id, this.dataset.name)">×</button>` : ''}
                     </div>
                 </td>
             </tr>

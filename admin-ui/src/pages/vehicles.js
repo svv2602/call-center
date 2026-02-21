@@ -90,7 +90,7 @@ async function loadBrands(offset = 0) {
             </tr></thead>
             <tbody>
             ${items.map(b => `
-                <tr class="${tw.trHover} cursor-pointer" onclick="window._pages.vehicles.selectBrand(${b.id}, '${escapeHtml(b.name).replace(/'/g, "\\'")}')">
+                <tr class="${tw.trHover} cursor-pointer" data-id="${b.id}" data-name="${escapeHtml(b.name)}" onclick="window._pages.vehicles.selectBrand(+this.dataset.id, this.dataset.name)">
                     <td class="${tw.td}">${escapeHtml(b.name)}</td>
                     <td class="${tw.td}">${b.model_count}</td>
                 </tr>
@@ -143,7 +143,7 @@ async function loadModels(brandId, brandName, offset = 0) {
             </tr></thead>
             <tbody>
             ${items.map(m => `
-                <tr class="${tw.trHover} cursor-pointer" onclick="window._pages.vehicles.selectModel(${m.id}, '${escapeHtml(m.name).replace(/'/g, "\\'")}')">
+                <tr class="${tw.trHover} cursor-pointer" data-id="${m.id}" data-name="${escapeHtml(m.name)}" onclick="window._pages.vehicles.selectModel(+this.dataset.id, this.dataset.name)">
                     <td class="${tw.td}">${escapeHtml(m.name)}</td>
                     <td class="${tw.td}">${m.kit_count}</td>
                 </tr>

@@ -124,7 +124,7 @@ async function loadArticles(offset) {
                             <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.knowledge.editArticle('${a.id}')">${t('knowledge.editBtn')}</button>
                             <button class="${tw.btnGreen} ${tw.btnSm}" onclick="window._pages.knowledge.reindexArticle('${a.id}')">${t('knowledge.reindexBtn')}</button>
                             <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.knowledge.toggleArticle('${a.id}', ${a.active !== false})">${a.active !== false ? t('common.deactivate') : t('common.activate')}</button>
-                            <button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.knowledge.deleteArticle('${a.id}', '${escapeHtml(a.title).replace(/'/g, "\\'")}')">×</button>
+                            <button class="${tw.btnDanger} ${tw.btnSm}" data-id="${escapeHtml(a.id)}" data-name="${escapeHtml(a.title)}" onclick="window._pages.knowledge.deleteArticle(this.dataset.id, this.dataset.name)">×</button>
                         </div>
                     </td>
                 </tr>
@@ -389,7 +389,7 @@ async function loadSourceConfigs() {
                         <div class="flex flex-wrap gap-1">
                             <button class="${tw.btnGreen} ${tw.btnSm}" onclick="window._pages.knowledge.runSourceConfig('${c.id}')">${t('sources.runSource')}</button>
                             <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.knowledge.editSourceConfig('${c.id}')">${t('common.edit')}</button>
-                            <button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.knowledge.deleteSourceConfig('${c.id}', '${escapeHtml(c.name).replace(/'/g, "\\'")}')">${t('common.delete')}</button>
+                            <button class="${tw.btnDanger} ${tw.btnSm}" data-id="${escapeHtml(c.id)}" data-name="${escapeHtml(c.name)}" onclick="window._pages.knowledge.deleteSourceConfig(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>
                         </div>
                     </td>
                 </tr>`;

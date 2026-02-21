@@ -42,7 +42,7 @@ async function loadPromptVersions() {
                     <td class="${tw.td}">
                         <div class="flex flex-wrap gap-1">
                             ${!v.is_active ? `<button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.prompts.activatePrompt('${v.id}')">${t('prompts.activateBtn')}</button>` : ''}
-                            ${!v.is_active ? `<button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.prompts.deletePrompt('${v.id}', '${escapeHtml(v.name).replace(/'/g, "\\'")}')">${t('common.delete')}</button>` : ''}
+                            ${!v.is_active ? `<button class="${tw.btnDanger} ${tw.btnSm}" data-id="${escapeHtml(v.id)}" data-name="${escapeHtml(v.name)}" onclick="window._pages.prompts.deletePrompt(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>` : ''}
                         </div>
                     </td>
                 </tr>
@@ -210,7 +210,7 @@ async function loadABTests() {
                     actionHtml = `<button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.prompts.stopABTest('${test.id}')">${t('prompts.stopBtn')}</button>`;
                 } else {
                     actionHtml = (test.significance ? _significanceBadge(test.significance) + ' ' : '')
-                        + `<button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.prompts.deleteABTest('${test.id}', '${escapeHtml(test.test_name).replace(/'/g, "\\'")}')">${t('common.delete')}</button>`;
+                        + `<button class="${tw.btnDanger} ${tw.btnSm}" data-id="${escapeHtml(test.id)}" data-name="${escapeHtml(test.test_name)}" onclick="window._pages.prompts.deleteABTest(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>`;
                 }
 
                 html += `<tr class="${tw.trHover}">

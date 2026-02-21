@@ -40,7 +40,7 @@ async function loadCalls(offset = 0) {
         }
 
         tbody.innerHTML = data.calls.map(c => `
-            <tr class="${tw.trHover} cursor-pointer" onclick="window._pages.calls.showCallDetail('${c.id}')">
+            <tr class="${tw.trHover} cursor-pointer" data-id="${escapeHtml(c.id)}" onclick="window._pages.calls.showCallDetail(this.dataset.id)">
                 <td class="${tw.td}" data-sort-value="${c.started_at || ''}">${formatDate(c.started_at)}</td>
                 <td class="${tw.td}">${escapeHtml(c.caller_id) || '-'}</td>
                 <td class="${tw.td}">${escapeHtml(c.scenario) || '-'}</td>
@@ -122,7 +122,7 @@ async function showCallDetail(callId) {
             html += '</table></div>';
         }
 
-        html += `<div class="flex items-center justify-between mt-4"><h3 class="${tw.sectionTitle}">${t('calls.transcription')}</h3><button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.calls.downloadTranscript('${callId}')">${t('calls.downloadTranscript')}</button></div>`;
+        html += `<div class="flex items-center justify-between mt-4"><h3 class="${tw.sectionTitle}">${t('calls.transcription')}</h3><button class="${tw.btnPrimary} ${tw.btnSm}" data-id="${escapeHtml(callId)}" onclick="window._pages.calls.downloadTranscript(this.dataset.id)">${t('calls.downloadTranscript')}</button></div>`;
         if (turns.length === 0) {
             html += `<div class="${tw.emptyState}">${t('calls.noTranscription')}</div>`;
         } else {

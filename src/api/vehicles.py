@@ -322,7 +322,15 @@ async def import_vehicle_db(
     Admin places 4 CSV files in a directory and provides the path.
     Import truncates existing data and re-inserts from CSVs (~30-60s).
     """
-    csv_path = Path(body.csv_dir)
+    csv_path = Path(body.csv_dir).resolve()
+
+    # Restrict to safe directories to prevent path traversal
+    allowed_parents = ("/tmp", "/data")
+    if not any(str(csv_path).startswith(p) for p in allowed_parents):
+        raise HTTPException(
+            status_code=400,
+            detail=f"csv_dir must be under {' or '.join(allowed_parents)}",
+        )
 
     if not csv_path.is_dir():
         raise HTTPException(status_code=400, detail=f"Directory not found: {body.csv_dir}")
@@ -341,7 +349,7 @@ async def import_vehicle_db(
         await import_data(engine, csv_path)
     except Exception as exc:
         logger.exception("Vehicle DB import failed")
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise HTTPException(status_code=500, detail="Import failed. Check server logs.") from exc
 
     # Read freshly-written metadata
     async with engine.begin() as conn:

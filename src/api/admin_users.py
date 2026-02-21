@@ -99,7 +99,11 @@ async def create_user(
                     "role": req.role,
                 },
             )
-            user = dict(result.first()._mapping)  # type: ignore[union-attr]
+            row = result.first()
+            if row is None:
+                msg = "Expected row from INSERT RETURNING"
+                raise RuntimeError(msg)
+            user = dict(row._mapping)
     except Exception as e:
         if "unique" in str(e).lower():
             raise HTTPException(status_code=409, detail="Username already exists") from e
@@ -181,8 +185,8 @@ async def reset_password(
 async def get_audit_log(
     user_id: str | None = Query(None),
     action: str | None = Query(None),
-    date_from: str | None = Query(None),
-    date_to: str | None = Query(None),
+    date_from: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
+    date_to: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     _: dict[str, Any] = _admin_dep,
