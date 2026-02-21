@@ -36,10 +36,10 @@ async function loadPromptVersions() {
             <div class="overflow-x-auto"><table class="${tw.table}" id="promptsTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('prompts.name')}</th><th class="${tw.thSortable}" data-sortable>${t('prompts.active')}</th><th class="${tw.thSortable}" data-sortable>${t('prompts.created')}</th><th class="${tw.th}">${t('prompts.action')}</th></tr></thead><tbody>
             ${versions.map(v => `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}"><a href="#" class="text-blue-600 dark:text-blue-400 hover:underline" onclick="event.preventDefault(); window._pages.prompts.viewPrompt('${v.id}')">${escapeHtml(v.name)}</a></td>
-                    <td class="${tw.td}">${v.is_active ? `<span class="${tw.badgeGreen}">${t('prompts.activeLabel')}</span>` : ''}</td>
-                    <td class="${tw.td}" data-sort-value="${v.created_at || ''}">${formatDate(v.created_at)}</td>
-                    <td class="${tw.td}">
+                    <td class="${tw.td}" data-label="${t('prompts.name')}"><a href="#" class="text-blue-600 dark:text-blue-400 hover:underline" onclick="event.preventDefault(); window._pages.prompts.viewPrompt('${v.id}')">${escapeHtml(v.name)}</a></td>
+                    <td class="${tw.td}" data-label="${t('prompts.active')}">${v.is_active ? `<span class="${tw.badgeGreen}">${t('prompts.activeLabel')}</span>` : ''}</td>
+                    <td class="${tw.td}" data-label="${t('prompts.created')}" data-sort-value="${v.created_at || ''}">${formatDate(v.created_at)}</td>
+                    <td class="${tw.tdActions}">
                         ${!v.is_active ? `<div class="relative inline-block">
                             <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
                             <div class="hidden absolute right-0 z-20 mt-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
@@ -227,13 +227,13 @@ async function loadABTests() {
                 }
 
                 html += `<tr class="${tw.trHover}">
-                    <td class="${tw.td}"><a href="#" class="text-blue-600 dark:text-blue-400 hover:underline" onclick="event.preventDefault(); window._pages.prompts.showABReport('${test.id}')">${escapeHtml(test.test_name)}</a></td>
-                    <td class="${tw.td}">${escapeHtml(test.variant_a_name || '')}</td>
-                    <td class="${tw.td}">${escapeHtml(test.variant_b_name || '')}</td>
-                    <td class="${tw.td}">${test.calls_a || 0} / ${test.calls_b || 0}</td>
-                    <td class="${tw.td}">${qualityA} / ${qualityB}</td>
-                    <td class="${tw.td}">${abStatusBadge(test.status)}</td>
-                    <td class="${tw.td}">${actionHtml}</td>
+                    <td class="${tw.td}" data-label="${t('prompts.testName')}"><a href="#" class="text-blue-600 dark:text-blue-400 hover:underline" onclick="event.preventDefault(); window._pages.prompts.showABReport('${test.id}')">${escapeHtml(test.test_name)}</a></td>
+                    <td class="${tw.td}" data-label="${t('prompts.variantA')}">${escapeHtml(test.variant_a_name || '')}</td>
+                    <td class="${tw.td}" data-label="${t('prompts.variantB')}">${escapeHtml(test.variant_b_name || '')}</td>
+                    <td class="${tw.td}" data-label="${t('prompts.callsAB')}">${test.calls_a || 0} / ${test.calls_b || 0}</td>
+                    <td class="${tw.td}" data-label="${t('prompts.qualityAB')}">${qualityA} / ${qualityB}</td>
+                    <td class="${tw.td}" data-label="${t('prompts.abStatus')}">${abStatusBadge(test.status)}</td>
+                    <td class="${tw.tdActions}">${actionHtml}</td>
                 </tr>`;
             }
             html += '</tbody></table></div>';
@@ -583,12 +583,12 @@ async function loadOptimizerResults() {
                     ? `<span class="${tw.badgeGreen}">${t('prompts.optimizerCompleted')}</span>`
                     : `<span class="${tw.badgeRed}">${t('prompts.optimizerError')}</span>`;
                 html += `<tr class="${tw.trHover}">
-                    <td class="${tw.td}">${formatDate(item.created_at)}</td>
-                    <td class="${tw.td}">${item.calls_analyzed}</td>
-                    <td class="${tw.td}">${patterns.length}</td>
-                    <td class="${tw.td}">${statusBadge}</td>
-                    <td class="${tw.td}"><span class="${tw.badge}">${escapeHtml(item.triggered_by)}</span></td>
-                    <td class="${tw.td}">
+                    <td class="${tw.td}" data-label="${t('prompts.optimizerDate')}">${formatDate(item.created_at)}</td>
+                    <td class="${tw.td}" data-label="${t('prompts.optimizerCalls')}">${item.calls_analyzed}</td>
+                    <td class="${tw.td}" data-label="${t('prompts.optimizerPatterns')}">${patterns.length}</td>
+                    <td class="${tw.td}" data-label="${t('prompts.optimizerStatus')}">${statusBadge}</td>
+                    <td class="${tw.td}" data-label="${t('prompts.optimizerTriggered')}"><span class="${tw.badge}">${escapeHtml(item.triggered_by)}</span></td>
+                    <td class="${tw.tdActions}">
                         <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.prompts.showOptimizerDetail('${item.id}')">${t('prompts.optimizerView')}</button>
                     </td>
                 </tr>`;

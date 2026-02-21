@@ -114,12 +114,12 @@ async function loadArticles(offset) {
             <div class="overflow-x-auto"><table class="${tw.table}" id="articlesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('knowledge.articleTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.category')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.embedding')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.activeCol')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.updated')}</th><th class="${tw.th}">${t('knowledge.actions')}</th></tr></thead><tbody>
             ${articles.map(a => `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}">${escapeHtml(a.title)}</td>
-                    <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(a.category)}</span></td>
-                    <td class="${tw.td}">${embeddingBadge(a.embedding_status)}</td>
-                    <td class="${tw.td}">${a.active !== false ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
-                    <td class="${tw.td}" data-sort-value="${a.updated_at || a.created_at || ''}">${formatDate(a.updated_at || a.created_at)}</td>
-                    <td class="${tw.td}">
+                    <td class="${tw.td}" data-label="${t('knowledge.articleTitle')}">${escapeHtml(a.title)}</td>
+                    <td class="${tw.td}" data-label="${t('knowledge.category')}"><span class="${tw.badgeBlue}">${escapeHtml(a.category)}</span></td>
+                    <td class="${tw.td}" data-label="${t('knowledge.embedding')}">${embeddingBadge(a.embedding_status)}</td>
+                    <td class="${tw.td}" data-label="${t('knowledge.activeCol')}">${a.active !== false ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
+                    <td class="${tw.td}" data-label="${t('knowledge.updated')}" data-sort-value="${a.updated_at || a.created_at || ''}">${formatDate(a.updated_at || a.created_at)}</td>
+                    <td class="${tw.tdActions}">
                         <div class="relative inline-block">
                             <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
                             <div class="hidden absolute right-0 z-20 mt-1 w-40 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
@@ -371,24 +371,24 @@ async function loadSourceConfigs() {
                 const statsText = c.last_run_stats ? `${t('sources.processed')}: ${c.last_run_stats.processed || 0}` : '';
                 return `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}">
+                    <td class="${tw.td}" data-label="${t('sources.sourceName')}">
                         <div>${escapeHtml(c.name)}</div>
                         <div class="${tw.mutedText} text-xs">${escapeHtml((c.source_url || '').replace(/^https?:\/\//, '').substring(0, 40))}</div>
                     </td>
-                    <td class="${tw.td}">${sourceTypeBadge(c.source_type)}</td>
-                    <td class="${tw.td}">${langBadge(c.language)}</td>
-                    <td class="${tw.td}" data-sort-value="${c.enabled ? 1 : 0}">
+                    <td class="${tw.td}" data-label="${t('sources.sourceType')}">${sourceTypeBadge(c.source_type)}</td>
+                    <td class="${tw.td}" data-label="${t('sources.sourceLanguage')}">${langBadge(c.language)}</td>
+                    <td class="${tw.td}" data-label="${t('sources.enabled')}" data-sort-value="${c.enabled ? 1 : 0}">
                         <label class="inline-flex items-center cursor-pointer">
                             <input type="checkbox" ${c.enabled ? 'checked' : ''} onchange="window._pages.knowledge.toggleSourceConfigEnabled('${c.id}', this.checked)">
                         </label>
                     </td>
-                    <td class="${tw.td}"><span class="text-xs">${escapeHtml(schedText)}</span></td>
-                    <td class="${tw.td}" data-sort-value="${c.last_run_at || ''}">
+                    <td class="${tw.td}" data-label="${t('sources.schedule')}"><span class="text-xs">${escapeHtml(schedText)}</span></td>
+                    <td class="${tw.td}" data-label="${t('sources.lastRun')}" data-sort-value="${c.last_run_at || ''}">
                         ${runStatusBadge(c.last_run_status)}
                         ${c.last_run_at ? `<br><span class="${tw.mutedText} text-xs">${formatDate(c.last_run_at)}</span>` : ''}
                         ${statsText ? `<br><span class="${tw.mutedText} text-xs">${statsText}</span>` : ''}
                     </td>
-                    <td class="${tw.td}">
+                    <td class="${tw.tdActions}">
                         <div class="relative inline-block">
                             <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
                             <div class="hidden absolute right-0 z-20 mt-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
@@ -524,11 +524,11 @@ async function loadSources(offset) {
             <div class="overflow-x-auto"><table class="${tw.table}" id="sourcesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('sources.url')}</th><th class="${tw.thSortable}" data-sortable>${t('sources.originalTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('sources.status')}</th><th class="${tw.thSortable}" data-sortable>${t('sources.date')}</th><th class="${tw.th}">${t('sources.actions')}</th></tr></thead><tbody>
             ${sources.map(s => `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}"><a href="${escapeHtml(s.url)}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline text-xs">${escapeHtml((s.url || '').replace(/^https?:\/\//, '').substring(0, 50))}${(s.url || '').length > 60 ? '...' : ''}</a></td>
-                    <td class="${tw.td}">${escapeHtml(s.original_title || '-')}</td>
-                    <td class="${tw.td}" data-sort-value="${escapeHtml(s.status || '')}">${sourceStatusBadge(s.status)}${s.skip_reason ? `<br><span class="${tw.mutedText} text-xs">${escapeHtml(s.skip_reason)}</span>` : ''}</td>
-                    <td class="${tw.td}" data-sort-value="${s.created_at || ''}">${formatDate(s.created_at)}</td>
-                    <td class="${tw.td}">
+                    <td class="${tw.td}" data-label="${t('sources.url')}"><a href="${escapeHtml(s.url)}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline text-xs">${escapeHtml((s.url || '').replace(/^https?:\/\//, '').substring(0, 50))}${(s.url || '').length > 60 ? '...' : ''}</a></td>
+                    <td class="${tw.td}" data-label="${t('sources.originalTitle')}">${escapeHtml(s.original_title || '-')}</td>
+                    <td class="${tw.td}" data-label="${t('sources.status')}" data-sort-value="${escapeHtml(s.status || '')}">${sourceStatusBadge(s.status)}${s.skip_reason ? `<br><span class="${tw.mutedText} text-xs">${escapeHtml(s.skip_reason)}</span>` : ''}</td>
+                    <td class="${tw.td}" data-label="${t('sources.date')}" data-sort-value="${s.created_at || ''}">${formatDate(s.created_at)}</td>
+                    <td class="${tw.tdActions}">
                         ${s.status === 'processed' && s.article_id ? `
                         <div class="relative inline-block">
                             <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
@@ -704,21 +704,21 @@ async function loadWatchedPages() {
                 const children = childrenByParent[p.id] || [];
                 rows += `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}">
+                    <td class="${tw.td}" data-label="${t('sources.watchedUrl')}">
                         <a href="${escapeHtml(p.url)}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline text-xs">${escapeHtml((p.url || '').replace(/^https?:\/\//, '').substring(0, 50))}</a>
                         ${isDiscovery ? `<br><span class="${tw.badgeYellow} text-xs">${t('sources.discoveryBadge')}</span> <span class="${tw.mutedText} text-xs">${t('sources.childCount', {count: p.child_count || 0})}</span>` : ''}
                     </td>
-                    <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(p.article_category || '-')}</span></td>
-                    <td class="${tw.td}">
+                    <td class="${tw.td}" data-label="${t('sources.watchedCategory')}"><span class="${tw.badgeBlue}">${escapeHtml(p.article_category || '-')}</span></td>
+                    <td class="${tw.td}" data-label="${t('sources.watchedInterval')}">
                         <select class="border rounded px-1 py-0.5 text-xs dark:bg-gray-700 dark:border-gray-600"
                             onchange="window._pages.knowledge.updateWatchedInterval('${p.id}', parseInt(this.value))">
                             ${INTERVAL_OPTIONS.map(o => `<option value="${o.value}" ${o.value === p.rescrape_interval_hours ? 'selected' : ''}>${o.label()}</option>`).join('')}
                         </select>
                     </td>
-                    <td class="${tw.td}">${sourceStatusBadge(p.status)}</td>
-                    <td class="${tw.td}">${p.fetched_at ? formatDate(p.fetched_at) : `<span class="${tw.mutedText} text-xs">${t('sources.neverScraped')}</span>`}</td>
-                    <td class="${tw.td}">${p.next_scrape_at ? formatDate(p.next_scrape_at) : '-'}</td>
-                    <td class="${tw.td}">
+                    <td class="${tw.td}" data-label="${t('sources.watchedStatus')}">${sourceStatusBadge(p.status)}</td>
+                    <td class="${tw.td}" data-label="${t('sources.watchedLastScraped')}">${p.fetched_at ? formatDate(p.fetched_at) : `<span class="${tw.mutedText} text-xs">${t('sources.neverScraped')}</span>`}</td>
+                    <td class="${tw.td}" data-label="${t('sources.watchedNextScrape')}">${p.next_scrape_at ? formatDate(p.next_scrape_at) : '-'}</td>
+                    <td class="${tw.tdActions}">
                         <div class="relative inline-block">
                             <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
                             <div class="hidden absolute right-0 z-20 mt-1 w-40 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
@@ -732,16 +732,16 @@ async function loadWatchedPages() {
                 for (const c of children) {
                     rows += `
                     <tr class="${tw.trHover} opacity-80">
-                        <td class="${tw.td} pl-8">
+                        <td class="${tw.td} pl-8" data-label="${t('sources.watchedUrl')}">
                             <span class="${tw.mutedText}">↳</span>
                             <a href="${escapeHtml(c.url)}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline text-xs">${escapeHtml((c.url || '').replace(/^https?:\/\//, '').substring(0, 50))}</a>
                         </td>
-                        <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(c.article_category || '-')}</span></td>
-                        <td class="${tw.td}"><span class="text-xs">${intervalLabel(c.rescrape_interval_hours)}</span></td>
-                        <td class="${tw.td}">${sourceStatusBadge(c.status)}</td>
-                        <td class="${tw.td}">${c.fetched_at ? formatDate(c.fetched_at) : `<span class="${tw.mutedText} text-xs">${t('sources.neverScraped')}</span>`}</td>
-                        <td class="${tw.td}">${c.next_scrape_at ? formatDate(c.next_scrape_at) : '-'}</td>
-                        <td class="${tw.td}">
+                        <td class="${tw.td}" data-label="${t('sources.watchedCategory')}"><span class="${tw.badgeBlue}">${escapeHtml(c.article_category || '-')}</span></td>
+                        <td class="${tw.td}" data-label="${t('sources.watchedInterval')}"><span class="text-xs">${intervalLabel(c.rescrape_interval_hours)}</span></td>
+                        <td class="${tw.td}" data-label="${t('sources.watchedStatus')}">${sourceStatusBadge(c.status)}</td>
+                        <td class="${tw.td}" data-label="${t('sources.watchedLastScraped')}">${c.fetched_at ? formatDate(c.fetched_at) : `<span class="${tw.mutedText} text-xs">${t('sources.neverScraped')}</span>`}</td>
+                        <td class="${tw.td}" data-label="${t('sources.watchedNextScrape')}">${c.next_scrape_at ? formatDate(c.next_scrape_at) : '-'}</td>
+                        <td class="${tw.tdActions}">
                             ${c.article_id ? `<button class="text-xs text-blue-600 dark:text-blue-400 hover:underline cursor-pointer" onclick="window._pages.knowledge.viewSourceArticle('${c.article_id}')">${t('sources.watchedArticle')}</button>` : ''}
                         </td>
                     </tr>`;

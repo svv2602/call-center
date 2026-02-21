@@ -91,8 +91,8 @@ async function loadBrands(offset = 0) {
             <tbody>
             ${items.map(b => `
                 <tr class="${tw.trHover} cursor-pointer" data-id="${b.id}" data-name="${escapeHtml(b.name)}" onclick="window._pages.vehicles.selectBrand(+this.dataset.id, this.dataset.name)">
-                    <td class="${tw.td}">${escapeHtml(b.name)}</td>
-                    <td class="${tw.td}">${b.model_count}</td>
+                    <td class="${tw.td}" data-label="${t('vehicles.brand')}">${escapeHtml(b.name)}</td>
+                    <td class="${tw.td}" data-label="${t('vehicles.models')}">${b.model_count}</td>
                 </tr>
             `).join('')}
             </tbody></table></div>
@@ -144,8 +144,8 @@ async function loadModels(brandId, brandName, offset = 0) {
             <tbody>
             ${items.map(m => `
                 <tr class="${tw.trHover} cursor-pointer" data-id="${m.id}" data-name="${escapeHtml(m.name)}" onclick="window._pages.vehicles.selectModel(+this.dataset.id, this.dataset.name)">
-                    <td class="${tw.td}">${escapeHtml(m.name)}</td>
-                    <td class="${tw.td}">${m.kit_count}</td>
+                    <td class="${tw.td}" data-label="${t('vehicles.model')}">${escapeHtml(m.name)}</td>
+                    <td class="${tw.td}" data-label="${t('vehicles.kits')}">${m.kit_count}</td>
                 </tr>
             `).join('')}
             </tbody></table></div>
@@ -200,13 +200,13 @@ async function loadKits(modelId, modelName, offset = 0) {
             <tbody>
             ${items.map(k => `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}">${k.year}</td>
-                    <td class="${tw.td}">${escapeHtml(k.name || '-')}</td>
-                    <td class="${tw.td}">${k.pcd ?? '-'}</td>
-                    <td class="${tw.td}" data-sort-value="${k.bolt_count ?? 0}">${k.bolt_count ?? '-'}${k.bolt_size ? ' / ' + escapeHtml(k.bolt_size) : ''}</td>
-                    <td class="${tw.td}">${k.dia ?? '-'}</td>
-                    <td class="${tw.td}">${k.tire_size_count}</td>
-                    <td class="${tw.td}">
+                    <td class="${tw.td}" data-label="${t('vehicles.year')}">${k.year}</td>
+                    <td class="${tw.td}" data-label="${t('vehicles.trim')}">${escapeHtml(k.name || '-')}</td>
+                    <td class="${tw.td}" data-label="${t('vehicles.pcd')}">${k.pcd ?? '-'}</td>
+                    <td class="${tw.td}" data-label="${t('vehicles.bolts')}" data-sort-value="${k.bolt_count ?? 0}">${k.bolt_count ?? '-'}${k.bolt_size ? ' / ' + escapeHtml(k.bolt_size) : ''}</td>
+                    <td class="${tw.td}" data-label="${t('vehicles.dia')}">${k.dia ?? '-'}</td>
+                    <td class="${tw.td}" data-label="${t('vehicles.tireSizes')}">${k.tire_size_count}</td>
+                    <td class="${tw.tdActions}">
                         <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.vehicles.toggleTireSizes(this, ${k.id})">${t('vehicles.tireSizes')}</button>
                     </td>
                 </tr>
@@ -266,9 +266,9 @@ async function toggleTireSizes(btn, kitId) {
             <tbody>
             ${items.map(ts => `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}">${ts.width}/${ts.height} R${ts.diameter}</td>
-                    <td class="${tw.td}"><span class="${typeBadge(ts.type)}">${typeLabel(ts.type)}</span></td>
-                    <td class="${tw.td}">${axleLabel(ts.axle)}</td>
+                    <td class="${tw.td}" data-label="${t('vehicles.size')}">${ts.width}/${ts.height} R${ts.diameter}</td>
+                    <td class="${tw.td}" data-label="${t('vehicles.type')}"><span class="${typeBadge(ts.type)}">${typeLabel(ts.type)}</span></td>
+                    <td class="${tw.td}" data-label="${t('vehicles.axle')}">${axleLabel(ts.axle)}</td>
                 </tr>
             `).join('')}
             </tbody></table>

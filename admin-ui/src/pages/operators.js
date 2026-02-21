@@ -32,13 +32,13 @@ async function loadOperators() {
         }
         tbody.innerHTML = ops.map(o => `
             <tr class="${tw.trHover}">
-                <td class="${tw.td}">${escapeHtml(o.name)}</td>
-                <td class="${tw.td}">${escapeHtml(o.extension)}</td>
-                <td class="${tw.td}">${statusBadge(o.current_status)}</td>
-                <td class="${tw.td}">${(o.skills || []).map(s => `<span class="${tw.badgeBlue}">${escapeHtml(s)}</span>`).join(' ')}</td>
-                <td class="${tw.td}">${o.shift_start || '09:00'} - ${o.shift_end || '18:00'}</td>
-                <td class="${tw.td}">${o.is_active ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
-                <td class="${tw.td}">
+                <td class="${tw.td}" data-label="${t('operators.name')}">${escapeHtml(o.name)}</td>
+                <td class="${tw.td}" data-label="${t('operators.extension')}">${escapeHtml(o.extension)}</td>
+                <td class="${tw.td}" data-label="${t('operators.status')}">${statusBadge(o.current_status)}</td>
+                <td class="${tw.td}" data-label="${t('operators.skills')}">${(o.skills || []).map(s => `<span class="${tw.badgeBlue}">${escapeHtml(s)}</span>`).join(' ')}</td>
+                <td class="${tw.td}" data-label="${t('operators.shift')}">${o.shift_start || '09:00'} - ${o.shift_end || '18:00'}</td>
+                <td class="${tw.td}" data-label="${t('operators.activeCol')}">${o.is_active ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
+                <td class="${tw.tdActions}">
                     <div class="relative inline-block">
                         <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
                         <div class="hidden absolute right-0 z-20 mt-1 w-44 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">

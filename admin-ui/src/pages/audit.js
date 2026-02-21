@@ -32,11 +32,11 @@ async function loadAuditLog(offset = 0) {
             <div class="overflow-x-auto"><table class="${tw.table}" id="auditTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('audit.date')}</th><th class="${tw.thSortable}" data-sortable>${t('audit.user')}</th><th class="${tw.thSortable}" data-sortable>${t('audit.action')}</th><th class="${tw.thSortable}" data-sortable>${t('audit.resource')}</th><th class="${tw.th}">${t('audit.ip')}</th></tr></thead><tbody>
             ${entries.map(e => `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}" data-sort-value="${e.created_at || ''}">${formatDate(e.created_at)}</td>
-                    <td class="${tw.td}">${escapeHtml(e.username) || '-'}</td>
-                    <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(e.action)}</span></td>
-                    <td class="${tw.td}">${escapeHtml(e.resource_type || '')}${e.resource_id ? '/' + escapeHtml(e.resource_id) : ''}</td>
-                    <td class="${tw.td}">${escapeHtml(e.ip_address) || '-'}</td>
+                    <td class="${tw.td}" data-label="${t('audit.date')}" data-sort-value="${e.created_at || ''}">${formatDate(e.created_at)}</td>
+                    <td class="${tw.td}" data-label="${t('audit.user')}">${escapeHtml(e.username) || '-'}</td>
+                    <td class="${tw.td}" data-label="${t('audit.action')}"><span class="${tw.badgeBlue}">${escapeHtml(e.action)}</span></td>
+                    <td class="${tw.td}" data-label="${t('audit.resource')}">${escapeHtml(e.resource_type || '')}${e.resource_id ? '/' + escapeHtml(e.resource_id) : ''}</td>
+                    <td class="${tw.td}" data-label="${t('audit.ip')}">${escapeHtml(e.ip_address) || '-'}</td>
                 </tr>
             `).join('')}
             </tbody></table></div>

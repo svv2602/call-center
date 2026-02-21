@@ -285,3 +285,124 @@ details[open] .details-chevron { transform: rotate(90deg); }
   from { transform: translateX(100%); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
 }
+
+/* ==========================================================================
+   MOBILE RESPONSIVE — table→card, collapsible filters, touch targets
+   ========================================================================== */
+
+@media (max-width: 767px) {
+
+  /* --- (a) Responsive table → card --- */
+  .responsive-table thead { display: none; }
+
+  .responsive-table tbody tr {
+    display: block;
+    border: 1px solid rgb(229 231 235);
+    border-radius: 0.5rem;
+    padding: 0.75rem;
+    margin-bottom: 0.75rem;
+    background: white;
+  }
+  .dark .responsive-table tbody tr {
+    border-color: rgb(64 64 64);
+    background: rgb(23 23 23);
+  }
+
+  .responsive-table tbody td {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 0.25rem 0;
+    border: none;
+  }
+  .responsive-table tbody td::before {
+    content: attr(data-label);
+    font-weight: 600;
+    font-size: 0.75rem;
+    color: rgb(115 115 115);
+    flex-shrink: 0;
+    margin-right: 0.75rem;
+  }
+  .dark .responsive-table tbody td::before {
+    color: rgb(163 163 163);
+  }
+
+  /* Action cells — no label, right-aligned, visual separator */
+  .responsive-table tbody td.td-actions {
+    justify-content: flex-end;
+    border-top: 1px solid rgb(229 231 235);
+    margin-top: 0.5rem;
+    padding-top: 0.5rem;
+  }
+  .responsive-table tbody td.td-actions::before { content: none; }
+  .dark .responsive-table tbody td.td-actions {
+    border-top-color: rgb(64 64 64);
+  }
+
+  /* Colspan cells (empty states, expandable rows) — full-width block, no label */
+  .responsive-table tbody td[colspan] {
+    display: block;
+    border: none;
+  }
+  .responsive-table tbody td[colspan]::before { content: none; }
+
+  /* Mobile-only cells (hidden on desktop, shown on mobile) */
+  .mobile-only-cell { display: flex !important; }
+
+  /* --- (b) Tab bar horizontal scroll --- */
+  .tab-bar {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;         /* Firefox */
+  }
+  .tab-bar::-webkit-scrollbar { display: none; }
+  .tab-bar button {
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
+  /* --- (c) Collapsible filters --- */
+  .filter-collapsible { display: none; }
+  .filter-collapsible.open {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+  }
+
+  /* --- (d) Touch targets --- */
+  input[type="checkbox"] {
+    width: 1.25rem;
+    height: 1.25rem;
+  }
+
+  /* --- (e) Sandbox split layout --- */
+  #sandboxContent-chat .flex.gap-4 {
+    flex-direction: column;
+  }
+  #sandboxContent-chat .flex.gap-4 > .w-72,
+  #sandboxContent-chat .flex.gap-4 > [class*="w-72"] {
+    width: 100%;
+    max-height: 200px;
+    overflow-y: auto;
+  }
+
+  /* --- (f) Dropdown menus inside cards --- */
+  .responsive-table .relative .absolute {
+    position: fixed;
+    left: 50%;
+    top: auto;
+    bottom: 1rem;
+    transform: translateX(-50%);
+    width: 90vw;
+    max-width: 20rem;
+    z-index: 50;
+    border-radius: 0.75rem;
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.15);
+  }
+  .dark .responsive-table .relative .absolute {
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.4);
+  }
+}
+
+/* Mobile-only cells: hidden on desktop */
+.mobile-only-cell { display: none; }

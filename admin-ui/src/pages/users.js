@@ -20,11 +20,11 @@ async function loadUsers() {
             <div class="overflow-x-auto"><table class="${tw.table}" id="usersTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('users.username')}</th><th class="${tw.thSortable}" data-sortable>${t('users.role')}</th><th class="${tw.thSortable}" data-sortable>${t('users.activeCol')}</th><th class="${tw.thSortable}" data-sortable>${t('users.lastLogin')}</th><th class="${tw.th}">${t('users.actionsCol')}</th></tr></thead><tbody>
             ${users.map(u => `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}">${escapeHtml(u.username)}</td>
-                    <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(u.role)}</span></td>
-                    <td class="${tw.td}">${u.is_active ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
-                    <td class="${tw.td}" data-sort-value="${u.last_login_at || ''}">${formatDate(u.last_login_at)}</td>
-                    <td class="${tw.td}">
+                    <td class="${tw.td}" data-label="${t('users.username')}">${escapeHtml(u.username)}</td>
+                    <td class="${tw.td}" data-label="${t('users.role')}"><span class="${tw.badgeBlue}">${escapeHtml(u.role)}</span></td>
+                    <td class="${tw.td}" data-label="${t('users.activeCol')}">${u.is_active ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
+                    <td class="${tw.td}" data-label="${t('users.lastLogin')}" data-sort-value="${u.last_login_at || ''}">${formatDate(u.last_login_at)}</td>
+                    <td class="${tw.tdActions}">
                         <div class="relative inline-block">
                             <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
                             <div class="hidden absolute right-0 z-20 mt-1 w-44 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">

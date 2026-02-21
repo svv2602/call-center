@@ -83,12 +83,12 @@ async function loadTemplates() {
                 const variantCount = variants.length;
                 rows += `
                 <tr class="${tw.trHover}">
-                    ${isFirst ? `<td class="${tw.td}" rowspan="${variantCount}"><span class="${tw.badgeBlue}">${escapeHtml(key)}</span><br><span class="${tw.mutedText} text-xs">${variantCount} ${t('training.variantCount', {count: variantCount})}</span><br><button class="${tw.btnPrimary} ${tw.btnSm} mt-1" onclick="window._pages.scenarios.addVariant('${escapeHtml(key)}')">${t('training.addVariant')}</button></td>` : ''}
-                    <td class="${tw.td}"><span class="${tw.badge}">#${item.variant_number}</span></td>
-                    <td class="${tw.td}">${escapeHtml(item.title)}</td>
-                    <td class="${tw.td}"><span class="${tw.mutedText}">${escapeHtml((item.content || '').substring(0, 80))}${(item.content || '').length > 80 ? '...' : ''}</span></td>
-                    <td class="${tw.td}">${item.is_active !== false ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
-                    <td class="${tw.td}">
+                    ${isFirst ? `<td class="${tw.td}" data-label="${t('training.templateKey')}" rowspan="${variantCount}"><span class="${tw.badgeBlue}">${escapeHtml(key)}</span><br><span class="${tw.mutedText} text-xs">${variantCount} ${t('training.variantCount', {count: variantCount})}</span><br><button class="${tw.btnPrimary} ${tw.btnSm} mt-1" onclick="window._pages.scenarios.addVariant('${escapeHtml(key)}')">${t('training.addVariant')}</button></td>` : `<td class="${tw.td} mobile-only-cell" data-label="${t('training.templateKey')}"><span class="${tw.badgeBlue}">${escapeHtml(key)}</span></td>`}
+                    <td class="${tw.td}" data-label="#"><span class="${tw.badge}">#${item.variant_number}</span></td>
+                    <td class="${tw.td}" data-label="${t('training.templateTitle')}">${escapeHtml(item.title)}</td>
+                    <td class="${tw.td}" data-label="${t('training.content')}"><span class="${tw.mutedText}">${escapeHtml((item.content || '').substring(0, 80))}${(item.content || '').length > 80 ? '...' : ''}</span></td>
+                    <td class="${tw.td}" data-label="${t('training.activeCol')}">${item.is_active !== false ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
+                    <td class="${tw.tdActions}">
                         <div class="relative inline-block">
                             <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
                             <div class="hidden absolute right-0 z-20 mt-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
@@ -210,12 +210,12 @@ async function loadDialogues(offset) {
             <div class="overflow-x-auto"><table class="${tw.table}" id="dialoguesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('training.dialogueTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('training.scenario')}</th><th class="${tw.thSortable}" data-sortable>${t('training.phase')}</th><th class="${tw.th}">${t('training.tools')}</th><th class="${tw.thSortable}" data-sortable>${t('training.activeCol')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
             ${items.map(item => `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}">${escapeHtml(item.title)}</td>
-                    <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(item.scenario_type)}</span></td>
-                    <td class="${tw.td}"><span class="${tw.badge}">${escapeHtml(item.phase)}</span></td>
-                    <td class="${tw.td}">${(item.tools_used || []).map(t => `<span class="${tw.badgeGray}">${escapeHtml(t)}</span>`).join(' ')}</td>
-                    <td class="${tw.td}">${item.is_active !== false ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
-                    <td class="${tw.td}">
+                    <td class="${tw.td}" data-label="${t('training.dialogueTitle')}">${escapeHtml(item.title)}</td>
+                    <td class="${tw.td}" data-label="${t('training.scenario')}"><span class="${tw.badgeBlue}">${escapeHtml(item.scenario_type)}</span></td>
+                    <td class="${tw.td}" data-label="${t('training.phase')}"><span class="${tw.badge}">${escapeHtml(item.phase)}</span></td>
+                    <td class="${tw.td}" data-label="${t('training.tools')}">${(item.tools_used || []).map(t => `<span class="${tw.badgeGray}">${escapeHtml(t)}</span>`).join(' ')}</td>
+                    <td class="${tw.td}" data-label="${t('training.activeCol')}">${item.is_active !== false ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
+                    <td class="${tw.tdActions}">
                         <div class="relative inline-block">
                             <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
                             <div class="hidden absolute right-0 z-20 mt-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
@@ -344,12 +344,12 @@ async function loadSafetyRules(offset) {
             <div class="overflow-x-auto"><table class="${tw.table}" id="safetyRulesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('training.ruleTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('training.ruleType')}</th><th class="${tw.thSortable}" data-sortable>${t('training.severity')}</th><th class="${tw.th}">${t('training.triggerInput')}</th><th class="${tw.thSortable}" data-sortable>${t('training.activeCol')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
             ${items.map(item => `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}">${escapeHtml(item.title)}</td>
-                    <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(item.rule_type)}</span></td>
-                    <td class="${tw.td}" data-sort-value="${SEVERITY_WEIGHT[item.severity] || 0}">${severityBadge(item.severity)}</td>
-                    <td class="${tw.td}"><span class="${tw.mutedText}">${escapeHtml((item.trigger_input || '').substring(0, 60))}${(item.trigger_input || '').length > 60 ? '...' : ''}</span></td>
-                    <td class="${tw.td}">${item.is_active !== false ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
-                    <td class="${tw.td}">
+                    <td class="${tw.td}" data-label="${t('training.ruleTitle')}">${escapeHtml(item.title)}</td>
+                    <td class="${tw.td}" data-label="${t('training.ruleType')}"><span class="${tw.badgeBlue}">${escapeHtml(item.rule_type)}</span></td>
+                    <td class="${tw.td}" data-label="${t('training.severity')}" data-sort-value="${SEVERITY_WEIGHT[item.severity] || 0}">${severityBadge(item.severity)}</td>
+                    <td class="${tw.td}" data-label="${t('training.triggerInput')}"><span class="${tw.mutedText}">${escapeHtml((item.trigger_input || '').substring(0, 60))}${(item.trigger_input || '').length > 60 ? '...' : ''}</span></td>
+                    <td class="${tw.td}" data-label="${t('training.activeCol')}">${item.is_active !== false ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
+                    <td class="${tw.tdActions}">
                         <div class="relative inline-block">
                             <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
                             <div class="hidden absolute right-0 z-20 mt-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">

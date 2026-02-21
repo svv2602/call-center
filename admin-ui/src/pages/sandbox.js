@@ -841,13 +841,13 @@ async function loadRegressionRuns() {
 
         const rows = items.map(item => `
             <tr class="${tw.trHover} cursor-pointer" onclick="window._pages.sandbox.showRegressionDetail('${item.id}')">
-                <td class="${tw.td}">${escapeHtml(item.source_title || '-')}</td>
-                <td class="${tw.td}">${item.prompt_version_name ? `<span class="${tw.badgeBlue}">${escapeHtml(item.prompt_version_name)}</span>` : '-'}</td>
-                <td class="${tw.td}">${statusBadge(item.status)}</td>
-                <td class="${tw.td}">${item.turns_compared || '-'}</td>
-                <td class="${tw.td}">${item.avg_source_rating != null ? parseFloat(item.avg_source_rating).toFixed(1) : '-'}</td>
-                <td class="${tw.td}">${item.error_message ? `<span class="${tw.mutedText}">${escapeHtml(item.error_message.substring(0, 50))}</span>` : '-'}</td>
-                <td class="${tw.td}">${formatDate(item.created_at)}</td>
+                <td class="${tw.td}" data-label="${t('sandbox.conversationTitle')}">${escapeHtml(item.source_title || '-')}</td>
+                <td class="${tw.td}" data-label="${t('sandbox.promptVersion')}">${item.prompt_version_name ? `<span class="${tw.badgeBlue}">${escapeHtml(item.prompt_version_name)}</span>` : '-'}</td>
+                <td class="${tw.td}" data-label="${t('sandbox.status')}">${statusBadge(item.status)}</td>
+                <td class="${tw.td}" data-label="${t('sandbox.turnsCompared')}">${item.turns_compared || '-'}</td>
+                <td class="${tw.td}" data-label="${t('sandbox.sourceRating')}">${item.avg_source_rating != null ? parseFloat(item.avg_source_rating).toFixed(1) : '-'}</td>
+                <td class="${tw.td}" data-label="${t('sandbox.error')}">${item.error_message ? `<span class="${tw.mutedText}">${escapeHtml(item.error_message.substring(0, 50))}</span>` : '-'}</td>
+                <td class="${tw.td}" data-label="${t('sandbox.lastActivity')}">${formatDate(item.created_at)}</td>
             </tr>`).join('');
 
         container.innerHTML = `
@@ -1011,14 +1011,14 @@ async function loadPatterns() {
 
             return `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}">
+                    <td class="${tw.td}" data-label="${t('sandbox.intentLabel')}">
                         <div class="flex items-center gap-1.5">${activeDot} ${typeBadge} <span class="truncate" title="${escapeHtml(item.intent_label)}">${escapeHtml(item.intent_label)}</span></div>
                     </td>
-                    <td class="${tw.td}"><div class="truncate text-xs" title="${escapeHtml(item.guidance_note)}">${escapeHtml(item.guidance_note)}</div></td>
-                    <td class="${tw.td}"><div class="truncate text-xs" title="${escapeHtml(item.customer_messages || '')}">${escapeHtml(item.customer_messages?.substring(0, 60) || '-')}</div></td>
-                    <td class="${tw.td} text-center"><span class="text-amber-400 text-xs">${rating}</span></td>
-                    <td class="${tw.td} text-center text-xs">${item.times_used}${tagsTitle ? ` <span class="text-neutral-400" title="${escapeHtml(tagsTitle)}">&#128196;</span>` : ''}</td>
-                    <td class="${tw.td} text-right">
+                    <td class="${tw.td}" data-label="${t('sandbox.guidanceNote')}"><div class="truncate text-xs" title="${escapeHtml(item.guidance_note)}">${escapeHtml(item.guidance_note)}</div></td>
+                    <td class="${tw.td}" data-label="${t('sandbox.customerMessages')}"><div class="truncate text-xs" title="${escapeHtml(item.customer_messages || '')}">${escapeHtml(item.customer_messages?.substring(0, 60) || '-')}</div></td>
+                    <td class="${tw.td} text-center" data-label="${t('sandbox.avgRating')}"><span class="text-amber-400 text-xs">${rating}</span></td>
+                    <td class="${tw.td} text-center text-xs" data-label="#">${item.times_used}${tagsTitle ? ` <span class="text-neutral-400" title="${escapeHtml(tagsTitle)}">&#128196;</span>` : ''}</td>
+                    <td class="${tw.tdActions}">
                         <div class="relative inline-block">
                             <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
                             <div class="hidden absolute right-0 z-20 mt-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
@@ -1147,11 +1147,11 @@ async function loadPhrases() {
 
                 return `
                     <tr class="${tw.trHover}">
-                        <td class="${tw.td}">
+                        <td class="${tw.td}" data-label="${t('sandbox.phrasesKey')}">
                             <span class="${tw.badgePurple}">${escapeHtml(key)}</span>
                             <div class="${tw.mutedText} text-xs mt-1">${t('sandbox.phrasesDbVariants', { active: activeCount, total: variants.length })}</div>
                         </td>
-                        <td class="${tw.td}">
+                        <td class="${tw.td}" data-label="${t('sandbox.phrasesText')}">
                             <details>
                                 <summary class="cursor-pointer text-xs text-blue-600 dark:text-blue-400">${escapeHtml(variants.find(v => v.is_active)?.content || variants[0]?.content || '')}</summary>
                                 <div class="mt-1 pl-2 border-l-2 border-purple-200 dark:border-purple-800">${variantItems}</div>
@@ -1181,9 +1181,9 @@ async function loadPhrases() {
             const hasOverride = !!dbTemplates[item.key];
             return `
             <tr class="${tw.trHover} ${hasOverride ? 'opacity-50' : ''}">
-                <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(item.label)}</span></td>
-                <td class="${tw.td} font-mono text-xs whitespace-pre-wrap">${escapeHtml(item.text)}</td>
-                <td class="${tw.td}">
+                <td class="${tw.td}" data-label="${t('sandbox.phrasesKey')}"><span class="${tw.badgeBlue}">${escapeHtml(item.label)}</span></td>
+                <td class="${tw.td} font-mono text-xs whitespace-pre-wrap" data-label="${t('sandbox.phrasesText')}">${escapeHtml(item.text)}</td>
+                <td class="${tw.td}" data-label="${t('sandbox.phrasesStatus')}">
                     ${hasOverride
                         ? `<span class="${tw.badgePurple}">${t('sandbox.phrasesOverridden')}</span>`
                         : `<span class="${tw.badgeGreen}">${t('sandbox.phrasesActive')}</span>`}
@@ -1201,17 +1201,17 @@ async function loadPhrases() {
 
             return `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}">
+                    <td class="${tw.td}" data-label="${t('sandbox.phrasesKey')}">
                         <span class="${tw.badgeYellow}">${escapeHtml(pool.label)}</span>
                         <div class="${tw.mutedText} text-xs mt-1">${t('sandbox.phrasesPoolLabel', { count: pool.phrases.length })}</div>
                     </td>
-                    <td class="${tw.td}">
+                    <td class="${tw.td}" data-label="${t('sandbox.phrasesText')}">
                         <details>
                             <summary class="cursor-pointer text-xs text-blue-600 dark:text-blue-400">${escapeHtml(pool.phrases[0])}</summary>
                             <div class="mt-1 pl-2 border-l-2 border-blue-200 dark:border-blue-800">${variants}</div>
                         </details>
                     </td>
-                    <td class="${tw.td}"><span class="${tw.badgeGreen}">${t('sandbox.phrasesActive')}</span></td>
+                    <td class="${tw.td}" data-label="${t('sandbox.phrasesStatus')}"><span class="${tw.badgeGreen}">${t('sandbox.phrasesActive')}</span></td>
                 </tr>`;
         }).join('');
 
@@ -1286,12 +1286,12 @@ async function loadStarters() {
                 : '';
             return `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}"><span class="font-medium">${escapeHtml(item.title)}</span></td>
-                    <td class="${tw.td}"><div class="max-w-xs truncate text-xs">${escapeHtml(item.first_message)}</div></td>
-                    <td class="${tw.td}">${scenarioBadge}</td>
-                    <td class="${tw.td}">${personaBadge}</td>
-                    <td class="${tw.td}"><div class="max-w-xs truncate text-xs">${escapeHtml(item.description || '')}</div></td>
-                    <td class="${tw.td}">
+                    <td class="${tw.td}" data-label="${t('sandbox.starterTitle')}"><span class="font-medium">${escapeHtml(item.title)}</span></td>
+                    <td class="${tw.td}" data-label="${t('sandbox.starterFirstMessage')}"><div class="max-w-xs truncate text-xs">${escapeHtml(item.first_message)}</div></td>
+                    <td class="${tw.td}" data-label="${t('sandbox.scenarioType')}">${scenarioBadge}</td>
+                    <td class="${tw.td}" data-label="${t('sandbox.starterPersona')}">${personaBadge}</td>
+                    <td class="${tw.td}" data-label="${t('sandbox.starterDescription')}"><div class="max-w-xs truncate text-xs">${escapeHtml(item.description || '')}</div></td>
+                    <td class="${tw.tdActions}">
                         <div class="flex gap-1">
                             <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.showStarterModal('${item.id}')">${t('common.edit')}</button>
                             <button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.sandbox.deleteStarter('${item.id}', '${escapeHtml(item.title).replace(/'/g, "\\'")}')">&times;</button>

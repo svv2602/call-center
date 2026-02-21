@@ -41,13 +41,13 @@ async function loadCalls(offset = 0) {
 
         tbody.innerHTML = data.calls.map(c => `
             <tr class="${tw.trHover} cursor-pointer" data-id="${escapeHtml(c.id)}" onclick="window._pages.calls.showCallDetail(this.dataset.id)">
-                <td class="${tw.td}" data-sort-value="${c.started_at || ''}">${formatDate(c.started_at)}</td>
-                <td class="${tw.td}">${escapeHtml(c.caller_id) || '-'}</td>
-                <td class="${tw.td}">${escapeHtml(c.scenario) || '-'}</td>
-                <td class="${tw.td}">${c.duration_seconds || 0}s</td>
-                <td class="${tw.td}">${qualityBadge(c.quality_score)}</td>
-                <td class="${tw.td}">$${(c.total_cost_usd || 0).toFixed(3)}</td>
-                <td class="${tw.td}">${c.transferred_to_operator ? `<span class="${tw.badgeYellow}">${t('calls.statusTransferred')}</span>` : `<span class="${tw.badgeGreen}">${t('calls.statusResolved')}</span>`}</td>
+                <td class="${tw.td}" data-label="${t('calls.date')}" data-sort-value="${c.started_at || ''}">${formatDate(c.started_at)}</td>
+                <td class="${tw.td}" data-label="${t('calls.caller')}">${escapeHtml(c.caller_id) || '-'}</td>
+                <td class="${tw.td}" data-label="${t('calls.scenario')}">${escapeHtml(c.scenario) || '-'}</td>
+                <td class="${tw.td}" data-label="${t('calls.duration')}">${c.duration_seconds || 0}s</td>
+                <td class="${tw.td}" data-label="${t('calls.quality')}">${qualityBadge(c.quality_score)}</td>
+                <td class="${tw.td}" data-label="${t('calls.cost')}">$${(c.total_cost_usd || 0).toFixed(3)}</td>
+                <td class="${tw.td}" data-label="${t('calls.status')}">${c.transferred_to_operator ? `<span class="${tw.badgeYellow}">${t('calls.statusTransferred')}</span>` : `<span class="${tw.badgeGreen}">${t('calls.statusResolved')}</span>`}</td>
             </tr>
         `).join('');
 

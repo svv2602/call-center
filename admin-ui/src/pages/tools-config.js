@@ -19,10 +19,10 @@ async function loadTools() {
             <div class="overflow-x-auto"><table class="${tw.table}" id="toolsTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('training.toolName')}</th><th class="${tw.th}">${t('training.description')}</th><th class="${tw.thSortable}" data-sortable>${t('training.override')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
             ${items.map(item => `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}"><span class="${tw.badgeBlue}">${escapeHtml(item.name)}</span></td>
-                    <td class="${tw.td}"><span class="${tw.mutedText}">${escapeHtml((item.effective_description || '').substring(0, 100))}${(item.effective_description || '').length > 100 ? '...' : ''}</span></td>
-                    <td class="${tw.td}">${item.has_override ? `<span class="${tw.badgeYellow}">${t('training.overridden')}</span>` : `<span class="${tw.badge}">${t('training.default')}</span>`}</td>
-                    <td class="${tw.td}">
+                    <td class="${tw.td}" data-label="${t('training.toolName')}"><span class="${tw.badgeBlue}">${escapeHtml(item.name)}</span></td>
+                    <td class="${tw.td}" data-label="${t('training.description')}"><span class="${tw.mutedText}">${escapeHtml((item.effective_description || '').substring(0, 100))}${(item.effective_description || '').length > 100 ? '...' : ''}</span></td>
+                    <td class="${tw.td}" data-label="${t('training.override')}">${item.has_override ? `<span class="${tw.badgeYellow}">${t('training.overridden')}</span>` : `<span class="${tw.badge}">${t('training.default')}</span>`}</td>
+                    <td class="${tw.tdActions}" data-label="${t('training.actions')}">
                         <div class="flex flex-wrap gap-1">
                             <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.tools.editToolOverride('${escapeHtml(item.name)}')">${t('common.edit')}</button>
                             ${item.has_override ? `<button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.tools.resetToolOverride('${escapeHtml(item.name)}')">${t('training.reset')}</button>` : ''}

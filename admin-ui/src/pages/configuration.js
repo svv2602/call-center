@@ -75,26 +75,26 @@ function renderLLMProviders(config, healthMap) {
             : `<span class="${tw.badgeYellow}">missing</span>`;
 
         html += `<tr class="${tw.trHover}">
-            <td class="${tw.td}"><strong>${escapeHtml(key)}</strong></td>
-            <td class="${tw.td}">${escapeHtml(cfg.type || '')}</td>
-            <td class="${tw.td}"><input type="text" value="${escapeHtml(cfg.model || '')}" class="text-xs font-mono bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-1.5 py-0.5 w-48 focus:outline-none focus:border-blue-500" onchange="window._pages.configuration.updateLLMModel('${escapeHtml(key)}', this.value)"></td>
-            <td class="${tw.td}">${keyBadge}</td>
-            <td class="${tw.td}"><input type="checkbox" ${enabledChecked} onchange="window._pages.configuration.toggleLLMProvider('${escapeHtml(key)}', this.checked)"></td>
-            <td class="${tw.td}">${healthBadge}</td>
-            <td class="${tw.td}"><button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.configuration.testLLMProvider('${escapeHtml(key)}')">${t('settings.llmTest')}</button></td>
+            <td class="${tw.td}" data-label="${t('settings.llmProvider')}"><strong>${escapeHtml(key)}</strong></td>
+            <td class="${tw.td}" data-label="${t('settings.llmType')}">${escapeHtml(cfg.type || '')}</td>
+            <td class="${tw.td}" data-label="${t('settings.llmModel')}"><input type="text" value="${escapeHtml(cfg.model || '')}" class="text-xs font-mono bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-1.5 py-0.5 w-48 focus:outline-none focus:border-blue-500" onchange="window._pages.configuration.updateLLMModel('${escapeHtml(key)}', this.value)"></td>
+            <td class="${tw.td}" data-label="${t('settings.llmApiKey')}">${keyBadge}</td>
+            <td class="${tw.td}" data-label="${t('settings.llmEnabled')}"><input type="checkbox" ${enabledChecked} onchange="window._pages.configuration.toggleLLMProvider('${escapeHtml(key)}', this.checked)"></td>
+            <td class="${tw.td}" data-label="${t('settings.llmHealth')}">${healthBadge}</td>
+            <td class="${tw.tdActions}" data-label="${t('settings.llmActions')}"><button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.configuration.testLLMProvider('${escapeHtml(key)}')">${t('settings.llmTest')}</button></td>
         </tr>`;
     }
     html += `<tr id="llm-add-row" style="display:none" class="${tw.trHover}">
-            <td class="${tw.td}"><span id="llm-add-key-preview" class="text-xs font-mono text-neutral-400">—</span></td>
-            <td class="${tw.td}"><select id="llm-add-type" class="${tw.selectSm}" onchange="window._pages.configuration.onAddTypeChange(this.value)">
+            <td class="${tw.td}" data-label="${t('settings.llmProvider')}"><span id="llm-add-key-preview" class="text-xs font-mono text-neutral-400">—</span></td>
+            <td class="${tw.td}" data-label="${t('settings.llmType')}"><select id="llm-add-type" class="${tw.selectSm}" onchange="window._pages.configuration.onAddTypeChange(this.value)">
                 <option value="anthropic">anthropic</option>
                 <option value="openai">openai</option>
                 <option value="deepseek">deepseek</option>
                 <option value="gemini">gemini</option>
             </select></td>
-            <td class="${tw.td}"><input id="llm-add-model" type="text" placeholder="claude-opus-4-20250115" class="text-xs font-mono bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-1.5 py-0.5 w-48 focus:outline-none focus:border-blue-500" oninput="window._pages.configuration.onAddModelInput()"></td>
-            <td class="${tw.td}"><span id="llm-add-env-preview" class="text-xs font-mono text-neutral-500">ANTHROPIC_API_KEY</span></td>
-            <td colspan="3" class="${tw.td}">
+            <td class="${tw.td}" data-label="${t('settings.llmModel')}"><input id="llm-add-model" type="text" placeholder="claude-opus-4-20250115" class="text-xs font-mono bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-1.5 py-0.5 w-48 focus:outline-none focus:border-blue-500" oninput="window._pages.configuration.onAddModelInput()"></td>
+            <td class="${tw.td}" data-label="${t('settings.llmApiKey')}"><span id="llm-add-env-preview" class="text-xs font-mono text-neutral-500">ANTHROPIC_API_KEY</span></td>
+            <td colspan="3" class="${tw.tdActions}" data-label="${t('settings.llmActions')}">
                 <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.configuration.saveNewProvider()">${t('common.save')}</button>
                 <button class="${tw.btnSm} ml-1 text-neutral-500" onclick="document.getElementById('llm-add-row').style.display='none'">${t('common.cancel')}</button>
             </td>
@@ -174,9 +174,9 @@ function renderLLMTasks(config) {
         fallbackHtml += '</div>';
 
         html += `<tr class="${tw.trHover}">
-            <td class="${tw.td}"><strong>${escapeHtml(taskName)}</strong>${_taskTooltip(taskName)}</td>
-            <td class="${tw.td}"><select class="${tw.selectSm}" onchange="window._pages.configuration.updateTaskRoute('${escapeHtml(taskName)}', this.value)">${options}</select></td>
-            <td class="${tw.td}">${fallbackHtml}</td>
+            <td class="${tw.td}" data-label="${t('settings.llmTask')}"><strong>${escapeHtml(taskName)}</strong>${_taskTooltip(taskName)}</td>
+            <td class="${tw.td}" data-label="${t('settings.llmPrimary')}"><select class="${tw.selectSm}" onchange="window._pages.configuration.updateTaskRoute('${escapeHtml(taskName)}', this.value)">${options}</select></td>
+            <td class="${tw.td}" data-label="${t('settings.llmFallbacks')}">${fallbackHtml}</td>
         </tr>`;
     }
     html += '</tbody></table></div>';

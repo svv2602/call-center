@@ -26,12 +26,14 @@ export function renderPagination({ containerId, total, offset, pageSize = PAGE_S
     }
 
     // Build page numbers with ellipsis
+    const isMobile = window.innerWidth < 768;
     const pages = [];
     const addPage = (n) => { if (!pages.includes(n)) pages.push(n); };
 
     addPage(0);
     addPage(totalPages - 1);
-    for (let i = Math.max(0, currentPage - 1); i <= Math.min(totalPages - 1, currentPage + 1); i++) {
+    const delta = isMobile ? 0 : 1;
+    for (let i = Math.max(0, currentPage - delta); i <= Math.min(totalPages - 1, currentPage + delta); i++) {
         addPage(i);
     }
     pages.sort((a, b) => a - b);
@@ -56,7 +58,7 @@ export function renderPagination({ containerId, total, offset, pageSize = PAGE_S
     // Next button
     html += `<button class="${tw.pageBtn}" data-page-offset="${Math.min((totalPages - 1) * ps, (currentPage + 1) * ps)}" ${currentPage >= totalPages - 1 ? 'disabled style="opacity:0.4;cursor:default"' : ''}>»</button>`;
 
-    html += `<span class="px-2 py-1.5 text-xs text-neutral-500 dark:text-neutral-400 self-center">${pageInfo}</span>`;
+    html += `<span class="px-2 py-1.5 text-xs text-neutral-500 dark:text-neutral-400 self-center max-md:hidden">${pageInfo}</span>`;
     html += `</div>`;
 
     container.innerHTML = html;
