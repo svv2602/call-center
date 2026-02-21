@@ -551,6 +551,7 @@ class WatchedPageCreate(BaseModel):
     category: KnowledgeCategory = "general"
     rescrape_interval_hours: int = Field(default=168, ge=1, le=8760)
     is_discovery: bool = False
+    tenant_id: str | None = None
 
 
 class WatchedPageUpdate(BaseModel):
@@ -560,17 +561,26 @@ class WatchedPageUpdate(BaseModel):
 
 
 @router.get("/watched-pages")
-async def list_watched_pages(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def list_watched_pages(
+    tenant_id: str | None = Query(None),
+    _: dict[str, Any] = _admin_dep,
+) -> dict[str, Any]:
     """List all watched pages with their status."""
     engine = await _get_engine()
 
+    tenant_filter = ""
+    params: dict[str, Any] = {}
+    if tenant_id:
+        tenant_filter = "AND ks.tenant_id = CAST(:tenant_id AS uuid)"
+        params["tenant_id"] = tenant_id
+
     async with engine.begin() as conn:
         result = await conn.execute(
-            text("""
+            text(f"""
                 SELECT ks.id, ks.url, ks.article_id, ks.status,
                        ks.content_hash, ks.rescrape_interval_hours,
                        COALESCE(ks.is_discovery, false) AS is_discovery,
-                       ks.parent_id,
+                       ks.parent_id, ks.tenant_id,
                        ks.fetched_at, ks.next_scrape_at, ks.created_at,
                        ka.title AS article_title, ka.category AS article_category,
                        ka.active AS article_active,
@@ -578,9 +588,10 @@ async def list_watched_pages(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
                         WHERE ch.parent_id = ks.id) AS child_count
                 FROM knowledge_sources ks
                 LEFT JOIN knowledge_articles ka ON ka.id = ks.article_id
-                WHERE ks.source_type = 'watched_page'
+                WHERE ks.source_type = 'watched_page' {tenant_filter}
                 ORDER BY ks.parent_id NULLS FIRST, ks.created_at
-            """)
+            """),
+            params,
         )
         pages = [dict(row._mapping) for row in result]
 
@@ -605,12 +616,18 @@ async def add_watched_page(
                 text("""
                     INSERT INTO knowledge_sources
                         (url, source_site, source_type, status, rescrape_interval_hours,
-                         original_title, next_scrape_at, is_discovery)
+                         original_title, next_scrape_at, is_discovery, tenant_id)
                     VALUES (:url, 'prokoleso.ua', 'watched_page', 'new',
-                            :interval, :url, now(), :is_discovery)
+                            :interval, :url, now(), :is_discovery,
+                            CAST(:tenant_id AS uuid))
                     RETURNING id
                 """),
-                {"url": url, "interval": interval, "is_discovery": request.is_discovery},
+                {
+                    "url": url,
+                    "interval": interval,
+                    "is_discovery": request.is_discovery,
+                    "tenant_id": request.tenant_id,
+                },
             )
             row = result.first()
             page_id = str(row.id) if row else None

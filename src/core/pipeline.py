@@ -143,6 +143,7 @@ class CallPipeline:
         pattern_search: PatternSearch | None = None,
         streaming_loop: StreamingAgentLoop | None = None,
         barge_in_event: asyncio.Event | None = None,
+        agent_name: str | None = None,
     ) -> None:
         self._conn = conn
         self._stt = stt
@@ -153,6 +154,7 @@ class CallPipeline:
         self._templates = templates or _DEFAULT_TEMPLATES
         self._pattern_search = pattern_search
         self._streaming_loop = streaming_loop
+        self._agent_name = agent_name
         self._llm_history: list[dict] = []  # persistent LLM context for streaming path
         self._speaking = False
         self._barge_in_event = barge_in_event or asyncio.Event()
@@ -196,9 +198,10 @@ class CallPipeline:
             self._session.transition_to(CallState.ENDED)
 
     async def _play_greeting(self) -> None:
-        """Play the greeting message, adapted to the time of day."""
+        """Play the greeting message, adapted to the time of day and agent name."""
         greeting = self._templates.get("greeting", GREETING_TEXT)
         greeting = greeting.replace("Добрий день", _time_of_day_greeting(), 1)
+        greeting = greeting.replace("{agent_name}", self._agent_name or "Олена")
         self._session.transition_to(CallState.GREETING)
         await self._speak(greeting)
         self._session.add_assistant_turn(greeting)

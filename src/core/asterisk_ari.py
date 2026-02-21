@@ -75,6 +75,46 @@ class AsteriskARIClient:
             logger.warning("ARI unavailable: %s", exc)
             return None
 
+    async def get_channel_variable(self, channel_uuid: str, variable_name: str) -> str | None:
+        """Get a channel variable value via ARI.
+
+        Used for tenant resolution: the dialplan sets CHANNEL(tenant_slug)
+        before calling AudioSocket().
+
+        Returns None if variable is not set or ARI is unavailable.
+        """
+        if self._session is None:
+            return None
+
+        try:
+            async with self._session.get(
+                f"{self._url}/channels/{channel_uuid}/variable",
+                params={"variable": variable_name},
+            ) as resp:
+                if resp.status != 200:
+                    logger.debug(
+                        "ARI variable not found: %s on channel %s (status=%d)",
+                        variable_name,
+                        channel_uuid,
+                        resp.status,
+                    )
+                    return None
+
+                data = await resp.json()
+                value = data.get("value", "")
+                if value:
+                    logger.info(
+                        "ARI variable %s=%s for channel %s",
+                        variable_name,
+                        value,
+                        channel_uuid,
+                    )
+                return value or None
+
+        except (aiohttp.ClientError, OSError) as exc:
+            logger.debug("ARI variable lookup failed: %s", exc)
+            return None
+
     async def transfer_to_queue(
         self, channel_uuid: str, context: str = "transfer-to-operator"
     ) -> bool:

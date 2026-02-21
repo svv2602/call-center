@@ -310,6 +310,72 @@ async def metrics_endpoint() -> Response:
     return Response(content=get_metrics(), media_type="text/plain; charset=utf-8")
 
 
+async def _resolve_tenant(
+    channel_uuid: str, db_engine: Any
+) -> dict[str, Any] | None:
+    """Resolve tenant for the current call.
+
+    1. Try ARI channel variable TENANT_SLUG (set by Asterisk dialplan).
+    2. Fallback to the first active tenant in DB.
+    3. Returns tenant dict or None.
+    """
+    slug: str | None = None
+
+    # Try ARI (best-effort, may not be configured)
+    settings = get_settings()
+    if settings.ari.url:
+        try:
+            from src.core.asterisk_ari import AsteriskARIClient
+
+            ari = AsteriskARIClient(
+                url=settings.ari.url,
+                user=settings.ari.user,
+                password=settings.ari.password,
+            )
+            await ari.open()
+            try:
+                slug = await ari.get_channel_variable(channel_uuid, "TENANT_SLUG")
+            finally:
+                await ari.close()
+        except Exception:
+            logger.debug("ARI tenant lookup failed", exc_info=True)
+
+    if db_engine is None:
+        return None
+
+    try:
+        async with db_engine.begin() as conn:
+            if slug:
+                result = await conn.execute(
+                    text("""
+                        SELECT id, slug, name, network_id, agent_name, greeting,
+                               enabled_tools, prompt_suffix, config, is_active
+                        FROM tenants
+                        WHERE slug = :slug AND is_active = true
+                    """),
+                    {"slug": slug},
+                )
+            else:
+                # Fallback: first active tenant
+                result = await conn.execute(
+                    text("""
+                        SELECT id, slug, name, network_id, agent_name, greeting,
+                               enabled_tools, prompt_suffix, config, is_active
+                        FROM tenants
+                        WHERE is_active = true
+                        ORDER BY created_at
+                        LIMIT 1
+                    """)
+                )
+            row = result.first()
+            if row:
+                return dict(row._mapping)
+    except Exception:
+        logger.debug("Tenant DB lookup failed", exc_info=True)
+
+    return None
+
+
 async def handle_call(conn: AudioSocketConnection) -> None:
     """Handle a single AudioSocket call from Asterisk.
 
@@ -318,6 +384,20 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     """
     settings = get_settings()
     session = CallSession(conn.channel_uuid)
+
+    # Resolve tenant for this call
+    tenant = await _resolve_tenant(conn.channel_uuid, _db_engine)
+    tenant_store_client: StoreClient | None = None
+    if tenant:
+        session.tenant_id = str(tenant["id"])
+        session.tenant_slug = tenant["slug"]
+        session.network_id = tenant.get("network_id")
+        logger.info(
+            "Tenant resolved: %s (%s) for call %s",
+            tenant["slug"],
+            tenant["name"],
+            conn.channel_uuid,
+        )
 
     if _redis is not None:
         store = SessionStore(_redis)
@@ -394,8 +474,34 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 system_prompt = inject_pronunciation_rules(system_prompt, pron_rules)
             # else: fallback SYSTEM_PROMPT already has rules baked in
 
+        # Apply tenant overrides (tools filter, greeting, prompt suffix)
+        if tenant:
+            if tenant.get("enabled_tools"):
+                allowed = set(tenant["enabled_tools"])
+                if tools:
+                    tools = [t for t in tools if t["name"] in allowed]
+            if tenant.get("greeting") and templates:
+                templates = dict(templates)  # copy to avoid mutating shared dict
+                templates["greeting"] = tenant["greeting"]
+            if tenant.get("prompt_suffix") and system_prompt:
+                system_prompt = system_prompt + "\n\n" + tenant["prompt_suffix"]
+
+        # Create per-tenant StoreClient if tenant has custom store config
+        if tenant and tenant.get("config"):
+            tenant_config = tenant["config"] if isinstance(tenant["config"], dict) else {}
+            if tenant_config.get("store_api_url"):
+                tenant_store_client = StoreClient(
+                    base_url=tenant_config["store_api_url"],
+                    api_key=tenant_config.get("store_api_key", ""),
+                    timeout=settings.store_api.timeout,
+                    db_engine=_db_engine,
+                    redis=_redis,
+                )
+                await tenant_store_client.open()
+                logger.info("Per-tenant StoreClient: %s", tenant_config["store_api_url"])
+
         # Per-call tool router, PII vault, and LLM agent
-        router = _build_tool_router(session)
+        router = _build_tool_router(session, store_client=tenant_store_client)
         vault = PIIVault()
         agent = LLMAgent(
             api_key=settings.anthropic.api_key,
@@ -458,6 +564,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             pattern_search=pattern_search,
             streaming_loop=streaming_loop,
             barge_in_event=barge_in_event,
+            agent_name=tenant.get("agent_name") if tenant else None,
         )
         await pipeline.run()
 
@@ -465,6 +572,11 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         logger.info("Call cancelled (shutdown): %s", conn.channel_uuid)
     except Exception:
         logger.exception("Unhandled error in call: %s", conn.channel_uuid)
+
+    # Cleanup per-tenant StoreClient
+    if tenant_store_client is not None:
+        with contextlib.suppress(Exception):
+            await tenant_store_client.close()
 
     # Cleanup
     if _embedding_gen is not None:
@@ -509,37 +621,41 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     )
 
 
-def _build_tool_router(session: CallSession) -> ToolRouter:
+def _build_tool_router(
+    session: CallSession, store_client: StoreClient | None = None
+) -> ToolRouter:
     """Build a ToolRouter with all canonical tools registered."""
     router = ToolRouter()
 
-    assert _store_client is not None, "StoreClient must be initialized before handling calls"
+    client = store_client or _store_client
+    assert client is not None, "StoreClient must be initialized before handling calls"
 
-    router.register("get_vehicle_tire_sizes", _store_client.get_vehicle_tire_sizes)
-    router.register("search_tires", _store_client.search_tires)
-    router.register("check_availability", _store_client.check_availability)
-    router.register("get_order_status", _store_client.search_orders)
+    router.register("get_vehicle_tire_sizes", client.get_vehicle_tire_sizes)
+    router.register("search_tires", client.search_tires)
+    router.register("check_availability", client.check_availability)
+    router.register("get_order_status", client.search_orders)
+
     async def _create_order_with_metric(**kwargs: Any) -> Any:
-        result = await _store_client.create_order(**kwargs)
+        result = await client.create_order(**kwargs)
         if isinstance(result, dict) and result.get("id"):
             orders_created_total.inc()
         return result
 
     async def _book_fitting_with_metric(**kwargs: Any) -> Any:
-        result = await _store_client.book_fitting(**kwargs)
+        result = await client.book_fitting(**kwargs)
         if isinstance(result, dict) and result.get("id"):
             fittings_booked_total.inc()
         return result
 
     router.register("create_order_draft", _create_order_with_metric)
-    router.register("update_order_delivery", _store_client.update_delivery)
-    router.register("confirm_order", _store_client.confirm_order)
-    router.register("get_fitting_stations", _store_client.get_fitting_stations)
-    router.register("get_fitting_slots", _store_client.get_fitting_slots)
+    router.register("update_order_delivery", client.update_delivery)
+    router.register("confirm_order", client.confirm_order)
+    router.register("get_fitting_stations", client.get_fitting_stations)
+    router.register("get_fitting_slots", client.get_fitting_slots)
     router.register("book_fitting", _book_fitting_with_metric)
-    router.register("cancel_fitting", _store_client.cancel_fitting)
-    router.register("get_fitting_price", _store_client.get_fitting_price)
-    router.register("search_knowledge_base", _store_client.search_knowledge_base)
+    router.register("cancel_fitting", client.cancel_fitting)
+    router.register("get_fitting_price", client.get_fitting_price)
+    router.register("search_knowledge_base", client.search_knowledge_base)
 
     async def transfer_to_operator(**_: object) -> dict[str, str]:
         session.transferred = True
