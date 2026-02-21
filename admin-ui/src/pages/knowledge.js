@@ -12,6 +12,8 @@ let _categories = [];
 let _activeTab = 'articles';
 let _articlesOffset = 0;
 let _sourcesOffset = 0;
+let _watchedTenantId = '';  // tenant filter for watched pages
+let _tenantsList = [];      // cached tenants list
 
 // ─── Internal tab switching ──────────────────────────────────
 function showTab(tab) {
@@ -648,7 +650,16 @@ async function loadWatchedPages() {
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
 
     try {
-        const data = await api('/admin/scraper/watched-pages');
+        // Load tenants list (cached)
+        if (_tenantsList.length === 0) {
+            try {
+                const td = await api('/admin/tenants');
+                _tenantsList = (td.tenants || []).filter(t => t.is_active);
+            } catch { _tenantsList = []; }
+        }
+
+        const tenantParam = _watchedTenantId ? `?tenant_id=${_watchedTenantId}` : '';
+        const data = await api(`/admin/scraper/watched-pages${tenantParam}`);
         const pages = data.pages || [];
 
         const cats = _categories.length ? _categories : [
@@ -662,7 +673,18 @@ async function loadWatchedPages() {
         const intervalOptions = `<option value="" disabled selected>${t('common.select')}</option>`
             + INTERVAL_OPTIONS.map(o => `<option value="${o.value}">${o.label()}</option>`).join('');
 
+        const tenantOptions = `<option value="">${t('sources.allTenants')}</option>`
+            + _tenantsList.map(t => `<option value="${t.id}" ${t.id === _watchedTenantId ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
+
+        const tenantCreateOptions = `<option value="">${t('sources.noTenant')}</option>`
+            + _tenantsList.map(t => `<option value="${t.id}" ${t.id === _watchedTenantId ? 'selected' : ''}>${escapeHtml(t.name)}</option>`).join('');
+
         let html = `
+            <div class="flex flex-wrap items-center gap-2 mb-3">
+                <label class="text-xs ${tw.mutedText}">${t('sources.filterByTenant')}</label>
+                <select id="watchedTenantFilter" class="border rounded px-2 py-1.5 text-sm dark:bg-gray-700 dark:border-gray-600"
+                    onchange="window._pages.knowledge.filterWatchedByTenant(this.value)">${tenantOptions}</select>
+            </div>
             <div class="flex flex-wrap items-end gap-2 mb-4">
                 <div class="flex-1 min-w-[250px]">
                     <label class="block text-xs ${tw.mutedText} mb-1">${t('sources.watchedUrl')}</label>
@@ -675,6 +697,10 @@ async function loadWatchedPages() {
                 <div>
                     <label class="block text-xs ${tw.mutedText} mb-1">${t('sources.watchedInterval')}</label>
                     <select id="watchedPageInterval" class="border rounded px-2 py-1.5 text-sm dark:bg-gray-700 dark:border-gray-600">${intervalOptions}</select>
+                </div>
+                <div>
+                    <label class="block text-xs ${tw.mutedText} mb-1">${t('sources.tenant')}</label>
+                    <select id="watchedPageTenant" class="border rounded px-2 py-1.5 text-sm dark:bg-gray-700 dark:border-gray-600">${tenantCreateOptions}</select>
                 </div>
                 <div>
                     <label class="flex items-center gap-1.5 text-sm cursor-pointer pt-4">
@@ -769,11 +795,17 @@ async function loadWatchedPages() {
     }
 }
 
+function filterWatchedByTenant(tenantId) {
+    _watchedTenantId = tenantId;
+    loadWatchedPages();
+}
+
 async function addWatchedPage() {
     const url = document.getElementById('watchedPageUrl')?.value?.trim();
     const category = document.getElementById('watchedPageCategory')?.value;
     const intervalRaw = document.getElementById('watchedPageInterval')?.value;
     const is_discovery = document.getElementById('watchedPageDiscovery')?.checked || false;
+    const tenant_id = document.getElementById('watchedPageTenant')?.value || null;
     if (!url) { showToast(t('sources.urlRequired'), 'error'); return; }
     if (!category) { showToast(t('sources.categoryRequired'), 'error'); return; }
     if (!intervalRaw) { showToast(t('sources.intervalRequired'), 'error'); return; }
@@ -783,7 +815,7 @@ async function addWatchedPage() {
     try {
         await api('/admin/scraper/watched-pages', {
             method: 'POST',
-            body: JSON.stringify({ url, category, rescrape_interval_hours: interval, is_discovery }),
+            body: JSON.stringify({ url, category, rescrape_interval_hours: interval, is_discovery, tenant_id }),
         });
         showToast(t('sources.watchedPageAdded'));
         document.getElementById('watchedPageUrl').value = '';
@@ -851,5 +883,5 @@ window._pages.knowledge = {
     loadScraperConfig, loadSources, toggleScraperEnabled, toggleAutoApprove, toggleDedupLlm, updateMinDate, updateMaxDate,
     runScraperNow, approveSource, rejectSource, viewSourceArticle,
     // Watched pages
-    loadWatchedPages, addWatchedPage, updateWatchedInterval, scrapeWatchedNow, deleteWatchedPage,
+    loadWatchedPages, addWatchedPage, updateWatchedInterval, scrapeWatchedNow, deleteWatchedPage, filterWatchedByTenant,
 };
