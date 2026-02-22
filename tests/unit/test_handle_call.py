@@ -123,7 +123,7 @@ class TestHandleCallDBIntegration:
 
             await handle_call(_make_mock_conn())
 
-        mock_get_tools.assert_called_once_with(p["db_engine"])
+        mock_get_tools.assert_called_once_with(p["db_engine"], redis=None)
         assert captured_agent_kwargs["tools"] == p["tools"]
 
     @pytest.mark.asyncio

@@ -7,8 +7,19 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
+import src.agent.tool_loader as _loader_mod
 from src.agent.tool_loader import get_tools_with_overrides
 from src.agent.tools import ALL_TOOLS
+
+
+@pytest.fixture(autouse=True)
+def _reset_tools_cache():
+    """Clear module-level tools cache between tests."""
+    _loader_mod._tools_cache = []
+    _loader_mod._tools_cache_ts = 0.0
+    yield
+    _loader_mod._tools_cache = []
+    _loader_mod._tools_cache_ts = 0.0
 
 
 def _make_engine(rows: list[MagicMock] | None = None):

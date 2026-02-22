@@ -6,10 +6,15 @@ with text fallback when pgvector is unavailable.
 
 from __future__ import annotations
 
+import contextlib
+import hashlib
+import json
 import logging
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+_EMBEDDING_CACHE_TTL = 3600  # 1 hour
 
 
 class KnowledgeSearch:
@@ -18,15 +23,44 @@ class KnowledgeSearch:
     Falls back to text search (ILIKE) if pgvector is unavailable.
     """
 
-    def __init__(self, pool: Any, embedding_generator: Any) -> None:
+    def __init__(self, pool: Any, embedding_generator: Any, redis: Any = None) -> None:
         """Initialize knowledge search.
 
         Args:
             pool: asyncpg connection pool.
             embedding_generator: EmbeddingGenerator instance for query embedding.
+            redis: Optional Redis client for caching embeddings.
         """
         self._pool = pool
         self._generator = embedding_generator
+        self._redis = redis
+
+    async def _get_embedding(self, query: str) -> list[float]:
+        """Get embedding for a query, checking Redis cache first."""
+        cache_key = "embed:" + hashlib.sha256(query.encode()).hexdigest()[:16]
+
+        # Try Redis cache
+        if self._redis is not None:
+            try:
+                raw = await self._redis.get(cache_key)
+                if raw:
+                    return json.loads(raw if isinstance(raw, str) else raw.decode())
+            except Exception:
+                pass
+
+        # Generate via OpenAI API
+        embedding = await self._generator.generate_single(query)
+
+        # Store in Redis cache
+        if self._redis is not None:
+            with contextlib.suppress(Exception):
+                await self._redis.setex(
+                    cache_key,
+                    _EMBEDDING_CACHE_TTL,
+                    json.dumps(embedding),
+                )
+
+        return embedding
 
     async def search(
         self,
@@ -77,7 +111,7 @@ class KnowledgeSearch:
         top results by relevance, ensuring relevant articles from other
         categories are not missed.
         """
-        query_embedding = await self._generator.generate_single(query)
+        query_embedding = await self._get_embedding(query)
         embedding_str = "[" + ",".join(str(v) for v in query_embedding) + "]"
 
         if not category:

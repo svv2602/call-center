@@ -443,7 +443,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         if _db_engine is not None:
             pm = PromptManager(_db_engine)
             templates = await pm.get_active_templates()
-            tools = await get_tools_with_overrides(_db_engine)
+            tools = await get_tools_with_overrides(_db_engine, redis=_redis)
 
             # Load active prompt version from DB
             active_prompt = await pm.get_active_prompt()
@@ -496,7 +496,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         # Load tenant promotions into prompt context
         promotions_context = None
         if _db_engine is not None and session.tenant_id:
-            promos = await fetch_tenant_promotions(_db_engine, str(session.tenant_id))
+            promos = await fetch_tenant_promotions(_db_engine, str(session.tenant_id), redis=_redis)
             promotions_context = format_promotions_context(promos)
 
         # Apply tenant overrides (tools filter, greeting, prompt suffix)
@@ -965,7 +965,7 @@ async def main() -> None:
 
             _search_embedding_gen = EmbeddingGenerator(settings.openai.api_key)
             await _search_embedding_gen.open()
-            _knowledge_search = KnowledgeSearch(_asyncpg_pool, _search_embedding_gen)
+            _knowledge_search = KnowledgeSearch(_asyncpg_pool, _search_embedding_gen, redis=_redis)
             logger.info("KnowledgeSearch initialized (pgvector)")
         except Exception:
             logger.debug("KnowledgeSearch init failed — tool will use StoreClient fallback", exc_info=True)

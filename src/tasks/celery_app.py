@@ -30,6 +30,7 @@ app = Celery(
         "src.tasks.scraper_tasks",
         "src.tasks.catalog_sync_tasks",
         "src.tasks.prompt_optimizer",
+        "src.tasks.promo_summary_tasks",
     ],
 )
 
@@ -55,6 +56,7 @@ app.conf.update(
         "src.tasks.scraper_tasks.*": {"queue": "scraper"},
         "src.tasks.catalog_sync_tasks.*": {"queue": "catalog"},
         "src.tasks.prompt_optimizer.*": {"queue": "quality"},
+        "src.tasks.promo_summary_tasks.*": {"queue": "embeddings"},
     },
 )
 

@@ -51,6 +51,33 @@ def _dispatch_embedding(article_id: str) -> None:
         )
 
 
+def _dispatch_promo_summary(article_id: str, category: str) -> None:
+    """Dispatch promo summary generation for promotions articles."""
+    if category != "promotions":
+        return
+    try:
+        from src.tasks.promo_summary_tasks import generate_promo_summary
+
+        generate_promo_summary.delay(article_id)
+    except Exception:
+        logger.debug("Could not dispatch promo summary task for %s", article_id, exc_info=True)
+
+
+def _invalidate_promos_cache() -> None:
+    """Signal promotions cache invalidation via Redis."""
+    import time as _time
+
+    try:
+        settings = get_settings()
+        from redis import Redis as SyncRedis
+
+        r = SyncRedis.from_url(settings.redis.url)
+        r.set("promotions:cache_ts", str(_time.time()))
+        r.close()
+    except Exception:
+        logger.debug("Could not invalidate promotions cache", exc_info=True)
+
+
 class ArticleCreateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=300)
     category: str = Field(min_length=1, max_length=50)
@@ -293,6 +320,9 @@ async def create_article(
         article = dict(row._mapping)
 
     _dispatch_embedding(str(article["id"]))
+    _dispatch_promo_summary(str(article["id"]), request.category)
+    if request.category == "promotions":
+        _invalidate_promos_cache()
     logger.info("Knowledge article created: %s (%s)", article["title"], article["id"])
     return {"article": article, "message": "Article created. Embedding generation queued."}
 
@@ -360,6 +390,13 @@ async def update_article(
 
     if needs_reindex:
         _dispatch_embedding(str(article_id))
+    # Regenerate promo summary if content changed on a promotions article
+    category = article.get("category", "")
+    if needs_reindex and category == "promotions":
+        _dispatch_promo_summary(str(article_id), category)
+    # Invalidate promos cache on any change to a promotions article
+    if category == "promotions" or request.category == "promotions":
+        _invalidate_promos_cache()
 
     msg = "Article updated. Embedding regeneration queued." if needs_reindex else "Article updated."
     return {"article": article, "message": msg}
@@ -376,7 +413,7 @@ async def delete_article(article_id: UUID, _: dict[str, Any] = _admin_dep) -> di
                 UPDATE knowledge_articles
                 SET active = false, updated_at = now()
                 WHERE id = :id
-                RETURNING id, title
+                RETURNING id, title, category
             """),
             {"id": str(article_id)},
         )
@@ -384,6 +421,8 @@ async def delete_article(article_id: UUID, _: dict[str, Any] = _admin_dep) -> di
         if not row:
             raise HTTPException(status_code=404, detail="Article not found")
 
+    if row.category == "promotions":
+        _invalidate_promos_cache()
     return {"message": f"Article '{row.title}' deactivated"}
 
 

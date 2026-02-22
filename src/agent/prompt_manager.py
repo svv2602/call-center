@@ -34,15 +34,19 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-# ── Dialogue / safety caches ────────────────────────────────
+# ── Dialogue / safety / promotions caches ──────────────────
 _dialogue_cache: dict[str, list[dict[str, Any]]] = {}
 _dialogue_cache_ts: float = 0.0
 
 _safety_cache: list[dict[str, Any]] = []
 _safety_cache_ts: float = 0.0
 
+_promos_cache: dict[str, list[dict[str, str]]] = {}  # keyed by tenant_id
+_promos_cache_ts: float = 0.0
+
 DIALOGUE_CACHE_REDIS_KEY = "training:dialogue_cache_ts"
 SAFETY_CACHE_REDIS_KEY = "training:safety_cache_ts"
+PROMOS_CACHE_REDIS_KEY = "promotions:cache_ts"
 
 
 class PromptManager:
@@ -447,19 +451,36 @@ def format_safety_rules_section(
 async def fetch_tenant_promotions(
     engine: AsyncEngine,
     tenant_id: str,
+    redis: Any = None,
 ) -> list[dict[str, str]]:
     """Fetch active promotions for a tenant (tenant-specific + shared).
 
-    Returns list of dicts with 'title' and 'content' keys.
+    Cached in-process keyed by tenant_id; invalidated when Redis key changes.
+    Returns list of dicts with 'title', 'content', 'promo_summary' keys.
     """
+    global _promos_cache, _promos_cache_ts
+
     if not tenant_id:
         return []
+
+    # Check Redis invalidation signal
+    if redis is not None:
+        try:
+            raw = await redis.get(PROMOS_CACHE_REDIS_KEY)
+            remote_ts = float(raw) if raw else 0.0
+        except Exception:
+            remote_ts = 0.0
+        if remote_ts > _promos_cache_ts and _promos_cache:
+            _promos_cache.clear()
+
+    if tenant_id in _promos_cache:
+        return _promos_cache[tenant_id]
 
     try:
         async with engine.begin() as conn:
             result = await conn.execute(
                 text("""
-                    SELECT title, content
+                    SELECT title, content, promo_summary
                     FROM knowledge_articles
                     WHERE active = true
                       AND (expires_at IS NULL OR expires_at > now())
@@ -470,7 +491,11 @@ async def fetch_tenant_promotions(
                 """),
                 {"tid": tenant_id},
             )
-            return [dict(r._mapping) for r in result]
+            promos = [dict(r._mapping) for r in result]
+
+        _promos_cache[tenant_id] = promos
+        _promos_cache_ts = time.time()
+        return promos
     except Exception:
         logger.warning("Failed to load tenant promotions", exc_info=True)
         return []
@@ -491,8 +516,9 @@ def format_promotions_context(
         "Ця інформація завантажена з бази — використовуй її в розмові.",
     ]
     for p in promos:
-        content = p.get("content", "")
-        if len(content) > 2500:
+        # Prefer promo_summary (LLM-generated, ~200 chars) over full content
+        content = p.get("promo_summary") or p.get("content", "")
+        if not p.get("promo_summary") and len(content) > 2500:
             content = content[:2500] + "…"
         parts.append(f"\n### {p['title']}\n{content}")
 

@@ -191,7 +191,7 @@ async def create_sandbox_agent(
             prompt_version_name = active["name"]
 
     # Load tools with DB overrides
-    tools = await get_tools_with_overrides(engine)
+    tools = await get_tools_with_overrides(engine, redis=redis)
 
     # Build tool router
     if tool_mode == "mock":
@@ -229,7 +229,7 @@ async def create_sandbox_agent(
     # Load tenant promotions into prompt context
     promotions_context = None
     if tenant_id:
-        promos = await fetch_tenant_promotions(engine, tenant_id)
+        promos = await fetch_tenant_promotions(engine, tenant_id, redis=redis)
         promotions_context = format_promotions_context(promos)
 
     # Apply tenant overrides (same logic as src/main.py)
