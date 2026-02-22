@@ -3,7 +3,7 @@ import './styles/main.css';
 
 // Core modules
 import { getToken } from './api.js';
-import { login, logout, checkTokenExpiry, applyRoleVisibility } from './auth.js';
+import { login, logout, checkTokenExpiry, applyRoleVisibility, loadPermissions } from './auth.js';
 import { showPage, toggleSidebarGroup, initRouter, getPageFromHash } from './router.js';
 import { connectWebSocket, setWsEventHandler, refreshWsStatus } from './websocket.js';
 import { closeModal } from './utils.js';
@@ -83,11 +83,13 @@ if (getToken()) {
     if (getToken()) {
         document.getElementById('loginContainer').style.display = 'none';
         document.getElementById('app').style.display = 'block';
-        applyRoleVisibility();
-        connectWebSocket();
-        // Prefer URL hash over localStorage for initial page
-        const hashPage = getPageFromHash();
-        showPage(hashPage || savedPage || 'dashboard');
+        loadPermissions().then(() => {
+            applyRoleVisibility();
+            connectWebSocket();
+            // Prefer URL hash over localStorage for initial page
+            const hashPage = getPageFromHash();
+            showPage(hashPage || savedPage || 'dashboard');
+        });
     }
 }
 
