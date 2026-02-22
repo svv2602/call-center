@@ -13,8 +13,8 @@
             }
         })();
     </script>
-  <script type="module" crossorigin src="/assets/index-ZA7gSFPk.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-0dkhSbbB.css">
+  <script type="module" crossorigin src="/assets/index-n7BY6h-p.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-BHp6kMRE.css">
 </head>
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-50 font-sans antialiased">
     <!-- Toast container -->
@@ -454,7 +454,10 @@
                     <div id="sandboxContent-chat" class="flex-1 overflow-hidden flex gap-4">
                         <div id="sandboxSidebar" class="w-72 flex-shrink-0 flex flex-col border border-neutral-200 dark:border-neutral-800 rounded-lg bg-white dark:bg-neutral-900 overflow-hidden">
                             <div class="p-3 border-b border-neutral-200 dark:border-neutral-700 space-y-2">
-                                <button class="w-full inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.sandbox.showNewConvModal()" data-i18n="sandbox.newConversation">+ Новый диалог</button>
+                                <div class="flex gap-1">
+                                    <button class="flex-1 inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.sandbox.showNewConvModal()" data-i18n="sandbox.newConversation">+ Новый диалог</button>
+                                    <button id="sandboxBulkToggle" class="px-2 py-1.5 text-sm rounded-md transition-colors cursor-pointer border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800" onclick="window._pages.sandbox.toggleBulkMode()" title="Bulk delete">&#9745;</button>
+                                </div>
                                 <input type="text" id="sandboxSearch" data-i18n-placeholder="sandbox.searchPlaceholder" placeholder="Поиск по названию..."
                                     onkeydown="if(event.key==='Enter')window._pages.sandbox.loadSidebar()"
                                     class="w-full px-2 py-1 text-xs border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">

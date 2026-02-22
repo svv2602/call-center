@@ -9,7 +9,7 @@ class TestPersonaPrompts:
     """Test persona definitions."""
 
     def test_all_personas_defined(self) -> None:
-        expected = {"neutral", "impatient", "confused", "angry", "expert"}
+        expected = {"neutral", "impatient", "confused", "angry", "expert", "rushed", "detailed"}
         assert set(PERSONA_PROMPTS.keys()) == expected
 
     def test_personas_are_ukrainian(self) -> None:

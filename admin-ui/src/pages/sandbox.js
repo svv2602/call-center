@@ -212,10 +212,10 @@ function renderConversationView() {
                     onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();window._pages.sandbox.sendMessage();}">
                 <select id="sandboxPersonaSelect" class="px-1.5 py-1 text-xs border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500" title="${t('sandbox.persona')}">
                     <option value="neutral">${t('sandbox.personaNeutral')}</option>
-                    <option value="angry">${t('sandbox.personaAngry')}</option>
+                    <option value="impatient">${t('sandbox.personaImpatient')}</option>
                     <option value="confused">${t('sandbox.personaConfused')}</option>
-                    <option value="rushed">${t('sandbox.personaRushed')}</option>
-                    <option value="detailed">${t('sandbox.personaDetailed')}</option>
+                    <option value="angry">${t('sandbox.personaAngry')}</option>
+                    <option value="expert">${t('sandbox.personaExpert')}</option>
                 </select>
                 <button id="sandboxAutoBtn" class="${tw.btnPurple} ${tw.btnSm}" title="${t('sandbox.autoCustomerHint')}" onclick="window._pages.sandbox.autoCustomer()">${t('sandbox.autoCustomer')}</button>
                 <button id="sandboxSendBtn" class="${tw.btnPrimary}" onclick="window._pages.sandbox.sendMessage()">${t('sandbox.sendMessage')}</button>
@@ -1321,8 +1321,8 @@ async function loadStarters() {
             const scenarioBadge = item.scenario_type
                 ? `<span class="${tw.badge}">${escapeHtml(item.scenario_type)}</span>`
                 : '';
-            const personaBadge = item.persona
-                ? `<span class="${tw.badgeBlue}">${escapeHtml(item.persona)}</span>`
+            const personaBadge = item.customer_persona
+                ? `<span class="${tw.badgeBlue}">${escapeHtml(item.customer_persona)}</span>`
                 : '';
             return `
                 <tr class="${tw.trHover}">
@@ -1377,7 +1377,7 @@ async function showStarterModal(starterId) {
             document.getElementById('sandboxStarterFirstMsg').value = item.first_message || '';
             document.getElementById('sandboxStarterDesc').value = item.description || '';
             document.getElementById('sandboxStarterScenario').value = item.scenario_type || '';
-            document.getElementById('sandboxStarterPersona').value = item.persona || 'neutral';
+            document.getElementById('sandboxStarterPersona').value = item.customer_persona || 'neutral';
         } catch { /* new starter fallback */ }
     } else {
         titleEl.textContent = t('sandbox.newStarter');
@@ -1397,13 +1397,13 @@ async function saveStarter() {
         first_message: firstMessage,
         description: document.getElementById('sandboxStarterDesc').value.trim() || null,
         scenario_type: document.getElementById('sandboxStarterScenario').value || null,
-        persona: document.getElementById('sandboxStarterPersona').value || 'neutral',
+        customer_persona: document.getElementById('sandboxStarterPersona').value || 'neutral',
     };
 
     try {
         if (editId) {
             await api(`/admin/sandbox/scenario-starters/${editId}`, {
-                method: 'PUT',
+                method: 'PATCH',
                 body: JSON.stringify(body),
             });
         } else {

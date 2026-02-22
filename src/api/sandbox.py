@@ -1016,6 +1016,29 @@ async def create_starter(request: StarterCreate, _: dict[str, Any] = _perm_w) ->
     return {"item": dict(row._mapping), "message": "Starter created"}
 
 
+@router.get("/scenario-starters/{starter_id}")
+async def get_starter(starter_id: UUID, _: dict[str, Any] = _perm_r) -> dict[str, Any]:
+    """Get a single scenario starter by ID."""
+    engine = await _get_engine()
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                SELECT id, title, first_message, scenario_type, tags,
+                       customer_persona, description, is_active, sort_order,
+                       created_at, updated_at
+                FROM sandbox_scenario_starters
+                WHERE id = :id
+            """),
+            {"id": str(starter_id)},
+        )
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Starter not found")
+
+    return {"item": dict(row._mapping)}
+
+
 @router.patch("/scenario-starters/{starter_id}")
 async def update_starter(
     starter_id: UUID,
