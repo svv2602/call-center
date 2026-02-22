@@ -104,6 +104,16 @@ def _rotate(pool: list[str]) -> str:
 
 # --- Contextual farewell prompt ---
 
+# --- Scenario-specific greeting suffixes (stress-marked for TTS) ---
+
+_SCENARIO_GREETING_SUFFIX: dict[str, str] = {
+    "tire_search": "Допомо́жу підібра́ти ши́ни.",
+    "order_status": "Переві́рю ста́тус ва́шого замо́влення.",
+    "fitting": "Запишу́ вас на шиномонта́ж.",
+    "consultation": "Гото́ва відпові́сти на ва́ші пита́ння.",
+}
+
+
 _FAREWELL_SYSTEM_PROMPT = (
     "Ти — голосовий асистент інтернет-магазину шин Олена. "
     "Клієнт мовчить. Згенеруй коро́тке проща́ння (1 ре́чення українською), "
@@ -202,6 +212,10 @@ class CallPipeline:
         greeting = self._templates.get("greeting", GREETING_TEXT)
         greeting = greeting.replace("Добрий день", _time_of_day_greeting(), 1)
         greeting = greeting.replace("{agent_name}", self._agent_name or "Олена")
+        # Append scenario-specific suffix if IVR intent was resolved
+        suffix = _SCENARIO_GREETING_SUFFIX.get(self._session.scenario or "")
+        if suffix:
+            greeting = greeting.rstrip() + " " + suffix
         self._session.transition_to(CallState.GREETING)
         await self._speak(greeting)
         self._session.add_assistant_turn(greeting)

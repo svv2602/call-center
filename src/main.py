@@ -331,6 +331,93 @@ async def metrics_endpoint() -> Response:
     return Response(content=get_metrics(), media_type="text/plain; charset=utf-8")
 
 
+_VALID_IVR_INTENTS = {"tire_search", "order_status", "fitting", "consultation"}
+
+# Tools allowed per IVR scenario (None = all tools, no filtering)
+_SCENARIO_TOOLS: dict[str, set[str]] = {
+    "tire_search": {
+        "get_vehicle_tire_sizes",
+        "search_tires",
+        "check_availability",
+        "create_order_draft",
+        "update_order_delivery",
+        "confirm_order",
+        "get_pickup_points",
+        "search_knowledge_base",
+        "transfer_to_operator",
+    },
+    "order_status": {
+        "get_order_status",
+        "search_knowledge_base",
+        "transfer_to_operator",
+    },
+    "fitting": {
+        "get_fitting_stations",
+        "get_fitting_slots",
+        "book_fitting",
+        "cancel_fitting",
+        "get_fitting_price",
+        "search_knowledge_base",
+        "transfer_to_operator",
+    },
+    "consultation": {
+        "search_knowledge_base",
+        "transfer_to_operator",
+    },
+}
+
+# Scenario-specific focus appended to system prompt (Ukrainian)
+_SCENARIO_EMPHASIS: dict[str, str] = {
+    "tire_search": (
+        "\n\n[IVR-фокус] Клієнт вже обрав підбір шин через IVR. "
+        "Не питай чого він дзвонить — одразу з'ясовуй розмір та сезон."
+    ),
+    "order_status": (
+        "\n\n[IVR-фокус] Клієнт дзвонить перевірити статус. "
+        "Запитай номер замовлення або телефон, одразу виклич get_order_status."
+    ),
+    "fitting": (
+        "\n\n[IVR-фокус] Клієнт дзвонить записатися на шиномонтаж. "
+        "Запитай місто, потім пропонуй точки та час."
+    ),
+    "consultation": (
+        "\n\n[IVR-фокус] Клієнт має питання. "
+        "Слухай і шукай відповідь через search_knowledge_base."
+    ),
+}
+
+
+async def _resolve_ivr_intent(channel_uuid: str) -> str | None:
+    """Resolve IVR intent from Asterisk channel variable IVR_INTENT.
+
+    Returns one of _VALID_IVR_INTENTS or None if not set / invalid.
+    """
+    settings = get_settings()
+    if not settings.ari.url:
+        return None
+
+    try:
+        from src.core.asterisk_ari import AsteriskARIClient
+
+        ari = AsteriskARIClient(
+            url=settings.ari.url,
+            user=settings.ari.user,
+            password=settings.ari.password,
+        )
+        await ari.open()
+        try:
+            raw = await ari.get_channel_variable(channel_uuid, "IVR_INTENT")
+        finally:
+            await ari.close()
+
+        if raw and raw.strip().lower() in _VALID_IVR_INTENTS:
+            return raw.strip().lower()
+    except Exception:
+        logger.debug("ARI IVR_INTENT lookup failed", exc_info=True)
+
+    return None
+
+
 async def _resolve_tenant(channel_uuid: str, db_engine: Any) -> dict[str, Any] | None:
     """Resolve tenant for the current call.
 
@@ -418,6 +505,12 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             conn.channel_uuid,
         )
 
+    # Resolve IVR intent (set by Asterisk dialplan before AudioSocket)
+    ivr_intent = await _resolve_ivr_intent(str(conn.channel_uuid))
+    if ivr_intent:
+        session.scenario = ivr_intent
+        logger.info("IVR intent resolved: %s for call %s", ivr_intent, conn.channel_uuid)
+
     if _redis is not None:
         store = SessionStore(_redis)
         await store.save(session)
@@ -477,7 +570,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         if _db_engine is not None:
             try:
                 few_shot_examples = await get_few_shot_examples(_db_engine, _redis)
-                few_shot_context = format_few_shot_section(few_shot_examples)
+                few_shot_context = format_few_shot_section(
+                    few_shot_examples, scenario_type=session.scenario
+                )
             except Exception:
                 logger.debug("Few-shot examples loading failed", exc_info=True)
             try:
@@ -510,6 +605,24 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 templates["greeting"] = tenant["greeting"]
             if tenant.get("prompt_suffix") and system_prompt:
                 system_prompt = system_prompt + "\n\n" + tenant["prompt_suffix"]
+
+        # Apply IVR scenario-based tool filtering
+        if session.scenario and session.scenario in _SCENARIO_TOOLS:
+            allowed_scenario = _SCENARIO_TOOLS[session.scenario]
+            if tools:
+                tools = [t for t in tools if t["name"] in allowed_scenario]
+            logger.info(
+                "Scenario tool filter: %s → %d tools for call %s",
+                session.scenario,
+                len(tools) if tools else 0,
+                conn.channel_uuid,
+            )
+
+        # Apply IVR scenario emphasis to system prompt
+        if session.scenario and system_prompt:
+            emphasis = _SCENARIO_EMPHASIS.get(session.scenario)
+            if emphasis:
+                system_prompt = system_prompt + emphasis
 
         # Create per-tenant StoreClient if tenant has custom store config
         if tenant and tenant.get("config"):
