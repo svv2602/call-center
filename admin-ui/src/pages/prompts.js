@@ -2,6 +2,7 @@ import { api, fetchWithAuth } from '../api.js';
 import { showToast } from '../notifications.js';
 import { qualityBadge, formatDate, escapeHtml, closeModal, downloadBlob } from '../utils.js';
 import { registerPageLoader } from '../router.js';
+import { hasPermission } from '../auth.js';
 import { t } from '../i18n.js';
 import { makeSortable } from '../sorting.js';
 import { renderPagination, buildParams } from '../pagination.js';
@@ -501,6 +502,7 @@ async function exportABReportCSV(testId) {
 //  Pronunciation Rules
 // ═══════════════════════════════════════════════════════════
 async function loadPronunciationRules() {
+    if (!hasPermission('pronunciation:read')) return;
     const container = document.getElementById('promptsContent');
     const existing = document.getElementById('pronunciationRulesSection');
     if (existing) existing.remove();
@@ -540,6 +542,7 @@ async function loadPronunciationRules() {
 }
 
 async function savePronunciationRules() {
+    if (!hasPermission('pronunciation:write')) return;
     const rules = document.getElementById('pronunciationRulesText').value;
     try {
         await api('/admin/agent/pronunciation-rules', {
@@ -555,6 +558,7 @@ async function savePronunciationRules() {
 }
 
 async function resetPronunciationRules() {
+    if (!hasPermission('pronunciation:write')) return;
     if (!confirm(t('prompts.pronunciationRulesResetConfirm'))) return;
     try {
         await api('/admin/agent/pronunciation-rules/reset', { method: 'POST' });

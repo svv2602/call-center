@@ -2,6 +2,7 @@ import { api, apiUpload } from '../api.js';
 import { showToast } from '../notifications.js';
 import { formatDate, escapeHtml, closeModal } from '../utils.js';
 import { registerPageLoader } from '../router.js';
+import { hasPermission } from '../auth.js';
 import { t } from '../i18n.js';
 import { makeSortable } from '../sorting.js';
 import { renderPagination, buildParams } from '../pagination.js';
@@ -688,8 +689,8 @@ async function loadWatchedPages(offset) {
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
 
     try {
-        // Load tenants list (cached)
-        if (_tenantsList.length === 0) {
+        // Load tenants list (cached, requires tenants:read)
+        if (_tenantsList.length === 0 && hasPermission('tenants:read')) {
             try {
                 const td = await api('/admin/tenants');
                 _tenantsList = (td.tenants || []).filter(t => t.is_active);

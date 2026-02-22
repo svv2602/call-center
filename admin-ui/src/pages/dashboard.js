@@ -2,6 +2,7 @@ import { api, fetchWithAuth } from '../api.js';
 import { showToast } from '../notifications.js';
 import { escapeHtml, downloadBlob } from '../utils.js';
 import { registerPageLoader, setRefreshTimer } from '../router.js';
+import { hasPermission } from '../auth.js';
 import { t } from '../i18n.js';
 import * as tw from '../tw.js';
 
@@ -12,6 +13,7 @@ let _selectedTenantId = '';
 let _tenants = [];
 
 async function _loadTenants() {
+    if (!hasPermission('tenants:read')) { _tenants = []; return; }
     try {
         const data = await api('/admin/tenants?is_active=true&limit=100');
         _tenants = data.tenants || [];
@@ -40,6 +42,12 @@ function onTenantChange(tenantId) {
 }
 
 async function loadDashboard() {
+    if (!hasPermission('analytics:read')) {
+        document.getElementById('dashboardStats').innerHTML = `
+            <div class="${tw.emptyState}">${t('dashboard.noAnalyticsAccess')}</div>
+        `;
+        return;
+    }
     try {
         const params = _selectedTenantId ? `?tenant_id=${_selectedTenantId}` : '';
         const data = await api(`/analytics/summary${params}`);
@@ -112,10 +120,15 @@ async function downloadPdfReport() {
 
 export function init() {
     registerPageLoader('dashboard', async () => {
+        // Hide export buttons if user lacks analytics permission
+        const exportBtns = document.querySelectorAll('#page-dashboard .flex.gap-2 button');
+        const canAnalytics = hasPermission('analytics:read');
+        exportBtns.forEach(btn => { btn.style.display = canAnalytics ? '' : 'none'; });
+
         await _loadTenants();
         _renderTenantFilter();
         loadDashboard();
-        setRefreshTimer(loadDashboard, 30000);
+        if (canAnalytics) setRefreshTimer(loadDashboard, 30000);
     });
 }
 
