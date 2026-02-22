@@ -355,14 +355,14 @@ async def get_safety_rules_for_prompt(
 
 def format_few_shot_section(
     examples: dict[str, list[dict[str, Any]]],
-    max_examples: int = 2,
+    max_examples: int = 1,
     scenario_type: str | None = None,
 ) -> str | None:
     """Format dialogue examples as a prompt section.
 
     Selects up to *max_examples* dialogues, preferring diversity across
     scenario types.  If *scenario_type* is provided, one slot is reserved
-    for that scenario.  Truncates each to 6 turns and strips tool_calls
+    for that scenario.  Truncates each to 4 turns and strips tool_calls
     to tool names only.  Returns ``None`` if there are no examples.
     """
     if not examples:
@@ -414,7 +414,7 @@ def format_few_shot_section(
             except (ValueError, TypeError):
                 continue
 
-        turns = raw_dialogue[:6]  # truncate to 6 turns
+        turns = raw_dialogue[:4]  # truncate to 4 turns
         for turn in turns:
             role = turn.get("role", "")
             text_val = turn.get("text", "")

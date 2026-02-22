@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 import anthropic
 
 from src.agent.prompts import ERROR_TEXT, PROMPT_VERSION, SYSTEM_PROMPT
+from src.agent.tool_result_compressor import compress_tool_result
 from src.agent.tools import ALL_TOOLS
 
 if TYPE_CHECKING:
@@ -267,8 +268,8 @@ class LLMAgent:
 
                 result = await self._tool_router.execute(tool_use["name"], args)
 
-                # Mask PII in tool results before adding to LLM history
-                content = str(result)
+                # Compress + mask PII in tool results before adding to LLM history
+                content = compress_tool_result(tool_use["name"], result)
                 if self._pii_vault is not None:
                     content = self._pii_vault.mask(content)
 

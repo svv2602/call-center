@@ -45,7 +45,7 @@ class TestFormatFewShotSection:
         assert "Клієнт: Потрібні шини на Камрі" in result
         assert "Агент: Зараз перевірю розміри" in result
 
-    def test_truncates_long_dialogues_to_6_turns(self) -> None:
+    def test_truncates_long_dialogues_to_4_turns(self) -> None:
         turns = [
             {"role": "customer" if i % 2 == 0 else "agent", "text": f"Turn {i}"}
             for i in range(10)
@@ -53,9 +53,9 @@ class TestFormatFewShotSection:
         examples = {"tire_search": [self._make_dialogue(turns=turns)]}
         result = format_few_shot_section(examples, max_examples=1)
         assert result is not None
-        # Should have turns 0-5 but not 6+
-        assert "Turn 5" in result
-        assert "Turn 6" not in result
+        # Should have turns 0-3 but not 4+
+        assert "Turn 3" in result
+        assert "Turn 4" not in result
 
     def test_respects_max_examples_limit(self) -> None:
         examples = {

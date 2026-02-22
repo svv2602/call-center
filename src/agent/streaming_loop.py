@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any
 
 from src.agent.agent import MAX_HISTORY_MESSAGES, MAX_TOOL_CALLS_PER_TURN
 from src.agent.prompts import SYSTEM_PROMPT
+from src.agent.tool_result_compressor import compress_tool_result
 from src.core.audio_sender import send_audio_stream
 from src.core.sentence_buffer import buffer_sentences
 from src.llm.models import LLMTask, Usage
@@ -210,8 +211,8 @@ class StreamingAgentLoop:
 
                 tool_result = await self._tool_router.execute(tc.name, args)
 
-                # Mask PII in tool results before adding to LLM history
-                content = str(tool_result)
+                # Compress + mask PII in tool results before adding to LLM history
+                content = compress_tool_result(tc.name, tool_result)
                 if self._pii_vault is not None:
                     content = self._pii_vault.mask(content)
 
