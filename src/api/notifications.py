@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from redis.asyncio import Redis
 
-from src.api.auth import require_role
+from src.api.auth import require_permission
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -23,8 +23,9 @@ REDIS_KEY = "notifications:telegram"
 
 _redis: Redis | None = None
 
-# Module-level dependency to satisfy B008 lint rule
-_admin_dep = Depends(require_role("admin"))
+# Module-level dependencies to satisfy B008 lint rule
+_perm_r = Depends(require_permission("notifications:read"))
+_perm_w = Depends(require_permission("notifications:write"))
 
 
 async def _get_redis() -> Redis:
@@ -41,7 +42,7 @@ class TelegramPatch(BaseModel):
 
 
 @router.get("/telegram")
-async def get_telegram_config(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def get_telegram_config(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Get Telegram notification config (token masked)."""
     redis = await _get_redis()
     raw = await redis.get(REDIS_KEY)
@@ -61,7 +62,7 @@ async def get_telegram_config(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
 
 @router.patch("/telegram")
 async def update_telegram_config(
-    request: TelegramPatch, _: dict[str, Any] = _admin_dep
+    request: TelegramPatch, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Save Telegram bot_token and/or chat_id to Redis."""
     redis = await _get_redis()
@@ -84,7 +85,7 @@ async def update_telegram_config(
 
 
 @router.post("/telegram/test")
-async def test_telegram(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def test_telegram(_: dict[str, Any] = _perm_w) -> dict[str, Any]:
     """Send a test message via Telegram Bot API."""
     redis = await _get_redis()
     raw = await redis.get(REDIS_KEY)

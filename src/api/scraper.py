@@ -17,7 +17,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from src.api.auth import require_role
+from src.api.auth import require_permission
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -26,8 +26,11 @@ router = APIRouter(prefix="/admin/scraper", tags=["scraper"])
 _engine: AsyncEngine | None = None
 _redis: Redis | None = None
 
-# Module-level dependency to satisfy B008 lint rule
-_admin_dep = Depends(require_role("admin"))
+# Module-level dependencies to satisfy B008 lint rule
+_perm_r = Depends(require_permission("scraper:read"))
+_perm_w = Depends(require_permission("scraper:write"))
+_perm_d = Depends(require_permission("scraper:delete"))
+_perm_x = Depends(require_permission("scraper:execute"))
 
 
 async def _get_engine() -> AsyncEngine:
@@ -98,7 +101,7 @@ class SourceConfigUpdate(BaseModel):
 
 
 @router.get("/config")
-async def get_scraper_config(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def get_scraper_config(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Get current scraper configuration (Redis + env fallback)."""
     settings = get_settings()
     redis = await _get_redis()
@@ -133,7 +136,7 @@ async def get_scraper_config(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
 
 @router.patch("/config")
 async def update_scraper_config(
-    request: ScraperConfigUpdate, _: dict[str, Any] = _admin_dep
+    request: ScraperConfigUpdate, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Update scraper configuration in Redis."""
     redis = await _get_redis()
@@ -169,7 +172,7 @@ async def update_scraper_config(
 
 
 @router.post("/run")
-async def trigger_scraper_run(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def trigger_scraper_run(_: dict[str, Any] = _perm_x) -> dict[str, Any]:
     """Trigger a manual scraper run via Celery."""
     try:
         from src.tasks.scraper_tasks import run_scraper
@@ -187,7 +190,7 @@ async def list_sources(
     source_config_id: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """List scraped sources with optional status/source_config_id filter."""
     engine = await _get_engine()
@@ -231,7 +234,7 @@ async def list_sources(
 
 
 @router.get("/sources/{source_id}")
-async def get_source(source_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def get_source(source_id: UUID, _: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Get a single source detail."""
     engine = await _get_engine()
 
@@ -253,7 +256,7 @@ async def get_source(source_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[st
 
 
 @router.post("/sources/{source_id}/approve")
-async def approve_source(source_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def approve_source(source_id: UUID, _: dict[str, Any] = _perm_x) -> dict[str, Any]:
     """Approve a scraped source: activate its article and trigger embeddings."""
     engine = await _get_engine()
 
@@ -291,7 +294,7 @@ async def approve_source(source_id: UUID, _: dict[str, Any] = _admin_dep) -> dic
 
 
 @router.post("/sources/{source_id}/reject")
-async def reject_source(source_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def reject_source(source_id: UUID, _: dict[str, Any] = _perm_x) -> dict[str, Any]:
     """Reject a scraped source: deactivate article, mark source as skipped."""
     engine = await _get_engine()
 
@@ -337,7 +340,7 @@ async def reject_source(source_id: UUID, _: dict[str, Any] = _admin_dep) -> dict
 async def list_source_configs(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """List all content source configurations."""
     engine = await _get_engine()
@@ -367,7 +370,7 @@ async def list_source_configs(
 
 @router.post("/source-configs")
 async def create_source_config(
-    request: SourceConfigCreate, _: dict[str, Any] = _admin_dep
+    request: SourceConfigCreate, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Create a new content source configuration."""
     if request.source_type not in _VALID_SOURCE_TYPES:
@@ -428,7 +431,7 @@ async def create_source_config(
 
 @router.patch("/source-configs/{config_id}")
 async def update_source_config(
-    config_id: UUID, request: SourceConfigUpdate, _: dict[str, Any] = _admin_dep
+    config_id: UUID, request: SourceConfigUpdate, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Update a content source configuration."""
     if request.source_type is not None and request.source_type not in _VALID_SOURCE_TYPES:
@@ -494,7 +497,7 @@ async def update_source_config(
 
 
 @router.delete("/source-configs/{config_id}")
-async def delete_source_config(config_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def delete_source_config(config_id: UUID, _: dict[str, Any] = _perm_d) -> dict[str, Any]:
     """Delete a content source configuration."""
     engine = await _get_engine()
 
@@ -515,7 +518,7 @@ async def delete_source_config(config_id: UUID, _: dict[str, Any] = _admin_dep) 
 
 
 @router.post("/source-configs/{config_id}/run")
-async def trigger_source_run(config_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def trigger_source_run(config_id: UUID, _: dict[str, Any] = _perm_x) -> dict[str, Any]:
     """Trigger a manual scraper run for a single source."""
     engine = await _get_engine()
 
@@ -589,7 +592,7 @@ class WatchedPageUpdate(BaseModel):
 @router.get("/watched-pages")
 async def list_watched_pages(
     tenant_id: str | None = Query(None),
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """List all watched pages with their status."""
     engine = await _get_engine()
@@ -626,7 +629,7 @@ async def list_watched_pages(
 
 @router.post("/watched-pages")
 async def add_watched_page(
-    request: WatchedPageCreate, _: dict[str, Any] = _admin_dep
+    request: WatchedPageCreate, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Add a new watched page for periodic rescraping."""
     url = request.url.strip()
@@ -674,7 +677,7 @@ class BulkWatchedPageCreate(BaseModel):
 
 @router.post("/watched-pages/bulk")
 async def bulk_add_watched_pages(
-    request: BulkWatchedPageCreate, _: dict[str, Any] = _admin_dep
+    request: BulkWatchedPageCreate, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Bulk-add watched pages. Skips duplicates."""
     engine = await _get_engine()
@@ -722,7 +725,7 @@ async def bulk_add_watched_pages(
 
 @router.patch("/watched-pages/{page_id}")
 async def update_watched_page(
-    page_id: UUID, request: WatchedPageUpdate, _: dict[str, Any] = _admin_dep
+    page_id: UUID, request: WatchedPageUpdate, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Update a watched page's category or rescrape interval."""
     engine = await _get_engine()
@@ -779,7 +782,7 @@ async def update_watched_page(
 
 
 @router.delete("/watched-pages/{page_id}")
-async def delete_watched_page(page_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def delete_watched_page(page_id: UUID, _: dict[str, Any] = _perm_d) -> dict[str, Any]:
     """Remove a watched page. Children are cascade-deleted (FK). Linked articles are kept."""
     engine = await _get_engine()
 
@@ -799,7 +802,7 @@ async def delete_watched_page(page_id: UUID, _: dict[str, Any] = _admin_dep) -> 
 
 
 @router.post("/watched-pages/{page_id}/scrape-now")
-async def scrape_watched_page_now(page_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def scrape_watched_page_now(page_id: UUID, _: dict[str, Any] = _perm_x) -> dict[str, Any]:
     """Scrape a single watched page immediately (inline, no Celery needed)."""
     from src.knowledge.article_processor import process_article
     from src.knowledge.scraper import ProKolesoScraper, content_hash

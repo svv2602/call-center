@@ -17,7 +17,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from src.api.auth import require_role
+from src.api.auth import require_permission
 from src.config import get_settings
 from src.knowledge.categories import CATEGORIES, is_valid_category
 
@@ -27,8 +27,9 @@ router = APIRouter(prefix="/knowledge", tags=["knowledge"])
 _engine: AsyncEngine | None = None
 
 # Module-level dependencies to satisfy B008 lint rule
-_admin_dep = Depends(require_role("admin"))
-_analyst_dep = Depends(require_role("admin", "analyst"))
+_perm_r = Depends(require_permission("knowledge:read"))
+_perm_w = Depends(require_permission("knowledge:write"))
+_perm_d = Depends(require_permission("knowledge:delete"))
 
 
 async def _get_engine() -> AsyncEngine:
@@ -96,7 +97,7 @@ class ArticleUpdateRequest(BaseModel):
 
 
 @router.get("/article-categories")
-async def get_article_categories(_: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
+async def get_article_categories(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Return the list of available article categories."""
     return {"categories": CATEGORIES}
 
@@ -109,7 +110,7 @@ async def list_articles(
     tenant_id: str | None = Query(None, description="Filter by tenant UUID (NULL = shared articles)"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _: dict[str, Any] = _analyst_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """List knowledge articles with filters."""
     engine = await _get_engine()
@@ -159,7 +160,7 @@ async def list_articles(
 async def import_articles(
     files: list[UploadFile],
     category: str | None = Query(None, description="Override category for all imported files"),
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Bulk import documents (MD, PDF, DOCX) as knowledge articles."""
     from src.knowledge.parsers import PARSERS, SUPPORTED_EXTENSIONS, detect_category_from_filename
@@ -227,7 +228,7 @@ async def import_articles(
 
 
 @router.post("/articles/{article_id}/reindex")
-async def reindex_article(article_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def reindex_article(article_id: UUID, _: dict[str, Any] = _perm_w) -> dict[str, Any]:
     """Trigger embedding regeneration for a specific article."""
     engine = await _get_engine()
 
@@ -250,7 +251,7 @@ async def reindex_article(article_id: UUID, _: dict[str, Any] = _admin_dep) -> d
 
 
 @router.post("/reindex-all")
-async def reindex_all(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def reindex_all(_: dict[str, Any] = _perm_w) -> dict[str, Any]:
     """Trigger embedding regeneration for all active articles."""
     try:
         from src.tasks.embedding_tasks import reindex_all_articles
@@ -264,7 +265,7 @@ async def reindex_all(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
 
 
 @router.get("/articles/{article_id}")
-async def get_article(article_id: UUID, _: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
+async def get_article(article_id: UUID, _: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Get a specific article with full content."""
     engine = await _get_engine()
 
@@ -287,7 +288,7 @@ async def get_article(article_id: UUID, _: dict[str, Any] = _analyst_dep) -> dic
 
 @router.post("/articles")
 async def create_article(
-    request: ArticleCreateRequest, _: dict[str, Any] = _admin_dep
+    request: ArticleCreateRequest, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Create a new knowledge article."""
     if not is_valid_category(request.category):
@@ -329,7 +330,7 @@ async def create_article(
 
 @router.patch("/articles/{article_id}")
 async def update_article(
-    article_id: UUID, request: ArticleUpdateRequest, _: dict[str, Any] = _admin_dep
+    article_id: UUID, request: ArticleUpdateRequest, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Update a knowledge article."""
     if request.category is not None and not is_valid_category(request.category):
@@ -403,7 +404,7 @@ async def update_article(
 
 
 @router.delete("/articles/{article_id}")
-async def delete_article(article_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def delete_article(article_id: UUID, _: dict[str, Any] = _perm_d) -> dict[str, Any]:
     """Delete (deactivate) a knowledge article."""
     engine = await _get_engine()
 
@@ -427,7 +428,7 @@ async def delete_article(article_id: UUID, _: dict[str, Any] = _admin_dep) -> di
 
 
 @router.get("/categories")
-async def list_categories(_: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
+async def list_categories(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """List all knowledge base categories with article counts."""
     engine = await _get_engine()
 

@@ -17,7 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.agent.prompt_manager import SAFETY_CACHE_REDIS_KEY
-from src.api.auth import require_role
+from src.api.auth import require_permission
 from src.config import get_settings
 
 if TYPE_CHECKING:
@@ -29,8 +29,10 @@ router = APIRouter(prefix="/training/safety-rules", tags=["training"])
 _engine: AsyncEngine | None = None
 _redis: Redis | None = None
 
-_admin_dep = Depends(require_role("admin"))
-_analyst_dep = Depends(require_role("admin", "analyst"))
+_perm_r = Depends(require_permission("training:read"))
+_perm_w = Depends(require_permission("training:write"))
+_perm_d = Depends(require_permission("training:delete"))
+_perm_x = Depends(require_permission("training:execute"))
 
 RULE_TYPES = [
     "prompt_injection",
@@ -94,7 +96,7 @@ async def list_safety_rules(
     is_active: bool | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _: dict[str, Any] = _analyst_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """List safety rules with filters."""
     engine = await _get_engine()
@@ -138,7 +140,7 @@ async def list_safety_rules(
 
 
 @router.get("/{rule_id}")
-async def get_safety_rule(rule_id: UUID, _: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
+async def get_safety_rule(rule_id: UUID, _: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Get a specific safety rule."""
     engine = await _get_engine()
 
@@ -161,7 +163,7 @@ async def get_safety_rule(rule_id: UUID, _: dict[str, Any] = _analyst_dep) -> di
 
 @router.post("/")
 async def create_safety_rule(
-    request: SafetyRuleCreateRequest, _: dict[str, Any] = _admin_dep
+    request: SafetyRuleCreateRequest, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Create a new safety rule."""
     if request.rule_type not in RULE_TYPES:
@@ -202,7 +204,7 @@ async def create_safety_rule(
 
 @router.patch("/{rule_id}")
 async def update_safety_rule(
-    rule_id: UUID, request: SafetyRuleUpdateRequest, _: dict[str, Any] = _admin_dep
+    rule_id: UUID, request: SafetyRuleUpdateRequest, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Update a safety rule."""
     if request.rule_type is not None and request.rule_type not in RULE_TYPES:
@@ -266,7 +268,7 @@ async def update_safety_rule(
 
 
 @router.delete("/{rule_id}")
-async def delete_safety_rule(rule_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def delete_safety_rule(rule_id: UUID, _: dict[str, Any] = _perm_d) -> dict[str, Any]:
     """Soft delete a safety rule."""
     engine = await _get_engine()
 
@@ -289,7 +291,7 @@ async def delete_safety_rule(rule_id: UUID, _: dict[str, Any] = _admin_dep) -> d
 
 
 @router.post("/regression-test")
-async def run_regression_test(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def run_regression_test(_: dict[str, Any] = _perm_x) -> dict[str, Any]:
     """Run safety regression test against all active rules.
 
     For each rule, sends the trigger_input to the agent and uses an

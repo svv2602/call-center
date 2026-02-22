@@ -16,14 +16,16 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from src.api.auth import require_role
+from src.api.auth import require_permission
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/sandbox", tags=["sandbox"])
 
 _engine: AsyncEngine | None = None
-_admin_dep = Depends(require_role("admin"))
+_perm_r = Depends(require_permission("sandbox:read"))
+_perm_w = Depends(require_permission("sandbox:write"))
+_perm_d = Depends(require_permission("sandbox:delete"))
 
 
 async def _get_engine() -> AsyncEngine:
@@ -97,7 +99,7 @@ class PatternUpdate(BaseModel):
 
 
 @router.get("/agent-phrases")
-async def get_agent_phrases(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def get_agent_phrases(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Return hardcoded agent phrases and active DB templates.
 
     Hardcoded phrases are fallbacks from prompts.py.
@@ -189,7 +191,7 @@ SANDBOX_MODELS = [
 
 
 @router.get("/models")
-async def list_models(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def list_models(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """List available LLM models for sandbox conversations.
 
     Returns static Anthropic models plus any active providers from the
@@ -235,7 +237,7 @@ async def list_conversations(
     scenario_type: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """List sandbox conversations with filters."""
     engine = await _get_engine()
@@ -284,7 +286,7 @@ async def list_conversations(
 
 @router.post("/conversations")
 async def create_conversation(
-    request: ConversationCreate, user: dict[str, Any] = _admin_dep
+    request: ConversationCreate, user: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Create a new sandbox conversation."""
     engine = await _get_engine()
@@ -338,7 +340,7 @@ async def create_conversation(
 
 
 @router.get("/conversations/{conversation_id}")
-async def get_conversation(conversation_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def get_conversation(conversation_id: UUID, _: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Get conversation with all turns and tool calls."""
     engine = await _get_engine()
 
@@ -403,7 +405,7 @@ async def get_conversation(conversation_id: UUID, _: dict[str, Any] = _admin_dep
 async def update_conversation(
     conversation_id: UUID,
     request: ConversationUpdate,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Update conversation metadata."""
     engine = await _get_engine()
@@ -451,7 +453,7 @@ async def update_conversation(
 
 @router.delete("/conversations/{conversation_id}")
 async def delete_conversation(
-    conversation_id: UUID, _: dict[str, Any] = _admin_dep
+    conversation_id: UUID, _: dict[str, Any] = _perm_d
 ) -> dict[str, Any]:
     """Delete a conversation and all its turns/tool_calls (CASCADE)."""
     engine = await _get_engine()
@@ -475,7 +477,7 @@ async def delete_conversation(
 async def send_message(
     conversation_id: UUID,
     request: SendMessage,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Send a customer message and get the agent response.
 
@@ -725,7 +727,7 @@ async def send_message(
 async def rate_turn(
     turn_id: UUID,
     request: RateTurn,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Rate an agent turn (1-5 stars + optional comment)."""
     engine = await _get_engine()
@@ -756,7 +758,7 @@ async def rate_turn(
 
 @router.get("/conversations/{conversation_id}/tree")
 async def get_conversation_tree(
-    conversation_id: UUID, _: dict[str, Any] = _admin_dep
+    conversation_id: UUID, _: dict[str, Any] = _perm_r
 ) -> dict[str, Any]:
     """Get the full turn tree structure using a recursive CTE."""
     engine = await _get_engine()
@@ -788,7 +790,7 @@ async def get_conversation_tree(
 async def update_turn_label(
     turn_id: UUID,
     label: str = Query(..., max_length=200),
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Set or update a branch label on a turn."""
     engine = await _get_engine()
@@ -820,7 +822,7 @@ class AutoCustomerRequest(BaseModel):
 async def auto_customer(
     conversation_id: UUID,
     request: AutoCustomerRequest,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Generate a customer reply using Haiku (editable before sending)."""
     from src.sandbox.auto_customer import generate_customer_reply
@@ -880,7 +882,7 @@ class StarterUpdate(BaseModel):
 async def list_starters(
     limit: int = Query(100, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """List all scenario starters."""
     engine = await _get_engine()
@@ -906,7 +908,7 @@ async def list_starters(
 
 
 @router.post("/scenario-starters")
-async def create_starter(request: StarterCreate, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def create_starter(request: StarterCreate, _: dict[str, Any] = _perm_w) -> dict[str, Any]:
     """Create a new scenario starter."""
     engine = await _get_engine()
 
@@ -947,7 +949,7 @@ async def create_starter(request: StarterCreate, _: dict[str, Any] = _admin_dep)
 async def update_starter(
     starter_id: UUID,
     request: StarterUpdate,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Update a scenario starter."""
     engine = await _get_engine()
@@ -1007,7 +1009,7 @@ async def update_starter(
 
 
 @router.delete("/scenario-starters/{starter_id}")
-async def delete_starter(starter_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def delete_starter(starter_id: UUID, _: dict[str, Any] = _perm_d) -> dict[str, Any]:
     """Delete a scenario starter."""
     engine = await _get_engine()
 
@@ -1035,7 +1037,7 @@ class ReplayRequest(BaseModel):
 async def replay_conversation(
     conversation_id: UUID,
     request: ReplayRequest,
-    user: dict[str, Any] = _admin_dep,
+    user: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Replay a baseline conversation with a new prompt version."""
     from src.sandbox.regression import run_regression
@@ -1140,7 +1142,7 @@ async def replay_conversation(
 async def list_regression_runs(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """List regression runs with pagination."""
     engine = await _get_engine()
@@ -1171,7 +1173,7 @@ async def list_regression_runs(
 
 
 @router.get("/regression-runs/{run_id}")
-async def get_regression_run(run_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def get_regression_run(run_id: UUID, _: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Get regression run detail with per-turn diffs."""
     engine = await _get_engine()
 
@@ -1201,7 +1203,7 @@ async def get_regression_run(run_id: UUID, _: dict[str, Any] = _admin_dep) -> di
 async def create_turn_group(
     conversation_id: UUID,
     request: TurnGroupCreate,
-    user: dict[str, Any] = _admin_dep,
+    user: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Create a turn group (marked conversation fragment)."""
     engine = await _get_engine()
@@ -1267,7 +1269,7 @@ async def create_turn_group(
 @router.get("/conversations/{conversation_id}/turn-groups")
 async def list_turn_groups(
     conversation_id: UUID,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """List turn groups for a conversation."""
     engine = await _get_engine()
@@ -1292,7 +1294,7 @@ async def list_turn_groups(
 async def update_turn_group(
     group_id: UUID,
     request: TurnGroupUpdate,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Update a turn group."""
     engine = await _get_engine()
@@ -1349,7 +1351,7 @@ async def update_turn_group(
 @router.delete("/turn-groups/{group_id}")
 async def delete_turn_group(
     group_id: UUID,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_d,
 ) -> dict[str, Any]:
     """Delete a turn group."""
     engine = await _get_engine()
@@ -1373,7 +1375,7 @@ async def delete_turn_group(
 async def export_turn_group(
     group_id: UUID,
     request: ExportPatternRequest,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Export a turn group to the conversation pattern bank."""
     from src.knowledge.embeddings import EmbeddingGenerator
@@ -1407,7 +1409,7 @@ async def list_patterns(
     search: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """List conversation patterns with filters."""
     engine = await _get_engine()
@@ -1455,7 +1457,7 @@ async def list_patterns(
 @router.get("/patterns/{pattern_id}")
 async def get_pattern(
     pattern_id: UUID,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """Get pattern detail."""
     engine = await _get_engine()
@@ -1483,7 +1485,7 @@ async def get_pattern(
 async def update_pattern(
     pattern_id: UUID,
     request: PatternUpdate,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Update a conversation pattern."""
     engine = await _get_engine()
@@ -1528,7 +1530,7 @@ async def update_pattern(
 @router.delete("/patterns/{pattern_id}")
 async def delete_pattern(
     pattern_id: UUID,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_d,
 ) -> dict[str, Any]:
     """Delete a conversation pattern."""
     engine = await _get_engine()
@@ -1550,7 +1552,7 @@ async def test_pattern_search(
     query: str = Query(..., min_length=1),
     top_k: int = Query(3, ge=1, le=10),
     min_similarity: float = Query(0.75, ge=0.0, le=1.0),
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """Test pattern search — find which patterns match a given query."""
     from src.knowledge.embeddings import EmbeddingGenerator

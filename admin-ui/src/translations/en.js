@@ -498,6 +498,13 @@ export default {
     'users.newPasswordPrompt': 'New password for {username}:',
     'users.passwordReset': 'Password reset',
     'users.resetFailed': 'Failed to reset password: {error}',
+    'users.roleContentManager': 'Content Manager',
+    'users.permissions': 'Permissions',
+    'users.useRoleDefaults': 'Role defaults',
+    'users.customPermissions': 'Custom',
+    'users.editPermissions': 'Permissions...',
+    'users.permissionsUpdated': 'Permissions updated',
+    'users.permissionsFailed': 'Failed to update permissions: {error}',
 
     // Training (unified agent training page)
     'training.breadcrumb': 'Agent Training',

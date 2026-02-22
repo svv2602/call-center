@@ -18,7 +18,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.agent.tools import ALL_TOOLS
-from src.api.auth import require_role
+from src.api.auth import require_permission
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -26,8 +26,10 @@ router = APIRouter(prefix="/admin/tenants", tags=["tenants"])
 
 _engine: AsyncEngine | None = None
 
-# Module-level dependency to satisfy B008 lint rule
-_admin_dep = Depends(require_role("admin"))
+# Module-level dependencies to satisfy B008 lint rule
+_perm_r = Depends(require_permission("tenants:read"))
+_perm_w = Depends(require_permission("tenants:write"))
+_perm_d = Depends(require_permission("tenants:delete"))
 
 # Canonical tool names for validation
 _VALID_TOOL_NAMES = frozenset(t["name"] for t in ALL_TOOLS)
@@ -89,7 +91,7 @@ async def list_tenants(
     is_active: bool | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """List all tenants with optional active filter and pagination."""
     engine = await _get_engine()
@@ -128,7 +130,7 @@ async def list_tenants(
 
 
 @router.get("/{tenant_id}")
-async def get_tenant(tenant_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def get_tenant(tenant_id: UUID, _: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Get a single tenant by ID."""
     engine = await _get_engine()
 
@@ -150,7 +152,7 @@ async def get_tenant(tenant_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[st
 
 
 @router.post("", status_code=201)
-async def create_tenant(request: TenantCreate, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def create_tenant(request: TenantCreate, _: dict[str, Any] = _perm_w) -> dict[str, Any]:
     """Create a new tenant."""
     if request.enabled_tools:
         _validate_tools(request.enabled_tools)
@@ -196,7 +198,7 @@ async def create_tenant(request: TenantCreate, _: dict[str, Any] = _admin_dep) -
 
 @router.patch("/{tenant_id}")
 async def update_tenant(
-    tenant_id: UUID, request: TenantUpdate, _: dict[str, Any] = _admin_dep
+    tenant_id: UUID, request: TenantUpdate, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Update a tenant (partial update)."""
     if request.enabled_tools is not None:
@@ -256,7 +258,7 @@ async def update_tenant(
 
 
 @router.delete("/{tenant_id}")
-async def delete_tenant(tenant_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def delete_tenant(tenant_id: UUID, _: dict[str, Any] = _perm_d) -> dict[str, Any]:
     """Soft-delete a tenant (set is_active=false)."""
     engine = await _get_engine()
 

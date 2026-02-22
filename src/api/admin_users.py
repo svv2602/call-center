@@ -6,6 +6,7 @@ Audit log viewer with filters.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
@@ -15,7 +16,8 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from src.api.auth import require_role
+from src.api.auth import invalidate_user_permissions_cache, require_permission
+from src.api.permissions import ALL_PERMISSIONS
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -23,8 +25,10 @@ router = APIRouter(prefix="/admin", tags=["admin"])
 
 _engine: AsyncEngine | None = None
 
-# Module-level dependency to satisfy B008 lint rule
-_admin_dep = Depends(require_role("admin"))
+# Module-level dependencies to satisfy B008 lint rule
+_users_write_dep = Depends(require_permission("users:write"))
+_users_read_dep = Depends(require_permission("users:read"))
+_audit_read_dep = Depends(require_permission("audit:read"))
 
 
 async def _get_engine() -> AsyncEngine:
@@ -35,18 +39,20 @@ async def _get_engine() -> AsyncEngine:
     return _engine
 
 
-_VALID_ROLES = ("admin", "analyst", "operator")
+_VALID_ROLES = ("admin", "analyst", "operator", "content_manager")
 
 
 class CreateUserRequest(BaseModel):
     username: str = Field(min_length=3, max_length=50)
     password: str = Field(min_length=8, max_length=128)
     role: str = Field(default="operator", pattern=f"^({'|'.join(_VALID_ROLES)})$")
+    permissions: list[str] | None = None
 
 
 class UpdateUserRequest(BaseModel):
     role: str | None = Field(default=None, pattern=f"^({'|'.join(_VALID_ROLES)})$")
     is_active: bool | None = None
+    permissions: list[str] | None = Field(default=None)
 
 
 class ResetPasswordRequest(BaseModel):
@@ -55,7 +61,7 @@ class ResetPasswordRequest(BaseModel):
 
 @router.get("/users")
 async def list_users(
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _users_read_dep,
 ) -> dict[str, Any]:
     """List all admin users."""
     engine = await _get_engine()
@@ -63,7 +69,8 @@ async def list_users(
     async with engine.begin() as conn:
         result = await conn.execute(
             text("""
-                SELECT id, username, role, is_active, created_at, last_login_at
+                SELECT id, username, role, is_active, permissions,
+                       created_at, last_login_at
                 FROM admin_users
                 ORDER BY created_at
             """)
@@ -76,27 +83,38 @@ async def list_users(
 @router.post("/users")
 async def create_user(
     req: CreateUserRequest,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _users_write_dep,
 ) -> dict[str, Any]:
     """Create a new admin user."""
-    if req.role not in ("admin", "analyst", "operator"):
+    if req.role not in _VALID_ROLES:
         raise HTTPException(status_code=400, detail="Invalid role")
+
+    # Validate custom permissions
+    if req.permissions is not None:
+        invalid = [p for p in req.permissions if p not in ALL_PERMISSIONS]
+        if invalid:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid permissions: {', '.join(invalid)}"
+            )
 
     password_hash = bcrypt.hashpw(req.password.encode(), bcrypt.gensalt()).decode()
     engine = await _get_engine()
+
+    perms_json = json.dumps(req.permissions) if req.permissions is not None else None
 
     try:
         async with engine.begin() as conn:
             result = await conn.execute(
                 text("""
-                    INSERT INTO admin_users (username, password_hash, role)
-                    VALUES (:username, :password_hash, :role)
-                    RETURNING id, username, role, is_active, created_at
+                    INSERT INTO admin_users (username, password_hash, role, permissions)
+                    VALUES (:username, :password_hash, :role, CAST(:permissions AS jsonb))
+                    RETURNING id, username, role, is_active, permissions, created_at
                 """),
                 {
                     "username": req.username,
                     "password_hash": password_hash,
                     "role": req.role,
+                    "permissions": perms_json,
                 },
             )
             row = result.first()
@@ -116,11 +134,19 @@ async def create_user(
 async def update_user(
     user_id: str,
     req: UpdateUserRequest,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _users_write_dep,
 ) -> dict[str, Any]:
-    """Update user role or active status."""
-    if req.role is not None and req.role not in ("admin", "analyst", "operator"):
+    """Update user role, active status, or permissions."""
+    if req.role is not None and req.role not in _VALID_ROLES:
         raise HTTPException(status_code=400, detail="Invalid role")
+
+    # Validate custom permissions
+    if req.permissions is not None:
+        invalid = [p for p in req.permissions if p not in ALL_PERMISSIONS]
+        if invalid:
+            raise HTTPException(
+                status_code=400, detail=f"Invalid permissions: {', '.join(invalid)}"
+            )
 
     engine = await _get_engine()
     updates: list[str] = []
@@ -132,6 +158,11 @@ async def update_user(
     if req.is_active is not None:
         updates.append("is_active = :is_active")
         params["is_active"] = req.is_active
+    # permissions: explicit None in JSON body means "use role defaults"
+    # We check model_fields_set to distinguish "not sent" from "sent as null"
+    if "permissions" in req.model_fields_set:
+        updates.append("permissions = CAST(:permissions AS jsonb)")
+        params["permissions"] = json.dumps(req.permissions) if req.permissions is not None else None
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -144,13 +175,16 @@ async def update_user(
                 UPDATE admin_users
                 SET {set_clause}
                 WHERE id = :user_id
-                RETURNING id, username, role, is_active
+                RETURNING id, username, role, is_active, permissions
             """),
             params,
         )
         row = result.first()
         if not row:
             raise HTTPException(status_code=404, detail="User not found")
+
+    # Invalidate permissions cache
+    await invalidate_user_permissions_cache(user_id)
 
     return {"user": dict(row._mapping)}
 
@@ -159,7 +193,7 @@ async def update_user(
 async def reset_password(
     user_id: str,
     req: ResetPasswordRequest,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _users_write_dep,
 ) -> dict[str, str]:
     """Reset user password."""
     password_hash = bcrypt.hashpw(req.new_password.encode(), bcrypt.gensalt()).decode()
@@ -189,7 +223,7 @@ async def get_audit_log(
     date_to: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _audit_read_dep,
 ) -> dict[str, Any]:
     """View audit log with filters."""
     engine = await _get_engine()

@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from src.api.auth import require_role
+from src.api.auth import require_permission
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -23,8 +23,9 @@ router = APIRouter(prefix="/training/templates", tags=["training"])
 
 _engine: AsyncEngine | None = None
 
-_admin_dep = Depends(require_role("admin"))
-_analyst_dep = Depends(require_role("admin", "analyst"))
+_perm_r = Depends(require_permission("training:read"))
+_perm_w = Depends(require_permission("training:write"))
+_perm_d = Depends(require_permission("training:delete"))
 
 TEMPLATE_KEYS = [
     "greeting",
@@ -63,7 +64,7 @@ class TemplateUpdateRequest(BaseModel):
 async def list_templates(
     limit: int = Query(200, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    _: dict[str, Any] = _analyst_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """List all response templates, ordered by key and variant."""
     engine = await _get_engine()
@@ -88,7 +89,7 @@ async def list_templates(
 
 
 @router.get("/{template_id}")
-async def get_template(template_id: UUID, _: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
+async def get_template(template_id: UUID, _: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Get a specific response template."""
     engine = await _get_engine()
 
@@ -111,7 +112,7 @@ async def get_template(template_id: UUID, _: dict[str, Any] = _analyst_dep) -> d
 
 @router.post("/")
 async def create_template(
-    request: TemplateCreateRequest, _: dict[str, Any] = _admin_dep
+    request: TemplateCreateRequest, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Create a new response template variant.
 
@@ -162,7 +163,7 @@ async def create_template(
 
 @router.patch("/{template_id}")
 async def update_template(
-    template_id: UUID, request: TemplateUpdateRequest, _: dict[str, Any] = _admin_dep
+    template_id: UUID, request: TemplateUpdateRequest, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Update a response template."""
     engine = await _get_engine()
@@ -207,7 +208,7 @@ async def update_template(
 
 
 @router.delete("/{template_id}")
-async def delete_template(template_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def delete_template(template_id: UUID, _: dict[str, Any] = _perm_d) -> dict[str, Any]:
     """Delete a response template variant.
 
     Only allows deletion if there is more than one variant for the key.

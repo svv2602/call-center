@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from src.api.auth import require_role
+from src.api.auth import require_permission
 from src.config import get_settings
 from src.monitoring.metrics import celery_workers_online
 
@@ -25,7 +25,8 @@ _engine: AsyncEngine | None = None
 _start_time = time.time()
 
 # Module-level dependencies to satisfy B008 lint rule
-_admin_dep = Depends(require_role("admin"))
+_perm_r = Depends(require_permission("system:read"))
+_perm_w = Depends(require_permission("system:write"))
 
 
 async def _get_engine() -> AsyncEngine:
@@ -73,7 +74,7 @@ async def celery_health() -> dict[str, Any]:
 
 @router.post("/admin/config/reload")
 async def reload_config(
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Reload safe configuration parameters from environment.
 
@@ -112,7 +113,7 @@ async def reload_config(
 
 @router.get("/admin/system-status")
 async def system_status(
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """Full system status for admin dashboard."""
     settings = get_settings()

@@ -16,7 +16,7 @@ from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from src.api.auth import require_role
+from src.api.auth import require_permission
 from src.config import get_settings
 from src.logging.pii_sanitizer import sanitize_phone
 
@@ -28,7 +28,7 @@ _engine: AsyncEngine | None = None
 _MAX_EXPORT_ROWS = 10000
 
 # Module-level dependency to satisfy B008 lint rule
-_analyst_dep = Depends(require_role("admin", "analyst"))
+_perm_export = Depends(require_permission("analytics:export"))
 
 
 async def _get_engine() -> AsyncEngine:
@@ -79,7 +79,7 @@ async def export_calls_csv(
     transferred: bool | None = Query(None, description="Filter transferred calls"),
     min_quality: float | None = Query(None, description="Minimum quality score"),
     tenant_id: str | None = Query(None, description="Filter by tenant UUID"),
-    _: dict[str, Any] = _analyst_dep,
+    _: dict[str, Any] = _perm_export,
 ) -> StreamingResponse:
     """Export calls as CSV with masked PII."""
     engine = await _get_engine()
@@ -170,7 +170,7 @@ async def export_summary_csv(
         None, description="End date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"
     ),
     tenant_id: str | None = Query(None, description="Filter by tenant UUID"),
-    _: dict[str, Any] = _analyst_dep,
+    _: dict[str, Any] = _perm_export,
 ) -> StreamingResponse:
     """Export daily statistics as CSV."""
     engine = await _get_engine()
@@ -286,7 +286,7 @@ async def download_report_pdf(
         ..., description="Start date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"
     ),
     date_to: str = Query(..., description="End date (YYYY-MM-DD)", pattern=r"^\d{4}-\d{2}-\d{2}$"),
-    _: dict[str, Any] = _analyst_dep,
+    _: dict[str, Any] = _perm_export,
 ) -> Response:
     """Generate and download a PDF report for the given date range."""
     from src.reports.generator import generate_weekly_report

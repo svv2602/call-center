@@ -15,7 +15,7 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel
 from redis.asyncio import Redis
 
-from src.api.auth import require_role
+from src.api.auth import require_permission
 from src.config import get_settings
 from src.llm.models import DEFAULT_ROUTING_CONFIG
 from src.llm.router import REDIS_CONFIG_KEY
@@ -25,8 +25,9 @@ router = APIRouter(prefix="/admin/llm", tags=["llm-routing"])
 
 _redis: Redis | None = None
 
-# Module-level dependency to satisfy B008 lint rule
-_admin_dep = Depends(require_role("admin"))
+# Module-level dependencies to satisfy B008 lint rule
+_perm_r = Depends(require_permission("llm_config:read"))
+_perm_w = Depends(require_permission("llm_config:write"))
 
 
 async def _get_redis() -> Redis:
@@ -56,7 +57,7 @@ class ConfigPatch(BaseModel):
 
 
 @router.get("/config")
-async def get_llm_config(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def get_llm_config(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Get current LLM routing configuration (Redis + env fallback).
 
     API keys are masked — only env var names are exposed.
@@ -80,7 +81,7 @@ async def get_llm_config(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
 
 
 @router.patch("/config")
-async def update_llm_config(request: ConfigPatch, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def update_llm_config(request: ConfigPatch, _: dict[str, Any] = _perm_w) -> dict[str, Any]:
     """Update LLM routing config in Redis (merge patch)."""
     redis = await _get_redis()
 
@@ -130,7 +131,7 @@ async def update_llm_config(request: ConfigPatch, _: dict[str, Any] = _admin_dep
 
 
 @router.get("/providers")
-async def get_providers_health(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def get_providers_health(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Get all providers with health status."""
     from src.llm import get_router as _get_llm_router
 
@@ -165,7 +166,7 @@ async def get_providers_health(_: dict[str, Any] = _admin_dep) -> dict[str, Any]
 
 
 @router.post("/providers/{key}/test")
-async def test_provider(key: str, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def test_provider(key: str, _: dict[str, Any] = _perm_w) -> dict[str, Any]:
     """Send a test prompt to a specific provider and return latency."""
     from src.llm import get_router as _get_llm_router
 

@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from redis.asyncio import Redis
 
 from src.agent.prompts import PRONUNCIATION_RULES
-from src.api.auth import require_role
+from src.api.auth import require_permission
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -27,7 +27,8 @@ REDIS_KEY = "agent:pronunciation_rules"
 _redis: Redis | None = None
 
 # Module-level dependency to satisfy B008 lint rule
-_admin_dep = Depends(require_role("admin"))
+_perm_r = Depends(require_permission("pronunciation:read"))
+_perm_w = Depends(require_permission("pronunciation:write"))
 
 
 async def _get_redis() -> Redis:
@@ -43,7 +44,7 @@ class PronunciationRulesPatch(BaseModel):
 
 
 @router.get("/pronunciation-rules")
-async def get_pronunciation_rules(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def get_pronunciation_rules(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Get current pronunciation rules (from Redis or hardcoded default)."""
     redis = await _get_redis()
     raw = await redis.get(REDIS_KEY)
@@ -63,7 +64,7 @@ async def get_pronunciation_rules(_: dict[str, Any] = _admin_dep) -> dict[str, A
 
 @router.patch("/pronunciation-rules")
 async def update_pronunciation_rules(
-    request: PronunciationRulesPatch, _: dict[str, Any] = _admin_dep
+    request: PronunciationRulesPatch, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Save pronunciation rules to Redis."""
     redis = await _get_redis()
@@ -73,7 +74,7 @@ async def update_pronunciation_rules(
 
 
 @router.post("/pronunciation-rules/reset")
-async def reset_pronunciation_rules(_: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def reset_pronunciation_rules(_: dict[str, Any] = _perm_w) -> dict[str, Any]:
     """Reset pronunciation rules to hardcoded defaults."""
     redis = await _get_redis()
     await redis.delete(REDIS_KEY)

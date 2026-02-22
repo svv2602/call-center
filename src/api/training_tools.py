@@ -14,7 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.agent.tools import ALL_TOOLS
-from src.api.auth import require_role
+from src.api.auth import require_permission
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -22,8 +22,9 @@ router = APIRouter(prefix="/training/tools", tags=["training"])
 
 _engine: AsyncEngine | None = None
 
-_admin_dep = Depends(require_role("admin"))
-_analyst_dep = Depends(require_role("admin", "analyst"))
+_perm_r = Depends(require_permission("training:read"))
+_perm_w = Depends(require_permission("training:write"))
+_perm_d = Depends(require_permission("training:delete"))
 
 _TOOL_NAMES = [t["name"] for t in ALL_TOOLS]
 
@@ -43,7 +44,7 @@ class ToolOverrideRequest(BaseModel):
 
 
 @router.get("/")
-async def list_tools(_: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
+async def list_tools(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """List all tools, merging code defaults with DB overrides."""
     engine = await _get_engine()
 
@@ -89,7 +90,7 @@ async def list_tools(_: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
 
 @router.patch("/{tool_name}")
 async def update_tool_override(
-    tool_name: str, request: ToolOverrideRequest, _: dict[str, Any] = _admin_dep
+    tool_name: str, request: ToolOverrideRequest, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Create or update a tool description override."""
     if tool_name not in _TOOL_NAMES:
@@ -131,7 +132,7 @@ async def update_tool_override(
 
 
 @router.delete("/{tool_name}")
-async def delete_tool_override(tool_name: str, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def delete_tool_override(tool_name: str, _: dict[str, Any] = _perm_d) -> dict[str, Any]:
     """Remove a tool description override (reset to code default)."""
     if tool_name not in _TOOL_NAMES:
         raise HTTPException(

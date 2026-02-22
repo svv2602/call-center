@@ -17,7 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.agent.prompt_manager import DIALOGUE_CACHE_REDIS_KEY
-from src.api.auth import require_role
+from src.api.auth import require_permission
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -26,8 +26,9 @@ router = APIRouter(prefix="/training/dialogues", tags=["training"])
 _engine: AsyncEngine | None = None
 _redis: Redis | None = None
 
-_admin_dep = Depends(require_role("admin"))
-_analyst_dep = Depends(require_role("admin", "analyst"))
+_perm_r = Depends(require_permission("training:read"))
+_perm_w = Depends(require_permission("training:write"))
+_perm_d = Depends(require_permission("training:delete"))
 
 SCENARIO_TYPES = [
     "tire_search",
@@ -94,7 +95,7 @@ async def list_dialogues(
     is_active: bool | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _: dict[str, Any] = _analyst_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """List dialogue examples with filters."""
     engine = await _get_engine()
@@ -138,7 +139,7 @@ async def list_dialogues(
 
 
 @router.get("/{dialogue_id}")
-async def get_dialogue(dialogue_id: UUID, _: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
+async def get_dialogue(dialogue_id: UUID, _: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Get a specific dialogue example with full content."""
     engine = await _get_engine()
 
@@ -161,7 +162,7 @@ async def get_dialogue(dialogue_id: UUID, _: dict[str, Any] = _analyst_dep) -> d
 
 @router.post("/")
 async def create_dialogue(
-    request: DialogueCreateRequest, _: dict[str, Any] = _admin_dep
+    request: DialogueCreateRequest, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Create a new dialogue example."""
     if request.scenario_type not in SCENARIO_TYPES:
@@ -203,7 +204,7 @@ async def create_dialogue(
 
 @router.patch("/{dialogue_id}")
 async def update_dialogue(
-    dialogue_id: UUID, request: DialogueUpdateRequest, _: dict[str, Any] = _admin_dep
+    dialogue_id: UUID, request: DialogueUpdateRequest, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Update a dialogue example."""
     import json
@@ -270,7 +271,7 @@ async def update_dialogue(
 
 
 @router.delete("/{dialogue_id}")
-async def delete_dialogue(dialogue_id: UUID, _: dict[str, Any] = _admin_dep) -> dict[str, Any]:
+async def delete_dialogue(dialogue_id: UUID, _: dict[str, Any] = _perm_d) -> dict[str, Any]:
     """Soft delete a dialogue example."""
     engine = await _get_engine()
 
@@ -294,7 +295,7 @@ async def delete_dialogue(dialogue_id: UUID, _: dict[str, Any] = _admin_dep) -> 
 
 @router.post("/import")
 async def import_dialogues(
-    items: list[DialogueCreateRequest], _: dict[str, Any] = _admin_dep
+    items: list[DialogueCreateRequest], _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Bulk import dialogue examples from a JSON array."""
     import json

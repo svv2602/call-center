@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from src.api.auth import require_role
+from src.api.auth import require_permission
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -23,7 +23,7 @@ router = APIRouter(prefix="/analytics", tags=["analytics"])
 _engine: AsyncEngine | None = None
 
 # Module-level dependencies to satisfy B008 lint rule
-_analyst_dep = Depends(require_role("admin", "analyst"))
+_perm_r = Depends(require_permission("analytics:read"))
 
 
 async def _get_engine() -> AsyncEngine:
@@ -45,7 +45,7 @@ async def get_quality_report(
     ),
     scenario: str | None = Query(None, description="Filter by scenario"),
     tenant_id: str | None = Query(None, description="Filter by tenant UUID"),
-    _: dict[str, Any] = _analyst_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """Aggregated quality report with averages by criteria."""
     engine = await _get_engine()
@@ -126,7 +126,7 @@ async def get_calls_list(
     tenant_id: str | None = Query(None, description="Filter by tenant UUID"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _: dict[str, Any] = _analyst_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """List calls with filters for quality, scenario, transfer status."""
     engine = await _get_engine()
@@ -201,7 +201,7 @@ async def get_calls_list(
 
 
 @router.get("/calls/{call_id}")
-async def get_call_details(call_id: UUID, _: dict[str, Any] = _analyst_dep) -> dict[str, Any]:
+async def get_call_details(call_id: UUID, _: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Full call details with transcription, tool calls, and quality breakdown."""
     engine = await _get_engine()
 
@@ -264,7 +264,7 @@ async def get_call_details(call_id: UUID, _: dict[str, Any] = _analyst_dep) -> d
 
 
 @router.get("/calls/{call_id}/transcript")
-async def download_call_transcript(call_id: UUID, _: dict[str, Any] = _analyst_dep) -> Any:
+async def download_call_transcript(call_id: UUID, _: dict[str, Any] = _perm_r) -> Any:
     """Download call transcription as a plain-text file."""
     from fastapi.responses import Response
 
@@ -338,7 +338,7 @@ async def get_summary(
     ),
     tenant_id: str | None = Query(None, description="Filter by tenant UUID"),
     limit: int = Query(90, ge=1, le=365, description="Max days to return"),
-    _: dict[str, Any] = _analyst_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """Aggregated daily statistics from daily_stats table or live from calls."""
     engine = await _get_engine()

@@ -13,7 +13,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
-from src.api.auth import require_role
+from src.api.auth import require_permission
 from src.config import get_settings
 from src.events.publisher import publish_event
 
@@ -23,8 +23,8 @@ router = APIRouter(prefix="/operators", tags=["operators"])
 _engine: AsyncEngine | None = None
 
 # Module-level dependencies to satisfy B008 lint rule
-_admin_dep = Depends(require_role("admin"))
-_admin_or_operator_dep = Depends(require_role("admin", "operator"))
+_perm_r = Depends(require_permission("operators:read"))
+_perm_w = Depends(require_permission("operators:write"))
 
 
 async def _get_engine() -> AsyncEngine:
@@ -70,7 +70,7 @@ class StatusChangeRequest(BaseModel):
 async def list_operators(
     limit: int = Query(200, ge=1, le=500),
     offset: int = Query(0, ge=0),
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """List all operators with their current status."""
     engine = await _get_engine()
@@ -100,7 +100,7 @@ async def list_operators(
 @router.post("")
 async def create_operator(
     req: CreateOperatorRequest,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Create a new operator."""
     engine = await _get_engine()
@@ -148,7 +148,7 @@ async def create_operator(
 async def update_operator(
     operator_id: str,
     req: UpdateOperatorRequest,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Update operator details."""
     engine = await _get_engine()
@@ -202,7 +202,7 @@ async def update_operator(
 @router.delete("/{operator_id}")
 async def deactivate_operator(
     operator_id: str,
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Deactivate an operator (soft delete)."""
     engine = await _get_engine()
@@ -228,7 +228,7 @@ async def deactivate_operator(
 async def change_operator_status(
     operator_id: str,
     req: StatusChangeRequest,
-    _: dict[str, Any] = _admin_or_operator_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """Change operator status (online/offline/busy/break)."""
     engine = await _get_engine()
@@ -266,7 +266,7 @@ async def change_operator_status(
 
 @router.get("/queue")
 async def get_queue_status(
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """Current operator queue status."""
     engine = await _get_engine()
@@ -312,7 +312,7 @@ async def get_transfers(
     reason: str | None = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """Transfer history with filters."""
     engine = await _get_engine()
@@ -364,7 +364,7 @@ async def get_operator_stats(
     date_from: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
     date_to: str | None = Query(None, pattern=r"^\d{4}-\d{2}-\d{2}$"),
     history_limit: int = Query(20, ge=1, le=200, description="Max status history entries"),
-    _: dict[str, Any] = _admin_dep,
+    _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """Statistics for a specific operator."""
     engine = await _get_engine()

@@ -112,16 +112,20 @@ class TestListOperators:
         assert len(data["operators"]) == 1
         assert data["operators"][0]["name"] == "John Doe"
 
+    @patch("src.api.operators._get_engine")
     @patch("src.api.auth.get_settings")
-    def test_list_operators_as_analyst_forbidden(
-        self, mock_settings: MagicMock, client: TestClient
+    def test_list_operators_as_analyst_allowed(
+        self, mock_settings: MagicMock, mock_engine_fn: MagicMock, client: TestClient
     ) -> None:
+        """Analysts have operators:read permission and can list operators."""
         mock_settings.return_value.admin.jwt_secret = "test-secret"
+        mock_engine, _mock_conn = _make_mock_engine([_SAMPLE_OPERATOR])
+        mock_engine_fn.return_value = mock_engine
         response = client.get(
             "/operators",
             headers={"Authorization": f"Bearer {_analyst_token()}"},
         )
-        assert response.status_code == 403
+        assert response.status_code == 200
 
 
 class TestCreateOperator:

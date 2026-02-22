@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from src.api.permissions import ROLE_DEFAULT_PERMISSIONS
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -27,6 +28,8 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 _engine: AsyncEngine | None = None
 _redis: Any = None
+
+_PERMS_CACHE_TTL = 300  # 5 minutes
 
 _LOGIN_MAX_ATTEMPTS = 5
 _LOGIN_WINDOW_SECONDS = 900  # 15 minutes
@@ -211,6 +214,114 @@ def require_role(*roles: str) -> Any:
     return _check_role
 
 
+# ── Granular permissions ─────────────────────────────────────
+
+
+def resolve_permissions(role: str, custom_perms: list[str] | None = None) -> list[str]:
+    """Return effective permissions for a user.
+
+    If custom_perms is None, return role defaults.
+    If custom_perms is an explicit list (even empty), use that instead.
+    """
+    if custom_perms is not None:
+        return custom_perms
+    return ROLE_DEFAULT_PERMISSIONS.get(role, [])
+
+
+def has_permission(effective_perms: list[str], required: str) -> bool:
+    """Check if effective permissions include the required permission."""
+    return "*" in effective_perms or required in effective_perms
+
+
+async def _load_user_permissions(user_id: str) -> list[str] | None:
+    """Load custom permissions from Redis cache, fallback to DB.
+
+    Returns None if user has no custom permissions (use role defaults).
+    Returns empty list if explicitly set to no permissions.
+    """
+    cache_key = f"user_perms:{user_id}"
+    try:
+        r = await _get_redis()
+        cached = await r.get(cache_key)
+        if cached is not None:
+            if cached == "__null__":
+                return None
+            return json.loads(cached)
+    except Exception:
+        logger.debug("Perms cache miss for user_id=%s", user_id, exc_info=True)
+
+    # Fallback to DB
+    try:
+        engine = await _get_engine()
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                text("SELECT permissions FROM admin_users WHERE id = :id"),
+                {"id": user_id},
+            )
+            row = result.first()
+            if not row:
+                return None
+            perms = row.permissions  # JSONB → list or None
+    except Exception:
+        logger.warning("Failed to load permissions from DB for user_id=%s", user_id, exc_info=True)
+        return None
+
+    # Cache the result
+    try:
+        r = await _get_redis()
+        if perms is None:
+            await r.setex(cache_key, _PERMS_CACHE_TTL, "__null__")
+        else:
+            await r.setex(cache_key, _PERMS_CACHE_TTL, json.dumps(perms))
+    except Exception:
+        logger.debug("Failed to cache perms for user_id=%s", user_id, exc_info=True)
+
+    return perms
+
+
+async def invalidate_user_permissions_cache(user_id: str) -> None:
+    """Delete cached permissions after user update."""
+    try:
+        r = await _get_redis()
+        await r.delete(f"user_perms:{user_id}")
+    except Exception:
+        logger.debug("Failed to invalidate perms cache for user_id=%s", user_id, exc_info=True)
+
+
+def require_permission(*permissions: str) -> Any:
+    """Create a FastAPI dependency that checks for granular permissions.
+
+    Loads the user's effective permissions (role defaults + custom overrides)
+    and checks that at least one of the required permissions is granted.
+
+    Usage:
+        @router.get("/...", dependencies=[Depends(require_permission("sandbox:read"))])
+    """
+
+    async def _check_permission(request: Request) -> dict[str, Any]:
+        payload = await require_admin(request)
+        role = payload.get("role", "")
+        user_id = payload.get("user_id")
+
+        # Load custom permissions (None means use role defaults)
+        custom_perms = None
+        if user_id:
+            custom_perms = await _load_user_permissions(user_id)
+
+        effective = resolve_permissions(role, custom_perms)
+
+        for perm in permissions:
+            if has_permission(effective, perm):
+                return payload
+
+        raise HTTPException(
+            status_code=403,
+            detail=f"Missing permission: {', '.join(permissions)}",
+        )
+
+    return _check_permission
+
+
 async def _authenticate_via_db(username: str, password: str) -> dict[str, Any] | None:
     """Try to authenticate via admin_users table."""
     import bcrypt
@@ -322,3 +433,24 @@ async def logout(request: Request) -> dict[str, str]:
         logger.info("Token blacklisted: jti=%s user=%s", jti, payload.get("sub"))
 
     return {"status": "logged_out"}
+
+
+@router.get("/me")
+async def get_me(request: Request) -> dict[str, Any]:
+    """Return current user info with effective permissions."""
+    payload = await require_admin(request)
+    role = payload.get("role", "")
+    user_id = payload.get("user_id")
+
+    custom_perms = None
+    if user_id:
+        custom_perms = await _load_user_permissions(user_id)
+
+    effective = resolve_permissions(role, custom_perms)
+
+    return {
+        "user_id": user_id,
+        "username": payload.get("sub", ""),
+        "role": role,
+        "permissions": effective,
+    }

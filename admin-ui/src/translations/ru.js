@@ -498,6 +498,13 @@ export default {
     'users.newPasswordPrompt': 'Новый пароль для {username}:',
     'users.passwordReset': 'Пароль сброшен',
     'users.resetFailed': 'Не удалось сбросить пароль: {error}',
+    'users.roleContentManager': 'Контент-менеджер',
+    'users.permissions': 'Права доступа',
+    'users.useRoleDefaults': 'По умолчанию для роли',
+    'users.customPermissions': 'Индивидуальные',
+    'users.editPermissions': 'Права доступа...',
+    'users.permissionsUpdated': 'Права доступа обновлены',
+    'users.permissionsFailed': 'Не удалось обновить права: {error}',
 
     // Training (unified agent training page)
     'training.breadcrumb': 'Обучение агента',
