@@ -202,3 +202,139 @@ class TestTestProvider:
         data = response.json()
         assert data["success"] is False
         assert "not active" in data["error"]
+
+
+class TestSandboxConfig:
+    """Test sandbox section in LLM config."""
+
+    @pytest.mark.asyncio()
+    async def test_get_returns_sandbox_section(self, app: Any, mock_redis: AsyncMock) -> None:
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get("/admin/llm/config")
+
+        assert response.status_code == 200
+        config = response.json()["config"]
+        assert "sandbox" in config
+        assert config["sandbox"]["default_model"] == ""
+        assert config["sandbox"]["auto_customer_model"] == ""
+
+    @pytest.mark.asyncio()
+    async def test_get_merges_sandbox_from_redis(self, app: Any, mock_redis: AsyncMock) -> None:
+        redis_config = {"sandbox": {"default_model": "gemini-flash", "auto_customer_model": "openai-gpt41-mini"}}
+        mock_redis.get = AsyncMock(return_value=json.dumps(redis_config))
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch.dict("os.environ", {}, clear=True),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get("/admin/llm/config")
+
+        config = response.json()["config"]
+        assert config["sandbox"]["default_model"] == "gemini-flash"
+        assert config["sandbox"]["auto_customer_model"] == "openai-gpt41-mini"
+
+    @pytest.mark.asyncio()
+    async def test_patch_sandbox_section(self, app: Any, mock_redis: AsyncMock) -> None:
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_config._get_redis", AsyncMock(return_value=mock_redis)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.patch(
+                    "/admin/llm/config",
+                    json={"sandbox": {"default_model": "gemini-flash", "auto_customer_model": "deepseek-chat"}},
+                )
+
+        assert response.status_code == 200
+        stored = json.loads(mock_redis.set.call_args[0][1])
+        assert stored["sandbox"]["default_model"] == "gemini-flash"
+        assert stored["sandbox"]["auto_customer_model"] == "deepseek-chat"
+
+        # Response also includes merged config with sandbox
+        resp_config = response.json()["config"]
+        assert resp_config["sandbox"]["default_model"] == "gemini-flash"
+
+    @pytest.mark.asyncio()
+    async def test_patch_sandbox_partial_update(self, app: Any, mock_redis: AsyncMock) -> None:
+        """Patching only default_model should not reset auto_customer_model."""
+        existing = {"sandbox": {"default_model": "old", "auto_customer_model": "existing"}}
+        mock_redis.get = AsyncMock(return_value=json.dumps(existing))
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_config._get_redis", AsyncMock(return_value=mock_redis)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.patch(
+                    "/admin/llm/config",
+                    json={"sandbox": {"default_model": "new-model"}},
+                )
+
+        assert response.status_code == 200
+        stored = json.loads(mock_redis.set.call_args[0][1])
+        assert stored["sandbox"]["default_model"] == "new-model"
+        assert stored["sandbox"]["auto_customer_model"] == "existing"
+
+
+class TestListModels:
+    """Test GET /admin/sandbox/models returns only enabled providers."""
+
+    @pytest.fixture()
+    def sandbox_app(self):
+        from fastapi import FastAPI
+
+        from src.api.sandbox import router as sandbox_router
+
+        test_app = FastAPI()
+        test_app.include_router(sandbox_router)
+        return test_app
+
+    @pytest.mark.asyncio()
+    async def test_returns_only_enabled_providers(self, sandbox_app: Any, mock_redis: AsyncMock) -> None:
+        # Only gemini-flash is enabled in this config
+        redis_config = {
+            "providers": {"gemini-flash": {"enabled": True}, "anthropic-sonnet": {"enabled": False}},
+            "sandbox": {"default_model": "gemini-flash"},
+        }
+        mock_redis.get = AsyncMock(return_value=json.dumps(redis_config))
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_config._get_redis", AsyncMock(return_value=mock_redis)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=sandbox_app), base_url="http://test") as ac:
+                response = await ac.get("/admin/sandbox/models")
+
+        assert response.status_code == 200
+        data = response.json()
+        model_ids = [m["id"] for m in data["models"]]
+        assert "gemini-flash" in model_ids
+        assert "anthropic-sonnet" not in model_ids
+        assert data["default_model"] == "gemini-flash"
+
+    @pytest.mark.asyncio()
+    async def test_returns_empty_when_all_disabled(self, sandbox_app: Any, mock_redis: AsyncMock) -> None:
+        # All providers disabled
+        redis_config = {
+            "providers": {"anthropic-sonnet": {"enabled": False}, "anthropic-haiku": {"enabled": False}},
+        }
+        mock_redis.get = AsyncMock(return_value=json.dumps(redis_config))
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_config._get_redis", AsyncMock(return_value=mock_redis)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=sandbox_app), base_url="http://test") as ac:
+                response = await ac.get("/admin/sandbox/models")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["models"] == []
+        assert data["default_model"] == ""

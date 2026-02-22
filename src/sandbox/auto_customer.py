@@ -124,10 +124,35 @@ async def _generate_via_router(
     if router is None:
         return None
 
+    # Check if a specific auto-customer model is configured in Redis
+    provider_override: str | None = None
+    try:
+        import json
+
+        from redis.asyncio import Redis
+
+        from src.config import get_settings as _get_settings
+        from src.llm.router import REDIS_CONFIG_KEY
+
+        _settings = _get_settings()
+        _redis = Redis.from_url(_settings.redis.url, decode_responses=True)
+        try:
+            raw = await _redis.get(REDIS_CONFIG_KEY)
+            if raw:
+                llm_cfg = json.loads(raw)
+                ac_model = (llm_cfg.get("sandbox") or {}).get("auto_customer_model", "")
+                if ac_model and ac_model in router.providers:
+                    provider_override = ac_model
+        finally:
+            await _redis.aclose()
+    except Exception:
+        logger.debug("Failed to read auto_customer_model from Redis", exc_info=True)
+
     response = await router.complete(
         LLMTask.AGENT,
         messages,
         system=system,
         max_tokens=200,
+        provider_override=provider_override,
     )
     return response.text or None

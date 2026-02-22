@@ -446,6 +446,13 @@ export default {
     'settings.llmTestSuccess': '{key}: OK ({latency}ms)',
     'settings.llmTestFailed': '{key}: ошибка — {error}',
     'settings.llmLoadFailed': 'Не удалось загрузить конфигурацию LLM: {error}',
+    // Sandbox defaults
+    'settings.sandboxDefaults': 'Настройки Sandbox',
+    'settings.sandboxDefaultModel': 'Модель по умолчанию',
+    'settings.sandboxAutoCustomerModel': 'Модель авто-клиента',
+    'settings.sandboxDefaultsSaved': 'Настройки sandbox сохранены',
+    'settings.sandboxDefaultsHint': 'Выбранные модели будут использоваться по умолчанию для новых диалогов sandbox и авто-клиента.',
+    'settings.sandboxNoProviders': 'Нет включённых провайдеров',
     // Telegram Notifications
     'settings.telegram': 'Уведомления Telegram',
     'settings.telegramDesc': 'Настройка Telegram-бота для получения алертов от Alertmanager.',

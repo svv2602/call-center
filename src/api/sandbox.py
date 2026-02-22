@@ -179,57 +179,82 @@ async def get_agent_phrases(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
 
 # ── Available models ─────────────────────────────────────────
 
-SANDBOX_MODELS = [
-    {
-        "id": "claude-sonnet-4-5-20250929",
-        "label": "Claude Sonnet 4.5",
-        "speed": "slow",
-        "quality": "best",
-    },
-    {
-        "id": "claude-haiku-4-5-20251001",
-        "label": "Claude Haiku 4.5",
-        "speed": "fast",
-        "quality": "good",
-    },
-]
+# Pretty labels for known provider types
+_PROVIDER_LABELS: dict[str, str] = {
+    "anthropic": "Anthropic",
+    "openai": "OpenAI",
+    "deepseek": "DeepSeek",
+    "gemini": "Google Gemini",
+}
+
+
+def _model_label(provider_key: str, cfg: dict[str, Any]) -> str:
+    """Build a human-readable label like 'Claude Sonnet 4.5' or 'GPT-4.1-mini'."""
+    model = cfg.get("model", provider_key)
+    provider_type = cfg.get("type", "")
+    prefix = _PROVIDER_LABELS.get(provider_type, provider_type.title())
+    # Shorten common model prefixes for display
+    short = model.replace("claude-", "Claude ").replace("gpt-", "GPT-")
+    if short == model:
+        return f"{prefix} {model}"
+    return short
 
 
 @router.get("/models")
 async def list_models(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """List available LLM models for sandbox conversations.
 
-    Returns static Anthropic models plus any active providers from the
-    LLM Router (marked with source='router').
+    Returns only enabled providers from the LLM routing config.
+    Includes the default_model from sandbox config for pre-selection.
     """
-    models = [dict(m) for m in SANDBOX_MODELS]
+    from src.api.llm_config import _get_redis, _merge_config
+    from src.llm.router import REDIS_CONFIG_KEY
 
-    # Add router providers if available
+    models: list[dict[str, Any]] = []
+    default_model = ""
+
     try:
-        from src.llm import get_router
+        redis = await _get_redis()
+        config_json = await redis.get(REDIS_CONFIG_KEY)
+        redis_config = json.loads(config_json) if config_json else {}
+        config = _merge_config(redis_config)
 
-        llm_router = get_router()
-        if llm_router is not None:
-            router_models = llm_router.get_available_models()
-            # Deduplicate: skip router providers whose model ID already exists
-            existing_ids = {m["id"] for m in models}
-            for rm in router_models:
-                if rm["id"] not in existing_ids:
+        for key, cfg in config.get("providers", {}).items():
+            if not cfg.get("enabled", False):
+                continue
+            models.append(
+                {
+                    "id": key,
+                    "label": _model_label(key, cfg),
+                    "provider_key": key,
+                    "model": cfg.get("model", ""),
+                    "type": cfg.get("type", ""),
+                }
+            )
+
+        default_model = config.get("sandbox", {}).get("default_model", "")
+    except Exception:
+        logger.debug("Failed to load LLM config for sandbox models", exc_info=True)
+        # Fallback: try LLM router instance
+        try:
+            from src.llm import get_router
+
+            llm_router = get_router()
+            if llm_router is not None:
+                for rm in llm_router.get_available_models():
                     models.append(
                         {
                             "id": rm["id"],
                             "label": rm["label"],
-                            "speed": "",
-                            "quality": "",
-                            "source": "router",
+                            "provider_key": rm["id"],
                             "model": rm.get("model", ""),
                             "type": rm.get("type", ""),
                         }
                     )
-    except Exception:
-        logger.debug("LLM router not available for sandbox models", exc_info=True)
+        except Exception:
+            logger.debug("LLM router also not available", exc_info=True)
 
-    return {"models": models}
+    return {"models": models, "default_model": default_model}
 
 
 # ── Conversation CRUD ────────────────────────────────────────

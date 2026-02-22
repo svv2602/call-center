@@ -43,6 +43,7 @@ async function loadLLMConfig() {
         }
         renderLLMProviders(_llmConfig, healthMap);
         renderLLMTasks(_llmConfig);
+        renderSandboxDefaults(_llmConfig);
     } catch (e) {
         provContainer.innerHTML = `<div class="${tw.emptyState}">${t('settings.llmLoadFailed', {error: escapeHtml(e.message)})}</div>`;
     }
@@ -181,6 +182,86 @@ function renderLLMTasks(config) {
     }
     html += '</tbody></table></div>';
     container.innerHTML = html;
+}
+
+function renderSandboxDefaults(config) {
+    let container = document.getElementById('llmSandboxDefaultsContainer');
+    if (!container) {
+        // Create container after tasks section if not in HTML
+        const tasksEl = document.getElementById('llmTasksContainer');
+        if (tasksEl) {
+            container = document.createElement('div');
+            container.id = 'llmSandboxDefaultsContainer';
+            container.className = 'mt-4';
+            tasksEl.after(container);
+        } else {
+            return;
+        }
+    }
+
+    const sandbox = config.sandbox || {};
+    const providers = config.providers || {};
+    const enabledKeys = Object.entries(providers)
+        .filter(([, cfg]) => cfg.enabled)
+        .map(([key, cfg]) => ({ key, model: cfg.model || key, type: cfg.type || '' }));
+
+    const defaultModel = sandbox.default_model || '';
+    const autoCustomerModel = sandbox.auto_customer_model || '';
+
+    function buildOptions(selected) {
+        let opts = `<option value="">${t('common.select')}</option>`;
+        for (const p of enabledKeys) {
+            const sel = p.key === selected ? ' selected' : '';
+            opts += `<option value="${escapeHtml(p.key)}"${sel}>${escapeHtml(p.key)} (${escapeHtml(p.model)})</option>`;
+        }
+        return opts;
+    }
+
+    if (enabledKeys.length === 0) {
+        container.innerHTML = `
+            <h4 class="${tw.sectionTitle}">${t('settings.sandboxDefaults')}</h4>
+            <p class="${tw.mutedText}">${t('settings.sandboxNoProviders')}</p>`;
+        return;
+    }
+
+    container.innerHTML = `
+        <h4 class="${tw.sectionTitle}">${t('settings.sandboxDefaults')}</h4>
+        <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-3">${t('settings.sandboxDefaultsHint')}</p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-3">
+            <div>
+                <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.sandboxDefaultModel')}</label>
+                <select id="sandboxDefaultModelSelect" class="${tw.selectSm} w-full">${buildOptions(defaultModel)}</select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.sandboxAutoCustomerModel')}</label>
+                <select id="sandboxAutoCustomerModelSelect" class="${tw.selectSm} w-full">${buildOptions(autoCustomerModel)}</select>
+            </div>
+        </div>
+        <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.configuration.saveSandboxDefaults()">${t('common.save')}</button>`;
+}
+
+async function saveSandboxDefaults() {
+    const defaultModel = document.getElementById('sandboxDefaultModelSelect')?.value || '';
+    const autoCustomerModel = document.getElementById('sandboxAutoCustomerModelSelect')?.value || '';
+
+    try {
+        await api('/admin/llm/config', {
+            method: 'PATCH',
+            body: JSON.stringify({
+                sandbox: {
+                    default_model: defaultModel,
+                    auto_customer_model: autoCustomerModel,
+                },
+            }),
+        });
+        // Update local state
+        if (_llmConfig) {
+            _llmConfig.sandbox = { default_model: defaultModel, auto_customer_model: autoCustomerModel };
+        }
+        showToast(t('settings.sandboxDefaultsSaved'), 'success');
+    } catch (e) {
+        showToast(t('settings.llmConfigFailed', { error: e.message }), 'error');
+    }
 }
 
 const _providerDefaults = {
@@ -340,4 +421,5 @@ window._pages.configuration = {
     reloadConfig, loadLLMConfig, toggleLLMProvider, updateLLMModel,
     onAddTypeChange, onAddModelInput, saveNewProvider,
     updateTaskRoute, addFallback, removeFallback, moveFallback, testLLMProvider,
+    saveSandboxDefaults,
 };

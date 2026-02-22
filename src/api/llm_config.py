@@ -51,9 +51,15 @@ class TaskRouteUpdate(BaseModel):
     fallbacks: list[str] | None = None
 
 
+class SandboxConfigUpdate(BaseModel):
+    default_model: str | None = None
+    auto_customer_model: str | None = None
+
+
 class ConfigPatch(BaseModel):
     providers: dict[str, ProviderUpdate] | None = None
     tasks: dict[str, TaskRouteUpdate] | None = None
+    sandbox: SandboxConfigUpdate | None = None
 
 
 @router.get("/config")
@@ -115,6 +121,14 @@ async def update_llm_config(request: ConfigPatch, _: dict[str, Any] = _perm_w) -
                 config["tasks"][task_name]["primary"] = task_update.primary
             if task_update.fallbacks is not None:
                 config["tasks"][task_name]["fallbacks"] = task_update.fallbacks
+
+    if request.sandbox:
+        if "sandbox" not in config:
+            config["sandbox"] = {}
+        if request.sandbox.default_model is not None:
+            config["sandbox"]["default_model"] = request.sandbox.default_model
+        if request.sandbox.auto_customer_model is not None:
+            config["sandbox"]["auto_customer_model"] = request.sandbox.auto_customer_model
 
     await redis.set(REDIS_CONFIG_KEY, json.dumps(config))
     logger.info("LLM routing config updated: %s", config)
@@ -227,4 +241,8 @@ def _merge_config(redis_config: dict[str, Any]) -> dict[str, Any]:
                 config["providers"][key] = val
     if "tasks" in redis_config:
         config["tasks"].update(redis_config["tasks"])
+    # Sandbox defaults
+    sandbox_defaults = {"default_model": "", "auto_customer_model": ""}
+    sandbox_defaults.update(redis_config.get("sandbox", {}))
+    config["sandbox"] = sandbox_defaults
     return config

@@ -276,9 +276,24 @@ async def create_sandbox_agent(
         if tenant.get("prompt_suffix") and system_prompt:
             system_prompt = system_prompt + "\n\n" + tenant["prompt_suffix"]
 
-    # Sandbox defaults to Haiku (cheap/fast) independently of ANTHROPIC_MODEL
-    # which may be set to a more expensive model for production calls.
+    # Resolve sandbox default model from Redis config → agent primary → hardcode
     sandbox_default_model = "claude-haiku-4-5-20251001"
+    if redis_client is not None:
+        try:
+            from src.llm.router import REDIS_CONFIG_KEY
+
+            raw = await redis_client.get(REDIS_CONFIG_KEY)
+            if raw:
+                import json as _json
+
+                llm_cfg = _json.loads(raw if isinstance(raw, str) else raw.decode())
+                cfg_model = (llm_cfg.get("sandbox") or {}).get("default_model", "")
+                if cfg_model:
+                    sandbox_default_model = cfg_model
+                elif llm_cfg.get("tasks", {}).get("agent", {}).get("primary"):
+                    sandbox_default_model = llm_cfg["tasks"]["agent"]["primary"]
+        except Exception:
+            logger.debug("Failed to read sandbox default model from Redis", exc_info=True)
 
     return LLMAgent(
         api_key=settings.anthropic.api_key,

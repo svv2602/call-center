@@ -506,9 +506,8 @@ async function _populateModelSelect(selectEl, currentModel) {
     selectEl.innerHTML = `<option value="">${t('sandbox.modelDefault')}</option>`;
     for (const m of _modelsCache) {
         const label = m.label || m.id;
-        const routerTag = m.source === 'router' ? ` [${t('sandbox.routerModel')}]` : '';
         const selected = m.id === currentModel ? ' selected' : '';
-        selectEl.innerHTML += `<option value="${escapeHtml(m.id)}"${selected}>${escapeHtml(label)}${routerTag}</option>`;
+        selectEl.innerHTML += `<option value="${escapeHtml(m.id)}"${selected}>${escapeHtml(label)}</option>`;
     }
 }
 
@@ -734,11 +733,11 @@ async function showNewConvModal() {
     try {
         const data = await api('/admin/sandbox/models');
         const select = document.getElementById('sandboxConvModel');
+        const defaultModel = data.default_model || '';
         select.innerHTML = `<option value="">${t('sandbox.modelDefault')}</option>`;
         for (const m of data.models || []) {
-            const speedLabel = m.speed === 'fast' ? ' ⚡' : '';
-            const routerLabel = m.source === 'router' ? ` [${t('sandbox.routerModel')}]` : '';
-            select.innerHTML += `<option value="${m.id}">${escapeHtml(m.label)}${speedLabel}${routerLabel}</option>`;
+            const selected = m.id === defaultModel ? ' selected' : '';
+            select.innerHTML += `<option value="${escapeHtml(m.id)}"${selected}>${escapeHtml(m.label)}</option>`;
         }
     } catch { /* ignore */ }
 
