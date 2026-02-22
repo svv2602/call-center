@@ -81,6 +81,7 @@ export default {
     'dashboard.failedToLoad': 'Failed to load dashboard: {error}',
     'dashboard.filterByNetwork': 'Network:',
     'dashboard.allNetworks': 'All networks',
+    'dashboard.noAnalyticsAccess': 'You do not have access to analytics. Use the navigation menu to go to an available section.',
 
     // Calls
     'calls.breadcrumb': 'Call Journal',
@@ -992,4 +993,63 @@ export default {
     'sandbox.deleteStarterConfirm': 'Delete starter "{title}"?',
     'sandbox.starterTitleRequired': 'Title and first message are required',
     'sandbox.editStarter': 'Edit Starter',
+
+    // Help
+    'help.close': 'Close help',
+    'help.tipsTitle': 'Useful tips',
+
+    // Help — Scenarios
+    'help.scenarios.title': 'Help: Scenarios',
+    'help.scenarios.overview': '<p>Manage agent training data: response templates, example dialogues, and safety rules.</p>',
+    'help.scenarios.templates.title': 'Response Templates',
+    'help.scenarios.templates.content': '<p>Pre-built phrases the agent uses in common situations (greeting, farewell, clarification, etc.).</p><ul><li><strong>Category</strong> — grouped by purpose</li><li><strong>Text</strong> — template text in Ukrainian</li><li><strong>Active</strong> — template enabled/disabled</li></ul>',
+    'help.scenarios.dialogues.title': 'Dialogue Scenarios',
+    'help.scenarios.dialogues.content': '<p>Example dialogues (few-shot) that teach the agent how to conduct conversations. Each scenario is a sequence of customer and agent turns.</p><ul><li><strong>Type</strong> — scenario category (tire search, order, fitting, etc.)</li><li><strong>Turns</strong> — alternating <code>user</code> / <code>assistant</code> roles</li><li>The agent selects the most relevant example for the current conversation</li></ul>',
+    'help.scenarios.safety.title': 'Safety Rules',
+    'help.scenarios.safety.content': '<p>Restrictions and constraints for the agent — topics it must not discuss and boundaries of its competence.</p><ul><li><strong>Rule</strong> — restriction text</li><li><strong>Priority</strong> — higher priority means stricter enforcement</li><li>Rules are always included in the agent\'s system prompt</li></ul>',
+    'help.scenarios.tips': '<ul><li>Start by reviewing existing templates — they cover the main scenarios</li><li>New dialogues are immediately available for the agent\'s few-shot selection</li><li>Safety rules have the highest priority — the agent cannot violate them</li></ul>',
+
+    // Help — Knowledge
+    'help.knowledge.title': 'Help: Knowledge Base',
+    'help.knowledge.overview': '<p>Manage knowledge base articles. The agent uses RAG search over these articles to consult customers.</p>',
+    'help.knowledge.articles.title': 'Articles',
+    'help.knowledge.articles.content': '<p>Main knowledge base content — articles organized by category (FAQ, guides, brands, delivery, etc.).</p><ul><li><strong>Category</strong> — auto-detected from filename on import</li><li><strong>Content</strong> — text in Markdown format</li><li><strong>Embeddings</strong> — vector representations are generated automatically every 5 minutes</li><li>Import supported via .md file upload</li></ul>',
+    'help.knowledge.sources.title': 'Source Configurations',
+    'help.knowledge.sources.content': '<p>Registry of external content sources for automatic knowledge base enrichment.</p><ul><li><strong>Type</strong> — RSS, HTML, specialized parser</li><li><strong>URL</strong> — source address</li><li><strong>Interval</strong> — update check frequency</li><li>Each source has its own fetcher handler</li></ul>',
+    'help.knowledge.scraper.title': 'Scraper',
+    'help.knowledge.scraper.content': '<p>Manual content import from configured sources.</p><ul><li><strong>URL</strong> — specify a page to scrape</li><li>Content is processed by LLM (Haiku) — cleaning, translation, formatting</li><li>Result is saved as a knowledge base article</li></ul>',
+    'help.knowledge.watched.title': 'Watched Pages',
+    'help.knowledge.watched.content': '<p>Pages periodically re-scanned to detect content changes.</p><ul><li><strong>URL</strong> — watched page address</li><li><strong>Interval</strong> — check frequency (in hours)</li><li>When content changes, the article is automatically updated</li><li>Bulk URL import is supported</li></ul>',
+    'help.knowledge.tips': '<ul><li>For quick population, use bulk .md file import</li><li>Check embedding status — articles without embeddings won\'t appear in RAG search</li><li>Watched pages automatically update content when the source site changes</li></ul>',
+
+    // Help — Prompts
+    'help.prompts.title': 'Help: Prompts',
+    'help.prompts.overview': '<p>Manage the agent\'s system prompts — instruction texts that define its behavior, style, and competencies.</p>',
+    'help.prompts.versions.title': 'Prompt Versions',
+    'help.prompts.versions.content': '<p>Each prompt version is a complete set of agent instructions.</p><ul><li><strong>Version</strong> — unique identifier (e.g. <code>v3.5-natural</code>)</li><li><strong>Status</strong> — active, draft, or archived</li><li><strong>Text</strong> — system prompt in Ukrainian</li><li>Only one version can be active at a time (or two during an A/B test)</li></ul>',
+    'help.prompts.ab.title': 'A/B Tests',
+    'help.prompts.ab.content': '<p>Compare two prompt versions on real traffic.</p><ul><li><strong>Variants</strong> — two prompts with traffic distribution (%)</li><li><strong>Metrics</strong> — automatic quality collection per variant</li><li>Tests can be stopped and a winner selected</li></ul>',
+    'help.prompts.tips': '<ul><li>Test new prompts in the Sandbox before activating</li><li>Use A/B tests to validate hypotheses — don\'t change prompts without data</li><li>Versioning allows quick rollback to a previous version</li></ul>',
+
+    // Help — Sandbox
+    'help.sandbox.title': 'Help: Sandbox',
+    'help.sandbox.overview': '<p>Agent testing environment — chat with the bot, verify response quality, and run regression tests.</p>',
+    'help.sandbox.chat.title': 'Chat',
+    'help.sandbox.chat.content': '<p>Interactive chat with the agent for testing prompts and behavior.</p><ul><li>Use quick start templates for common scenarios</li><li>The agent uses the current active prompt and all configured tools</li><li>In Live Tools mode — real data from the Store API</li></ul>',
+    'help.sandbox.regression.title': 'Regression',
+    'help.sandbox.regression.content': '<p>Automated tests on a set of reference questions — verify that prompt changes haven\'t broken responses.</p><ul><li><strong>Suite</strong> — list of "question → expected pattern" pairs</li><li><strong>Run</strong> — execute all tests with the current prompt</li><li>Results show match percentage and divergence details</li></ul>',
+    'help.sandbox.patterns.title': 'Patterns',
+    'help.sandbox.patterns.content': '<p>Expected response templates for regression tests.</p><ul><li><strong>Pattern</strong> — regex or text to verify the response</li><li>Linked to a specific test question</li></ul>',
+    'help.sandbox.phrases.title': 'Agent Phrases',
+    'help.sandbox.phrases.content': '<p>Control the agent\'s characteristic phrases and expressions.</p><ul><li>Verify that the agent uses correct wording</li><li>Useful for monitoring tone and communication style</li></ul>',
+    'help.sandbox.starters.title': 'Starter Templates',
+    'help.sandbox.starters.content': '<p>Ready-made scenarios for quickly starting a test dialogue.</p><ul><li><strong>Title</strong> — brief scenario description</li><li><strong>First message</strong> — initial customer message</li><li><strong>Persona</strong> — customer type description</li></ul>',
+    'help.sandbox.tips': '<ul><li>Before changing a prompt, run regression tests — establish a baseline</li><li>Use starter templates to quickly switch between test scenarios</li></ul>',
+
+    // Help — Tools
+    'help.tools.title': 'Help: Tools',
+    'help.tools.overview': '<p>Manage tool descriptions that the agent can invoke during conversations — tire search, availability check, order creation, etc.</p>',
+    'help.tools.overrides.title': 'Description Overrides',
+    'help.tools.overrides.content': '<p>Override a tool\'s description for the LLM without changing code.</p><ul><li><strong>Tool</strong> — canonical name (e.g. <code>search_tires</code>)</li><li><strong>Description</strong> — custom text the LLM sees instead of the default</li><li>Useful for fine-tuning when the agent selects the wrong tool</li></ul>',
+    'help.tools.tips': '<ul><li>Change descriptions carefully — they directly affect the agent\'s tool selection</li><li>Test changes in the Sandbox before applying in production</li></ul>',
 };

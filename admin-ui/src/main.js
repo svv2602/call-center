@@ -9,6 +9,7 @@ import { connectWebSocket, setWsEventHandler, refreshWsStatus } from './websocke
 import { closeModal } from './utils.js';
 import { initTheme, toggleTheme, refreshThemeLabel } from './theme.js';
 import { initLang, toggleLang, translateStaticDOM } from './i18n.js';
+import { initHelp, openHelp, closeHelp } from './help.js';
 
 // Page modules — each registers its page loader via init()
 import { init as initDashboard } from './pages/dashboard.js';
@@ -32,6 +33,7 @@ initLang();
 initTheme();
 translateStaticDOM();
 initRouter();
+initHelp();
 
 // Initialize all page loaders
 initDashboard();
@@ -150,4 +152,4 @@ window.addEventListener('langchange', () => {
 });
 
 // Expose globals for onclick handlers in HTML
-window._app = { login, logout, showPage, closeModal, toggleSidebar, toggleSidebarExpand, toggleTheme, toggleLang, toggleSidebarGroup };
+window._app = { login, logout, showPage, closeModal, toggleSidebar, toggleSidebarExpand, toggleTheme, toggleLang, toggleSidebarGroup, openHelp, closeHelp };
