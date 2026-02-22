@@ -189,6 +189,8 @@ class TestProcessSandboxTurn:
         agent = MagicMock(spec=LLMAgent)
         agent._model = "claude-test"
         agent.tool_router = router
+        agent.last_input_tokens = 150
+        agent.last_output_tokens = 42
 
         # Simulate process_message returning text + history
         agent.process_message = AsyncMock(
@@ -200,3 +202,5 @@ class TestProcessSandboxTurn:
         assert result.response_text == "Є шини в наявності"
         assert result.model == "claude-test"
         assert result.latency_ms >= 0
+        assert result.input_tokens == 150
+        assert result.output_tokens == 42

@@ -77,8 +77,9 @@ def _register_live_tools(
     network: str = "ProKoleso",
     knowledge_search: Any = None,
     tenant_id: str = "",
+    store_client: Any = None,
 ) -> None:
-    """Override mock handlers with real 1C-backed handlers where available."""
+    """Override mock handlers with real handlers where available."""
     # Register real knowledge search (pgvector) if available
     if knowledge_search is not None:
 
@@ -93,50 +94,79 @@ def _register_live_tools(
         router.register("search_knowledge_base", _search_kb)
         logger.info("Live tool registered: search_knowledge_base (pgvector)")
 
-    if onec_client is None:
-        logger.warning("Live tool mode: no OneCClient — all tools remain mock")
-        return
+    # Register StoreClient-based tools
+    if store_client is not None:
+        router.register("get_vehicle_tire_sizes", store_client.get_vehicle_tire_sizes)
 
-    async def _get_pickup_points(city: str = "") -> dict[str, Any]:
-        cache_key = f"onec:points:{network}"
+        async def _search_tires(**params: Any) -> dict[str, Any]:
+            return await store_client.search_tires(network=network, **params)
 
-        # 1. Redis cache
-        if redis_client:
-            try:
-                raw = await redis_client.get(cache_key)
-                if raw:
-                    all_points = json.loads(raw if isinstance(raw, str) else raw.decode())
-                    if city:
-                        all_points = [
-                            p for p in all_points if city.lower() in p.get("city", "").lower()
-                        ]
-                    return {"total": len(all_points), "points": all_points[:15]}
-            except Exception:
-                pass
+        async def _check_availability(
+            product_id: str = "", query: str = "", **kw: Any
+        ) -> dict[str, Any]:
+            return await store_client.check_availability(product_id, query, network=network, **kw)
 
-        # 2. 1C API
-        data = await onec_client.get_pickup_points(network)
-        raw_points = data.get("data", [])
-        all_points = [
-            {
-                "id": p.get("id", ""),
-                "address": p.get("point", ""),
-                "type": p.get("point_type", ""),
-                "city": p.get("City", ""),
-            }
-            for p in raw_points
-        ]
-        if redis_client:
-            with contextlib.suppress(Exception):
-                await redis_client.setex(
-                    cache_key, 3600, json.dumps(all_points, ensure_ascii=False)
-                )
-        if city:
-            all_points = [p for p in all_points if city.lower() in p.get("city", "").lower()]
-        return {"total": len(all_points), "points": all_points[:15]}
+        router.register("search_tires", _search_tires)
+        router.register("check_availability", _check_availability)
+        router.register("get_order_status", store_client.search_orders)
+        router.register("create_order_draft", store_client.create_order)
+        router.register("update_order_delivery", store_client.update_delivery)
+        router.register("confirm_order", store_client.confirm_order)
+        router.register("get_fitting_stations", store_client.get_fitting_stations)
+        router.register("get_fitting_slots", store_client.get_fitting_slots)
+        router.register("book_fitting", store_client.book_fitting)
+        logger.info("Live tools registered: 10 StoreClient tools (network=%s)", network)
+    else:
+        logger.warning("Live tool mode: no StoreClient — Store tools remain mock")
 
-    router.register("get_pickup_points", _get_pickup_points)
-    logger.info("Live tool registered: get_pickup_points (network=%s)", network)
+    if onec_client is not None:
+
+        async def _get_pickup_points(city: str = "") -> dict[str, Any]:
+            cache_key = f"onec:points:{network}"
+
+            # 1. Redis cache
+            if redis_client:
+                try:
+                    raw = await redis_client.get(cache_key)
+                    if raw:
+                        all_points = json.loads(raw if isinstance(raw, str) else raw.decode())
+                        if city:
+                            all_points = [
+                                p
+                                for p in all_points
+                                if city.lower() in p.get("city", "").lower()
+                            ]
+                        return {"total": len(all_points), "points": all_points[:15]}
+                except Exception:
+                    pass
+
+            # 2. 1C API
+            data = await onec_client.get_pickup_points(network)
+            raw_points = data.get("data", [])
+            all_points = [
+                {
+                    "id": p.get("id", ""),
+                    "address": p.get("point", ""),
+                    "type": p.get("point_type", ""),
+                    "city": p.get("City", ""),
+                }
+                for p in raw_points
+            ]
+            if redis_client:
+                with contextlib.suppress(Exception):
+                    await redis_client.setex(
+                        cache_key, 3600, json.dumps(all_points, ensure_ascii=False)
+                    )
+            if city:
+                all_points = [
+                    p for p in all_points if city.lower() in p.get("city", "").lower()
+                ]
+            return {"total": len(all_points), "points": all_points[:15]}
+
+        router.register("get_pickup_points", _get_pickup_points)
+        logger.info("Live tool registered: get_pickup_points (network=%s)", network)
+    else:
+        logger.info("Live tool mode: no OneCClient — get_pickup_points remains mock")
 
 
 async def create_sandbox_agent(
@@ -152,6 +182,7 @@ async def create_sandbox_agent(
     tenant: dict[str, Any] | None = None,
     knowledge_search: Any = None,
     tenant_id: str = "",
+    store_client: Any = None,
 ) -> LLMAgent:
     """Create an LLMAgent configured for sandbox testing.
 
@@ -199,12 +230,15 @@ async def create_sandbox_agent(
     else:
         # Live mode: start with mock, overlay real handlers where available
         tool_router = build_mock_tool_router()
+        network = (tenant or {}).get("network_id") or "ProKoleso"
         _register_live_tools(
             tool_router,
             onec_client=onec_client,
             redis_client=redis_client,
+            network=network,
             knowledge_search=knowledge_search,
             tenant_id=tenant_id,
+            store_client=store_client,
         )
 
     # Inject pronunciation rules from Redis
@@ -314,21 +348,9 @@ async def process_sandbox_turn(
         # Restore original execute
         agent.tool_router.execute = original_execute  # type: ignore[method-assign]
 
-    # Estimate token counts from history changes
-    # The real counts come from the Claude API response, but we approximate here
-    input_tokens = 0
-    output_tokens = 0
-    # Check last assistant message in updated history for rough estimate
-    for msg in reversed(updated_history):
-        if msg.get("role") == "assistant":
-            content = msg.get("content", [])
-            if isinstance(content, list):
-                for block in content:
-                    if isinstance(block, dict) and block.get("type") == "text":
-                        output_tokens += len(block.get("text", "")) // 4
-            break
-
-    input_tokens = len(str(history_copy)) // 4 + len(user_text) // 4
+    # Use real token counts from the Claude API response (accumulated across tool rounds)
+    input_tokens = agent.last_input_tokens
+    output_tokens = agent.last_output_tokens
 
     return SandboxTurnResult(
         response_text=response_text,

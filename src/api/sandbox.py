@@ -510,7 +510,7 @@ async def send_message(
         async with engine.begin() as conn:
             tenant_result = await conn.execute(
                 text("""
-                    SELECT slug, name, enabled_tools, prompt_suffix
+                    SELECT slug, name, network_id, enabled_tools, prompt_suffix
                     FROM tenants WHERE id = :id AND is_active = true
                 """),
                 {"id": str(conv.tenant_id)},
@@ -590,6 +590,7 @@ async def send_message(
     onec_client = None
     redis_client = None
     knowledge_search = None
+    store_client = None
     if conv.tool_mode == "live":
         try:
             # Use sys.modules to get the actual running main module
@@ -601,6 +602,7 @@ async def send_message(
                 onec_client = getattr(main_mod, "_onec_client", None)
                 redis_client = getattr(main_mod, "_redis", None)
                 knowledge_search = getattr(main_mod, "_knowledge_search", None)
+                store_client = getattr(main_mod, "_store_client", None)
         except Exception:
             logger.debug("Could not get live clients from main module", exc_info=True)
 
@@ -616,6 +618,7 @@ async def send_message(
         tenant=tenant,
         knowledge_search=knowledge_search,
         tenant_id=str(conv.tenant_id) if conv.tenant_id else "",
+        store_client=store_client,
     )
 
     result = await process_sandbox_turn(agent, request.message, history, is_mock=is_mock)

@@ -97,6 +97,9 @@ class LLMAgent:
         self._few_shot_context = few_shot_context
         self._safety_context = safety_context
         self._promotions_context = promotions_context
+        # Accumulated usage from last process_message call (all LLM rounds)
+        self.last_input_tokens: int = 0
+        self.last_output_tokens: int = 0
 
     @property
     def tool_router(self) -> ToolRouter:
@@ -154,6 +157,8 @@ class LLMAgent:
 
         response_text = ""
         tool_call_count = 0
+        self.last_input_tokens = 0
+        self.last_output_tokens = 0
 
         while tool_call_count <= MAX_TOOL_CALLS_PER_TURN:
             start = time.monotonic()
@@ -178,6 +183,8 @@ class LLMAgent:
                     )
 
                     latency_ms = int((time.monotonic() - start) * 1000)
+                    self.last_input_tokens += llm_response.usage.input_tokens
+                    self.last_output_tokens += llm_response.usage.output_tokens
                     logger.info(
                         "LLM response: provider=%s, stop=%s, latency=%dms, tokens_in=%d, tokens_out=%d",
                         llm_response.provider,
@@ -220,6 +227,8 @@ class LLMAgent:
                     return ERROR_TEXT, conversation_history
 
                 latency_ms = int((time.monotonic() - start) * 1000)
+                self.last_input_tokens += response.usage.input_tokens
+                self.last_output_tokens += response.usage.output_tokens
                 logger.info(
                     "Claude response: stop=%s, latency=%dms, tokens_in=%d, tokens_out=%d",
                     response.stop_reason,
