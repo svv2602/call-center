@@ -122,9 +122,12 @@ class TestConversationEndpoints:
         from src.api.sandbox import delete_conversation
 
         mock_conn = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.first.return_value = None
-        mock_conn.execute.return_value = mock_result
+        # First call: regression check (no refs), second call: delete (not found)
+        no_refs = MagicMock()
+        no_refs.first.return_value = None
+        not_found = MagicMock()
+        not_found.first.return_value = None
+        mock_conn.execute.side_effect = [no_refs, not_found]
 
         @asynccontextmanager
         async def mock_begin():
@@ -142,5 +145,79 @@ class TestConversationEndpoints:
             with pytest.raises(HTTPException) as exc_info:
                 await delete_conversation(uuid4(), {})
             assert exc_info.value.status_code == 404
+        finally:
+            sandbox_module._engine = original_engine
+
+    @pytest.mark.asyncio
+    async def test_delete_blocked_by_regression_run(self) -> None:
+        """Deleting a conversation referenced by regression runs should raise 409."""
+        from contextlib import asynccontextmanager
+        from uuid import uuid4
+
+        from fastapi import HTTPException
+
+        from src.api.sandbox import delete_conversation
+
+        mock_conn = AsyncMock()
+        # Regression check returns a row → block deletion
+        has_ref = MagicMock()
+        has_ref.first.return_value = MagicMock()  # truthy = reference exists
+        mock_conn.execute.return_value = has_ref
+
+        @asynccontextmanager
+        async def mock_begin():
+            yield mock_conn
+
+        mock_engine = MagicMock()
+        mock_engine.begin = mock_begin
+
+        import src.api.sandbox as sandbox_module
+
+        original_engine = sandbox_module._engine
+        sandbox_module._engine = mock_engine
+
+        try:
+            with pytest.raises(HTTPException) as exc_info:
+                await delete_conversation(uuid4(), {})
+            assert exc_info.value.status_code == 409
+            assert "regression" in exc_info.value.detail.lower()
+        finally:
+            sandbox_module._engine = original_engine
+
+    @pytest.mark.asyncio
+    async def test_delete_success(self) -> None:
+        """Deleting a conversation with no regression refs should succeed."""
+        from contextlib import asynccontextmanager
+        from uuid import uuid4
+
+        from src.api.sandbox import delete_conversation
+
+        mock_conn = AsyncMock()
+        # First call: regression check (no refs)
+        no_refs = MagicMock()
+        no_refs.first.return_value = None
+        # Second call: delete returns the row
+        deleted_row = MagicMock()
+        deleted_row.title = "Test Chat"
+        deleted_row._mapping = {"id": str(uuid4()), "title": "Test Chat"}
+        deleted_row.first.return_value = deleted_row
+        mock_conn.execute.side_effect = [no_refs, deleted_row]
+
+        @asynccontextmanager
+        async def mock_begin():
+            yield mock_conn
+
+        mock_engine = MagicMock()
+        mock_engine.begin = mock_begin
+
+        import src.api.sandbox as sandbox_module
+
+        original_engine = sandbox_module._engine
+        sandbox_module._engine = mock_engine
+
+        try:
+            result = await delete_conversation(uuid4(), {})
+            assert "Test Chat" in result["message"]
+            assert mock_conn.execute.call_count == 2
         finally:
             sandbox_module._engine = original_engine

@@ -835,6 +835,7 @@ export default {
     'sandbox.archived': 'Диалог архивирован',
     'sandbox.deleted': 'Диалог удалён',
     'sandbox.deleteConfirm': 'Удалить диалог «{title}»? Все данные будут потеряны.',
+    'sandbox.deleteBlockedByRegression': 'Диалог используется в regression-прогонах. Архивируйте его вместо удаления.',
     'sandbox.ratingCommentPrompt': 'Комментарий к оценке (необязательно):',
     'sandbox.ratingSaved': 'Оценка сохранена',
     'sandbox.ratingFailed': 'Не удалось сохранить оценку: {error}',

@@ -455,13 +455,33 @@ async def update_conversation(
 async def delete_conversation(
     conversation_id: UUID, _: dict[str, Any] = _perm_d
 ) -> dict[str, Any]:
-    """Delete a conversation and all its turns/tool_calls (CASCADE)."""
+    """Delete a conversation and all its turns/tool_calls (CASCADE).
+
+    Blocks deletion if the conversation is referenced by regression runs
+    (suggests archiving instead).
+    """
     engine = await _get_engine()
+    cid = str(conversation_id)
 
     async with engine.begin() as conn:
+        # Check if conversation is referenced by regression runs
+        refs = await conn.execute(
+            text("""
+                SELECT id FROM sandbox_regression_runs
+                WHERE source_conversation_id = :cid OR new_conversation_id = :cid
+                LIMIT 1
+            """),
+            {"cid": cid},
+        )
+        if refs.first():
+            raise HTTPException(
+                status_code=409,
+                detail="Conversation is referenced by regression runs. Archive it instead.",
+            )
+
         result = await conn.execute(
             text("DELETE FROM sandbox_conversations WHERE id = :id RETURNING id, title"),
-            {"id": str(conversation_id)},
+            {"id": cid},
         )
         row = result.first()
         if not row:

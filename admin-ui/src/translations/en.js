@@ -835,6 +835,7 @@ export default {
     'sandbox.archived': 'Conversation archived',
     'sandbox.deleted': 'Conversation deleted',
     'sandbox.deleteConfirm': 'Delete conversation "{title}"? All data will be lost.',
+    'sandbox.deleteBlockedByRegression': 'Conversation is referenced by regression runs. Archive it instead.',
     'sandbox.ratingCommentPrompt': 'Rating comment (optional):',
     'sandbox.ratingSaved': 'Rating saved',
     'sandbox.ratingFailed': 'Failed to save rating: {error}',

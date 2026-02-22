@@ -802,7 +802,10 @@ async function deleteConversation(convId, title) {
         }
         loadSidebar();
     } catch (e) {
-        showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
+        const msg = e.status === 409
+            ? t('sandbox.deleteBlockedByRegression')
+            : t('sandbox.loadFailed', { error: e.message });
+        showToast(msg, 'error');
         if (btn) { btn.disabled = false; btn.innerHTML = '&times;'; }
     }
 }
