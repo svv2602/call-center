@@ -191,6 +191,7 @@ class TestProcessSandboxTurn:
         agent.tool_router = router
         agent.last_input_tokens = 150
         agent.last_output_tokens = 42
+        agent.last_error = None
 
         # Simulate process_message returning text + history
         agent.process_message = AsyncMock(

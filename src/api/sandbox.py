@@ -54,6 +54,7 @@ class ConversationUpdate(BaseModel):
     tags: list[str] | None = None
     status: str | None = None
     is_baseline: bool | None = None
+    model: str | None = None
 
 
 class SendMessage(BaseModel):
@@ -431,6 +432,10 @@ async def update_conversation(
     if request.is_baseline is not None:
         updates.append("is_baseline = :is_baseline")
         params["is_baseline"] = request.is_baseline
+    if request.model is not None:
+        # Empty string means reset to default (NULL)
+        updates.append("model = :model")
+        params["model"] = request.model or None
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -444,7 +449,7 @@ async def update_conversation(
                 UPDATE sandbox_conversations
                 SET {set_clause}
                 WHERE id = :id
-                RETURNING id, title, status, is_baseline, tags, updated_at
+                RETURNING id, title, status, is_baseline, tags, model, updated_at
             """),
             params,
         )
@@ -781,7 +786,7 @@ async def send_message(
 
     agent_turn["tool_calls"] = tool_calls_saved
 
-    return {
+    resp: dict[str, Any] = {
         "customer_turn": customer_turn,
         "agent_turn": agent_turn,
         "latency_ms": result.latency_ms,
@@ -789,6 +794,9 @@ async def send_message(
         "output_tokens": result.output_tokens,
         "model": result.model,
     }
+    if result.error:
+        resp["error"] = result.error
+    return resp
 
 
 # ── Rate turn ────────────────────────────────────────────────

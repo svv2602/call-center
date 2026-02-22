@@ -90,9 +90,16 @@ function renderConversationView() {
     const promptBadge = conv.prompt_version_name
         ? `<span class="${tw.badgeBlue}">${escapeHtml(conv.prompt_version_name)}</span>`
         : `<span class="${tw.badge}">${t('sandbox.promptVersionDefault')}</span>`;
-    const modelBadge = conv.model
-        ? `<span class="${tw.badgeGray}">${escapeHtml(conv.model.replace('claude-', '').replace(/-\d+$/, ''))}</span>`
-        : '';
+    const modelLabel = conv.model
+        ? escapeHtml(conv.model.replace('claude-', '').replace(/-\d+$/, ''))
+        : t('sandbox.modelDefault');
+    const modelBadge = isActive
+        ? `<select id="sandboxModelSwitch"
+                class="text-[11px] px-1.5 py-0.5 rounded-md border border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-200 cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500"
+                onchange="window._pages.sandbox.changeModel(this.value)"
+                title="${t('sandbox.changeModel')}">
+            </select>`
+        : (conv.model ? `<span class="${tw.badgeGray}">${modelLabel}</span>` : '');
     const scenarioBadge = conv.scenario_type
         ? `<span class="${tw.badge}">${escapeHtml(conv.scenario_type)}</span>`
         : '';
@@ -226,6 +233,10 @@ function renderConversationView() {
     const newInput = document.getElementById('sandboxInput');
     if (newInput && prevInput) newInput.value = prevInput;
 
+    // Populate model selector for active conversations
+    const modelSelect = document.getElementById('sandboxModelSwitch');
+    if (modelSelect) _populateModelSelect(modelSelect, conv.model);
+
     // Scroll to bottom
     const msgArea = document.getElementById('sandboxMessages');
     if (msgArea) msgArea.scrollTop = msgArea.scrollHeight;
@@ -311,12 +322,16 @@ function renderTurn(turn) {
 
     let metricsHtml = '';
     if (!isCustomer && turn.llm_latency_ms != null) {
+        const isLlmError = !turn.input_tokens && !turn.output_tokens;
         metricsHtml = `<div class="${tw.mutedText} mt-1">${t('sandbox.metrics', {
             latency: turn.llm_latency_ms,
             input: turn.input_tokens || 0,
             output: turn.output_tokens || 0,
             model: turn.model || '-'
         })}</div>`;
+        if (isLlmError) {
+            metricsHtml += `<div class="mt-1 text-xs text-red-600 dark:text-red-400 bg-red-50 dark:bg-red-950/30 rounded px-2 py-1">${t('sandbox.llmErrorHint')}</div>`;
+        }
     }
 
     let ratingHtml = '';
@@ -476,6 +491,45 @@ async function submitExport() {
     }
 }
 
+// ─── Model switcher ──────────────────────────────────────────
+let _modelsCache = null;
+
+async function _populateModelSelect(selectEl, currentModel) {
+    if (!_modelsCache) {
+        try {
+            const data = await api('/admin/sandbox/models');
+            _modelsCache = data.models || [];
+        } catch { _modelsCache = []; }
+    }
+    selectEl.innerHTML = `<option value="">${t('sandbox.modelDefault')}</option>`;
+    for (const m of _modelsCache) {
+        const label = m.label || m.id;
+        const routerTag = m.source === 'router' ? ` [${t('sandbox.routerModel')}]` : '';
+        const selected = m.id === currentModel ? ' selected' : '';
+        selectEl.innerHTML += `<option value="${escapeHtml(m.id)}"${selected}>${escapeHtml(label)}${routerTag}</option>`;
+    }
+}
+
+async function changeModel(modelId) {
+    if (!_currentConvId) return;
+    try {
+        await api(`/admin/sandbox/conversations/${_currentConvId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ model: modelId || '' }),
+        });
+        // Update local state without full reload
+        if (_currentConv) _currentConv.model = modelId || null;
+        showToast(t('sandbox.modelChanged'));
+    } catch (e) {
+        showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
+        // Revert select to previous value
+        const sel = document.getElementById('sandboxModelSwitch');
+        if (sel && _currentConv) {
+            sel.value = _currentConv.model || '';
+        }
+    }
+}
+
 async function sendMessage() {
     if (_sending) return;
     const input = document.getElementById('sandboxInput');
@@ -489,10 +543,13 @@ async function sendMessage() {
     input.value = '';
 
     try {
-        await api(`/admin/sandbox/conversations/${_currentConvId}/send`, {
+        const sendResult = await api(`/admin/sandbox/conversations/${_currentConvId}/send`, {
             method: 'POST',
             body: JSON.stringify({ message: msg }),
         });
+        if (sendResult.error) {
+            showToast(`${t('sandbox.llmError')}: ${sendResult.error}`, 'error');
+        }
         await loadConversation(_currentConvId);
     } catch (e) {
         showToast(t('sandbox.sendFailed', { error: e.message }), 'error');
@@ -1578,6 +1635,8 @@ window._pages.sandbox = {
     togglePatternActive,
     deletePattern,
     testSearch,
+    // Model switcher
+    changeModel,
     // Phase 5: Agent Phrases
     loadPhrases,
     // Bulk delete

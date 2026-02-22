@@ -100,6 +100,8 @@ class LLMAgent:
         # Accumulated usage from last process_message call (all LLM rounds)
         self.last_input_tokens: int = 0
         self.last_output_tokens: int = 0
+        # Last error message (if LLM call failed) — consumed by sandbox
+        self.last_error: str | None = None
 
     @property
     def tool_router(self) -> ToolRouter:
@@ -159,6 +161,7 @@ class LLMAgent:
         tool_call_count = 0
         self.last_input_tokens = 0
         self.last_output_tokens = 0
+        self.last_error = None
 
         while tool_call_count <= MAX_TOOL_CALLS_PER_TURN:
             start = time.monotonic()
@@ -211,6 +214,7 @@ class LLMAgent:
                         )
                 except Exception as exc:
                     logger.exception("LLM router error: %s", exc)
+                    self.last_error = f"LLM router: {exc}"
                     return ERROR_TEXT, conversation_history
             else:
                 # Legacy path: direct Anthropic SDK
@@ -224,6 +228,7 @@ class LLMAgent:
                     )
                 except anthropic.APIStatusError as exc:
                     logger.exception("Claude API error: %s", exc)
+                    self.last_error = f"Claude API: {exc.status_code} {exc.message}"
                     return ERROR_TEXT, conversation_history
 
                 latency_ms = int((time.monotonic() - start) * 1000)

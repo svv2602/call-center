@@ -68,6 +68,7 @@ class SandboxTurnResult:
     output_tokens: int
     model: str
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
+    error: str | None = None
 
 
 def _register_live_tools(
@@ -360,4 +361,5 @@ async def process_sandbox_turn(
         output_tokens=output_tokens,
         model=agent._model,
         tool_calls=tool_calls_log,
+        error=agent.last_error,
     )
