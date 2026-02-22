@@ -3,6 +3,30 @@
  * All values are i18n keys (not raw text).
  */
 export const HELP_PAGES = {
+    dashboard: {
+        titleKey: 'help.dashboard.title',
+        overviewKey: 'help.dashboard.overview',
+        sections: [
+            { titleKey: 'help.dashboard.stats.title', contentKey: 'help.dashboard.stats.content' },
+            { titleKey: 'help.dashboard.filters.title', contentKey: 'help.dashboard.filters.content' },
+            { titleKey: 'help.dashboard.export.title', contentKey: 'help.dashboard.export.content' },
+            { titleKey: 'help.dashboard.export.steps', contentKey: 'help.dashboard.export.stepsContent' },
+        ],
+        tipsKey: 'help.dashboard.tips',
+    },
+    calls: {
+        titleKey: 'help.calls.title',
+        overviewKey: 'help.calls.overview',
+        sections: [
+            { titleKey: 'help.calls.table.title', contentKey: 'help.calls.table.content' },
+            { titleKey: 'help.calls.filters.title', contentKey: 'help.calls.filters.content' },
+            { titleKey: 'help.calls.filters.steps', contentKey: 'help.calls.filters.stepsContent' },
+            { titleKey: 'help.calls.detail.title', contentKey: 'help.calls.detail.content' },
+            { titleKey: 'help.calls.detail.steps', contentKey: 'help.calls.detail.stepsContent' },
+            { titleKey: 'help.calls.quality.title', contentKey: 'help.calls.quality.content' },
+        ],
+        tipsKey: 'help.calls.tips',
+    },
     scenarios: {
         titleKey: 'help.scenarios.title',
         overviewKey: 'help.scenarios.overview',
@@ -58,6 +82,100 @@ export const HELP_PAGES = {
             { titleKey: 'help.sandbox.workflow.title', contentKey: 'help.sandbox.workflow.content' },
         ],
         tipsKey: 'help.sandbox.tips',
+    },
+    operators: {
+        titleKey: 'help.operators.title',
+        overviewKey: 'help.operators.overview',
+        sections: [
+            { titleKey: 'help.operators.table.title', contentKey: 'help.operators.table.content' },
+            { titleKey: 'help.operators.creating.title', contentKey: 'help.operators.creating.content' },
+            { titleKey: 'help.operators.creating.steps', contentKey: 'help.operators.creating.stepsContent' },
+            { titleKey: 'help.operators.status.title', contentKey: 'help.operators.status.content' },
+            { titleKey: 'help.operators.status.steps', contentKey: 'help.operators.status.stepsContent' },
+            { titleKey: 'help.operators.skills.title', contentKey: 'help.operators.skills.content' },
+            { titleKey: 'help.operators.transfer.title', contentKey: 'help.operators.transfer.content' },
+            { titleKey: 'help.operators.affects.title', contentKey: 'help.operators.affects.content' },
+        ],
+        tipsKey: 'help.operators.tips',
+    },
+    monitoring: {
+        titleKey: 'help.monitoring.title',
+        overviewKey: 'help.monitoring.overview',
+        sections: [
+            { titleKey: 'help.monitoring.health.title', contentKey: 'help.monitoring.health.content' },
+            { titleKey: 'help.monitoring.extended.title', contentKey: 'help.monitoring.extended.content' },
+            { titleKey: 'help.monitoring.external.title', contentKey: 'help.monitoring.external.content' },
+        ],
+        tipsKey: 'help.monitoring.tips',
+    },
+    configuration: {
+        titleKey: 'help.configuration.title',
+        overviewKey: 'help.configuration.overview',
+        sections: [
+            { titleKey: 'help.configuration.reload.title', contentKey: 'help.configuration.reload.content' },
+            { titleKey: 'help.configuration.llm.title', contentKey: 'help.configuration.llm.content' },
+            { titleKey: 'help.configuration.llm.steps', contentKey: 'help.configuration.llm.stepsContent' },
+            { titleKey: 'help.configuration.tasks.title', contentKey: 'help.configuration.tasks.content' },
+            { titleKey: 'help.configuration.affects.title', contentKey: 'help.configuration.affects.content' },
+        ],
+        tipsKey: 'help.configuration.tips',
+    },
+    notifications: {
+        titleKey: 'help.notifications.title',
+        overviewKey: 'help.notifications.overview',
+        sections: [
+            { titleKey: 'help.notifications.telegram.title', contentKey: 'help.notifications.telegram.content' },
+            { titleKey: 'help.notifications.telegram.steps', contentKey: 'help.notifications.telegram.stepsContent' },
+            { titleKey: 'help.notifications.affects.title', contentKey: 'help.notifications.affects.content' },
+        ],
+        tipsKey: 'help.notifications.tips',
+    },
+    tenants: {
+        titleKey: 'help.tenants.title',
+        overviewKey: 'help.tenants.overview',
+        sections: [
+            { titleKey: 'help.tenants.table.title', contentKey: 'help.tenants.table.content' },
+            { titleKey: 'help.tenants.creating.title', contentKey: 'help.tenants.creating.content' },
+            { titleKey: 'help.tenants.creating.steps', contentKey: 'help.tenants.creating.stepsContent' },
+            { titleKey: 'help.tenants.tools.title', contentKey: 'help.tenants.tools.content' },
+            { titleKey: 'help.tenants.affects.title', contentKey: 'help.tenants.affects.content' },
+        ],
+        tipsKey: 'help.tenants.tips',
+    },
+    users: {
+        titleKey: 'help.users.title',
+        overviewKey: 'help.users.overview',
+        sections: [
+            { titleKey: 'help.users.table.title', contentKey: 'help.users.table.content' },
+            { titleKey: 'help.users.creating.title', contentKey: 'help.users.creating.content' },
+            { titleKey: 'help.users.creating.steps', contentKey: 'help.users.creating.stepsContent' },
+            { titleKey: 'help.users.roles.title', contentKey: 'help.users.roles.content' },
+            { titleKey: 'help.users.permissions.title', contentKey: 'help.users.permissions.content' },
+            { titleKey: 'help.users.permissions.steps', contentKey: 'help.users.permissions.stepsContent' },
+        ],
+        tipsKey: 'help.users.tips',
+    },
+    audit: {
+        titleKey: 'help.audit.title',
+        overviewKey: 'help.audit.overview',
+        sections: [
+            { titleKey: 'help.audit.table.title', contentKey: 'help.audit.table.content' },
+            { titleKey: 'help.audit.filters.title', contentKey: 'help.audit.filters.content' },
+            { titleKey: 'help.audit.filters.steps', contentKey: 'help.audit.filters.stepsContent' },
+        ],
+        tipsKey: 'help.audit.tips',
+    },
+    vehicles: {
+        titleKey: 'help.vehicles.title',
+        overviewKey: 'help.vehicles.overview',
+        sections: [
+            { titleKey: 'help.vehicles.navigation.title', contentKey: 'help.vehicles.navigation.content' },
+            { titleKey: 'help.vehicles.navigation.steps', contentKey: 'help.vehicles.navigation.stepsContent' },
+            { titleKey: 'help.vehicles.import.title', contentKey: 'help.vehicles.import.content' },
+            { titleKey: 'help.vehicles.import.steps', contentKey: 'help.vehicles.import.stepsContent' },
+            { titleKey: 'help.vehicles.affects.title', contentKey: 'help.vehicles.affects.content' },
+        ],
+        tipsKey: 'help.vehicles.tips',
     },
     tools: {
         titleKey: 'help.tools.title',

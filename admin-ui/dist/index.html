@@ -13,8 +13,8 @@
             }
         })();
     </script>
-  <script type="module" crossorigin src="/assets/index-Cn_efzof.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-Ddnvy4mF.css">
+  <script type="module" crossorigin src="/assets/index-CQRi_py9.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-D6WAp0ej.css">
 </head>
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-50 font-sans antialiased">
     <!-- Toast container -->
@@ -173,7 +173,10 @@
             <!-- Dashboard -->
             <div id="page-dashboard">
                 <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="dashboard.breadcrumb">Дашборд</span></div>
-                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="dashboard.title">Дашборд</h1>
+                <div class="flex items-center gap-2 mb-4">
+                    <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="dashboard.title">Дашборд</h1>
+                    <button onclick="window._app.openHelp('dashboard')" class="w-6 h-6 rounded-full border border-neutral-300 dark:border-neutral-600 text-neutral-400 hover:text-blue-600 hover:border-blue-400 dark:hover:text-blue-400 dark:hover:border-blue-400 text-xs font-bold transition-colors flex items-center justify-center" title="Help">?</button>
+                </div>
                 <div class="flex items-center gap-3 mb-4" id="dashboardTenantFilter"></div>
                 <div class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4 mb-6 max-md:grid-cols-2 max-[480px]:grid-cols-1" id="dashboardStats">
                     <div class="flex justify-center py-8"><div class="spinner"></div></div>
@@ -192,7 +195,10 @@
             <!-- Calls -->
             <div id="page-calls" style="display:none">
                 <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="calls.breadcrumb">Журнал звонков</span></div>
-                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="calls.title">Журнал звонков</h1>
+                <div class="flex items-center gap-2 mb-4">
+                    <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="calls.title">Журнал звонков</h1>
+                    <button onclick="window._app.openHelp('calls')" class="w-6 h-6 rounded-full border border-neutral-300 dark:border-neutral-600 text-neutral-400 hover:text-blue-600 hover:border-blue-400 dark:hover:text-blue-400 dark:hover:border-blue-400 text-xs font-bold transition-colors flex items-center justify-center" title="Help">?</button>
+                </div>
                 <div class="flex flex-wrap items-center gap-2 mb-4">
                     <input type="date" id="filterDateFrom" onchange="window._pages.calls.loadCalls()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                     <input type="date" id="filterDateTo" onchange="window._pages.calls.loadCalls()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
@@ -502,7 +508,10 @@
             <!-- Operators -->
             <div id="page-operators" style="display:none">
                 <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="operators.breadcrumb">Операторы</span></div>
-                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="operators.title">Операторы</h1>
+                <div class="flex items-center gap-2 mb-4">
+                    <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="operators.title">Операторы</h1>
+                    <button onclick="window._app.openHelp('operators')" class="w-6 h-6 rounded-full border border-neutral-300 dark:border-neutral-600 text-neutral-400 hover:text-blue-600 hover:border-blue-400 dark:hover:text-blue-400 dark:hover:border-blue-400 text-xs font-bold transition-colors flex items-center justify-center" title="Help">?</button>
+                </div>
                 <div class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4 mb-6 max-md:grid-cols-2 max-[480px]:grid-cols-1" id="operatorQueueStats"></div>
                 <div class="flex flex-wrap items-center gap-2 mb-4">
                     <input type="text" id="operatorSearch" data-i18n-placeholder="operators.searchPlaceholder" placeholder="Поиск по имени/номеру..."
@@ -542,7 +551,10 @@
             <!-- Monitoring -->
             <div id="page-monitoring" style="display:none">
                 <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.monitoring">Мониторинг</span></div>
-                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.monitoring">Мониторинг</h1>
+                <div class="flex items-center gap-2 mb-4">
+                    <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="nav.monitoring">Мониторинг</h1>
+                    <button onclick="window._app.openHelp('monitoring')" class="w-6 h-6 rounded-full border border-neutral-300 dark:border-neutral-600 text-neutral-400 hover:text-blue-600 hover:border-blue-400 dark:hover:text-blue-400 dark:hover:border-blue-400 text-xs font-bold transition-colors flex items-center justify-center" title="Help">?</button>
+                </div>
                 <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
                     <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.healthCheck">Проверка здоровья</h3>
                     <div id="systemInfo"><div class="flex justify-center py-8"><div class="spinner"></div></div></div>
@@ -576,7 +588,10 @@
             <!-- Configuration -->
             <div id="page-configuration" style="display:none">
                 <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.configuration">Конфигурация</span></div>
-                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.configuration">Конфигурация</h1>
+                <div class="flex items-center gap-2 mb-4">
+                    <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="nav.configuration">Конфигурация</h1>
+                    <button onclick="window._app.openHelp('configuration')" class="w-6 h-6 rounded-full border border-neutral-300 dark:border-neutral-600 text-neutral-400 hover:text-blue-600 hover:border-blue-400 dark:hover:text-blue-400 dark:hover:border-blue-400 text-xs font-bold transition-colors flex items-center justify-center" title="Help">?</button>
+                </div>
                 <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
                     <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.configuration">Конфигурация</h3>
                     <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="settings.configDescription">Перезагрузить безопасные параметры конфигурации (качество, фича-флаги, логирование) без перезапуска.</p>
@@ -594,7 +609,10 @@
             <!-- Notifications -->
             <div id="page-notifications" style="display:none">
                 <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.notifications">Уведомления</span></div>
-                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.notifications">Уведомления</h1>
+                <div class="flex items-center gap-2 mb-4">
+                    <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="nav.notifications">Уведомления</h1>
+                    <button onclick="window._app.openHelp('notifications')" class="w-6 h-6 rounded-full border border-neutral-300 dark:border-neutral-600 text-neutral-400 hover:text-blue-600 hover:border-blue-400 dark:hover:text-blue-400 dark:hover:border-blue-400 text-xs font-bold transition-colors flex items-center justify-center" title="Help">?</button>
+                </div>
                 <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
                     <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.telegram">Уведомления Telegram</h3>
                     <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="settings.telegramDesc">Настройка Telegram-бота для получения алертов от Alertmanager.</p>
@@ -605,7 +623,10 @@
             <!-- Tenants -->
             <div id="page-tenants" style="display:none">
                 <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.tenants">Сети</span></div>
-                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="tenants.title">Сети</h1>
+                <div class="flex items-center gap-2 mb-4">
+                    <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="tenants.title">Сети</h1>
+                    <button onclick="window._app.openHelp('tenants')" class="w-6 h-6 rounded-full border border-neutral-300 dark:border-neutral-600 text-neutral-400 hover:text-blue-600 hover:border-blue-400 dark:hover:text-blue-400 dark:hover:border-blue-400 text-xs font-bold transition-colors flex items-center justify-center" title="Help">?</button>
+                </div>
                 <div class="flex flex-wrap items-center gap-2 mb-4">
                     <select id="tenantsActiveFilter" onchange="window._pages.tenants.loadTenants()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                         <option value="" data-i18n="common.all">Все</option>
@@ -674,7 +695,10 @@
             <!-- Users -->
             <div id="page-users" style="display:none">
                 <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="users.breadcrumb">Пользователи</span></div>
-                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="users.title">Управление пользователями</h1>
+                <div class="flex items-center gap-2 mb-4">
+                    <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="users.title">Управление пользователями</h1>
+                    <button onclick="window._app.openHelp('users')" class="w-6 h-6 rounded-full border border-neutral-300 dark:border-neutral-600 text-neutral-400 hover:text-blue-600 hover:border-blue-400 dark:hover:text-blue-400 dark:hover:border-blue-400 text-xs font-bold transition-colors flex items-center justify-center" title="Help">?</button>
+                </div>
                 <div class="flex flex-wrap items-center gap-2 mb-4">
                     <button onclick="window._pages.users.showCreateUser()"
                         class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="users.newUser">+ Новый пользователь</button>
@@ -688,7 +712,10 @@
             <!-- Audit Log -->
             <div id="page-audit" style="display:none">
                 <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="audit.breadcrumb">Аудит</span></div>
-                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="audit.title">Журнал аудита</h1>
+                <div class="flex items-center gap-2 mb-4">
+                    <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="audit.title">Журнал аудита</h1>
+                    <button onclick="window._app.openHelp('audit')" class="w-6 h-6 rounded-full border border-neutral-300 dark:border-neutral-600 text-neutral-400 hover:text-blue-600 hover:border-blue-400 dark:hover:text-blue-400 dark:hover:border-blue-400 text-xs font-bold transition-colors flex items-center justify-center" title="Help">?</button>
+                </div>
                 <div class="flex flex-wrap items-center gap-2 mb-4">
                     <input type="date" id="auditDateFrom" onchange="window._pages.audit.loadAuditLog()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
                     <input type="date" id="auditDateTo" onchange="window._pages.audit.loadAuditLog()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full">
@@ -713,7 +740,10 @@
                     <a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> /
                     <span data-i18n="vehicles.breadcrumb">База авто</span>
                 </div>
-                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="vehicles.title">База автомобилей</h1>
+                <div class="flex items-center gap-2 mb-4">
+                    <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="vehicles.title">База автомобилей</h1>
+                    <button onclick="window._app.openHelp('vehicles')" class="w-6 h-6 rounded-full border border-neutral-300 dark:border-neutral-600 text-neutral-400 hover:text-blue-600 hover:border-blue-400 dark:hover:text-blue-400 dark:hover:border-blue-400 text-xs font-bold transition-colors flex items-center justify-center" title="Help">?</button>
+                </div>
                 <div id="vehiclesStats" class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4 mb-6 max-md:grid-cols-2 max-[480px]:grid-cols-1"></div>
                 <div class="flex flex-wrap items-center gap-2 mb-4">
                     <input type="text" id="vehiclesSearch" placeholder="Поиск по названию..."
