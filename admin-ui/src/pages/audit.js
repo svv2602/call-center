@@ -29,7 +29,7 @@ async function loadAuditLog(offset = 0) {
             return;
         }
         container.innerHTML = `
-            <div class="overflow-x-auto"><table class="${tw.table}" id="auditTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('audit.date')}</th><th class="${tw.thSortable}" data-sortable>${t('audit.user')}</th><th class="${tw.thSortable}" data-sortable>${t('audit.action')}</th><th class="${tw.thSortable}" data-sortable>${t('audit.resource')}</th><th class="${tw.th}">${t('audit.ip')}</th></tr></thead><tbody>
+            <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}" id="auditTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('audit.date')}</th><th class="${tw.thSortable}" data-sortable>${t('audit.user')}</th><th class="${tw.thSortable}" data-sortable>${t('audit.action')}</th><th class="${tw.thSortable}" data-sortable>${t('audit.resource')}</th><th class="${tw.th}">${t('audit.ip')}</th></tr></thead><tbody>
             ${entries.map(e => `
                 <tr class="${tw.trHover}">
                     <td class="${tw.td}" data-label="${t('audit.date')}" data-sort-value="${e.created_at || ''}">${formatDate(e.created_at)}</td>

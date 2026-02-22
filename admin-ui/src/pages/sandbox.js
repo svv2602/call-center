@@ -851,7 +851,7 @@ async function loadRegressionRuns() {
             </tr>`).join('');
 
         container.innerHTML = `
-            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr>
+            <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}"><thead><tr>
                 <th class="${tw.th}">${t('sandbox.conversationTitle')}</th>
                 <th class="${tw.th}">${t('sandbox.promptVersion')}</th>
                 <th class="${tw.th}">${t('sandbox.status')}</th>

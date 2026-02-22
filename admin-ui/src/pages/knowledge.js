@@ -124,7 +124,7 @@ async function loadArticles(offset) {
             return;
         }
         container.innerHTML = `
-            <div class="overflow-x-auto"><table class="${tw.table}" id="articlesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('knowledge.articleTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.category')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.embedding')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.activeCol')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.expiresAt')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.updated')}</th><th class="${tw.th}">${t('knowledge.actions')}</th></tr></thead><tbody>
+            <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}" id="articlesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('knowledge.articleTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.category')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.embedding')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.activeCol')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.expiresAt')}</th><th class="${tw.thSortable}" data-sortable>${t('knowledge.updated')}</th><th class="${tw.th}">${t('knowledge.actions')}</th></tr></thead><tbody>
             ${articles.map(a => `
                 <tr class="${tw.trHover}">
                     <td class="${tw.td}" data-label="${t('knowledge.articleTitle')}">${escapeHtml(a.title)}</td>
@@ -385,7 +385,7 @@ async function loadSourceConfigs() {
             const days = { monday: t('sources.scheduleDays.monday'), tuesday: t('sources.scheduleDays.tuesday'), wednesday: t('sources.scheduleDays.wednesday'), thursday: t('sources.scheduleDays.thursday'), friday: t('sources.scheduleDays.friday'), saturday: t('sources.scheduleDays.saturday'), sunday: t('sources.scheduleDays.sunday') };
 
             html += `
-            <div class="overflow-x-auto"><table class="${tw.table}" id="sourceConfigsTable"><thead><tr>
+            <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}" id="sourceConfigsTable"><thead><tr>
                 <th class="${tw.thSortable}" data-sortable>${t('sources.sourceName')}</th>
                 <th class="${tw.th}">${t('sources.sourceType')}</th>
                 <th class="${tw.th}">${t('sources.sourceLanguage')}</th>
@@ -549,7 +549,7 @@ async function loadSources(offset) {
             return;
         }
         container.innerHTML = `
-            <div class="overflow-x-auto"><table class="${tw.table}" id="sourcesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('sources.url')}</th><th class="${tw.thSortable}" data-sortable>${t('sources.originalTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('sources.status')}</th><th class="${tw.thSortable}" data-sortable>${t('sources.date')}</th><th class="${tw.th}">${t('sources.actions')}</th></tr></thead><tbody>
+            <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}" id="sourcesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('sources.url')}</th><th class="${tw.thSortable}" data-sortable>${t('sources.originalTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('sources.status')}</th><th class="${tw.thSortable}" data-sortable>${t('sources.date')}</th><th class="${tw.th}">${t('sources.actions')}</th></tr></thead><tbody>
             ${sources.map(s => `
                 <tr class="${tw.trHover}">
                     <td class="${tw.td}" data-label="${t('sources.url')}"><a href="${escapeHtml(s.url)}" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline text-xs">${escapeHtml((s.url || '').replace(/^https?:\/\//, '').substring(0, 50))}${(s.url || '').length > 60 ? '...' : ''}</a></td>
@@ -802,7 +802,7 @@ async function loadWatchedPages() {
             }
 
             html += `
-            <div class="overflow-x-auto"><table class="${tw.table}" id="watchedPagesTable"><thead><tr>
+            <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}" id="watchedPagesTable"><thead><tr>
                 <th class="${tw.th}">${t('sources.watchedUrl')}</th>
                 <th class="${tw.th}">${t('sources.watchedCategory')}</th>
                 <th class="${tw.th}">${t('sources.watchedInterval')}</th>

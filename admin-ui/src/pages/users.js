@@ -53,7 +53,7 @@ async function loadUsers() {
             return;
         }
         container.innerHTML = `
-            <div class="overflow-x-auto"><table class="${tw.table}" id="usersTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('users.username')}</th><th class="${tw.thSortable}" data-sortable>${t('users.role')}</th><th class="${tw.thSortable}" data-sortable>${t('users.permissions')}</th><th class="${tw.thSortable}" data-sortable>${t('users.activeCol')}</th><th class="${tw.thSortable}" data-sortable>${t('users.lastLogin')}</th><th class="${tw.th}">${t('users.actionsCol')}</th></tr></thead><tbody>
+            <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}" id="usersTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('users.username')}</th><th class="${tw.thSortable}" data-sortable>${t('users.role')}</th><th class="${tw.thSortable}" data-sortable>${t('users.permissions')}</th><th class="${tw.thSortable}" data-sortable>${t('users.activeCol')}</th><th class="${tw.thSortable}" data-sortable>${t('users.lastLogin')}</th><th class="${tw.th}">${t('users.actionsCol')}</th></tr></thead><tbody>
             ${users.map(u => {
                 const permsBadge = u.permissions !== null && u.permissions !== undefined
                     ? `<span class="${tw.badgeYellow}">${t('users.customPermissions')}</span>`

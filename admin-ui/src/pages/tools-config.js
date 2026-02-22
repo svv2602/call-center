@@ -16,7 +16,7 @@ async function loadTools() {
         const data = await api('/training/tools/');
         const items = data.items || [];
         container.innerHTML = `
-            <div class="overflow-x-auto"><table class="${tw.table}" id="toolsTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('training.toolName')}</th><th class="${tw.th}">${t('training.description')}</th><th class="${tw.thSortable}" data-sortable>${t('training.override')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
+            <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}" id="toolsTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('training.toolName')}</th><th class="${tw.th}">${t('training.description')}</th><th class="${tw.thSortable}" data-sortable>${t('training.override')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
             ${items.map(item => `
                 <tr class="${tw.trHover}">
                     <td class="${tw.td}" data-label="${t('training.toolName')}"><span class="${tw.badgeBlue}">${escapeHtml(item.name)}</span></td>

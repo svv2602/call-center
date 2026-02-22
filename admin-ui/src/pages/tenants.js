@@ -51,7 +51,7 @@ async function loadTenants(offset) {
             return;
         }
         container.innerHTML = `
-            <div class="overflow-x-auto"><table class="${tw.table}" id="tenantsTable"><thead><tr>
+            <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}" id="tenantsTable"><thead><tr>
                 <th class="${tw.thSortable}" data-sortable>${t('tenants.slug')}</th>
                 <th class="${tw.thSortable}" data-sortable>${t('tenants.name')}</th>
                 <th class="${tw.thSortable}" data-sortable>${t('tenants.networkId')}</th>

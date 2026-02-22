@@ -106,7 +106,7 @@ async function loadTemplates() {
                 <button class="${tw.btnPrimary}" onclick="window._pages.scenarios.showCreateTemplate()">${t('training.newTemplate')}</button>
                 <span class="${tw.mutedText} ml-3 text-sm">${t('training.variantsHint')}</span>
             </div>
-            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr><th class="${tw.th}">${t('training.templateKey')}</th><th class="${tw.th}">#</th><th class="${tw.th}">${t('training.templateTitle')}</th><th class="${tw.th}">${t('training.content')}</th><th class="${tw.th}">${t('training.activeCol')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
+            <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}"><thead><tr><th class="${tw.th}">${t('training.templateKey')}</th><th class="${tw.th}">#</th><th class="${tw.th}">${t('training.templateTitle')}</th><th class="${tw.th}">${t('training.content')}</th><th class="${tw.th}">${t('training.activeCol')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
             ${rows}
             </tbody></table></div>`;
     } catch (e) {
@@ -207,7 +207,7 @@ async function loadDialogues(offset) {
         }
         container.innerHTML = `
             <div class="mb-4"><button class="${tw.btnPrimary}" onclick="window._pages.scenarios.showCreateDialogue()">${t('training.newDialogue')}</button></div>
-            <div class="overflow-x-auto"><table class="${tw.table}" id="dialoguesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('training.dialogueTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('training.scenario')}</th><th class="${tw.thSortable}" data-sortable>${t('training.phase')}</th><th class="${tw.th}">${t('training.tools')}</th><th class="${tw.thSortable}" data-sortable>${t('training.activeCol')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
+            <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}" id="dialoguesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('training.dialogueTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('training.scenario')}</th><th class="${tw.thSortable}" data-sortable>${t('training.phase')}</th><th class="${tw.th}">${t('training.tools')}</th><th class="${tw.thSortable}" data-sortable>${t('training.activeCol')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
             ${items.map(item => `
                 <tr class="${tw.trHover}">
                     <td class="${tw.td}" data-label="${t('training.dialogueTitle')}">${escapeHtml(item.title)}</td>
@@ -341,7 +341,7 @@ async function loadSafetyRules(offset) {
                 <button class="${tw.btnPrimary}" onclick="window._pages.scenarios.showCreateSafetyRule()">${t('training.newSafetyRule')}</button>
                 <button class="${tw.btnSecondary} ml-2" id="regressionTestBtn" onclick="window._pages.scenarios.runSafetyRegressionTest()">${t('training.regressionTest')}</button>
             </div>
-            <div class="overflow-x-auto"><table class="${tw.table}" id="safetyRulesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('training.ruleTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('training.ruleType')}</th><th class="${tw.thSortable}" data-sortable>${t('training.severity')}</th><th class="${tw.th}">${t('training.triggerInput')}</th><th class="${tw.thSortable}" data-sortable>${t('training.activeCol')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
+            <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}" id="safetyRulesTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('training.ruleTitle')}</th><th class="${tw.thSortable}" data-sortable>${t('training.ruleType')}</th><th class="${tw.thSortable}" data-sortable>${t('training.severity')}</th><th class="${tw.th}">${t('training.triggerInput')}</th><th class="${tw.thSortable}" data-sortable>${t('training.activeCol')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
             ${items.map(item => `
                 <tr class="${tw.trHover}">
                     <td class="${tw.td}" data-label="${t('training.ruleTitle')}">${escapeHtml(item.title)}</td>

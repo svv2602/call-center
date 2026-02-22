@@ -33,7 +33,7 @@ async function loadPromptVersions() {
                 <button class="${tw.btnPrimary}" onclick="window._pages.prompts.showCreatePrompt()">${t('prompts.newVersion')}</button>
                 <button class="${tw.btnSecondary} ml-2" onclick="window._pages.prompts.resetToDefault()">${t('prompts.resetToDefault')}</button>
             </div>
-            <div class="overflow-x-auto"><table class="${tw.table}" id="promptsTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('prompts.name')}</th><th class="${tw.thSortable}" data-sortable>${t('prompts.active')}</th><th class="${tw.thSortable}" data-sortable>${t('prompts.created')}</th><th class="${tw.th}">${t('prompts.action')}</th></tr></thead><tbody>
+            <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}" id="promptsTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('prompts.name')}</th><th class="${tw.thSortable}" data-sortable>${t('prompts.active')}</th><th class="${tw.thSortable}" data-sortable>${t('prompts.created')}</th><th class="${tw.th}">${t('prompts.action')}</th></tr></thead><tbody>
             ${versions.map(v => `
                 <tr class="${tw.trHover}">
                     <td class="${tw.td}" data-label="${t('prompts.name')}"><a href="#" class="text-blue-600 dark:text-blue-400 hover:underline" onclick="event.preventDefault(); window._pages.prompts.viewPrompt('${v.id}')">${escapeHtml(v.name)}</a></td>
@@ -194,7 +194,7 @@ async function loadABTests() {
         if (tests.length === 0) {
             html += `<div class="${tw.emptyState}">${t('prompts.noABTests')}</div>`;
         } else {
-            html += `<div class="overflow-x-auto"><table class="${tw.table}" id="abTestsTable"><thead><tr>
+            html += `<div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}" id="abTestsTable"><thead><tr>
                 <th class="${tw.th}">${t('prompts.testName')}</th>
                 <th class="${tw.th}">${t('prompts.variantA')}</th>
                 <th class="${tw.th}">${t('prompts.variantB')}</th>

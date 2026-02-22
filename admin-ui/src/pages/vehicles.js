@@ -83,7 +83,7 @@ async function loadBrands(offset = 0) {
         }
 
         container.innerHTML = `
-            <div class="overflow-x-auto"><table class="${tw.table}" id="brandsTable">
+            <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}" id="brandsTable">
             <thead><tr>
                 <th class="${tw.thSortable}" data-sortable>${t('vehicles.brand')}</th>
                 <th class="${tw.thSortable}" data-sortable>${t('vehicles.models')}</th>
