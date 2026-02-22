@@ -1,7 +1,7 @@
 """Auto-generate customer responses for sandbox testing.
 
-Uses a cheap LLM (Haiku) to simulate customer behavior
-in various personas: neutral, impatient, confused, angry, expert.
+Uses LLM router (with fallback providers) or direct Anthropic SDK
+to simulate customer behavior in various personas.
 """
 
 from __future__ import annotations
@@ -50,7 +50,6 @@ async def generate_customer_reply(
     Returns:
         Generated customer message text.
     """
-    settings = get_settings()
     persona_text = PERSONA_PROMPTS.get(persona, PERSONA_PROMPTS["neutral"])
     context_text = f"Контекст: {context_hint}" if context_hint else ""
 
@@ -89,7 +88,16 @@ async def generate_customer_reply(
             {"role": "user", "content": "Привіт, я менеджер шинного магазину. Чим можу допомогти?"}
         ]
 
+    # Try LLM router first (supports Gemini, OpenAI, etc.), fall back to direct Anthropic SDK
     try:
+        reply = await _generate_via_router(system, messages)
+        if reply:
+            return reply
+    except Exception:
+        logger.debug("LLM router not available for auto-customer, trying direct SDK")
+
+    try:
+        settings = get_settings()
         client = anthropic.AsyncAnthropic(api_key=settings.anthropic.api_key)
         response = await client.messages.create(
             model="claude-haiku-4-5-20251001",
@@ -102,3 +110,24 @@ async def generate_customer_reply(
     except Exception:
         logger.exception("Failed to generate customer reply")
         return "Так, добре."
+
+
+async def _generate_via_router(
+    system: str,
+    messages: list[dict[str, Any]],
+) -> str | None:
+    """Try generating via LLM router. Returns None if router unavailable."""
+    from src.llm import get_router
+    from src.llm.models import LLMTask
+
+    router = get_router()
+    if router is None:
+        return None
+
+    response = await router.complete(
+        LLMTask.AGENT,
+        messages,
+        system=system,
+        max_tokens=200,
+    )
+    return response.text or None
