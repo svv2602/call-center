@@ -1498,11 +1498,15 @@ function useStarterByIndex(idx) {
 
 async function useStarter(starter) {
     // Create conversation from starter and send first message
+    // Pick model and tool_mode from the new-conversation modal if open
+    const modalModel = document.getElementById('sandboxConvModel')?.value || null;
+    const modalToolMode = document.getElementById('sandboxConvToolMode')?.value || 'mock';
     const body = {
         title: starter.title,
-        tool_mode: 'mock',
+        tool_mode: modalToolMode,
         tags: [],
     };
+    if (modalModel) body.model = modalModel;
     if (starter.scenario_type) body.scenario_type = starter.scenario_type;
 
     try {
