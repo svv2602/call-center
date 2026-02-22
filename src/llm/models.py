@@ -112,16 +112,16 @@ DEFAULT_ROUTING_CONFIG: dict[str, Any] = {
             "api_key_env": "ANTHROPIC_API_KEY",
             "enabled": True,
         },
-        "openai-gpt4o": {
+        "openai-gpt41": {
             "type": "openai",
-            "model": "gpt-4o",
+            "model": "gpt-4.1",
             "api_key_env": "OPENAI_API_KEY",
             "base_url": "https://api.openai.com/v1",
             "enabled": False,
         },
-        "openai-gpt4o-mini": {
+        "openai-gpt41-nano": {
             "type": "openai",
-            "model": "gpt-4o-mini",
+            "model": "gpt-4.1-nano",
             "api_key_env": "OPENAI_API_KEY",
             "base_url": "https://api.openai.com/v1",
             "enabled": False,
