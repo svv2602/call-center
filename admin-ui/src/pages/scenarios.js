@@ -9,6 +9,7 @@ import * as tw from '../tw.js';
 
 // ─── State ───────────────────────────────────────────────────
 let _activeTab = 'templates';
+let _templatesOffset = 0;
 let _dialoguesOffset = 0;
 let _safetyOffset = 0;
 let _saving = false; // prevent double-submit on modal save buttons
@@ -25,6 +26,7 @@ function showTab(tab) {
     const activeBtn = document.querySelector(`#page-scenarios .tab-bar button[data-tab="${tab}"]`);
     if (activeBtn) activeBtn.classList.add('active');
 
+    _templatesOffset = 0;
     _dialoguesOffset = 0;
     _safetyOffset = 0;
 
@@ -35,11 +37,13 @@ function showTab(tab) {
 // ═══════════════════════════════════════════════════════════
 //  TAB 1: Шаблоны ответов (with variant support)
 // ═══════════════════════════════════════════════════════════
-async function loadTemplates() {
+async function loadTemplates(offset) {
+    if (offset !== undefined) _templatesOffset = offset;
     const container = document.getElementById('templatesContainer') || document.getElementById('scenariosContent-templates');
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+    const params = buildParams({ offset: _templatesOffset });
     try {
-        const data = await api('/training/templates/');
+        const data = await api(`/training/templates/?${params}`);
         let items = data.items || [];
 
         // Populate filter key select with unique keys
@@ -65,6 +69,7 @@ async function loadTemplates() {
             container.innerHTML = `
                 <div class="mb-4"><button class="${tw.btnPrimary}" onclick="window._pages.scenarios.showCreateTemplate()">${t('training.newTemplate')}</button></div>
                 <div class="${tw.emptyState}">${t('training.noTemplates')}</div>`;
+            renderPagination({ containerId: 'templatesPagination', total: 0, offset: 0 });
             return;
         }
 
@@ -109,6 +114,13 @@ async function loadTemplates() {
             <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}"><thead><tr><th class="${tw.th}">${t('training.templateKey')}</th><th class="${tw.th}">#</th><th class="${tw.th}">${t('training.templateTitle')}</th><th class="${tw.th}">${t('training.content')}</th><th class="${tw.th}">${t('training.activeCol')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
             ${rows}
             </tbody></table></div>`;
+
+        renderPagination({
+            containerId: 'templatesPagination',
+            total: data.total,
+            offset: _templatesOffset,
+            onPage: (newOffset) => loadTemplates(newOffset),
+        });
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('training.loadFailed', {error: escapeHtml(e.message)})}</div>`;
     }
@@ -169,7 +181,7 @@ async function saveTemplate() {
         }
         closeModal('responseTemplateModal');
         showToast(t('training.templateSaved'));
-        loadTemplates();
+        loadTemplates(_templatesOffset);
     } catch (e) { showToast(t('training.saveFailed', {error: e.message}), 'error'); } finally { _saving = false; }
 }
 
@@ -178,7 +190,7 @@ async function deleteTemplate(id, title) {
     try {
         await api(`/training/templates/${id}`, { method: 'DELETE' });
         showToast(t('training.variantDeleted'));
-        loadTemplates();
+        loadTemplates(_templatesOffset);
     } catch (e) { showToast(t('training.deleteFailed', {error: e.message}), 'error'); }
 }
 

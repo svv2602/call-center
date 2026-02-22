@@ -12,6 +12,8 @@ let _categories = [];
 let _activeTab = 'articles';
 let _articlesOffset = 0;
 let _sourcesOffset = 0;
+let _sourceConfigsOffset = 0;
+let _watchedOffset = 0;
 let _watchedTenantId = '';  // tenant filter for watched pages
 let _tenantsList = [];      // cached tenants list
 
@@ -29,6 +31,8 @@ function showTab(tab) {
 
     _articlesOffset = 0;
     _sourcesOffset = 0;
+    _sourceConfigsOffset = 0;
+    _watchedOffset = 0;
 
     const loaders = {
         articles: loadKnowledge,
@@ -365,13 +369,14 @@ function runStatusBadge(status) {
     }
 }
 
-async function loadSourceConfigs() {
+async function loadSourceConfigs(offset) {
+    if (offset !== undefined) _sourceConfigsOffset = offset;
     const container = document.getElementById('sourceConfigsContainer');
     if (!container) return;
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
-
+    const params = buildParams({ offset: _sourceConfigsOffset });
     try {
-        const data = await api('/admin/scraper/source-configs');
+        const data = await api(`/admin/scraper/source-configs?${params}`);
         const configs = data.configs || [];
 
         let html = `
@@ -433,6 +438,12 @@ async function loadSourceConfigs() {
 
         container.innerHTML = html;
         makeSortable('sourceConfigsTable');
+        renderPagination({
+            containerId: 'sourceConfigsPagination',
+            total: data.total,
+            offset: _sourceConfigsOffset,
+            onPage: (newOffset) => loadSourceConfigs(newOffset),
+        });
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('sources.failedToLoad', {error: escapeHtml(e.message)})}
             <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.knowledge.loadSourceConfigs()">${t('common.retry')}</button></div>`;
@@ -670,7 +681,8 @@ function intervalLabel(hours) {
     return opt ? opt.label() : `${hours}h`;
 }
 
-async function loadWatchedPages() {
+async function loadWatchedPages(offset) {
+    if (offset !== undefined) _watchedOffset = offset;
     const container = document.getElementById('watchedPagesContainer');
     if (!container) return;
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
@@ -684,8 +696,9 @@ async function loadWatchedPages() {
             } catch { _tenantsList = []; }
         }
 
-        const tenantParam = _watchedTenantId ? `?tenant_id=${_watchedTenantId}` : '';
-        const data = await api(`/admin/scraper/watched-pages${tenantParam}`);
+        const params = buildParams({ offset: _watchedOffset });
+        if (_watchedTenantId) params.set('tenant_id', _watchedTenantId);
+        const data = await api(`/admin/scraper/watched-pages?${params}`);
         const pages = data.pages || [];
 
         const cats = _categories.length ? _categories : [
@@ -816,6 +829,12 @@ async function loadWatchedPages() {
         }
 
         container.innerHTML = html;
+        renderPagination({
+            containerId: 'watchedPagesPagination',
+            total: data.total,
+            offset: _watchedOffset,
+            onPage: (newOffset) => loadWatchedPages(newOffset),
+        });
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('sources.watchedFailedToLoad', {error: escapeHtml(e.message)})}
             <br><button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.knowledge.loadWatchedPages()">${t('common.retry')}</button></div>`;
@@ -824,6 +843,7 @@ async function loadWatchedPages() {
 
 function filterWatchedByTenant(tenantId) {
     _watchedTenantId = tenantId;
+    _watchedOffset = 0;
     loadWatchedPages();
 }
 

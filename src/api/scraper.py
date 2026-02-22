@@ -592,18 +592,28 @@ class WatchedPageUpdate(BaseModel):
 @router.get("/watched-pages")
 async def list_watched_pages(
     tenant_id: str | None = Query(None),
+    limit: int = Query(25, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
-    """List all watched pages with their status."""
+    """List watched pages with their status (paginated)."""
     engine = await _get_engine()
 
     tenant_filter = ""
-    params: dict[str, Any] = {}
+    params: dict[str, Any] = {"limit": limit, "offset": offset}
     if tenant_id:
         tenant_filter = "AND ks.tenant_id = CAST(:tenant_id AS uuid)"
         params["tenant_id"] = tenant_id
 
     async with engine.begin() as conn:
+        total = (await conn.execute(
+            text(f"""
+                SELECT COUNT(*) FROM knowledge_sources ks
+                WHERE ks.source_type = 'watched_page' {tenant_filter}
+            """),
+            params,
+        )).scalar()
+
         result = await conn.execute(
             text(f"""
                 SELECT ks.id, ks.url, ks.article_id, ks.status,
@@ -619,12 +629,13 @@ async def list_watched_pages(
                 LEFT JOIN knowledge_articles ka ON ka.id = ks.article_id
                 WHERE ks.source_type = 'watched_page' {tenant_filter}
                 ORDER BY ks.parent_id NULLS FIRST, ks.created_at
+                LIMIT :limit OFFSET :offset
             """),
             params,
         )
         pages = [dict(row._mapping) for row in result]
 
-    return {"pages": pages}
+    return {"pages": pages, "total": total}
 
 
 @router.post("/watched-pages")

@@ -4,17 +4,24 @@ import { escapeHtml, closeModal } from '../utils.js';
 import { registerPageLoader } from '../router.js';
 import { t } from '../i18n.js';
 import { makeSortable } from '../sorting.js';
+import { renderPagination } from '../pagination.js';
 import * as tw from '../tw.js';
+
+const PAGE_SIZE = 25;
+let _offset = 0;
+let _allItems = [];
 
 // ═══════════════════════════════════════════════════════════
 //  Инструменты
 // ═══════════════════════════════════════════════════════════
-async function loadTools() {
+async function loadTools(offset) {
+    if (offset !== undefined) _offset = offset;
     const container = document.getElementById('toolsContent');
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
     try {
         const data = await api('/training/tools/');
-        const items = data.items || [];
+        _allItems = data.items || [];
+        const items = _allItems.slice(_offset, _offset + PAGE_SIZE);
         container.innerHTML = `
             <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}" id="toolsTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('training.toolName')}</th><th class="${tw.th}">${t('training.description')}</th><th class="${tw.thSortable}" data-sortable>${t('training.override')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
             ${items.map(item => `
@@ -33,9 +40,43 @@ async function loadTools() {
             </tbody></table></div>`;
 
         makeSortable('toolsTable');
+        renderPagination({
+            containerId: 'toolsPagination',
+            total: _allItems.length,
+            offset: _offset,
+            onPage: (newOffset) => { _offset = newOffset; _renderPage(); },
+        });
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('training.loadFailed', {error: escapeHtml(e.message)})}</div>`;
     }
+}
+
+function _renderPage() {
+    const container = document.getElementById('toolsContent');
+    const items = _allItems.slice(_offset, _offset + PAGE_SIZE);
+    container.innerHTML = `
+        <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}" id="toolsTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('training.toolName')}</th><th class="${tw.th}">${t('training.description')}</th><th class="${tw.thSortable}" data-sortable>${t('training.override')}</th><th class="${tw.th}">${t('training.actions')}</th></tr></thead><tbody>
+        ${items.map(item => `
+            <tr class="${tw.trHover}">
+                <td class="${tw.td}" data-label="${t('training.toolName')}"><span class="${tw.badgeBlue}">${escapeHtml(item.name)}</span></td>
+                <td class="${tw.td}" data-label="${t('training.description')}"><span class="${tw.mutedText}">${escapeHtml((item.effective_description || '').substring(0, 100))}${(item.effective_description || '').length > 100 ? '...' : ''}</span></td>
+                <td class="${tw.td}" data-label="${t('training.override')}">${item.has_override ? `<span class="${tw.badgeYellow}">${t('training.overridden')}</span>` : `<span class="${tw.badge}">${t('training.default')}</span>`}</td>
+                <td class="${tw.tdActions}" data-label="${t('training.actions')}">
+                    <div class="flex flex-wrap gap-1">
+                        <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.tools.editToolOverride('${escapeHtml(item.name)}')">${t('common.edit')}</button>
+                        ${item.has_override ? `<button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.tools.resetToolOverride('${escapeHtml(item.name)}')">${t('training.reset')}</button>` : ''}
+                    </div>
+                </td>
+            </tr>
+        `).join('')}
+        </tbody></table></div>`;
+    makeSortable('toolsTable');
+    renderPagination({
+        containerId: 'toolsPagination',
+        total: _allItems.length,
+        offset: _offset,
+        onPage: (newOffset) => { _offset = newOffset; _renderPage(); },
+    });
 }
 
 async function editToolOverride(toolName) {

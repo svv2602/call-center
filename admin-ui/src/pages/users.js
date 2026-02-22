@@ -4,7 +4,10 @@ import { formatDate, escapeHtml, closeModal } from '../utils.js';
 import { registerPageLoader } from '../router.js';
 import { t } from '../i18n.js';
 import { makeSortable } from '../sorting.js';
+import { renderPagination, buildParams } from '../pagination.js';
 import * as tw from '../tw.js';
+
+let _offset = 0;
 
 const PERMISSION_GROUPS = {
     sandbox: ['sandbox:read', 'sandbox:write', 'sandbox:delete'],
@@ -42,14 +45,17 @@ function roleLabel(role) {
     return t(key) || role;
 }
 
-async function loadUsers() {
+async function loadUsers(offset) {
+    if (offset !== undefined) _offset = offset;
     const container = document.getElementById('usersContainer');
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+    const params = buildParams({ offset: _offset });
     try {
-        const data = await api('/admin/users');
+        const data = await api(`/admin/users?${params}`);
         const users = data.users || [];
         if (users.length === 0) {
             container.innerHTML = `<div class="${tw.emptyState}">${t('users.noUsers')}</div>`;
+            renderPagination({ containerId: 'usersPagination', total: 0, offset: 0 });
             return;
         }
         container.innerHTML = `
@@ -88,6 +94,12 @@ async function loadUsers() {
         `;
 
         makeSortable('usersTable');
+        renderPagination({
+            containerId: 'usersPagination',
+            total: data.total,
+            offset: _offset,
+            onPage: (newOffset) => loadUsers(newOffset),
+        });
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('users.failedToLoad', {error: escapeHtml(e.message)})}</div>`;
     }

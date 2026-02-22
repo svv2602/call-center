@@ -4,18 +4,23 @@ import { qualityBadge, formatDate, escapeHtml, closeModal, downloadBlob } from '
 import { registerPageLoader } from '../router.js';
 import { t } from '../i18n.js';
 import { makeSortable } from '../sorting.js';
+import { renderPagination, buildParams } from '../pagination.js';
 import * as tw from '../tw.js';
 
 // ─── State ───────────────────────────────────────────────────
 let _promptVersionsCache = [];
+let _promptsOffset = 0;
+let _abTestsOffset = 0;
 
 // ═══════════════════════════════════════════════════════════
 //  Промпты
 // ═══════════════════════════════════════════════════════════
-async function loadPromptVersions() {
+async function loadPromptVersions(offset) {
+    if (offset !== undefined) _promptsOffset = offset;
     const container = document.getElementById('promptsContent');
+    const params = buildParams({ offset: _promptsOffset });
     try {
-        const data = await api('/prompts');
+        const data = await api(`/prompts?${params}`);
         const versions = data.versions || [];
         _promptVersionsCache = versions;
         if (versions.length === 0) {
@@ -53,6 +58,21 @@ async function loadPromptVersions() {
             </tbody></table></div>`;
 
         makeSortable('promptsTable');
+
+        // Add pagination div dynamically (prompts and AB tests share promptsContent)
+        let paginDiv = document.getElementById('promptsPagination');
+        if (!paginDiv) {
+            paginDiv = document.createElement('div');
+            paginDiv.id = 'promptsPagination';
+            container.appendChild(paginDiv);
+        }
+        renderPagination({
+            containerId: 'promptsPagination',
+            total: data.total,
+            offset: _promptsOffset,
+            onPage: (newOffset) => loadPromptVersions(newOffset),
+        });
+
         loadABTests();
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('prompts.failedToLoad', {error: escapeHtml(e.message)})}
@@ -174,7 +194,8 @@ function _significanceText(sig) {
     return t('prompts.noSignificance');
 }
 
-async function loadABTests() {
+async function loadABTests(offset) {
+    if (offset !== undefined) _abTestsOffset = offset;
     const container = document.getElementById('promptsContent');
     const existing = document.getElementById('abTestsSection');
     if (existing) existing.remove();
@@ -184,8 +205,9 @@ async function loadABTests() {
     section.className = 'mt-6';
     container.appendChild(section);
 
+    const params = buildParams({ offset: _abTestsOffset });
     try {
-        const data = await api('/prompts/ab-tests');
+        const data = await api(`/prompts/ab-tests?${params}`);
         const tests = data.tests || [];
 
         let html = `<h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-3">${t('prompts.abTests')}</h3>`;
@@ -240,6 +262,17 @@ async function loadABTests() {
         }
 
         section.innerHTML = html;
+
+        // Add pagination div for AB tests
+        const abPaginDiv = document.createElement('div');
+        abPaginDiv.id = 'abTestsPagination';
+        section.appendChild(abPaginDiv);
+        renderPagination({
+            containerId: 'abTestsPagination',
+            total: data.total,
+            offset: _abTestsOffset,
+            onPage: (newOffset) => loadABTests(newOffset),
+        });
     } catch (e) {
         section.innerHTML = `<div class="${tw.emptyState}">${t('prompts.failedToLoadAB', {error: escapeHtml(e.message)})}</div>`;
     }

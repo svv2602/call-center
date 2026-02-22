@@ -9,8 +9,9 @@ import logging
 from typing import Any
 from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.agent.ab_testing import QUALITY_CRITERIA, ABTestManager
@@ -60,12 +61,30 @@ class CreateABTestRequest(BaseModel):
 
 
 @router.get("")
-async def list_prompts(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
-    """List all prompt versions."""
+async def list_prompts(
+    limit: int = Query(25, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    _: dict[str, Any] = _perm_r,
+) -> dict[str, Any]:
+    """List prompt versions with pagination."""
     engine = await _get_engine()
-    manager = PromptManager(engine)
-    versions = await manager.list_versions()
-    return {"versions": versions}
+
+    async with engine.begin() as conn:
+        total = (await conn.execute(text("SELECT COUNT(*) FROM prompt_versions"))).scalar()
+
+        result = await conn.execute(
+            text("""
+                SELECT id, name, system_prompt, tools_config, metadata,
+                       is_active, created_at
+                FROM prompt_versions
+                ORDER BY created_at DESC
+                LIMIT :limit OFFSET :offset
+            """),
+            {"limit": limit, "offset": offset},
+        )
+        versions = [dict(row._mapping) for row in result]
+
+    return {"versions": versions, "total": total}
 
 
 @router.post("")
@@ -94,12 +113,46 @@ async def get_default_prompt(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
 
 
 @router.get("/ab-tests")
-async def list_ab_tests(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
-    """List all A/B tests."""
+async def list_ab_tests(
+    limit: int = Query(25, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    _: dict[str, Any] = _perm_r,
+) -> dict[str, Any]:
+    """List A/B tests with pagination."""
+    from src.agent.ab_testing import calculate_significance
+
     engine = await _get_engine()
-    ab_manager = ABTestManager(engine)
-    tests = await ab_manager.list_tests()
-    return {"tests": tests}
+
+    async with engine.begin() as conn:
+        total = (await conn.execute(text("SELECT COUNT(*) FROM prompt_ab_tests"))).scalar()
+
+        result = await conn.execute(
+            text("""
+                SELECT
+                    t.*, a.name AS variant_a_name, b.name AS variant_b_name
+                FROM prompt_ab_tests t
+                JOIN prompt_versions a ON t.variant_a_id = a.id
+                JOIN prompt_versions b ON t.variant_b_id = b.id
+                ORDER BY t.started_at DESC
+                LIMIT :limit OFFSET :offset
+            """),
+            {"limit": limit, "offset": offset},
+        )
+        tests = []
+        for row in result:
+            test = dict(row._mapping)
+            if test["status"] in ("completed", "stopped"):
+                test["significance"] = calculate_significance(
+                    n_a=test["calls_a"],
+                    n_b=test["calls_b"],
+                    mean_a=float(test["quality_a"] or 0),
+                    mean_b=float(test["quality_b"] or 0),
+                )
+            else:
+                test["significance"] = None
+            tests.append(test)
+
+    return {"tests": tests, "total": total}
 
 
 @router.post("/ab-tests")

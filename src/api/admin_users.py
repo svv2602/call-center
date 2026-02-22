@@ -61,23 +61,29 @@ class ResetPasswordRequest(BaseModel):
 
 @router.get("/users")
 async def list_users(
+    limit: int = Query(25, ge=1, le=200),
+    offset: int = Query(0, ge=0),
     _: dict[str, Any] = _users_read_dep,
 ) -> dict[str, Any]:
     """List all admin users."""
     engine = await _get_engine()
 
     async with engine.begin() as conn:
+        total = (await conn.execute(text("SELECT COUNT(*) FROM admin_users"))).scalar()
+
         result = await conn.execute(
             text("""
                 SELECT id, username, role, is_active, permissions,
                        created_at, last_login_at
                 FROM admin_users
                 ORDER BY created_at
-            """)
+                LIMIT :limit OFFSET :offset
+            """),
+            {"limit": limit, "offset": offset},
         )
         users = [dict(row._mapping) for row in result]
 
-    return {"users": users}
+    return {"users": users, "total": total}
 
 
 @router.post("/users")

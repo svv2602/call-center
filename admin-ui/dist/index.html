@@ -13,7 +13,7 @@
             }
         })();
     </script>
-  <script type="module" crossorigin src="/assets/index-Zi7PrqCi.js"></script>
+  <script type="module" crossorigin src="/assets/index-gH16wamp.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index-B4DD8a2O.css">
 </head>
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-50 font-sans antialiased">
@@ -295,6 +295,7 @@
                     <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-3" data-i18n="sources.sourceConfigsTitle">Источники контента</h3>
                     <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="sources.sourceConfigsHint">Внешние сайты для сбора статей в базу знаний.</p>
                     <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="sourceConfigsContainer"></div>
+                    <div id="sourceConfigsPagination"></div>
                 </div>
 
                 <!-- Tab: Scraper -->
@@ -322,6 +323,7 @@
                     <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-100 mb-3" data-i18n="sources.watchedPagesTitle">Отслеживаемые страницы</h3>
                     <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="sources.watchedPagesHint">Страницы сайта, которые периодически пересканируются для обновления базы знаний агента.</p>
                     <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="watchedPagesContainer"></div>
+                    <div id="watchedPagesPagination"></div>
                 </div>
             </div>
 
@@ -348,6 +350,7 @@
                             class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.filter">Фильтровать</button>
                     </div>
                     <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="templatesContainer"></div>
+                    <div id="templatesPagination"></div>
                 </div>
 
                 <!-- Tab: Dialogues -->
@@ -417,6 +420,7 @@
                 <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.training">Обучение</span> / <span data-i18n="nav.tools">Инструменты</span></div>
                 <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="nav.tools">Инструменты</h1>
                 <div id="toolsContent" class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4"></div>
+                <div id="toolsPagination"></div>
             </div>
 
             <!-- Sandbox -->
@@ -660,6 +664,7 @@
                 <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="usersContainer">
                     <div class="flex justify-center py-8"><div class="spinner"></div></div>
                 </div>
+                <div id="usersPagination"></div>
             </div>
 
             <!-- Audit Log -->
