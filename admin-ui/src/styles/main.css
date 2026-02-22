@@ -421,3 +421,10 @@ details[open] .details-chevron { transform: rotate(90deg); }
 .help-section summary { list-style: none; cursor: pointer; user-select: none; }
 .help-section summary::-webkit-details-marker { display: none; }
 .help-section[open] .help-chevron { transform: rotate(90deg); }
+.help-drawer-content ol { list-style: decimal; padding-left: 1.25rem; margin-top: 0.25rem; }
+.help-drawer-content ol li { margin-bottom: 0.25rem; }
+.help-drawer-content ol ol { list-style: lower-alpha; }
+.help-drawer-content strong { color: rgb(23 23 23); }
+.dark .help-drawer-content strong { color: rgb(229 231 235); }
+.help-drawer-content .help-affects { background: rgb(254 252 232); border: 1px solid rgb(253 224 71); border-radius: 0.5rem; padding: 0.75rem; margin-top: 0.5rem; }
+.dark .help-drawer-content .help-affects { background: rgb(66 32 6); border-color: rgb(133 77 14); }
