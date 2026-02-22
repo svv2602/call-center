@@ -85,6 +85,10 @@ class TurnGroupUpdate(BaseModel):
     tags: list[str] | None = None
 
 
+class BulkDeleteRequest(BaseModel):
+    conversation_ids: list[UUID] = Field(..., min_length=1)
+
+
 class ExportPatternRequest(BaseModel):
     guidance_note: str = Field(..., min_length=1)
 
@@ -488,6 +492,50 @@ async def delete_conversation(
             raise HTTPException(status_code=404, detail="Conversation not found")
 
     return {"message": f"Conversation '{row.title}' deleted"}
+
+
+@router.post("/conversations/bulk-delete")
+async def bulk_delete_conversations(
+    request: BulkDeleteRequest, _: dict[str, Any] = _perm_d
+) -> dict[str, Any]:
+    """Delete multiple conversations at once, skipping those referenced by regression runs."""
+    engine = await _get_engine()
+    ids = [str(cid) for cid in request.conversation_ids]
+
+    async with engine.begin() as conn:
+        # Find IDs that have regression run references
+        refs_result = await conn.execute(
+            text("""
+                SELECT DISTINCT id FROM (
+                    SELECT source_conversation_id AS id FROM sandbox_regression_runs
+                    WHERE source_conversation_id = ANY(:ids)
+                    UNION
+                    SELECT new_conversation_id AS id FROM sandbox_regression_runs
+                    WHERE new_conversation_id = ANY(:ids)
+                ) sub
+            """),
+            {"ids": ids},
+        )
+        protected_ids = {str(row.id) for row in refs_result}
+
+        deletable_ids = [cid for cid in ids if cid not in protected_ids]
+        skipped_ids = [cid for cid in ids if cid in protected_ids]
+
+        deleted_count = 0
+        if deletable_ids:
+            del_result = await conn.execute(
+                text(
+                    "DELETE FROM sandbox_conversations WHERE id = ANY(:ids) RETURNING id"
+                ),
+                {"ids": deletable_ids},
+            )
+            deleted_count = del_result.rowcount
+
+    return {
+        "deleted": deleted_count,
+        "skipped": len(skipped_ids),
+        "skipped_ids": skipped_ids,
+    }
 
 
 # ── Send message ─────────────────────────────────────────────

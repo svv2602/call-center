@@ -8,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from src.api.sandbox import (
+    BulkDeleteRequest,
     ConversationCreate,
     ConversationUpdate,
     RateTurn,
@@ -219,5 +220,104 @@ class TestConversationEndpoints:
             result = await delete_conversation(uuid4(), {})
             assert "Test Chat" in result["message"]
             assert mock_conn.execute.call_count == 2
+        finally:
+            sandbox_module._engine = original_engine
+
+
+class TestBulkDelete:
+    """Test bulk delete endpoint."""
+
+    def test_bulk_delete_request_valid(self) -> None:
+        req = BulkDeleteRequest(
+            conversation_ids=[
+                "12345678-1234-1234-1234-123456789012",
+                "22345678-1234-1234-1234-123456789012",
+            ]
+        )
+        assert len(req.conversation_ids) == 2
+
+    def test_bulk_delete_request_empty_list_fails(self) -> None:
+        with pytest.raises(ValidationError):
+            BulkDeleteRequest(conversation_ids=[])
+
+    @pytest.mark.asyncio
+    async def test_bulk_delete_success(self) -> None:
+        """Delete 2 conversations with no regression refs."""
+        from contextlib import asynccontextmanager
+        from uuid import uuid4
+
+        from src.api.sandbox import bulk_delete_conversations
+
+        cid1, cid2 = uuid4(), uuid4()
+
+        mock_conn = AsyncMock()
+        # First call: regression refs query (empty result)
+        no_refs = MagicMock()
+        no_refs.__iter__ = MagicMock(return_value=iter([]))
+        # Second call: DELETE returns 2 rows
+        del_result = MagicMock()
+        del_result.rowcount = 2
+        mock_conn.execute.side_effect = [no_refs, del_result]
+
+        @asynccontextmanager
+        async def mock_begin():
+            yield mock_conn
+
+        mock_engine = MagicMock()
+        mock_engine.begin = mock_begin
+
+        import src.api.sandbox as sandbox_module
+
+        original_engine = sandbox_module._engine
+        sandbox_module._engine = mock_engine
+
+        try:
+            req = BulkDeleteRequest(conversation_ids=[cid1, cid2])
+            result = await bulk_delete_conversations(req, {})
+            assert result["deleted"] == 2
+            assert result["skipped"] == 0
+            assert result["skipped_ids"] == []
+        finally:
+            sandbox_module._engine = original_engine
+
+    @pytest.mark.asyncio
+    async def test_bulk_delete_skips_regression_refs(self) -> None:
+        """One of two conversations is protected by regression runs."""
+        from contextlib import asynccontextmanager
+        from uuid import uuid4
+
+        from src.api.sandbox import bulk_delete_conversations
+
+        cid1, cid2 = uuid4(), uuid4()
+
+        mock_conn = AsyncMock()
+        # First call: regression refs query returns cid1 as protected
+        protected_row = MagicMock()
+        protected_row.id = cid1
+        refs_result = MagicMock()
+        refs_result.__iter__ = MagicMock(return_value=iter([protected_row]))
+        # Second call: DELETE returns 1 row (only cid2 deleted)
+        del_result = MagicMock()
+        del_result.rowcount = 1
+        mock_conn.execute.side_effect = [refs_result, del_result]
+
+        @asynccontextmanager
+        async def mock_begin():
+            yield mock_conn
+
+        mock_engine = MagicMock()
+        mock_engine.begin = mock_begin
+
+        import src.api.sandbox as sandbox_module
+
+        original_engine = sandbox_module._engine
+        sandbox_module._engine = mock_engine
+
+        try:
+            req = BulkDeleteRequest(conversation_ids=[cid1, cid2])
+            result = await bulk_delete_conversations(req, {})
+            assert result["deleted"] == 1
+            assert result["skipped"] == 1
+            assert str(cid1) in result["skipped_ids"]
         finally:
             sandbox_module._engine = original_engine

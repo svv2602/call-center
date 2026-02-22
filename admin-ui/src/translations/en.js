@@ -994,6 +994,13 @@ export default {
     'sandbox.deleteStarterConfirm': 'Delete starter "{title}"?',
     'sandbox.starterTitleRequired': 'Title and first message are required',
     'sandbox.editStarter': 'Edit Starter',
+    'sandbox.bulkMode': 'Bulk delete',
+    'sandbox.selectAll': 'Select all',
+    'sandbox.deselectAll': 'Deselect all',
+    'sandbox.bulkDelete': 'Delete selected ({count})',
+    'sandbox.bulkDeleted': 'Deleted: {deleted}, skipped: {skipped}',
+    'sandbox.bulkDeleteConfirm': 'Delete {count} conversations? All data will be lost.',
+    'sandbox.bulkSkipped': 'Some conversations are protected by regression runs and were not deleted.',
 
     // Help
     'help.close': 'Close help',

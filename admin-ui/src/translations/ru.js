@@ -994,6 +994,13 @@ export default {
     'sandbox.deleteStarterConfirm': 'Удалить шаблон «{title}»?',
     'sandbox.starterTitleRequired': 'Название и первое сообщение обязательны',
     'sandbox.editStarter': 'Редактирование шаблона',
+    'sandbox.bulkMode': 'Массовое удаление',
+    'sandbox.selectAll': 'Выбрать все',
+    'sandbox.deselectAll': 'Снять все',
+    'sandbox.bulkDelete': 'Удалить выбранные ({count})',
+    'sandbox.bulkDeleted': 'Удалено: {deleted}, пропущено: {skipped}',
+    'sandbox.bulkDeleteConfirm': 'Удалить {count} диалогов? Данные будут потеряны.',
+    'sandbox.bulkSkipped': 'Некоторые диалоги защищены regression-прогонами и не были удалены.',
 
     // Help
     'help.close': 'Закрыть справку',

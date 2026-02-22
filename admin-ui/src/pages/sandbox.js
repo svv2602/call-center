@@ -20,6 +20,8 @@ let _branchTurnId = null;
 let _branchTurnNumber = null;
 let _replayConvId = null;
 let _starterCache = [];
+let _bulkMode = false;
+let _selectedIds = new Set();
 
 // ─── Tab switching ───────────────────────────────────────────
 function showTab(tab) {
@@ -723,6 +725,18 @@ async function loadSidebar() {
     if (!container) return;
     container.innerHTML = `<div class="flex justify-center py-6"><div class="spinner"></div></div>`;
 
+    // Update bulk toggle button style
+    const bulkBtn = document.getElementById('sandboxBulkToggle');
+    if (bulkBtn) {
+        if (_bulkMode) {
+            bulkBtn.classList.add('bg-blue-600', 'text-white', 'border-blue-600');
+            bulkBtn.classList.remove('text-neutral-600', 'dark:text-neutral-300', 'border-neutral-300', 'dark:border-neutral-600');
+        } else {
+            bulkBtn.classList.remove('bg-blue-600', 'text-white', 'border-blue-600');
+            bulkBtn.classList.add('text-neutral-600', 'dark:text-neutral-300', 'border-neutral-300', 'dark:border-neutral-600');
+        }
+    }
+
     const search = document.getElementById('sandboxSearch')?.value?.trim() || '';
     const status = document.getElementById('sandboxFilterStatus')?.value || '';
     const scenario = document.getElementById('sandboxFilterScenario')?.value || '';
@@ -742,7 +756,21 @@ async function loadSidebar() {
             return;
         }
 
-        container.innerHTML = items.map(item => {
+        // Bulk action bar
+        let bulkBar = '';
+        if (_bulkMode) {
+            const allIds = items.map(i => i.id);
+            const allSelected = allIds.length > 0 && allIds.every(id => _selectedIds.has(id));
+            const toggleLabel = allSelected ? t('sandbox.deselectAll') : t('sandbox.selectAll');
+            const toggleFn = allSelected ? 'deselectAll' : 'selectAll';
+            bulkBar = `
+                <div class="px-3 py-2 border-b border-neutral-200 dark:border-neutral-700 flex items-center gap-2 bg-neutral-50 dark:bg-neutral-800">
+                    <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.${toggleFn}()">${toggleLabel}</button>
+                    ${_selectedIds.size > 0 ? `<button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.sandbox.bulkDelete()">${t('sandbox.bulkDelete', { count: _selectedIds.size })}</button>` : ''}
+                </div>`;
+        }
+
+        const rows = items.map(item => {
             const isActive = item.id === _currentConvId;
             const activeCls = isActive
                 ? 'bg-blue-50 dark:bg-blue-950/30 border-l-2 border-blue-500'
@@ -759,12 +787,19 @@ async function loadSidebar() {
                 ? '<span class="text-[10px] px-1 rounded bg-indigo-100 dark:bg-indigo-900/40 text-indigo-700 dark:text-indigo-300 font-semibold">B</span>'
                 : '';
 
+            let checkboxHtml = '';
+            if (_bulkMode) {
+                const checked = _selectedIds.has(item.id) ? 'checked' : '';
+                checkboxHtml = `<input type="checkbox" ${checked} onclick="event.stopPropagation();window._pages.sandbox.toggleBulkSelect('${item.id}')" class="mr-1.5 mt-0.5 cursor-pointer flex-shrink-0">`;
+            }
+
             return `
-                <div class="px-3 py-2 cursor-pointer ${activeCls} transition-colors" onclick="window._pages.sandbox.openConversation('${item.id}')">
+                <div class="px-3 py-2 cursor-pointer ${activeCls} transition-colors" onclick="${_bulkMode ? `window._pages.sandbox.toggleBulkSelect('${item.id}')` : `window._pages.sandbox.openConversation('${item.id}')`}">
                     <div class="flex items-center gap-1">
+                        ${checkboxHtml}
                         <span class="text-xs font-medium text-neutral-900 dark:text-neutral-100 truncate flex-1">${escapeHtml(item.title)}</span>
                         ${baselineBadge}
-                        <button class="text-neutral-400 hover:text-red-500 text-xs leading-none flex-shrink-0" onclick="event.stopPropagation();window._pages.sandbox.deleteConversation('${item.id}', '${escapeHtml(item.title).replace(/'/g, "\\'")}')" title="${t('common.delete')}">&times;</button>
+                        ${!_bulkMode ? `<button class="text-neutral-400 hover:text-red-500 text-xs leading-none flex-shrink-0" onclick="event.stopPropagation();window._pages.sandbox.deleteConversation('${item.id}', '${escapeHtml(item.title).replace(/'/g, "\\'")}')" title="${t('common.delete')}">&times;</button>` : ''}
                     </div>
                     <div class="flex items-center gap-1.5 mt-0.5 text-[10px] text-neutral-500 dark:text-neutral-400">
                         <span>${dateStr}</span>
@@ -775,6 +810,8 @@ async function loadSidebar() {
                     </div>
                 </div>`;
         }).join('');
+
+        container.innerHTML = bulkBar + rows;
     } catch (e) {
         container.innerHTML = `<div class="p-4 text-center ${tw.mutedText}">${t('sandbox.loadFailed', { error: escapeHtml(e.message) })}</div>`;
     }
@@ -1434,6 +1471,65 @@ async function useStarter(starter) {
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  Bulk Delete
+// ═══════════════════════════════════════════════════════════
+
+function toggleBulkMode() {
+    _bulkMode = !_bulkMode;
+    _selectedIds.clear();
+    loadSidebar();
+}
+
+function toggleBulkSelect(convId) {
+    if (_selectedIds.has(convId)) _selectedIds.delete(convId);
+    else _selectedIds.add(convId);
+    loadSidebar();
+}
+
+function selectAll() {
+    document.querySelectorAll('#sandboxSidebarList input[type="checkbox"]').forEach(cb => {
+        const onclick = cb.getAttribute('onclick') || '';
+        const match = onclick.match(/toggleBulkSelect\('([^']+)'\)/);
+        if (match) _selectedIds.add(match[1]);
+    });
+    loadSidebar();
+}
+
+function deselectAll() {
+    _selectedIds.clear();
+    loadSidebar();
+}
+
+async function bulkDelete() {
+    if (_selectedIds.size === 0) return;
+    if (!confirm(t('sandbox.bulkDeleteConfirm', { count: _selectedIds.size }))) return;
+
+    try {
+        const data = await api('/admin/sandbox/conversations/bulk-delete', {
+            method: 'POST',
+            body: JSON.stringify({ conversation_ids: Array.from(_selectedIds) }),
+        });
+        const msg = t('sandbox.bulkDeleted', { deleted: data.deleted, skipped: data.skipped });
+        showToast(msg);
+        if (data.skipped > 0) {
+            showToast(t('sandbox.bulkSkipped'), 'warning');
+        }
+        // Clear selection & reset current if it was deleted
+        if (_currentConvId && _selectedIds.has(_currentConvId) && !data.skipped_ids?.includes(_currentConvId)) {
+            _currentConvId = null;
+            _currentConv = null;
+            _turns = [];
+            renderChat();
+        }
+        _selectedIds.clear();
+        _bulkMode = false;
+        loadSidebar();
+    } catch (e) {
+        showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
+    }
+}
+
 // ─── Init ────────────────────────────────────────────────────
 export function init() {
     registerPageLoader('sandbox', () => {
@@ -1484,6 +1580,12 @@ window._pages.sandbox = {
     testSearch,
     // Phase 5: Agent Phrases
     loadPhrases,
+    // Bulk delete
+    toggleBulkMode,
+    toggleBulkSelect,
+    selectAll,
+    deselectAll,
+    bulkDelete,
     // Phase 6: Scenario Starters
     loadStarters,
     showStarterModal,
