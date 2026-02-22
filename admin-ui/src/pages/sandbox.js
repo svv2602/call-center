@@ -223,6 +223,8 @@ function renderConversationView() {
                     <option value="confused">${t('sandbox.personaConfused')}</option>
                     <option value="angry">${t('sandbox.personaAngry')}</option>
                     <option value="expert">${t('sandbox.personaExpert')}</option>
+                    <option value="rushed">${t('sandbox.personaRushed')}</option>
+                    <option value="detailed">${t('sandbox.personaDetailed')}</option>
                 </select>
                 <button id="sandboxAutoBtn" class="${tw.btnPurple} ${tw.btnSm}" title="${t('sandbox.autoCustomerHint')}" onclick="window._pages.sandbox.autoCustomer()">${t('sandbox.autoCustomer')}</button>
                 <button id="sandboxSendBtn" class="${tw.btnPrimary}" onclick="window._pages.sandbox.sendMessage()">${t('sandbox.sendMessage')}</button>

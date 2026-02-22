@@ -875,6 +875,8 @@ export default {
     'sandbox.personaConfused': 'Растерянный',
     'sandbox.personaAngry': 'Злой',
     'sandbox.personaExpert': 'Эксперт',
+    'sandbox.personaRushed': 'Спешит',
+    'sandbox.personaDetailed': 'Дотошный',
     'sandbox.contextHint': 'Подсказка контекста',
     'sandbox.starters': 'Шаблоны старта',
     'sandbox.newStarter': 'Новый шаблон',

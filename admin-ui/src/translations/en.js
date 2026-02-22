@@ -875,6 +875,8 @@ export default {
     'sandbox.personaConfused': 'Confused',
     'sandbox.personaAngry': 'Angry',
     'sandbox.personaExpert': 'Expert',
+    'sandbox.personaRushed': 'Rushed',
+    'sandbox.personaDetailed': 'Detailed',
     'sandbox.contextHint': 'Context hint',
     'sandbox.starters': 'Starter Templates',
     'sandbox.newStarter': 'New Starter',
