@@ -13,8 +13,8 @@
             }
         })();
     </script>
-  <script type="module" crossorigin src="/assets/index-CQRi_py9.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-D6WAp0ej.css">
+  <script type="module" crossorigin src="/assets/index-D8jn0XDX.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-BjwveaZP.css">
 </head>
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-50 font-sans antialiased">
     <!-- Toast container -->
@@ -124,6 +124,10 @@
                         <a href="#" class="nav-flyout-link" data-page="notifications" onclick="window._app.showPage('notifications')">
                             <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M14.857 17.082a23.848 23.848 0 005.454-1.31A8.967 8.967 0 0118 9.75v-.7V9A6 6 0 006 9v.75a8.967 8.967 0 01-2.312 6.022c1.733.64 3.56 1.085 5.455 1.31m5.714 0a24.255 24.255 0 01-5.714 0m5.714 0a3 3 0 11-5.714 0"/></svg>
                             <span data-i18n="nav.notifications">Уведомления</span>
+                        </a>
+                        <a href="#" class="nav-flyout-link" data-page="onec-data" onclick="window._app.showPage('onec-data')">
+                            <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M20.25 6.375c0 2.278-3.694 4.125-8.25 4.125S3.75 8.653 3.75 6.375m16.5 0c0-2.278-3.694-4.125-8.25-4.125S3.75 4.097 3.75 6.375m16.5 0v11.25c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125V6.375m16.5 0v3.75c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125v-3.75m16.5 3.75v3.75c0 2.278-3.694 4.125-8.25 4.125s-8.25-1.847-8.25-4.125v-3.75"/></svg>
+                            <span data-i18n="nav.onecData">Данные 1С</span>
                         </a>
                     </div>
                 </div>
@@ -640,6 +644,47 @@
                     <div class="flex justify-center py-8"><div class="spinner"></div></div>
                 </div>
                 <div class="pagination flex justify-center gap-1 mt-4" id="tenantsPagination"></div>
+            </div>
+
+            <!-- 1C Data -->
+            <div id="page-onec-data" style="display:none">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.onecData">Данные 1С</span></div>
+                <div class="flex items-center gap-2 mb-4">
+                    <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="onec.title">Данные 1С</h1>
+                </div>
+
+                <!-- Status -->
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
+                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="onec.statusTitle">Статус подключения</h3>
+                    <div id="onecStatusContainer"><div class="flex justify-center py-4"><div class="spinner"></div></div></div>
+                </div>
+
+                <!-- Pickup points -->
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
+                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="onec.pickupPoints">Пункты выдачи</h3>
+                    <div class="flex flex-wrap items-center gap-2 mb-3">
+                        <select id="onecPickupNetwork" onchange="window._pages['onec-data'].loadPickupPoints()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="ProKoleso">ProKoleso</option>
+                        </select>
+                        <input id="onecPickupCity" type="text" placeholder="Київ" data-i18n-placeholder="onec.filterCity" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 w-40">
+                        <button onclick="window._pages['onec-data'].loadPickupPoints()" class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" data-i18n="common.filter">Фильтровать</button>
+                        <button onclick="window._pages['onec-data'].refreshPickupFromOnec()" class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800" data-i18n="onec.refresh">Обновить из 1С</button>
+                    </div>
+                    <div id="onecPickupContainer"><div class="flex justify-center py-4"><div class="spinner"></div></div></div>
+                </div>
+
+                <!-- Stock lookup -->
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
+                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="onec.stockLookup">Остатки по SKU</h3>
+                    <div class="flex flex-wrap items-center gap-2 mb-3">
+                        <select id="onecStockNetwork" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="ProKoleso">ProKoleso</option>
+                        </select>
+                        <input id="onecStockSku" type="text" placeholder="1234567" data-i18n-placeholder="onec.skuPlaceholder" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 w-48 font-mono">
+                        <button onclick="window._pages['onec-data'].lookupStock()" class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" data-i18n="onec.search">Найти</button>
+                    </div>
+                    <div id="onecStockResult"><div class="text-center py-4 text-neutral-400 dark:text-neutral-500 text-sm" data-i18n="onec.skuPlaceholder">Введите артикул для поиска</div></div>
+                </div>
             </div>
 
             <!-- Tenant Modal -->

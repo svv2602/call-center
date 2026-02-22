@@ -42,6 +42,7 @@ from src.api.middleware.audit import AuditMiddleware
 from src.api.middleware.rate_limit import RateLimitMiddleware
 from src.api.middleware.security_headers import SecurityHeadersMiddleware
 from src.api.notifications import router as notifications_router
+from src.api.onec_data import router as onec_data_router
 from src.api.operators import router as operators_router
 from src.api.prompts import router as prompts_router
 from src.api.pronunciation import router as pronunciation_router
@@ -93,6 +94,7 @@ app.include_router(export_router)
 app.include_router(knowledge_router)
 app.include_router(llm_config_router)
 app.include_router(notifications_router)
+app.include_router(onec_data_router)
 app.include_router(operators_router)
 app.include_router(pronunciation_router)
 app.include_router(prompts_router)

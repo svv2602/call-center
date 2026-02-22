@@ -163,8 +163,22 @@ async function showCallDetail(callId) {
 
         if (tools.length) {
             html += `<h3 class="${tw.sectionTitle} mt-4">${t('calls.toolCalls')}</h3><div class="overflow-x-auto"><table class="${tw.table}"><tr><th class="${tw.th}">${t('calls.toolName')}</th><th class="${tw.th}">${t('calls.toolSuccess')}</th><th class="${tw.th}">${t('calls.toolDuration')}</th></tr>`;
-            tools.forEach(tc => {
-                html += `<tr class="${tw.trHover}"><td class="${tw.td}">${escapeHtml(tc.tool_name)}</td><td class="${tw.td}">${tc.success ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td><td class="${tw.td}">${tc.duration_ms || 0}ms</td></tr>`;
+            tools.forEach((tc, idx) => {
+                const hasDetail = tc.tool_args || tc.tool_result;
+                html += `<tr class="${tw.trHover}${hasDetail ? ' cursor-pointer' : ''}" ${hasDetail ? `onclick="window._pages.calls.toggleToolDetail(${idx})"` : ''}>
+                    <td class="${tw.td}"><span class="inline-flex items-center gap-1">${hasDetail ? `<svg class="w-3.5 h-3.5 text-neutral-400 transition-transform tool-chevron-${idx}" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M7.21 14.77a.75.75 0 01.02-1.06L11.168 10 7.23 6.29a.75.75 0 111.04-1.08l4.5 4.25a.75.75 0 010 1.08l-4.5 4.25a.75.75 0 01-1.06-.02z" clip-rule="evenodd"/></svg>` : ''}${escapeHtml(tc.tool_name)}</span></td>
+                    <td class="${tw.td}">${tc.success ? `<span class="${tw.badgeGreen}">${t('common.yes')}</span>` : `<span class="${tw.badgeRed}">${t('common.no')}</span>`}</td>
+                    <td class="${tw.td}">${tc.duration_ms || 0}ms</td></tr>`;
+                if (hasDetail) {
+                    html += `<tr id="toolDetail-${idx}" class="hidden"><td colspan="3" class="px-3 py-2 border-b border-neutral-100 dark:border-neutral-800">`;
+                    if (tc.tool_args && Object.keys(tc.tool_args).length) {
+                        html += `<div class="mb-2"><span class="text-xs font-semibold text-neutral-500 dark:text-neutral-400">${t('calls.toolArgs')}</span><pre class="mt-1 p-2 text-xs bg-neutral-50 dark:bg-neutral-800 rounded-md overflow-x-auto text-neutral-700 dark:text-neutral-300">${escapeHtml(JSON.stringify(tc.tool_args, null, 2))}</pre></div>`;
+                    }
+                    if (tc.tool_result) {
+                        html += `<div><span class="text-xs font-semibold text-neutral-500 dark:text-neutral-400">${t('calls.toolResult')}</span><pre class="mt-1 p-2 text-xs bg-neutral-50 dark:bg-neutral-800 rounded-md overflow-x-auto text-neutral-700 dark:text-neutral-300 max-h-64 overflow-y-auto">${escapeHtml(JSON.stringify(tc.tool_result, null, 2))}</pre></div>`;
+                    }
+                    html += '</td></tr>';
+                }
             });
             html += '</table></div>';
         }
@@ -191,6 +205,14 @@ async function downloadTranscript(callId) {
     }
 }
 
+function toggleToolDetail(idx) {
+    const row = document.getElementById(`toolDetail-${idx}`);
+    if (!row) return;
+    const chevron = document.querySelector(`.tool-chevron-${idx}`);
+    row.classList.toggle('hidden');
+    if (chevron) chevron.style.transform = row.classList.contains('hidden') ? '' : 'rotate(90deg)';
+}
+
 function closeCallModal() {
     document.getElementById('callModal').classList.remove('show');
 }
@@ -206,4 +228,4 @@ export function init() {
 }
 
 window._pages = window._pages || {};
-window._pages.calls = { loadCalls, exportCallsCSV, showCallDetail, closeCallModal, downloadTranscript };
+window._pages.calls = { loadCalls, exportCallsCSV, showCallDetail, closeCallModal, downloadTranscript, toggleToolDetail };
