@@ -68,7 +68,7 @@ class TestGetConfig:
                 response = await ac.get("/admin/llm/config")
 
         data = response.json()
-        assert data["config"]["providers"]["openai-gpt41"]["api_key_set"] is False
+        assert data["config"]["providers"]["openai-gpt41-mini"]["api_key_set"] is False
 
     @pytest.mark.asyncio()
     async def test_merges_redis_config(self, app: Any, mock_redis: AsyncMock) -> None:
@@ -99,13 +99,13 @@ class TestPatchConfig:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.patch(
                     "/admin/llm/config",
-                    json={"providers": {"openai-gpt41": {"enabled": True}}},
+                    json={"providers": {"openai-gpt41-mini": {"enabled": True}}},
                 )
 
         assert response.status_code == 200
         mock_redis.set.assert_called_once()
         stored = json.loads(mock_redis.set.call_args[0][1])
-        assert stored["providers"]["openai-gpt41"]["enabled"] is True
+        assert stored["providers"]["openai-gpt41-mini"]["enabled"] is True
 
     @pytest.mark.asyncio()
     async def test_update_task_route(self, app: Any, mock_redis: AsyncMock) -> None:
@@ -116,12 +116,12 @@ class TestPatchConfig:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.patch(
                     "/admin/llm/config",
-                    json={"tasks": {"agent": {"primary": "openai-gpt41"}}},
+                    json={"tasks": {"agent": {"primary": "openai-gpt41-mini"}}},
                 )
 
         assert response.status_code == 200
         stored = json.loads(mock_redis.set.call_args[0][1])
-        assert stored["tasks"]["agent"]["primary"] == "openai-gpt41"
+        assert stored["tasks"]["agent"]["primary"] == "openai-gpt41-mini"
 
     @pytest.mark.asyncio()
     async def test_update_fallbacks(self, app: Any, mock_redis: AsyncMock) -> None:
@@ -136,7 +136,7 @@ class TestPatchConfig:
                         "tasks": {
                             "agent": {
                                 "primary": "anthropic-sonnet",
-                                "fallbacks": ["openai-gpt41", "deepseek-chat"],
+                                "fallbacks": ["openai-gpt41-mini", "deepseek-chat"],
                             }
                         }
                     },
@@ -144,7 +144,7 @@ class TestPatchConfig:
 
         assert response.status_code == 200
         stored = json.loads(mock_redis.set.call_args[0][1])
-        assert stored["tasks"]["agent"]["fallbacks"] == ["openai-gpt41", "deepseek-chat"]
+        assert stored["tasks"]["agent"]["fallbacks"] == ["openai-gpt41-mini", "deepseek-chat"]
 
 
 class TestGetProvidersHealth:
