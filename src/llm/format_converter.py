@@ -140,8 +140,13 @@ def openai_response_to_llm_response(
     model: str,
 ) -> LLMResponse:
     """Parse OpenAI chat completion JSON response into LLMResponse."""
-    choice = data["choices"][0]
-    message = choice["message"]
+    choices = data.get("choices")
+    if not choices:
+        error = data.get("error", {})
+        msg = error.get("message", "") if isinstance(error, dict) else str(error)
+        raise ValueError(f"OpenAI-compat response missing 'choices': {msg or str(data)[:200]}")
+    choice = choices[0]
+    message = choice.get("message", {})
 
     text = message.get("content") or ""
 

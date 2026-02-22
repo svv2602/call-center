@@ -11,6 +11,7 @@ import json
 import logging
 import os
 import time
+from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from aiobreaker import CircuitBreaker
@@ -81,7 +82,7 @@ class LLMRouter:
             provider = self._create_provider(key, provider_cfg, api_key)
             if provider is not None:
                 self._providers[key] = provider
-                self._breakers[key] = CircuitBreaker(fail_max=5, timeout_duration=30)
+                self._breakers[key] = CircuitBreaker(fail_max=5, timeout_duration=timedelta(seconds=30))
                 logger.info("LLM provider initialized: %s (%s)", key, provider_cfg.get("model"))
 
         self._initialized = True
