@@ -135,7 +135,7 @@ DEFAULT_ROUTING_CONFIG: dict[str, Any] = {
         },
         "gemini-flash": {
             "type": "gemini",
-            "model": "gemini-2.0-flash",
+            "model": "gemini-2.5-flash",
             "api_key_env": "GEMINI_API_KEY",
             "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
             "enabled": False,
