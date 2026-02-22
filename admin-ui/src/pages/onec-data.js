@@ -6,6 +6,7 @@ import { t } from '../i18n.js';
 import * as tw from '../tw.js';
 
 let _tenants = [];
+let _pickupLoaded = false;
 
 async function _loadTenants() {
     try {
@@ -30,7 +31,6 @@ function _populateNetworkSelects() {
             if (ten.network_id === current) opt.selected = true;
             sel.appendChild(opt);
         }
-        // Ensure at least ProKoleso is available
         if (sel.options.length === 0) {
             const opt = document.createElement('option');
             opt.value = 'ProKoleso';
@@ -40,11 +40,37 @@ function _populateNetworkSelects() {
     });
 }
 
+function toggleSection(btn) {
+    const card = btn.closest('.onec-accordion');
+    if (!card) return;
+    const body = card.querySelector('.onec-section-body');
+    const chevron = card.querySelector('.onec-chevron');
+    const isOpen = card.dataset.open === 'true';
+
+    if (isOpen) {
+        // Collapse
+        body.style.display = 'none';
+        chevron.classList.add('rotate-[-90deg]');
+        card.dataset.open = 'false';
+    } else {
+        // Expand
+        body.style.display = '';
+        chevron.classList.remove('rotate-[-90deg]');
+        card.dataset.open = 'true';
+
+        // Load pickup data on first expand
+        if (body.querySelector('#onecPickupContainer') && !_pickupLoaded) {
+            _pickupLoaded = true;
+            loadPickupPoints();
+        }
+    }
+}
+
 async function loadOnecData() {
+    _pickupLoaded = false;
     await _loadTenants();
     _populateNetworkSelects();
     await loadStatus();
-    await loadPickupPoints();
 }
 
 async function loadStatus() {
@@ -177,8 +203,6 @@ async function refreshPickupFromOnec() {
     const container = document.getElementById('onecPickupContainer');
     if (container) container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
 
-    // Force a live fetch by deleting cache first — but we don't have admin delete,
-    // so just re-fetch (the endpoint falls back to live if cache is empty)
     try {
         const params = new URLSearchParams({ network });
         if (city) params.set('city', city);
@@ -222,7 +246,6 @@ async function lookupStock() {
             [t('onec.year'), stock.year || stock.Year || '—'],
         ];
 
-        // Show all other fields from the stock object
         const knownKeys = new Set(['price', 'quantity', 'qty', 'country', 'Country', 'year', 'Year']);
         for (const [key, val] of Object.entries(stock)) {
             if (!knownKeys.has(key) && val != null && val !== '') {
@@ -251,5 +274,6 @@ export function init() {
         loadPickupPoints,
         refreshPickupFromOnec,
         lookupStock,
+        toggleSection,
     };
 }
