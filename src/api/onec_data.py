@@ -86,6 +86,9 @@ async def onec_status() -> dict[str, Any]:
     # Cache info
     if redis:
         for network in ("ProKoleso", "Tshina"):
+            pickup_info: dict[str, Any] = {"ttl_seconds": None, "cache_age_seconds": None, "count": 0}
+            stock_info: dict[str, Any] = {"ttl_seconds": None, "count": 0}
+
             # Pickup points cache
             cache_key = f"onec:points:{network}"
             try:
@@ -96,13 +99,14 @@ async def onec_status() -> dict[str, Any]:
                     if raw:
                         data = json.loads(raw if isinstance(raw, str) else raw.decode())
                         count = len(data) if isinstance(data, list) else 0
-                    result["pickup_cache"][network] = {
+                    pickup_info = {
                         "ttl_seconds": ttl,
                         "cache_age_seconds": max(0, 3600 - ttl),
                         "count": count,
                     }
             except Exception:
                 pass
+            result["pickup_cache"][network] = pickup_info
 
             # Stock cache
             stock_key = f"onec:stock:{network}"
@@ -112,12 +116,13 @@ async def onec_status() -> dict[str, Any]:
                 if stock_type_str == "hash":
                     count = await redis.hlen(stock_key)
                     ttl = await redis.ttl(stock_key)
-                    result["stock_cache"][network] = {
+                    stock_info = {
                         "ttl_seconds": ttl if ttl and ttl > 0 else None,
                         "count": count,
                     }
             except Exception:
                 pass
+            result["stock_cache"][network] = stock_info
 
     # SOAP / REST / AI-orders info (from system settings + Redis)
     try:
