@@ -5,6 +5,7 @@ Manages conversation flow, tool routing, and context window.
 
 from __future__ import annotations
 
+import contextlib
 import datetime
 import logging
 import time
@@ -35,6 +36,11 @@ class ToolRouter:
 
     def __init__(self) -> None:
         self._handlers: dict[str, Any] = {}
+        self._on_execute: Any = None  # optional async callback(name, args, result, duration_ms, success)
+
+    def set_execute_hook(self, callback: Any) -> None:
+        """Set an async callback invoked after each tool execution."""
+        self._on_execute = callback
 
     def register(self, name: str, handler: Any) -> None:
         """Register a handler for a tool name."""
@@ -56,10 +62,16 @@ class ToolRouter:
                 name,
                 duration_ms,
             )
+            if self._on_execute is not None:
+                with contextlib.suppress(Exception):
+                    await self._on_execute(name, args, result, duration_ms, True)
             return result
         except Exception as exc:
             duration_ms = int((time.monotonic() - start) * 1000)
             logger.exception("Tool %s failed after %dms", name, duration_ms)
+            if self._on_execute is not None:
+                with contextlib.suppress(Exception):
+                    await self._on_execute(name, args, {"error": str(exc)}, duration_ms, False)
             return {"error": str(exc)}
 
 

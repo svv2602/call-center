@@ -154,6 +154,7 @@ class CallPipeline:
         streaming_loop: StreamingAgentLoop | None = None,
         barge_in_event: asyncio.Event | None = None,
         agent_name: str | None = None,
+        call_logger: Any = None,
     ) -> None:
         self._conn = conn
         self._stt = stt
@@ -165,10 +166,36 @@ class CallPipeline:
         self._pattern_search = pattern_search
         self._streaming_loop = streaming_loop
         self._agent_name = agent_name
+        self._call_logger = call_logger
+        self._turn_counter = 0
         self._llm_history: list[dict[str, Any]] = []  # persistent LLM context for streaming path
         self._speaking = False
         self._barge_in_event = barge_in_event or asyncio.Event()
         self._final_transcript_queue: asyncio.Queue[Transcript | None] = asyncio.Queue()
+
+    async def _log_turn(
+        self,
+        speaker: str,
+        content: str,
+        stt_confidence: float | None = None,
+        llm_latency_ms: int | None = None,
+    ) -> None:
+        """Log a turn to the database (fire-and-forget)."""
+        if self._call_logger is None:
+            return
+        turn_number = self._turn_counter
+        self._turn_counter += 1
+        try:
+            await self._call_logger.log_turn(
+                call_id=self._session.channel_uuid,
+                turn_number=turn_number,
+                speaker=speaker,
+                content=content,
+                stt_confidence=stt_confidence,
+                llm_latency_ms=llm_latency_ms,
+            )
+        except Exception:
+            logger.warning("log_turn failed for call %s", self._session.channel_uuid)
 
     async def run(self) -> None:
         """Run the full call pipeline until hangup or transfer."""
@@ -219,6 +246,7 @@ class CallPipeline:
         self._session.transition_to(CallState.GREETING)
         await self._speak(greeting)
         self._session.add_assistant_turn(greeting)
+        await self._log_turn("bot", greeting)
         # Seed LLM history so the model knows the greeting was already spoken
         self._llm_history.append({"role": "assistant", "content": greeting})
 
@@ -279,6 +307,7 @@ class CallPipeline:
                     if farewell is None:
                         farewell = self._templates.get("farewell", FAREWELL_TEXT)
                     self._session.add_assistant_turn(farewell)
+                    await self._log_turn("bot", farewell)
                     await self._speak(farewell)
                     break
                 else:
@@ -318,6 +347,7 @@ class CallPipeline:
                     stt_confidence=transcript.confidence,
                     detected_language=transcript.language,
                 )
+                await self._log_turn("customer", transcript.text, stt_confidence=transcript.confidence)
                 self._session.transition_to(CallState.SPEAKING)
                 start = time.monotonic()
                 try:
@@ -343,6 +373,7 @@ class CallPipeline:
 
                 if result is not None and result.spoken_text:
                     self._session.add_assistant_turn(result.spoken_text)
+                    await self._log_turn("bot", result.spoken_text, llm_latency_ms=llm_latency_ms)
                     logger.info(
                         "Streaming turn completed: call=%s, user='%s', agent='%s', "
                         "tools=%d, llm=%dms",
@@ -356,6 +387,7 @@ class CallPipeline:
                     logger.warning("Empty streaming response: call=%s", self._session.channel_uuid)
                     fallback = self._templates.get("error", ERROR_TEXT)
                     self._session.add_assistant_turn(fallback)
+                    await self._log_turn("bot", fallback)
                     await self._speak(fallback)
             else:
                 # BLOCKING PATH — delay add_user_turn so process_message
@@ -391,6 +423,7 @@ class CallPipeline:
                     stt_confidence=transcript.confidence,
                     detected_language=transcript.language,
                 )
+                await self._log_turn("customer", transcript.text, stt_confidence=transcript.confidence)
 
                 logger.info(
                     "Turn completed: call=%s, user='%s', agent='%s', llm=%dms",
@@ -402,12 +435,14 @@ class CallPipeline:
 
                 if response_text:
                     self._session.add_assistant_turn(response_text)
+                    await self._log_turn("bot", response_text, llm_latency_ms=llm_latency_ms)
                     await self._speak_streaming(response_text)
                 else:
                     # Never leave the caller in silence — speak an error fallback
                     logger.warning("Empty agent response: call=%s", self._session.channel_uuid)
                     fallback = self._templates.get("error", ERROR_TEXT)
                     self._session.add_assistant_turn(fallback)
+                    await self._log_turn("bot", fallback)
                     await self._speak(fallback)
 
             # Check if transfer was triggered

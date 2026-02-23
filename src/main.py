@@ -7,6 +7,7 @@ import logging
 import os
 import signal
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -200,6 +201,7 @@ _tts_engine: GoogleTTSEngine | None = None
 _onec_client: OneCClient | None = None
 _embedding_task: asyncio.Task | None = None  # type: ignore[type-arg]
 _db_engine: Any = None
+_call_logger: Any = None  # CallLogger for persisting calls to PostgreSQL
 _llm_router: Any = None  # LLMRouter when FF_LLM_ROUTING_ENABLED=true
 _asyncpg_pool: Any = None  # asyncpg pool for PatternSearch (pgvector)
 _knowledge_search: Any = None  # KnowledgeSearch (pgvector) for search_knowledge_base tool
@@ -521,6 +523,20 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     logger.info("Call started: %s", conn.channel_uuid)
     await publish_event("call:started", {"call_id": str(conn.channel_uuid)})
 
+    # Persist call start to PostgreSQL
+    if _call_logger is not None:
+        try:
+            await _call_logger.log_call_start(
+                call_id=conn.channel_uuid,
+                caller_id=session.caller_id,
+                customer_id=None,
+                started_at=datetime.now(UTC),
+                prompt_version="default",
+                tenant_id=session.tenant_id,
+            )
+        except Exception:
+            logger.warning("log_call_start failed", exc_info=True)
+
     _embedding_gen = None
     try:
         # Per-call STT engine (each call gets its own streaming session)
@@ -642,6 +658,31 @@ async def handle_call(conn: AudioSocketConnection) -> None:
 
         # Per-call tool router, PII vault, and LLM agent
         router = _build_tool_router(session, store_client=tenant_store_client)
+
+        # Wire tool call logging into the router
+        if _call_logger is not None:
+            _tool_turn_counter = [0]  # mutable counter for tool turn tracking
+
+            async def _on_tool_execute(
+                name: str,
+                args: dict[str, Any],
+                result: Any,
+                duration_ms: int,
+                success: bool,
+            ) -> None:
+                _tool_turn_counter[0] += 1
+                await _call_logger.log_tool_call(
+                    call_id=conn.channel_uuid,
+                    turn_number=_tool_turn_counter[0],
+                    tool_name=name,
+                    tool_args=args if isinstance(args, dict) else {},
+                    tool_result=result if isinstance(result, dict) else {"result": str(result)},
+                    duration_ms=duration_ms,
+                    success=success,
+                )
+
+            router.set_execute_hook(_on_tool_execute)
+
         vault = PIIVault()
         agent = LLMAgent(
             api_key=settings.anthropic.api_key,
@@ -706,6 +747,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             streaming_loop=streaming_loop,
             barge_in_event=barge_in_event,
             agent_name=tenant.get("agent_name") if tenant else None,
+            call_logger=_call_logger,
         )
         await pipeline.run()
 
@@ -745,6 +787,20 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             "duration_seconds": session.duration_seconds,
         },
     )
+
+    # Persist call end to PostgreSQL
+    if _call_logger is not None:
+        try:
+            await _call_logger.log_call_end(
+                call_id=conn.channel_uuid,
+                ended_at=datetime.now(UTC),
+                duration_seconds=session.duration_seconds,
+                scenario=session.scenario,
+                transferred=session.transferred,
+                transfer_reason=session.transfer_reason if session.transferred else None,
+            )
+        except Exception:
+            logger.warning("log_call_end failed", exc_info=True)
 
     # Dispatch async quality evaluation (non-blocking, Celery task)
     try:
@@ -1057,6 +1113,17 @@ async def main() -> None:
     else:
         logger.info("1C integration not configured (ONEC_USERNAME empty)")
 
+    # Initialize CallLogger for persisting real calls to PostgreSQL
+    global _call_logger
+    try:
+        from src.logging.call_logger import CallLogger
+
+        _call_logger = CallLogger(database_url=settings.database.url, redis=_redis)
+        logger.info("CallLogger initialized")
+    except Exception:
+        logger.warning("CallLogger init failed — calls will not be persisted", exc_info=True)
+        _call_logger = None
+
     # Initialize asyncpg pool for PatternSearch (pgvector direct queries)
     if settings.openai.api_key and _db_engine is not None:
         try:
@@ -1167,6 +1234,10 @@ async def main() -> None:
     if _asyncpg_pool is not None:
         await _asyncpg_pool.close()
         logger.info("asyncpg pool closed")
+
+    if _call_logger is not None:
+        await _call_logger.close()
+        logger.info("CallLogger closed")
 
     if _db_engine is not None:
         await _db_engine.dispose()
