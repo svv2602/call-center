@@ -109,6 +109,21 @@ Key entry points: `doc/README.md` (navigation), `doc/development/00-overview.md`
 
 Ядро i18n: `admin-ui/src/i18n.js` (`t()`, `initLang()`, `toggleLang()`, `translateStaticDOM()`, `getLocale()`).
 
+## Admin UI — Help Content (обязательно при изменениях UI)
+
+При добавлении нового функционала или изменении существующего в Admin UI **обязательно** обновить справку для пользователей:
+
+1. **Новая страница** — добавить запись в `admin-ui/src/help-content.js` (реестр `HELP_PAGES`) с `titleKey`, `overviewKey`, `sections[]`, `tipsKey`
+2. **Новая функция на существующей странице** — добавить секцию в соответствующий блок `HELP_PAGES.<page>.sections[]`
+3. **Тексты справки** — добавить i18n-ключи `help.<page>.*` в оба словаря: `admin-ui/src/translations/ru.js` и `admin-ui/src/translations/en.js`
+4. **Формат секций** — каждая секция содержит `titleKey` + `contentKey`; для пошаговых инструкций добавлять пару `steps` + `stepsContent`
+
+Файлы справочной системы:
+- `admin-ui/src/help-content.js` — реестр секций (i18n-ключи, не сырой текст)
+- `admin-ui/src/translations/ru.js` — русские тексты (`help.*` ключи)
+- `admin-ui/src/translations/en.js` — английские тексты (`help.*` ключи)
+- `admin-ui/src/help-drawer.js` — компонент отрисовки (обычно не меняется)
+
 ## Key Design Decisions
 
 - Audio is **never stored** — streaming STT only, transcriptions retained 90 days
