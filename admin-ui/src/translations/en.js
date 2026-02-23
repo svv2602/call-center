@@ -996,6 +996,8 @@ export default {
     'sandbox.generateGuidance': '✦ Generate with AI',
     'sandbox.generatingGuidance': 'Generating guidance...',
     'sandbox.generateGuidanceFailed': 'Failed to generate: {error}',
+    'sandbox.editPattern': 'Edit pattern',
+    'sandbox.patternSaved': 'Pattern saved',
     'sandbox.titleRequired': 'Enter a conversation title',
     'sandbox.ratingCommentPlaceholder': 'Comment (Enter to save)',
     'sandbox.convInfo': 'Conversation details',

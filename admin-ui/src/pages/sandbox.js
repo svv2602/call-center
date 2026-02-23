@@ -1257,6 +1257,7 @@ async function loadPatterns() {
                         <div class="relative inline-block">
                             <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
                             <div class="hidden absolute right-0 z-20 mt-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="this.closest('.relative').querySelector('.hidden')||this.parentElement.classList.add('hidden');window._pages.sandbox.showEditPatternModal('${item.id}')">${t('common.edit')}</button>
                                 <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="this.closest('.relative').querySelector('.hidden')||this.parentElement.classList.add('hidden');window._pages.sandbox.togglePatternActive('${item.id}', ${item.is_active})">${toggleLabel}</button>
                                 <button class="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer" onclick="this.closest('.relative').querySelector('.hidden')||this.parentElement.classList.add('hidden');window._pages.sandbox.deletePattern('${item.id}')">${t('common.delete')}</button>
                             </div>
@@ -1283,6 +1284,40 @@ async function loadPatterns() {
             </tr></thead><tbody>${rows}</tbody></table>`;
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('sandbox.loadFailed', { error: escapeHtml(e.message) })}</div>`;
+    }
+}
+
+async function showEditPatternModal(patternId) {
+    try {
+        const data = await api(`/admin/sandbox/patterns/${patternId}`);
+        const item = data.item;
+        document.getElementById('editPatternId').value = patternId;
+        document.getElementById('editPatternGuidance').value = item.guidance_note || '';
+        document.getElementById('editPatternTags').value = (item.tags || []).join(', ');
+        document.getElementById('sandboxEditPatternModal').classList.add('show');
+    } catch (e) {
+        showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
+    }
+}
+
+async function savePattern() {
+    const patternId = document.getElementById('editPatternId').value;
+    const guidanceNote = document.getElementById('editPatternGuidance').value.trim();
+    if (!guidanceNote) { showToast(t('sandbox.guidanceRequired'), 'error'); return; }
+
+    const tagsRaw = document.getElementById('editPatternTags').value.trim();
+    const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
+
+    try {
+        await api(`/admin/sandbox/patterns/${patternId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ guidance_note: guidanceNote, tags }),
+        });
+        closeModal('sandboxEditPatternModal');
+        showToast(t('sandbox.patternSaved'));
+        loadPatterns();
+    } catch (e) {
+        showToast(t('sandbox.loadFailed', { error: e.message }), 'error');
     }
 }
 
@@ -1922,6 +1957,8 @@ window._pages.sandbox = {
     generateGuidance,
     submitExport,
     loadPatterns,
+    showEditPatternModal,
+    savePattern,
     togglePatternActive,
     deletePattern,
     testSearch,

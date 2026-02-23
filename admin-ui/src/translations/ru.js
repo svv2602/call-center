@@ -996,6 +996,8 @@ export default {
     'sandbox.generateGuidance': '✦ Сгенерировать ИИ',
     'sandbox.generatingGuidance': 'Генерация инструкции...',
     'sandbox.generateGuidanceFailed': 'Не удалось сгенерировать: {error}',
+    'sandbox.editPattern': 'Редактирование паттерна',
+    'sandbox.patternSaved': 'Паттерн сохранён',
     'sandbox.titleRequired': 'Введите название диалога',
     'sandbox.ratingCommentPlaceholder': 'Комментарий (Enter для сохранения)',
     'sandbox.convInfo': 'Параметры диалога',
