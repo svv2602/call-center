@@ -83,8 +83,15 @@ class StoreClient:
         self._stock_cache_ttl = stock_cache_ttl
 
     async def open(self) -> None:
-        """Open the HTTP session."""
+        """Open the HTTP session with connection pooling."""
+        connector = aiohttp.TCPConnector(
+            limit=20,
+            limit_per_host=10,
+            ttl_dns_cache=300,
+            enable_cleanup_closed=True,
+        )
         self._session = aiohttp.ClientSession(
+            connector=connector,
             timeout=self._timeout,
             headers={
                 "Authorization": f"Bearer {self._api_key}",

@@ -12,9 +12,11 @@ class TestCompressToolResult:
         assert compress_tool_result("search_tires", "plain string") == "plain string"
         assert compress_tool_result("search_tires", 42) == "42"
 
-    def test_unknown_tool_returns_str(self) -> None:
+    def test_unknown_tool_returns_compact_json(self) -> None:
         data = {"foo": "bar", "extra": 123}
-        assert compress_tool_result("transfer_to_operator", data) == str(data)
+        result = compress_tool_result("transfer_to_operator", data)
+        assert '"foo":"bar"' in result
+        assert '"extra":123' in result
 
     def test_vehicle_sizes_strips_years_when_long(self) -> None:
         data = {
@@ -262,7 +264,7 @@ class TestCompressToolResult:
             "updated_at": "2026-02-22T10:00:00",
         }
         result = compress_tool_result("check_availability", data)
-        assert "True" in result
+        assert "true" in result
         assert "3200" in result
         assert "stock_quantity" in result
         # Warehouses trimmed to first 3
@@ -287,4 +289,6 @@ class TestCompressToolResult:
 
     def test_book_fitting_unchanged(self) -> None:
         data = {"booking_id": "b-1", "status": "confirmed"}
-        assert compress_tool_result("book_fitting", data) == str(data)
+        result = compress_tool_result("book_fitting", data)
+        assert '"booking_id":"b-1"' in result
+        assert '"status":"confirmed"' in result

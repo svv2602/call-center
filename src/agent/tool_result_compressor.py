@@ -6,7 +6,13 @@ reducing input token count by 20-30%.
 
 from __future__ import annotations
 
+import json
 from typing import Any
+
+
+def _compact(obj: Any) -> str:
+    """Compact JSON serialization (no spaces, no ASCII escaping)."""
+    return json.dumps(obj, ensure_ascii=False, separators=(",", ":"), default=str)
 
 
 def _compress_vehicle_sizes(result: dict[str, Any]) -> str:
@@ -19,13 +25,13 @@ def _compress_vehicle_sizes(result: dict[str, Any]) -> str:
     years = result.get("years")
     if years is not None and len(years) <= 5:
         out["years"] = years
-    return str(out)
+    return _compact(out)
 
 
 def _compress_order_status(result: dict[str, Any]) -> str:
     """Strip id and items_summary from each order."""
     if "orders" not in result:
-        return str(result)
+        return _compact(result)
     orders = []
     for o in result["orders"]:
         orders.append(
@@ -37,7 +43,7 @@ def _compress_order_status(result: dict[str, Any]) -> str:
         )
     out = {k: v for k, v in result.items() if k != "orders"}
     out["orders"] = orders
-    return str(out)
+    return _compact(out)
 
 
 def _compress_order_draft(result: dict[str, Any]) -> str:
@@ -51,38 +57,38 @@ def _compress_order_draft(result: dict[str, Any]) -> str:
             {k: v for k, v in item.items() if k in ("name", "quantity", "price", "total")}
             for item in result["items"]
         ]
-    return str(out)
+    return _compact(out)
 
 
 def _compress_fitting_stations(result: dict[str, Any]) -> str:
     """Keep id, name, address, working_hours per station."""
     if "stations" not in result:
-        return str(result)
+        return _compact(result)
     stations = [
         {k: v for k, v in s.items() if k in ("id", "name", "address", "working_hours")}
         for s in result["stations"]
     ]
     out = {k: v for k, v in result.items() if k != "stations"}
     out["stations"] = stations
-    return str(out)
+    return _compact(out)
 
 
 def _compress_pickup_points(result: dict[str, Any]) -> str:
     """Keep id, address, city per point."""
     if "points" not in result:
-        return str(result)
+        return _compact(result)
     points = [
         {k: v for k, v in p.items() if k in ("id", "address", "city")} for p in result["points"]
     ]
     out = {k: v for k, v in result.items() if k != "points"}
     out["points"] = points
-    return str(out)
+    return _compact(out)
 
 
 def _compress_knowledge(result: dict[str, Any]) -> str:
     """Keep title + truncated content per article."""
     if "articles" not in result:
-        return str(result)
+        return _compact(result)
     articles = []
     for a in result["articles"]:
         entry: dict[str, Any] = {}
@@ -95,7 +101,7 @@ def _compress_knowledge(result: dict[str, Any]) -> str:
         articles.append(entry)
     out = {k: v for k, v in result.items() if k != "articles"}
     out["articles"] = articles
-    return str(out)
+    return _compact(out)
 
 
 def _compress_search_tires(result: dict[str, Any]) -> str:
@@ -108,7 +114,7 @@ def _compress_search_tires(result: dict[str, Any]) -> str:
     compressed = [{k: v for k, v in item.items() if k in essential_keys} for item in items[:3]]
     out: dict[str, Any] = {"total": result.get("total", len(items))}
     out["items"] = compressed
-    return str(out)
+    return _compact(out)
 
 
 def _compress_check_availability(result: dict[str, Any]) -> str:
@@ -118,7 +124,7 @@ def _compress_check_availability(result: dict[str, Any]) -> str:
     warehouses = result.get("warehouses")
     if warehouses:
         out["warehouses"] = warehouses[:3]
-    return str(out)
+    return _compact(out)
 
 
 def _compress_fitting_slots(result: dict[str, Any]) -> str:
@@ -127,7 +133,7 @@ def _compress_fitting_slots(result: dict[str, Any]) -> str:
     compressed = [{k: v for k, v in s.items() if k in ("date", "time", "available")} for s in slots]
     out = {k: v for k, v in result.items() if k != "slots"}
     out["slots"] = compressed
-    return str(out)
+    return _compact(out)
 
 
 _COMPRESSORS: dict[str, Any] = {
@@ -156,4 +162,4 @@ def compress_tool_result(tool_name: str, result: Any) -> str:
     if compressor is not None:
         return compressor(result)
 
-    return str(result)
+    return _compact(result)
