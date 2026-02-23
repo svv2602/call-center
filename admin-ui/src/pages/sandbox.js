@@ -1292,6 +1292,7 @@ async function showEditPatternModal(patternId) {
         const data = await api(`/admin/sandbox/patterns/${patternId}`);
         const item = data.item;
         document.getElementById('editPatternId').value = patternId;
+        document.getElementById('editPatternIntent').value = item.intent_label || '';
         document.getElementById('editPatternGuidance').value = item.guidance_note || '';
         document.getElementById('editPatternTags').value = (item.tags || []).join(', ');
         document.getElementById('sandboxEditPatternModal').classList.add('show');
@@ -1302,16 +1303,18 @@ async function showEditPatternModal(patternId) {
 
 async function savePattern() {
     const patternId = document.getElementById('editPatternId').value;
+    const intentLabel = document.getElementById('editPatternIntent').value.trim();
+    if (!intentLabel) { showToast(t('sandbox.intentRequired'), 'error'); return; }
     const guidanceNote = document.getElementById('editPatternGuidance').value.trim();
     if (!guidanceNote) { showToast(t('sandbox.guidanceRequired'), 'error'); return; }
 
     const tagsRaw = document.getElementById('editPatternTags').value.trim();
-    const tags = tagsRaw ? tagsRaw.split(',').map(t => t.trim()).filter(Boolean) : [];
+    const tags = tagsRaw ? tagsRaw.split(',').map(s => s.trim()).filter(Boolean) : [];
 
     try {
         await api(`/admin/sandbox/patterns/${patternId}`, {
             method: 'PATCH',
-            body: JSON.stringify({ guidance_note: guidanceNote, tags }),
+            body: JSON.stringify({ intent_label: intentLabel, guidance_note: guidanceNote, tags }),
         });
         closeModal('sandboxEditPatternModal');
         showToast(t('sandbox.patternSaved'));

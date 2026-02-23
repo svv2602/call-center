@@ -95,6 +95,7 @@ class ExportPatternRequest(BaseModel):
 
 
 class PatternUpdate(BaseModel):
+    intent_label: str | None = None
     guidance_note: str | None = None
     is_active: bool | None = None
     tags: list[str] | None = None
@@ -1877,6 +1878,9 @@ async def update_pattern(
     updates: list[str] = []
     params: dict[str, Any] = {"id": str(pattern_id)}
 
+    if request.intent_label is not None:
+        updates.append("intent_label = :intent_label")
+        params["intent_label"] = request.intent_label
     if request.guidance_note is not None:
         updates.append("guidance_note = :guidance_note")
         params["guidance_note"] = request.guidance_note

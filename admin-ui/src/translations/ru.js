@@ -998,6 +998,7 @@ export default {
     'sandbox.generateGuidanceFailed': 'Не удалось сгенерировать: {error}',
     'sandbox.editPattern': 'Редактирование паттерна',
     'sandbox.patternSaved': 'Паттерн сохранён',
+    'sandbox.intentHint': 'Один или несколько через запятую',
     'sandbox.titleRequired': 'Введите название диалога',
     'sandbox.ratingCommentPlaceholder': 'Комментарий (Enter для сохранения)',
     'sandbox.convInfo': 'Параметры диалога',
