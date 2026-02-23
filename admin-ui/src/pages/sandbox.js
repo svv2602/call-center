@@ -1616,6 +1616,8 @@ function showImportCallModal() {
     document.getElementById('importCallDateTo').value = '';
     document.getElementById('importCallsTableContainer').innerHTML = '';
     document.getElementById('importCallsPagination').innerHTML = '';
+    document.getElementById('importCallTranscript').innerHTML =
+        `<p class="text-neutral-400 dark:text-neutral-500 text-center py-8">${t('sandbox.importCallSelectToPreview')}</p>`;
     document.getElementById('sandboxImportCallModal').classList.add('show');
     loadImportCalls(0);
 }
@@ -1653,13 +1655,13 @@ async function loadImportCalls(offset) {
                 <th class="${tw.th}">${t('calls.quality')}</th>
                 <th class="${tw.th}"></th>
             </tr></thead>
-            <tbody>${calls.map(c => `<tr class="${tw.trHover}">
+            <tbody>${calls.map(c => `<tr class="${tw.trHover} cursor-pointer" data-call-id="${c.id}" onclick="window._pages.sandbox.previewCall('${c.id}', this)">
                 <td class="${tw.td}">${formatDate(c.started_at || c.created_at)}</td>
                 <td class="${tw.td}">${escapeHtml(c.caller_number || '-')}</td>
                 <td class="${tw.td}">${escapeHtml(c.scenario || '-')}</td>
                 <td class="${tw.td}">${c.duration_seconds || 0}s</td>
                 <td class="${tw.td}">${qualityBadge(c.quality_score)}</td>
-                <td class="${tw.td}"><button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.importCallById('${c.id}', this)">${t('sandbox.importBtn')}</button></td>
+                <td class="${tw.td}"><button class="${tw.btnPrimary} ${tw.btnSm}" onclick="event.stopPropagation(); window._pages.sandbox.importCallById('${c.id}', this)">${t('sandbox.importBtn')}</button></td>
             </tr>`).join('')}</tbody></table>`;
 
         renderPagination(document.getElementById('importCallsPagination'), {
@@ -1668,6 +1670,49 @@ async function loadImportCalls(offset) {
         });
     } catch (e) {
         container.innerHTML = `<p class="text-sm text-red-500 py-4 text-center">${escapeHtml(e.message)}</p>`;
+    }
+}
+
+async function previewCall(callId, row) {
+    // Highlight active row
+    const table = row.closest('table');
+    if (table) table.querySelectorAll('tr.ring-2').forEach(r => {
+        r.classList.remove('ring-2', 'ring-blue-500', 'bg-blue-50', 'dark:bg-blue-950/20');
+    });
+    row.classList.add('ring-2', 'ring-blue-500', 'bg-blue-50', 'dark:bg-blue-950/20');
+
+    const panel = document.getElementById('importCallTranscript');
+    panel.innerHTML = `<div class="flex justify-center py-8"><div class="spinner"></div></div>`;
+
+    try {
+        const data = await api(`/analytics/calls/${callId}`);
+        const c = data.call;
+        const turns = data.turns || [];
+
+        // Metadata header
+        let html = `<div class="grid grid-cols-2 gap-2 mb-3 p-2 bg-neutral-50 dark:bg-neutral-800 rounded-md text-xs">
+            <div><span class="text-neutral-500 dark:text-neutral-400">${t('calls.caller')}:</span> ${escapeHtml(c.caller_id || c.caller_number || '-')}</div>
+            <div><span class="text-neutral-500 dark:text-neutral-400">${t('calls.scenario')}:</span> ${escapeHtml(c.scenario || '-')}</div>
+            <div><span class="text-neutral-500 dark:text-neutral-400">${t('calls.quality')}:</span> ${qualityBadge(c.quality_score)}</div>
+            <div><span class="text-neutral-500 dark:text-neutral-400">${t('calls.duration')}:</span> ${c.duration_seconds || 0}s</div>
+        </div>`;
+
+        // Turns
+        if (turns.length === 0) {
+            html += `<p class="text-neutral-400 text-center py-4">${t('calls.noTranscription')}</p>`;
+        } else {
+            turns.forEach(turn => {
+                const isCustomer = turn.speaker === 'customer';
+                html += `<div class="${tw.turnWrap}">
+                    <span class="${isCustomer ? tw.speakerCustomer : tw.speakerBot}">${isCustomer ? t('calls.customer') : t('calls.bot')}</span>
+                    <div class="${tw.turnText}">${escapeHtml(turn.text)}</div>
+                </div>`;
+            });
+        }
+
+        panel.innerHTML = html;
+    } catch (e) {
+        panel.innerHTML = `<p class="text-red-500 text-center py-4">${escapeHtml(e.message)}</p>`;
     }
 }
 
@@ -1760,5 +1805,6 @@ window._pages.sandbox = {
     // Import from call
     showImportCallModal,
     loadImportCalls,
+    previewCall,
     importCallById,
 };

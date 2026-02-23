@@ -1060,6 +1060,8 @@ export default {
     'sandbox.importingCall': 'Импорт...',
     'sandbox.importedCall': 'Звонок импортирован в песочницу',
     'sandbox.importCallFailed': 'Ошибка импорта: {error}',
+    'sandbox.importCallPreview': 'Расшифровка',
+    'sandbox.importCallSelectToPreview': 'Выберите звонок для просмотра',
 
     // Help
     'help.close': 'Закрыть справку',

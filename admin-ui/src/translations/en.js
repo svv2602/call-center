@@ -1060,6 +1060,8 @@ export default {
     'sandbox.importingCall': 'Importing...',
     'sandbox.importedCall': 'Call imported to sandbox',
     'sandbox.importCallFailed': 'Import error: {error}',
+    'sandbox.importCallPreview': 'Transcript',
+    'sandbox.importCallSelectToPreview': 'Select a call to preview',
 
     // Help
     'help.close': 'Close help',

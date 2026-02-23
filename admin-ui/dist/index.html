@@ -13,8 +13,8 @@
             }
         })();
     </script>
-  <script type="module" crossorigin src="/assets/index-CUQRl02_.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-CGPSPgLt.css">
+  <script type="module" crossorigin src="/assets/index-BoVC1m8q.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-DB0j4StW.css">
 </head>
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-50 font-sans antialiased">
     <!-- Toast container -->
@@ -1018,9 +1018,11 @@
 
     <!-- Import Call Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxImportCallModal">
-        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-3xl w-[90%] max-h-[80vh] overflow-y-auto">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxImportCallModal')">&times;</span>
-            <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.importFromCall">Из звонка</h3>
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-6xl w-[95%] max-h-[85vh] overflow-hidden flex flex-col">
+            <div class="flex items-center justify-between mb-4">
+                <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="sandbox.importFromCall">Из звонка</h3>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxImportCallModal')">&times;</span>
+            </div>
             <div class="flex gap-2 mb-3 flex-wrap">
                 <input type="text" id="importCallSearch" data-i18n-placeholder="sandbox.importCallSearchPlaceholder" placeholder="Поиск по номеру..."
                     onkeydown="if(event.key==='Enter')window._pages.sandbox.loadImportCalls(0)"
@@ -1029,8 +1031,20 @@
                 <input type="date" id="importCallDateTo" class="px-2 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <button class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.sandbox.loadImportCalls(0)" data-i18n="common.filter">Фильтр</button>
             </div>
-            <div id="importCallsTableContainer"></div>
-            <div id="importCallsPagination" class="mt-2"></div>
+            <div class="flex gap-4 flex-1 min-h-0">
+                <!-- Left: calls table -->
+                <div class="w-[55%] flex flex-col min-h-0">
+                    <div id="importCallsTableContainer" class="overflow-y-auto flex-1"></div>
+                    <div id="importCallsPagination" class="mt-2 flex-shrink-0"></div>
+                </div>
+                <!-- Right: transcript preview -->
+                <div id="importCallPreviewPanel" class="w-[45%] flex flex-col min-h-0 border-l border-neutral-200 dark:border-neutral-700 pl-4">
+                    <h4 class="text-sm font-semibold text-neutral-700 dark:text-neutral-300 mb-2 flex-shrink-0" data-i18n="sandbox.importCallPreview">Расшифровка</h4>
+                    <div id="importCallTranscript" class="overflow-y-auto flex-1 text-sm">
+                        <p class="text-neutral-400 dark:text-neutral-500 text-center py-8" data-i18n="sandbox.importCallSelectToPreview">Выберите звонок для просмотра</p>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 
