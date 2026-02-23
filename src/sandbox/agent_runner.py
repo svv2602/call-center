@@ -118,7 +118,19 @@ def _register_live_tools(
         router.register("get_fitting_stations", store_client.get_fitting_stations)
         router.register("get_fitting_slots", store_client.get_fitting_slots)
         router.register("book_fitting", store_client.book_fitting)
-        logger.info("Live tools registered: 10 StoreClient tools (network=%s)", network)
+
+        async def _fitting_price(args: dict) -> dict:
+            tire_diameter = args.get("tire_diameter", 0)
+            station_id = args.get("station_id", "")
+            service_type = args.get("service_type", "")
+            return await store_client.get_fitting_price(
+                tire_diameter=tire_diameter,
+                station_id=station_id,
+                service_type=service_type,
+            )
+
+        router.register("get_fitting_price", _fitting_price)
+        logger.info("Live tools registered: 11 StoreClient tools (network=%s)", network)
     else:
         logger.warning("Live tool mode: no StoreClient — Store tools remain mock")
 
@@ -135,9 +147,7 @@ def _register_live_tools(
                         all_points = json.loads(raw if isinstance(raw, str) else raw.decode())
                         if city:
                             all_points = [
-                                p
-                                for p in all_points
-                                if city.lower() in p.get("city", "").lower()
+                                p for p in all_points if city.lower() in p.get("city", "").lower()
                             ]
                         return {"total": len(all_points), "points": all_points[:15]}
                 except Exception:
@@ -161,9 +171,7 @@ def _register_live_tools(
                         cache_key, 3600, json.dumps(all_points, ensure_ascii=False)
                     )
             if city:
-                all_points = [
-                    p for p in all_points if city.lower() in p.get("city", "").lower()
-                ]
+                all_points = [p for p in all_points if city.lower() in p.get("city", "").lower()]
             return {"total": len(all_points), "points": all_points[:15]}
 
         router.register("get_pickup_points", _get_pickup_points)
@@ -206,9 +214,7 @@ def _register_live_tools(
         async def _get_customer_bookings_soap(**kwargs: Any) -> dict[str, Any]:
             phone = kwargs.get("phone", "")
             station_id = kwargs.get("station_id", "")
-            bookings = await soap_client.get_customer_bookings(
-                phone=phone, station_id=station_id
-            )
+            bookings = await soap_client.get_customer_bookings(phone=phone, station_id=station_id)
             return {"total": len(bookings), "bookings": bookings}
 
         router.register("get_fitting_slots", _get_fitting_slots_soap)
@@ -356,7 +362,11 @@ async def create_sandbox_agent(
     # that LLMAgent uses the router instead of the direct Anthropic SDK.
     effective_provider = provider_override
     effective_router = llm_router
-    if effective_provider is None and effective_router is not None and effective_model in effective_router.providers:
+    if (
+        effective_provider is None
+        and effective_router is not None
+        and effective_model in effective_router.providers
+    ):
         effective_provider = effective_model
 
     return LLMAgent(

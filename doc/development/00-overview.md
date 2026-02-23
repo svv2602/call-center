@@ -124,6 +124,7 @@ call_center/
 
 | Tool | Фаза | Описание | Store API endpoint |
 |------|------|----------|--------------------|
+| `get_vehicle_tire_sizes` | 1 (MVP) | Заводские размеры шин для автомобиля по марке/модели/году | 1C API |
 | `search_tires` | 1 (MVP) | Поиск шин по параметрам (авто, размер, бренд, сезон) | `GET /tires/search` |
 | `check_availability` | 1 (MVP) | Проверка наличия конкретного товара | `GET /tires/{id}/availability` |
 | `transfer_to_operator` | 1 (MVP) | Переключение на живого оператора | Asterisk ARI |
@@ -131,11 +132,13 @@ call_center/
 | `create_order_draft` | 2 | Создание черновика заказа | `POST /orders` |
 | `update_order_delivery` | 2 | Указание способа и адреса доставки | `PATCH /orders/{id}/delivery` |
 | `confirm_order` | 2 | Подтверждение и финализация заказа | `POST /orders/{id}/confirm` |
+| `get_pickup_points` | 2 | Список пунктов выдачи (самовывоза) из 1C API, с фильтрацией по городу | 1C REST API |
 | `get_fitting_stations` | 3 | Список точек шиномонтажа | `GET /fitting/stations` |
 | `get_fitting_slots` | 3 | Доступные слоты для записи | `GET /fitting/stations/{id}/slots` |
 | `book_fitting` | 3 | Запись на шиномонтаж | `POST /fitting/bookings` |
 | `cancel_fitting` | 3 | Отмена или перенос записи на шиномонтаж | `DELETE /fitting/bookings/{id}`, `PATCH /fitting/bookings/{id}` |
 | `get_fitting_price` | 3 | Стоимость шиномонтажа | `GET /fitting/prices` |
+| `get_customer_bookings` | 3 | Существующие записи клиента на шиномонтаж по номеру телефона | 1C SOAP API |
 | `search_knowledge_base` | 3 | Поиск по базе знаний (RAG) | `GET /knowledge/search` |
 
 > **Правило:** при упоминании tools в документах используйте только имена из этой таблицы. При добавлении нового tool — сначала добавьте его сюда.
