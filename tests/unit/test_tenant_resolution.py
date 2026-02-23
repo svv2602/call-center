@@ -151,27 +151,20 @@ class TestResolveTenant:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_called_exten_resolves_tenant(self) -> None:
-        """When ARI returns CALLED_EXTEN=7770, tenant with extensions=['7770'] is resolved."""
+    async def test_called_exten_from_redis_resolves_tenant(self) -> None:
+        """When Redis has CALLED_EXTEN=7770, tenant with extensions=['7770'] is resolved."""
         tenant_data = _make_tenant_row(slug="prokoleso", extensions=["7770"])
         engine = _make_mock_engine([tenant_data])
 
-        mock_ari = AsyncMock()
-        # TENANT_SLUG is empty, CALLED_EXTEN returns 7770
-        mock_ari.get_channel_variable = AsyncMock(
-            side_effect=lambda _uuid, var: None if var == "TENANT_SLUG" else "7770"
-        )
-        mock_ari.open = AsyncMock()
-        mock_ari.close = AsyncMock()
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=b"7770")
 
         mock_settings = MagicMock()
-        mock_settings.ari.url = "http://localhost:8088/ari"
-        mock_settings.ari.user = "user"
-        mock_settings.ari.password = "pass"
+        mock_settings.ari.url = ""  # ARI not configured
 
         with (
             patch("src.main.get_settings", return_value=mock_settings),
-            patch("src.core.asterisk_ari.AsteriskARIClient", return_value=mock_ari),
+            patch("src.main._redis", mock_redis),
         ):
             from src.main import _resolve_tenant
 
@@ -180,26 +173,24 @@ class TestResolveTenant:
         assert result is not None
         assert result["slug"] == "prokoleso"
         assert result["extensions"] == ["7770"]
+        # Verify Redis was called with correct key
+        mock_redis.get.assert_called_once_with("call:exten:test-uuid")
 
     @pytest.mark.asyncio
     async def test_no_slug_no_exten_falls_back(self) -> None:
-        """When neither TENANT_SLUG nor CALLED_EXTEN is set, fallback to first active."""
+        """When neither Redis CALLED_EXTEN nor ARI is available, fallback to first active."""
         tenant_data = _make_tenant_row(slug="fallback-tenant")
         engine = _make_mock_engine([tenant_data])
 
-        mock_ari = AsyncMock()
-        mock_ari.get_channel_variable = AsyncMock(return_value=None)
-        mock_ari.open = AsyncMock()
-        mock_ari.close = AsyncMock()
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
 
         mock_settings = MagicMock()
-        mock_settings.ari.url = "http://localhost:8088/ari"
-        mock_settings.ari.user = "user"
-        mock_settings.ari.password = "pass"
+        mock_settings.ari.url = ""  # ARI not configured
 
         with (
             patch("src.main.get_settings", return_value=mock_settings),
-            patch("src.core.asterisk_ari.AsteriskARIClient", return_value=mock_ari),
+            patch("src.main._redis", mock_redis),
         ):
             from src.main import _resolve_tenant
 

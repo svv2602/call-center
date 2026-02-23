@@ -332,17 +332,23 @@ async def readiness_check() -> dict[str, object]:
 
 @app.post("/internal/caller-id")
 async def store_caller_id(data: dict[str, str]) -> dict[str, str]:
-    """Store CallerID in Redis for a call UUID.
+    """Store CallerID and called extension in Redis for a call UUID.
 
     Called by Asterisk dialplan before AudioSocket:
-      System(curl -s -X POST http://...:8080/internal/caller-id -H 'Content-Type: application/json' -d '{"uuid":"${CALL_UUID}","number":"${CALLERID(num)}"}')
+      System(curl -s -X POST http://...:8080/internal/caller-id
+        -H 'Content-Type: application/json'
+        -d '{"uuid":"${CALL_UUID}","number":"${CALLERID(num)}","exten":"${CALLED_EXTEN}"}')
     """
     call_uuid = data.get("uuid", "").strip()
     number = data.get("number", "").strip()
-    if not call_uuid or not number:
+    exten = data.get("exten", "").strip()
+    if not call_uuid:
         return {"status": "ignored"}
     if _redis is not None:
-        await _redis.set(f"call:caller:{call_uuid}", number, ex=120)
+        if number:
+            await _redis.set(f"call:caller:{call_uuid}", number, ex=120)
+        if exten:
+            await _redis.set(f"call:exten:{call_uuid}", exten, ex=120)
     return {"status": "ok"}
 
 
@@ -503,26 +509,41 @@ async def _resolve_tenant(channel_uuid: str, db_engine: Any) -> dict[str, Any] |
         "enabled_tools, prompt_suffix, config, is_active, extensions"
     )
 
-    # Try ARI (best-effort, may not be configured)
-    settings = get_settings()
-    if settings.ari.url:
+    # 1. Primary: read CALLED_EXTEN from Redis (set by Asterisk curl before AudioSocket)
+    if _redis is not None:
         try:
-            from src.core.asterisk_ari import AsteriskARIClient
-
-            ari = AsteriskARIClient(
-                url=settings.ari.url,
-                user=settings.ari.user,
-                password=settings.ari.password,
-            )
-            await ari.open()
-            try:
-                slug = await ari.get_channel_variable(channel_uuid, "TENANT_SLUG")
-                if not slug:
-                    called_exten = await ari.get_channel_variable(channel_uuid, "CALLED_EXTEN")
-            finally:
-                await ari.close()
+            raw = await _redis.get(f"call:exten:{channel_uuid}")
+            if raw:
+                called_exten = raw.decode() if isinstance(raw, bytes) else str(raw)
+                called_exten = called_exten.strip() or None
+                if called_exten:
+                    logger.info("CALLED_EXTEN from Redis: %s for call %s", called_exten, channel_uuid)
         except Exception:
-            logger.debug("ARI tenant lookup failed", exc_info=True)
+            logger.debug("Redis CALLED_EXTEN lookup failed", exc_info=True)
+
+    # 2. Fallback: try ARI channel variables (best-effort)
+    if not called_exten:
+        settings = get_settings()
+        if settings.ari.url:
+            try:
+                from src.core.asterisk_ari import AsteriskARIClient
+
+                ari = AsteriskARIClient(
+                    url=settings.ari.url,
+                    user=settings.ari.user,
+                    password=settings.ari.password,
+                )
+                await ari.open()
+                try:
+                    slug = await ari.get_channel_variable(channel_uuid, "TENANT_SLUG")
+                    if not slug:
+                        called_exten = await ari.get_channel_variable(
+                            channel_uuid, "CALLED_EXTEN"
+                        )
+                finally:
+                    await ari.close()
+            except Exception:
+                logger.debug("ARI tenant lookup failed", exc_info=True)
 
     if db_engine is None:
         return None
