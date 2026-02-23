@@ -557,32 +557,56 @@
                     <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="nav.monitoring">Мониторинг</h1>
                     <button onclick="window._app.openHelp('monitoring')" class="w-6 h-6 rounded-full border border-neutral-300 dark:border-neutral-600 text-neutral-400 hover:text-blue-600 hover:border-blue-400 dark:hover:text-blue-400 dark:hover:border-blue-400 text-xs font-bold transition-colors flex items-center justify-center" title="Help">?</button>
                 </div>
-                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
-                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.healthCheck">Проверка здоровья</h3>
-                    <div id="systemInfo"><div class="flex justify-center py-8"><div class="spinner"></div></div></div>
-                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.monitoring.loadSettings()" data-i18n="settings.refresh">Обновить</button>
-                </div>
-                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
-                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.extendedStatus">Расширенный статус</h3>
-                    <div id="extendedStatus"><div class="text-center py-8 text-neutral-400 dark:text-neutral-500 text-sm" data-i18n="settings.clickToLoad">Нажмите для загрузки</div></div>
-                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.monitoring.loadSystemStatus()" data-i18n="settings.loadStatus">Загрузить статус</button>
-                </div>
-                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
-                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.externalTools">Внешние инструменты</h3>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm" id="externalToolsTable">
-                            <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">Grafana</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800"><a data-tool-port="3000" href="#" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline" data-i18n="settings.openGrafana">Открыть Grafana</a></td></tr>
-                            <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">Prometheus</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800"><a data-tool-port="9090" href="#" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline" data-i18n="settings.openPrometheus">Открыть Prometheus</a></td></tr>
-                            <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">Flower (Celery)</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800"><a data-tool-path="/flower/" href="/flower/" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline" data-i18n="settings.openFlower">Открыть Flower</a></td></tr>
-                        </table>
+                <!-- Health check (open) -->
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg mb-4 acc-section" data-open="true">
+                    <button type="button" onclick="window._app.toggleAccordion(this)" class="w-full flex items-center justify-between px-5 py-3.5 text-left cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50 rounded-lg transition-colors">
+                        <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="settings.healthCheck">Проверка здоровья</h3>
+                        <svg class="w-4 h-4 text-neutral-400 transition-transform acc-chevron" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+                    </button>
+                    <div class="acc-body px-5 pb-5">
+                        <div id="systemInfo"><div class="flex justify-center py-8"><div class="spinner"></div></div></div>
+                        <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.monitoring.loadSettings()" data-i18n="settings.refresh">Обновить</button>
                     </div>
                 </div>
-                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
-                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.appInfo">Информация о приложении</h3>
-                    <div class="overflow-x-auto">
-                        <table class="w-full text-sm">
-                            <tr><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300" data-i18n="settings.version">Версия</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">v0.1.0</td></tr>
-                        </table>
+                <!-- Extended status (collapsed) -->
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg mb-4 admin-only acc-section" data-open="false">
+                    <button type="button" onclick="window._app.toggleAccordion(this)" class="w-full flex items-center justify-between px-5 py-3.5 text-left cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50 rounded-lg transition-colors">
+                        <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="settings.extendedStatus">Расширенный статус</h3>
+                        <svg class="w-4 h-4 text-neutral-400 transition-transform acc-chevron rotate-[-90deg]" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+                    </button>
+                    <div class="acc-body px-5 pb-5" style="display:none">
+                        <div id="extendedStatus"><div class="text-center py-8 text-neutral-400 dark:text-neutral-500 text-sm" data-i18n="settings.clickToLoad">Нажмите для загрузки</div></div>
+                        <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.monitoring.loadSystemStatus()" data-i18n="settings.loadStatus">Загрузить статус</button>
+                    </div>
+                </div>
+                <!-- External tools (collapsed) -->
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg mb-4 acc-section" data-open="false">
+                    <button type="button" onclick="window._app.toggleAccordion(this)" class="w-full flex items-center justify-between px-5 py-3.5 text-left cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50 rounded-lg transition-colors">
+                        <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="settings.externalTools">Внешние инструменты</h3>
+                        <svg class="w-4 h-4 text-neutral-400 transition-transform acc-chevron rotate-[-90deg]" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+                    </button>
+                    <div class="acc-body px-5 pb-5" style="display:none">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm" id="externalToolsTable">
+                                <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">Grafana</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800"><a data-tool-port="3000" href="#" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline" data-i18n="settings.openGrafana">Открыть Grafana</a></td></tr>
+                                <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">Prometheus</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800"><a data-tool-port="9090" href="#" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline" data-i18n="settings.openPrometheus">Открыть Prometheus</a></td></tr>
+                                <tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/50 transition-colors"><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">Flower (Celery)</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800"><a data-tool-path="/flower/" href="/flower/" target="_blank" class="text-blue-600 dark:text-blue-400 hover:underline" data-i18n="settings.openFlower">Открыть Flower</a></td></tr>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+                <!-- App info (collapsed) -->
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg mb-4 acc-section" data-open="false">
+                    <button type="button" onclick="window._app.toggleAccordion(this)" class="w-full flex items-center justify-between px-5 py-3.5 text-left cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50 rounded-lg transition-colors">
+                        <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="settings.appInfo">Информация о приложении</h3>
+                        <svg class="w-4 h-4 text-neutral-400 transition-transform acc-chevron rotate-[-90deg]" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+                    </button>
+                    <div class="acc-body px-5 pb-5" style="display:none">
+                        <div class="overflow-x-auto">
+                            <table class="w-full text-sm">
+                                <tr><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300" data-i18n="settings.version">Версия</td><td class="px-3 py-2.5 border-b border-neutral-100 dark:border-neutral-800 text-neutral-700 dark:text-neutral-300">v0.1.0</td></tr>
+                            </table>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -594,17 +618,29 @@
                     <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="nav.configuration">Конфигурация</h1>
                     <button onclick="window._app.openHelp('configuration')" class="w-6 h-6 rounded-full border border-neutral-300 dark:border-neutral-600 text-neutral-400 hover:text-blue-600 hover:border-blue-400 dark:hover:text-blue-400 dark:hover:border-blue-400 text-xs font-bold transition-colors flex items-center justify-center" title="Help">?</button>
                 </div>
-                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
-                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.configuration">Конфигурация</h3>
-                    <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="settings.configDescription">Перезагрузить безопасные параметры конфигурации (качество, фича-флаги, логирование) без перезапуска.</p>
-                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.configuration.reloadConfig()" data-i18n="settings.reloadConfig">Перезагрузить конфиг</button>
+                <!-- Config reload (open) -->
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg mb-4 admin-only acc-section" data-open="true">
+                    <button type="button" onclick="window._app.toggleAccordion(this)" class="w-full flex items-center justify-between px-5 py-3.5 text-left cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50 rounded-lg transition-colors">
+                        <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="settings.configuration">Конфигурация</h3>
+                        <svg class="w-4 h-4 text-neutral-400 transition-transform acc-chevron" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+                    </button>
+                    <div class="acc-body px-5 pb-5">
+                        <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="settings.configDescription">Перезагрузить безопасные параметры конфигурации (качество, фича-флаги, логирование) без перезапуска.</p>
+                        <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.configuration.reloadConfig()" data-i18n="settings.reloadConfig">Перезагрузить конфиг</button>
+                    </div>
                 </div>
-                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4 admin-only">
-                    <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="settings.llmRouting">Маршрутизация LLM</h3>
-                    <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="settings.llmRoutingDesc">Мультипровайдерный роутинг LLM: управление провайдерами, задачами и fallback-цепочками.</p>
-                    <div id="llmProvidersContainer"><div class="text-center py-4 text-neutral-400 dark:text-neutral-500 text-sm" data-i18n="settings.clickToLoad">Нажмите для загрузки</div></div>
-                    <div id="llmTasksContainer" class="mt-4"></div>
-                    <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.configuration.loadLLMConfig()" data-i18n="settings.llmLoadConfig">Загрузить конфигурацию</button>
+                <!-- LLM Routing (open — main content) -->
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg mb-4 admin-only acc-section" data-open="true">
+                    <button type="button" onclick="window._app.toggleAccordion(this)" class="w-full flex items-center justify-between px-5 py-3.5 text-left cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50 rounded-lg transition-colors">
+                        <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="settings.llmRouting">Маршрутизация LLM</h3>
+                        <svg class="w-4 h-4 text-neutral-400 transition-transform acc-chevron" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+                    </button>
+                    <div class="acc-body px-5 pb-5">
+                        <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="settings.llmRoutingDesc">Мультипровайдерный роутинг LLM: управление провайдерами, задачами и fallback-цепочками.</p>
+                        <div id="llmProvidersContainer"><div class="text-center py-4 text-neutral-400 dark:text-neutral-500 text-sm" data-i18n="settings.clickToLoad">Нажмите для загрузки</div></div>
+                        <div id="llmTasksContainer" class="mt-4"></div>
+                        <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.configuration.loadLLMConfig()" data-i18n="settings.llmLoadConfig">Загрузить конфигурацию</button>
+                    </div>
                 </div>
             </div>
 
@@ -652,23 +688,23 @@
                 </div>
 
                 <!-- Status (open by default) -->
-                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg mb-4 onec-accordion" data-open="true">
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg mb-4 acc-section" data-open="true">
                     <button type="button" onclick="window._pages['onec-data'].toggleSection(this)" class="w-full flex items-center justify-between px-5 py-3.5 text-left cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50 rounded-lg transition-colors">
                         <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="onec.statusTitle">Статус подключения</h3>
-                        <svg class="w-4 h-4 text-neutral-400 transition-transform onec-chevron" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+                        <svg class="w-4 h-4 text-neutral-400 transition-transform acc-chevron" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
                     </button>
-                    <div class="onec-section-body px-5 pb-5">
+                    <div class="acc-body px-5 pb-5">
                         <div id="onecStatusContainer"><div class="flex justify-center py-4"><div class="spinner"></div></div></div>
                     </div>
                 </div>
 
                 <!-- Pickup points (collapsed by default) -->
-                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg mb-4 onec-accordion" data-open="false">
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg mb-4 acc-section" data-open="false">
                     <button type="button" onclick="window._pages['onec-data'].toggleSection(this)" class="w-full flex items-center justify-between px-5 py-3.5 text-left cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50 rounded-lg transition-colors">
                         <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="onec.pickupPoints">Пункты выдачи</h3>
-                        <svg class="w-4 h-4 text-neutral-400 transition-transform onec-chevron rotate-[-90deg]" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+                        <svg class="w-4 h-4 text-neutral-400 transition-transform acc-chevron rotate-[-90deg]" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
                     </button>
-                    <div class="onec-section-body px-5 pb-5" style="display:none">
+                    <div class="acc-body px-5 pb-5" style="display:none">
                         <div class="flex flex-wrap items-center gap-2 mb-3">
                             <select id="onecPickupNetwork" onchange="window._pages['onec-data'].loadPickupPoints()" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
                                 <option value="ProKoleso">ProKoleso</option>
@@ -682,12 +718,12 @@
                 </div>
 
                 <!-- Stock lookup (collapsed by default) -->
-                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg mb-4 onec-accordion" data-open="false">
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg mb-4 acc-section" data-open="false">
                     <button type="button" onclick="window._pages['onec-data'].toggleSection(this)" class="w-full flex items-center justify-between px-5 py-3.5 text-left cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50 rounded-lg transition-colors">
                         <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="onec.stockLookup">Остатки по SKU</h3>
-                        <svg class="w-4 h-4 text-neutral-400 transition-transform onec-chevron rotate-[-90deg]" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+                        <svg class="w-4 h-4 text-neutral-400 transition-transform acc-chevron rotate-[-90deg]" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
                     </button>
-                    <div class="onec-section-body px-5 pb-5" style="display:none">
+                    <div class="acc-body px-5 pb-5" style="display:none">
                         <div class="flex flex-wrap items-center gap-2 mb-3">
                             <select id="onecStockNetwork" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
                                 <option value="ProKoleso">ProKoleso</option>

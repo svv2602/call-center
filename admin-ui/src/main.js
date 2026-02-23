@@ -153,5 +153,23 @@ window.addEventListener('langchange', () => {
     showPage(activePage);
 });
 
+// Shared accordion toggle for collapsible card sections
+function toggleAccordion(btn) {
+    const card = btn.closest('.acc-section') || btn.closest('.onec-accordion');
+    if (!card) return;
+    const body = card.querySelector('.acc-body') || card.querySelector('.onec-section-body');
+    const chevron = card.querySelector('.acc-chevron') || card.querySelector('.onec-chevron');
+    const isOpen = card.dataset.open === 'true';
+    if (isOpen) {
+        body.style.display = 'none';
+        if (chevron) chevron.classList.add('rotate-[-90deg]');
+        card.dataset.open = 'false';
+    } else {
+        body.style.display = '';
+        if (chevron) chevron.classList.remove('rotate-[-90deg]');
+        card.dataset.open = 'true';
+    }
+}
+
 // Expose globals for onclick handlers in HTML
-window._app = { login, logout, showPage, closeModal, toggleSidebar, toggleSidebarExpand, toggleTheme, toggleLang, toggleSidebarGroup, openHelp, closeHelp };
+window._app = { login, logout, showPage, closeModal, toggleSidebar, toggleSidebarExpand, toggleTheme, toggleLang, toggleSidebarGroup, openHelp, closeHelp, toggleAccordion };

@@ -41,25 +41,14 @@ function _populateNetworkSelects() {
 }
 
 function toggleSection(btn) {
-    const card = btn.closest('.onec-accordion');
-    if (!card) return;
-    const body = card.querySelector('.onec-section-body');
-    const chevron = card.querySelector('.onec-chevron');
-    const isOpen = card.dataset.open === 'true';
+    // Delegate to shared accordion toggle
+    if (window._app?.toggleAccordion) window._app.toggleAccordion(btn);
 
-    if (isOpen) {
-        // Collapse
-        body.style.display = 'none';
-        chevron.classList.add('rotate-[-90deg]');
-        card.dataset.open = 'false';
-    } else {
-        // Expand
-        body.style.display = '';
-        chevron.classList.remove('rotate-[-90deg]');
-        card.dataset.open = 'true';
-
-        // Load pickup data on first expand
-        if (body.querySelector('#onecPickupContainer') && !_pickupLoaded) {
+    // Load pickup data on first expand
+    const card = btn.closest('.acc-section');
+    if (card && card.dataset.open === 'true') {
+        const body = card.querySelector('.acc-body');
+        if (body?.querySelector('#onecPickupContainer') && !_pickupLoaded) {
             _pickupLoaded = true;
             loadPickupPoints();
         }
