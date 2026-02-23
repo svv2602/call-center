@@ -4,6 +4,8 @@ import { formatDate, escapeHtml, closeModal } from '../utils.js';
 import { registerPageLoader } from '../router.js';
 import { t } from '../i18n.js';
 import * as tw from '../tw.js';
+import { renderPagination, buildParams } from '../pagination.js';
+import { makeSortable } from '../sorting.js';
 
 // ─── State ───────────────────────────────────────────────────
 let _activeTab = 'chat';
@@ -22,6 +24,7 @@ let _replayConvId = null;
 let _starterCache = [];
 let _bulkMode = false;
 let _selectedIds = new Set();
+let _startersOffset = 0;
 
 // ─── Tab switching ───────────────────────────────────────────
 function showTab(tab) {
@@ -1357,21 +1360,28 @@ async function loadPhrases() {
 //  Scenario Starters Tab (Phase 5)
 // ═══════════════════════════════════════════════════════════
 
-async function loadStarters() {
+async function loadStarters(offset) {
+    if (offset !== undefined) _startersOffset = offset;
     const container = document.getElementById('sandboxStartersContainer');
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
 
     try {
-        const data = await api('/admin/sandbox/scenario-starters?limit=100');
+        const params = buildParams({
+            offset: _startersOffset,
+            filters: {
+                search: 'starterSearch',
+                scenario_type: 'starterFilterScenario',
+                is_active: 'starterFilterActive',
+            },
+        });
+        const data = await api(`/admin/sandbox/scenario-starters?${params}`);
         const items = data.items || [];
+        const total = data.total || 0;
 
         if (items.length === 0) {
             container.innerHTML = `
-                <div class="flex items-center justify-between mb-4">
-                    <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50">${t('sandbox.starters')}</h2>
-                    <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.showStarterModal()">${t('sandbox.newStarter')}</button>
-                </div>
                 <div class="${tw.emptyState}">${t('sandbox.noStarters')}</div>`;
+            renderPagination({ containerId: 'startersPagination', total: 0, offset: _startersOffset, onPage: loadStarters });
             return;
         }
 
@@ -1382,9 +1392,12 @@ async function loadStarters() {
             const personaBadge = item.customer_persona
                 ? `<span class="${tw.badgeBlue}">${escapeHtml(item.customer_persona)}</span>`
                 : '';
+            const activeDot = item.is_active !== false
+                ? '<span class="inline-block w-2 h-2 rounded-full bg-emerald-500" title="Active"></span>'
+                : '<span class="inline-block w-2 h-2 rounded-full bg-neutral-300 dark:bg-neutral-600" title="Inactive"></span>';
             return `
                 <tr class="${tw.trHover}">
-                    <td class="${tw.td}" data-label="${t('sandbox.starterTitle')}"><span class="font-medium">${escapeHtml(item.title)}</span></td>
+                    <td class="${tw.td}" data-label="${t('sandbox.starterTitle')}"><div class="flex items-center gap-1.5">${activeDot}<span class="font-medium">${escapeHtml(item.title)}</span></div></td>
                     <td class="${tw.td}" data-label="${t('sandbox.starterFirstMessage')}"><div class="max-w-xs truncate text-xs">${escapeHtml(item.first_message)}</div></td>
                     <td class="${tw.td}" data-label="${t('sandbox.scenarioType')}">${scenarioBadge}</td>
                     <td class="${tw.td}" data-label="${t('sandbox.starterPersona')}">${personaBadge}</td>
@@ -1400,19 +1413,22 @@ async function loadStarters() {
 
         container.innerHTML = `
             <div class="flex items-center justify-between mb-4">
-                <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50">${t('sandbox.starters')} (${items.length})</h2>
-                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.showStarterModal()">${t('sandbox.newStarter')}</button>
+                <h2 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50">${t('sandbox.starters')} (${total})</h2>
             </div>
-            <div class="overflow-x-auto"><table class="${tw.table}"><thead><tr>
-                <th class="${tw.th}">${t('sandbox.starterTitle')}</th>
+            <div class="overflow-x-auto"><table id="startersTable" class="${tw.table}"><thead><tr>
+                <th class="${tw.thSortable}" data-sortable>${t('sandbox.starterTitle')}</th>
                 <th class="${tw.th}">${t('sandbox.starterFirstMessage')}</th>
-                <th class="${tw.th}">${t('sandbox.scenarioType')}</th>
-                <th class="${tw.th}">${t('sandbox.starterPersona')}</th>
+                <th class="${tw.thSortable}" data-sortable>${t('sandbox.scenarioType')}</th>
+                <th class="${tw.thSortable}" data-sortable>${t('sandbox.starterPersona')}</th>
                 <th class="${tw.th}">${t('sandbox.starterDescription')}</th>
                 <th class="${tw.th}"></th>
             </tr></thead><tbody>${rows}</tbody></table></div>`;
+
+        makeSortable('startersTable');
+        renderPagination({ containerId: 'startersPagination', total, offset: _startersOffset, onPage: loadStarters });
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('sandbox.loadFailed', { error: escapeHtml(e.message) })}</div>`;
+        renderPagination({ containerId: 'startersPagination', total: 0, offset: _startersOffset, onPage: loadStarters });
     }
 }
 

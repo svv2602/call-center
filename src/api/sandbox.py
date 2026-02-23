@@ -984,27 +984,64 @@ class StarterUpdate(BaseModel):
 
 @router.get("/scenario-starters")
 async def list_starters(
-    limit: int = Query(100, ge=1, le=500),
+    limit: int = Query(25, ge=1, le=500),
     offset: int = Query(0, ge=0),
+    search: str | None = Query(None),
+    scenario_type: str | None = Query(None),
+    is_active: str | None = Query(None),
+    sort_by: str = Query("sort_order"),
+    sort_dir: str = Query("asc"),
     _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
-    """List all scenario starters."""
+    """List scenario starters with optional filtering and sorting."""
     engine = await _get_engine()
 
+    # Build dynamic WHERE clause
+    conditions: list[str] = []
+    params: dict[str, Any] = {"limit": limit, "offset": offset}
+
+    if search:
+        conditions.append(
+            "(title ILIKE :search OR description ILIKE :search OR first_message ILIKE :search)"
+        )
+        params["search"] = f"%{search}%"
+
+    if scenario_type:
+        conditions.append("scenario_type = :scenario_type")
+        params["scenario_type"] = scenario_type
+
+    if is_active is not None and is_active in ("true", "false"):
+        conditions.append("is_active = :is_active")
+        params["is_active"] = is_active == "true"
+
+    where_clause = (" WHERE " + " AND ".join(conditions)) if conditions else ""
+
+    # Whitelist sort columns
+    allowed_sort = {"sort_order", "title", "created_at", "scenario_type"}
+    safe_sort = sort_by if sort_by in allowed_sort else "sort_order"
+    safe_dir = "DESC" if sort_dir.lower() == "desc" else "ASC"
+    order_clause = f"ORDER BY {safe_sort} {safe_dir}"
+    if safe_sort != "sort_order":
+        order_clause += ", sort_order ASC"
+
     async with engine.begin() as conn:
-        count_result = await conn.execute(text("SELECT COUNT(*) FROM sandbox_scenario_starters"))
+        count_result = await conn.execute(
+            text(f"SELECT COUNT(*) FROM sandbox_scenario_starters{where_clause}"),
+            params,
+        )
         total = count_result.scalar() or 0
 
         result = await conn.execute(
-            text("""
+            text(f"""
                 SELECT id, title, first_message, scenario_type, tags,
                        customer_persona, description, is_active, sort_order,
                        created_at, updated_at
                 FROM sandbox_scenario_starters
-                ORDER BY sort_order, created_at
+                {where_clause}
+                {order_clause}
                 LIMIT :limit OFFSET :offset
             """),
-            {"limit": limit, "offset": offset},
+            params,
         )
         items = [dict(row._mapping) for row in result]
 
