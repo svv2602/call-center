@@ -55,9 +55,7 @@ class TestMockResponses:
     async def test_knowledge_base_brand_query(self) -> None:
         """Brand-specific query returns relevant brand data."""
         router = build_mock_tool_router()
-        result = await router.execute(
-            "search_knowledge_base", {"query": "Michelin зимові шини"}
-        )
+        result = await router.execute("search_knowledge_base", {"query": "Michelin зимові шини"})
         assert "results" in result
         assert len(result["results"]) >= 1
         assert "Michelin" in result["results"][0]["title"]
@@ -66,9 +64,7 @@ class TestMockResponses:
     async def test_knowledge_base_generic_query(self) -> None:
         """Generic query returns fallback comparison data."""
         router = build_mock_tool_router()
-        result = await router.execute(
-            "search_knowledge_base", {"query": "які шини обрати"}
-        )
+        result = await router.execute("search_knowledge_base", {"query": "які шини обрати"})
         assert "results" in result
         assert len(result["results"]) >= 1
 

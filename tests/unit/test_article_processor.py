@@ -20,8 +20,18 @@ class TestValidateCategory:
     """Test category validation and normalization."""
 
     def test_valid_categories(self) -> None:
-        for cat in ["brands", "guides", "faq", "comparisons", "policies",
-                     "procedures", "returns", "warranty", "delivery", "general"]:
+        for cat in [
+            "brands",
+            "guides",
+            "faq",
+            "comparisons",
+            "policies",
+            "procedures",
+            "returns",
+            "warranty",
+            "delivery",
+            "general",
+        ]:
             assert _validate_category(cat) == cat
 
     def test_uppercase_normalized(self) -> None:
@@ -56,13 +66,15 @@ class TestProcessArticle:
 
     @pytest.mark.asyncio
     async def test_useful_article(self) -> None:
-        llm_json = json.dumps({
-            "is_useful": True,
-            "skip_reason": None,
-            "title": "Як обрати зимові шини",
-            "category": "guides",
-            "content": "## Вибір зимових шин\n\nВажливо враховувати температуру.",
-        })
+        llm_json = json.dumps(
+            {
+                "is_useful": True,
+                "skip_reason": None,
+                "title": "Як обрати зимові шини",
+                "category": "guides",
+                "content": "## Вибір зимових шин\n\nВажливо враховувати температуру.",
+            }
+        )
 
         with patch("src.knowledge.article_processor.llm_complete", _patch_llm_complete(llm_json)):
             result = await process_article(
@@ -80,13 +92,15 @@ class TestProcessArticle:
 
     @pytest.mark.asyncio
     async def test_not_useful_article(self) -> None:
-        llm_json = json.dumps({
-            "is_useful": False,
-            "skip_reason": "Purely promotional content",
-            "title": "Акція на шини",
-            "category": "general",
-            "content": "",
-        })
+        llm_json = json.dumps(
+            {
+                "is_useful": False,
+                "skip_reason": "Purely promotional content",
+                "title": "Акція на шини",
+                "category": "general",
+                "content": "",
+            }
+        )
 
         with patch("src.knowledge.article_processor.llm_complete", _patch_llm_complete(llm_json)):
             result = await process_article(
@@ -100,17 +114,20 @@ class TestProcessArticle:
 
     @pytest.mark.asyncio
     async def test_invalid_category_falls_back(self) -> None:
-        llm_json = json.dumps({
-            "is_useful": True,
-            "skip_reason": None,
-            "title": "Test",
-            "category": "invalid_category",
-            "content": "Some content",
-        })
+        llm_json = json.dumps(
+            {
+                "is_useful": True,
+                "skip_reason": None,
+                "title": "Test",
+                "category": "invalid_category",
+                "content": "Some content",
+            }
+        )
 
         with patch("src.knowledge.article_processor.llm_complete", _patch_llm_complete(llm_json)):
             result = await process_article(
-                title="Test", content="Content",
+                title="Test",
+                content="Content",
                 source_url="https://example.com",
             )
 
@@ -118,18 +135,21 @@ class TestProcessArticle:
 
     @pytest.mark.asyncio
     async def test_strips_markdown_code_fences(self) -> None:
-        llm_json = json.dumps({
-            "is_useful": True,
-            "skip_reason": None,
-            "title": "Cleaned",
-            "category": "faq",
-            "content": "FAQ content",
-        })
+        llm_json = json.dumps(
+            {
+                "is_useful": True,
+                "skip_reason": None,
+                "title": "Cleaned",
+                "category": "faq",
+                "content": "FAQ content",
+            }
+        )
         fenced = f"```json\n{llm_json}\n```"
 
         with patch("src.knowledge.article_processor.llm_complete", _patch_llm_complete(fenced)):
             result = await process_article(
-                title="Test", content="Content",
+                title="Test",
+                content="Content",
                 source_url="https://example.com",
             )
 
@@ -139,18 +159,21 @@ class TestProcessArticle:
 
     @pytest.mark.asyncio
     async def test_strips_bare_backtick_fences(self) -> None:
-        llm_json = json.dumps({
-            "is_useful": True,
-            "skip_reason": None,
-            "title": "Test",
-            "category": "guides",
-            "content": "Bare fenced",
-        })
+        llm_json = json.dumps(
+            {
+                "is_useful": True,
+                "skip_reason": None,
+                "title": "Test",
+                "category": "guides",
+                "content": "Bare fenced",
+            }
+        )
         fenced = f"```\n{llm_json}\n```"
 
         with patch("src.knowledge.article_processor.llm_complete", _patch_llm_complete(fenced)):
             result = await process_article(
-                title="Test", content="Content",
+                title="Test",
+                content="Content",
                 source_url="https://example.com",
             )
 
@@ -186,26 +209,32 @@ class TestProcessArticle:
             pytest.raises(RuntimeError, match="API connection failed"),
         ):
             await process_article(
-                    title="Test", content="Content",
-                    source_url="https://example.com",
-                )
+                title="Test",
+                content="Content",
+                source_url="https://example.com",
+            )
 
     @pytest.mark.asyncio
     async def test_content_truncation(self) -> None:
         """Long content should be truncated before sending to LLM."""
         long_content = "A" * 20000
 
-        mock_llm = AsyncMock(return_value=json.dumps({
-            "is_useful": True,
-            "skip_reason": None,
-            "title": "Test",
-            "category": "general",
-            "content": "Cleaned",
-        }))
+        mock_llm = AsyncMock(
+            return_value=json.dumps(
+                {
+                    "is_useful": True,
+                    "skip_reason": None,
+                    "title": "Test",
+                    "category": "general",
+                    "content": "Cleaned",
+                }
+            )
+        )
 
         with patch("src.knowledge.article_processor.llm_complete", mock_llm):
             await process_article(
-                title="Test", content=long_content,
+                title="Test",
+                content=long_content,
                 source_url="https://example.com",
             )
 
@@ -222,17 +251,22 @@ class TestProcessArticle:
         """Short content should not have truncation marker."""
         short_content = "Short article about tires."
 
-        mock_llm = AsyncMock(return_value=json.dumps({
-            "is_useful": True,
-            "skip_reason": None,
-            "title": "Test",
-            "category": "general",
-            "content": "Cleaned",
-        }))
+        mock_llm = AsyncMock(
+            return_value=json.dumps(
+                {
+                    "is_useful": True,
+                    "skip_reason": None,
+                    "title": "Test",
+                    "category": "general",
+                    "content": "Cleaned",
+                }
+            )
+        )
 
         with patch("src.knowledge.article_processor.llm_complete", mock_llm):
             await process_article(
-                title="Test", content=short_content,
+                title="Test",
+                content=short_content,
                 source_url="https://example.com",
             )
 
@@ -262,14 +296,22 @@ class TestProcessArticle:
     async def test_router_parameter_passed_through(self) -> None:
         """llm_router parameter should be forwarded to llm_complete as router."""
         mock_router = object()  # any non-None object
-        mock_llm = AsyncMock(return_value=json.dumps({
-            "is_useful": True, "skip_reason": None,
-            "title": "T", "category": "general", "content": "C",
-        }))
+        mock_llm = AsyncMock(
+            return_value=json.dumps(
+                {
+                    "is_useful": True,
+                    "skip_reason": None,
+                    "title": "T",
+                    "category": "general",
+                    "content": "C",
+                }
+            )
+        )
 
         with patch("src.knowledge.article_processor.llm_complete", mock_llm):
             await process_article(
-                title="Test", content="Content",
+                title="Test",
+                content="Content",
                 source_url="https://example.com",
                 llm_router=mock_router,
             )

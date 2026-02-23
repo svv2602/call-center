@@ -156,7 +156,12 @@ def get_dialogue_examples() -> list[dict]:
                     "tool_calls": [
                         {
                             "name": "search_tires",
-                            "input": {"width": 215, "profile": 55, "diameter": 17, "season": "summer"},
+                            "input": {
+                                "width": 215,
+                                "profile": 55,
+                                "diameter": 17,
+                                "season": "summer",
+                            },
                         }
                     ],
                 },
@@ -242,7 +247,12 @@ def get_dialogue_examples() -> list[dict]:
                     "tool_calls": [
                         {
                             "name": "search_tires",
-                            "input": {"width": 145, "profile": 65, "diameter": 13, "season": "winter"},
+                            "input": {
+                                "width": 145,
+                                "profile": 65,
+                                "diameter": 13,
+                                "season": "winter",
+                            },
                         }
                     ],
                 },
@@ -448,9 +458,7 @@ def get_dialogue_examples() -> list[dict]:
                         "статус — в доставці Новою поштою, трек-номер 20450012345678. "
                         "Очікувана дата — 17 березня."
                     ),
-                    "tool_calls": [
-                        {"name": "get_order_status", "input": {"order_id": "12345"}}
-                    ],
+                    "tool_calls": [{"name": "get_order_status", "input": {"order_id": "12345"}}],
                 },
             ],
             "tools_used": ["get_order_status"],
@@ -481,9 +489,7 @@ def get_dialogue_examples() -> list[dict]:
                         "Знайшла! Замовлення №15678: 2 шини Nokian Hakkapeliitta 10, "
                         "статус — очікує відправки, буде відправлено сьогодні."
                     ),
-                    "tool_calls": [
-                        {"name": "get_order_status", "input": {"order_id": "15678"}}
-                    ],
+                    "tool_calls": [{"name": "get_order_status", "input": {"order_id": "15678"}}],
                 },
             ],
             "tools_used": ["get_order_status"],
@@ -589,7 +595,10 @@ def get_dialogue_examples() -> list[dict]:
             "scenario_type": "order_creation",
             "phase": "orders",
             "dialogue": [
-                {"role": "customer", "text": "Замовлю Michelin Pilot Sport, 4 штуки, оплачу онлайн"},
+                {
+                    "role": "customer",
+                    "text": "Замовлю Michelin Pilot Sport, 4 штуки, оплачу онлайн",
+                },
                 {
                     "role": "agent",
                     "text": (
@@ -684,9 +693,7 @@ def get_dialogue_examples() -> list[dict]:
                 {"role": "customer", "text": "380 67 123 45 67"},
                 {
                     "role": "agent",
-                    "text": (
-                        "Дякую! Номер +380671234567. Які саме шини бажаєте замовити?"
-                    ),
+                    "text": ("Дякую! Номер +380671234567. Які саме шини бажаєте замовити?"),
                 },
                 {"role": "customer", "text": "Continental IceContact 3, 4 штуки, 215/55 R17"},
                 {
@@ -728,16 +735,13 @@ def get_dialogue_examples() -> list[dict]:
                         "1. Червоноармійська 15, 2. Перемоги 50, 3. Здолбунівська 7а. "
                         "Яка зручніша?"
                     ),
-                    "tool_calls": [
-                        {"name": "get_fitting_stations", "input": {"city": "Київ"}}
-                    ],
+                    "tool_calls": [{"name": "get_fitting_stations", "input": {"city": "Київ"}}],
                 },
                 {"role": "customer", "text": "Позняки"},
                 {
                     "role": "agent",
                     "text": (
-                        "На Позняках найближчі вільні дати: "
-                        "Завтра 15 березня — 10:00, 14:00, 16:00"
+                        "На Позняках найближчі вільні дати: Завтра 15 березня — 10:00, 14:00, 16:00"
                     ),
                     "tool_calls": [
                         {
@@ -1112,7 +1116,10 @@ def get_dialogue_examples() -> list[dict]:
             "scenario_type": "fitting_booking",
             "phase": "services",
             "dialogue": [
-                {"role": "customer", "text": "Хочу записатися на шиномонтаж, але спочатку скажіть ціну"},
+                {
+                    "role": "customer",
+                    "text": "Хочу записатися на шиномонтаж, але спочатку скажіть ціну",
+                },
                 {
                     "role": "agent",
                     "text": "Звичайно! Який діаметр ваших шин?",
@@ -1132,12 +1139,9 @@ def get_dialogue_examples() -> list[dict]:
                 {
                     "role": "agent",
                     "text": (
-                        "У Харкові є 2 точки: "
-                        "1. Сумська 25, 2. Героїв Праці 10. Яка зручніша?"
+                        "У Харкові є 2 точки: 1. Сумська 25, 2. Героїв Праці 10. Яка зручніша?"
                     ),
-                    "tool_calls": [
-                        {"name": "get_fitting_stations", "input": {"city": "Харків"}}
-                    ],
+                    "tool_calls": [{"name": "get_fitting_stations", "input": {"city": "Харків"}}],
                 },
             ],
             "tools_used": ["get_fitting_price", "get_fitting_stations"],
@@ -1176,9 +1180,7 @@ def get_dialogue_examples() -> list[dict]:
                 {"role": "customer", "text": "У мене сімнадцяті диски"},
                 {
                     "role": "agent",
-                    "text": (
-                        "Добре, 235/65 R17. Літні чи зимові?"
-                    ),
+                    "text": ("Добре, 235/65 R17. Літні чи зимові?"),
                 },
                 {"role": "customer", "text": "Зимові"},
                 {
@@ -1229,9 +1231,7 @@ def get_dialogue_examples() -> list[dict]:
                 {"role": "customer", "text": "225/55 R18"},
                 {
                     "role": "agent",
-                    "text": (
-                        "Дякую! Літні чи зимові шини потрібні?"
-                    ),
+                    "text": ("Дякую! Літні чи зимові шини потрібні?"),
                 },
                 {"role": "customer", "text": "Літні"},
                 {
@@ -1286,9 +1286,7 @@ def get_dialogue_examples() -> list[dict]:
                 {"role": "customer", "text": "Ой, це для іншої машини. На X5 давайте двадцятки"},
                 {
                     "role": "agent",
-                    "text": (
-                        "Добре, 275/45 R20 для BMW X5. Зимові чи літні?"
-                    ),
+                    "text": ("Добре, 275/45 R20 для BMW X5. Зимові чи літні?"),
                 },
                 {"role": "customer", "text": "Літні"},
                 {
@@ -1373,8 +1371,7 @@ def get_dialogue_examples() -> list[dict]:
                 {
                     "role": "agent",
                     "text": (
-                        "Для Honda Civic 2020 заводський розмір — 215/55 R16. "
-                        "Шукаю Pirelli..."
+                        "Для Honda Civic 2020 заводський розмір — 215/55 R16. Шукаю Pirelli..."
                     ),
                     "tool_calls": [
                         {
@@ -1458,9 +1455,7 @@ def get_dialogue_examples() -> list[dict]:
                 {"role": "customer", "text": "Зимові"},
                 {
                     "role": "agent",
-                    "text": (
-                        "Є побажання щодо бренду чи бюджету?"
-                    ),
+                    "text": ("Є побажання щодо бренду чи бюджету?"),
                 },
                 {"role": "customer", "text": "До 3000 за штуку, бренд не важливий"},
                 {
@@ -1753,8 +1748,7 @@ def get_response_templates() -> list[dict]:
             "variant_number": 2,
             "title": "Привітання (неформальне)",
             "content": (
-                "{time_greeting}! Це автомати́чна систе́ма інтерне́т-магази́ну шин. "
-                "Як мо́жу допомогти́?"
+                "{time_greeting}! Це автомати́чна систе́ма інтерне́т-магази́ну шин. Як мо́жу допомогти́?"
             ),
         },
         {

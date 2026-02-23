@@ -100,7 +100,13 @@ class TestAnthropicProvider:
         )
         provider._client.messages.create = AsyncMock(return_value=mock_resp)
 
-        tools = [{"name": "search", "description": "Search", "input_schema": {"type": "object", "properties": {}}}]
+        tools = [
+            {
+                "name": "search",
+                "description": "Search",
+                "input_schema": {"type": "object", "properties": {}},
+            }
+        ]
         result = await provider.complete_with_tools(
             messages=[{"role": "user", "content": "Find tires"}],
             tools=tools,
@@ -187,7 +193,13 @@ class TestOpenAICompatProvider:
         mock_session.closed = False
         provider._session = mock_session
 
-        tools = [{"name": "search", "description": "Search", "input_schema": {"type": "object", "properties": {}}}]
+        tools = [
+            {
+                "name": "search",
+                "description": "Search",
+                "input_schema": {"type": "object", "properties": {}},
+            }
+        ]
         result = await provider.complete_with_tools(
             messages=[{"role": "user", "content": "Find tires"}],
             tools=tools,

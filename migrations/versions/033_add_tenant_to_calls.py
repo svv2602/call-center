@@ -22,9 +22,7 @@ def upgrade() -> None:
     op.execute(
         "ALTER TABLE calls ADD COLUMN tenant_id UUID REFERENCES tenants(id) ON DELETE SET NULL"
     )
-    op.execute(
-        "CREATE INDEX ix_calls_tenant_id ON calls (tenant_id) WHERE tenant_id IS NOT NULL"
-    )
+    op.execute("CREATE INDEX ix_calls_tenant_id ON calls (tenant_id) WHERE tenant_id IS NOT NULL")
 
 
 def downgrade() -> None:

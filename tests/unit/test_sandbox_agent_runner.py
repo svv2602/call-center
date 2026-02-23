@@ -94,7 +94,6 @@ class TestCreateSandboxAgent:
         assert agent is not None
         assert agent._model == "claude-haiku-4-5-20251001"
 
-
     @pytest.mark.asyncio
     async def test_creates_agent_with_provider_override(self) -> None:
         """Agent should use LLM router when provider_override is given."""
@@ -242,7 +241,10 @@ class TestProcessSandboxTurn:
 
         # Simulate process_message returning text + history
         agent.process_message = AsyncMock(
-            return_value=("Є шини в наявності", [{"role": "assistant", "content": [{"type": "text", "text": "Є шини"}]}])
+            return_value=(
+                "Є шини в наявності",
+                [{"role": "assistant", "content": [{"type": "text", "text": "Є шини"}]}],
+            )
         )
 
         result = await process_sandbox_turn(agent, "Підберіть шини", [])

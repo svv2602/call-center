@@ -176,9 +176,7 @@ async def _evaluate_call_quality_async(task: Any, call_id: str) -> dict[str, Any
         # Call LLM for evaluation (router → Anthropic fallback)
         messages = [{"role": "user", "content": EVALUATION_PROMPT + transcription}]
 
-        response_text = await llm_complete(
-            LLMTask.QUALITY_SCORING, messages, max_tokens=512
-        )
+        response_text = await llm_complete(LLMTask.QUALITY_SCORING, messages, max_tokens=512)
 
         # Parse JSON response
         # Handle markdown code blocks if present

@@ -141,9 +141,7 @@ async def _analyze_failed_calls_async(
         # Analyze with LLM (try LLM router first, fall back to direct Anthropic)
         messages = [{"role": "user", "content": ANALYSIS_PROMPT + combined_text}]
 
-        response_text = await llm_complete(
-            LLMTask.PROMPT_OPTIMIZER, messages, max_tokens=1024
-        )
+        response_text = await llm_complete(LLMTask.PROMPT_OPTIMIZER, messages, max_tokens=1024)
 
         if response_text.startswith("```"):
             response_text = response_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()

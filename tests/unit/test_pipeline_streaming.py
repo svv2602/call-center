@@ -157,9 +157,7 @@ class TestFallbackOnEmptyResult:
     async def test_fallback_on_empty_streaming_result(self) -> None:
         """Error template spoken when run_turn returns empty spoken_text."""
         mock_loop = AsyncMock()
-        mock_loop.run_turn = AsyncMock(
-            return_value=_make_turn_result(spoken_text="")
-        )
+        mock_loop.run_turn = AsyncMock(return_value=_make_turn_result(spoken_text=""))
 
         pipeline = _make_pipeline(streaming_loop=mock_loop)
 
@@ -249,9 +247,7 @@ class TestBlockingPathUnchanged:
         transcript.confidence = 0.9
         transcript.language = "uk-UA"
 
-        pipeline._agent.process_message = AsyncMock(
-            return_value=("Добрий день!", [])
-        )
+        pipeline._agent.process_message = AsyncMock(return_value=("Добрий день!", []))
 
         call_count = 0
 

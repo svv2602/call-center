@@ -114,7 +114,9 @@ class TestGenericHTMLSameSite:
         from src.knowledge.fetchers.generic_html import GenericHTMLFetcher
 
         fetcher = GenericHTMLFetcher(base_url="https://www.adac.de", listing_urls=[])
-        assert fetcher._is_same_site("press.adac.de") is False  # subdomain of adac.de, not www.adac.de
+        assert (
+            fetcher._is_same_site("press.adac.de") is False
+        )  # subdomain of adac.de, not www.adac.de
 
     def test_different_domain(self) -> None:
         from src.knowledge.fetchers.generic_html import GenericHTMLFetcher
@@ -141,10 +143,12 @@ class TestGenericHTMLDiscovery:
         mock_resp.text = AsyncMock(return_value=SAMPLE_LISTING_HTML)
 
         mock_session = AsyncMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_resp),
-            __aexit__=AsyncMock(),
-        ))
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=mock_resp),
+                __aexit__=AsyncMock(),
+            )
+        )
         fetcher._session = mock_session
 
         articles = await fetcher.discover_articles(max_articles=20)
@@ -165,10 +169,12 @@ class TestGenericHTMLDiscovery:
         mock_resp.text = AsyncMock(return_value=SAMPLE_LISTING_HTML)
 
         mock_session = AsyncMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_resp),
-            __aexit__=AsyncMock(),
-        ))
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=mock_resp),
+                __aexit__=AsyncMock(),
+            )
+        )
         fetcher._session = mock_session
 
         articles = await fetcher.discover_articles(max_articles=1)
@@ -188,10 +194,12 @@ class TestGenericHTMLDiscovery:
         mock_resp.status = 403
 
         mock_session = AsyncMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_resp),
-            __aexit__=AsyncMock(),
-        ))
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=mock_resp),
+                __aexit__=AsyncMock(),
+            )
+        )
         fetcher._session = mock_session
 
         articles = await fetcher.discover_articles()
@@ -217,10 +225,12 @@ class TestGenericHTMLFetchArticle:
         mock_resp.text = AsyncMock(return_value=html)
 
         mock_session = AsyncMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_resp),
-            __aexit__=AsyncMock(),
-        ))
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=mock_resp),
+                __aexit__=AsyncMock(),
+            )
+        )
         fetcher._session = mock_session
 
         with patch("src.knowledge.fetchers.generic_html.trafilatura") as mock_traf:
@@ -253,10 +263,12 @@ class TestGenericHTMLFetchArticle:
         mock_resp.text = AsyncMock(return_value="<html><body>Short</body></html>")
 
         mock_session = AsyncMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_resp),
-            __aexit__=AsyncMock(),
-        ))
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=mock_resp),
+                __aexit__=AsyncMock(),
+            )
+        )
         fetcher._session = mock_session
 
         with patch("src.knowledge.fetchers.generic_html.trafilatura") as mock_traf:

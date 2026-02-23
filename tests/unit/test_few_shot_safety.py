@@ -47,8 +47,7 @@ class TestFormatFewShotSection:
 
     def test_truncates_long_dialogues_to_4_turns(self) -> None:
         turns = [
-            {"role": "customer" if i % 2 == 0 else "agent", "text": f"Turn {i}"}
-            for i in range(10)
+            {"role": "customer" if i % 2 == 0 else "agent", "text": f"Turn {i}"} for i in range(10)
         ]
         examples = {"tire_search": [self._make_dialogue(turns=turns)]}
         result = format_few_shot_section(examples, max_examples=1)

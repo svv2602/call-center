@@ -224,9 +224,7 @@ class OneCClient:
         """Make a GET request with circuit breaker and retry."""
         return await self._request("GET", path, params=params)
 
-    async def _post(
-        self, path: str, json_data: dict[str, Any] | None = None
-    ) -> dict[str, Any]:
+    async def _post(self, path: str, json_data: dict[str, Any] | None = None) -> dict[str, Any]:
         """Make a POST request with circuit breaker and retry."""
         return await self._request("POST", path, json_data=json_data)
 

@@ -225,7 +225,9 @@ class TestSandboxConfig:
 
     @pytest.mark.asyncio()
     async def test_get_merges_sandbox_from_redis(self, app: Any, mock_redis: AsyncMock) -> None:
-        redis_config = {"sandbox": {"default_model": "gemini-flash", "auto_customer_model": "openai-gpt41-mini"}}
+        redis_config = {
+            "sandbox": {"default_model": "gemini-flash", "auto_customer_model": "openai-gpt41-mini"}
+        }
         mock_redis.get = AsyncMock(return_value=json.dumps(redis_config))
 
         with (
@@ -249,7 +251,12 @@ class TestSandboxConfig:
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.patch(
                     "/admin/llm/config",
-                    json={"sandbox": {"default_model": "gemini-flash", "auto_customer_model": "deepseek-chat"}},
+                    json={
+                        "sandbox": {
+                            "default_model": "gemini-flash",
+                            "auto_customer_model": "deepseek-chat",
+                        }
+                    },
                 )
 
         assert response.status_code == 200
@@ -297,10 +304,15 @@ class TestListModels:
         return test_app
 
     @pytest.mark.asyncio()
-    async def test_returns_only_enabled_providers(self, sandbox_app: Any, mock_redis: AsyncMock) -> None:
+    async def test_returns_only_enabled_providers(
+        self, sandbox_app: Any, mock_redis: AsyncMock
+    ) -> None:
         # Only gemini-flash is enabled in this config
         redis_config = {
-            "providers": {"gemini-flash": {"enabled": True}, "anthropic-sonnet": {"enabled": False}},
+            "providers": {
+                "gemini-flash": {"enabled": True},
+                "anthropic-sonnet": {"enabled": False},
+            },
             "sandbox": {"default_model": "gemini-flash"},
         }
         mock_redis.get = AsyncMock(return_value=json.dumps(redis_config))
@@ -309,7 +321,9 @@ class TestListModels:
             patch("src.api.auth.require_admin", _fake_require_admin),
             patch("src.api.llm_config._get_redis", AsyncMock(return_value=mock_redis)),
         ):
-            async with AsyncClient(transport=ASGITransport(app=sandbox_app), base_url="http://test") as ac:
+            async with AsyncClient(
+                transport=ASGITransport(app=sandbox_app), base_url="http://test"
+            ) as ac:
                 response = await ac.get("/admin/sandbox/models")
 
         assert response.status_code == 200
@@ -320,10 +334,15 @@ class TestListModels:
         assert data["default_model"] == "gemini-flash"
 
     @pytest.mark.asyncio()
-    async def test_returns_empty_when_all_disabled(self, sandbox_app: Any, mock_redis: AsyncMock) -> None:
+    async def test_returns_empty_when_all_disabled(
+        self, sandbox_app: Any, mock_redis: AsyncMock
+    ) -> None:
         # All providers disabled
         redis_config = {
-            "providers": {"anthropic-sonnet": {"enabled": False}, "anthropic-haiku": {"enabled": False}},
+            "providers": {
+                "anthropic-sonnet": {"enabled": False},
+                "anthropic-haiku": {"enabled": False},
+            },
         }
         mock_redis.get = AsyncMock(return_value=json.dumps(redis_config))
 
@@ -331,7 +350,9 @@ class TestListModels:
             patch("src.api.auth.require_admin", _fake_require_admin),
             patch("src.api.llm_config._get_redis", AsyncMock(return_value=mock_redis)),
         ):
-            async with AsyncClient(transport=ASGITransport(app=sandbox_app), base_url="http://test") as ac:
+            async with AsyncClient(
+                transport=ASGITransport(app=sandbox_app), base_url="http://test"
+            ) as ac:
                 response = await ac.get("/admin/sandbox/models")
 
         assert response.status_code == 200

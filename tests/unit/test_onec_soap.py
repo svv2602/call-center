@@ -46,9 +46,7 @@ class TestOneCSOAPClientInit:
         assert soap_client._auth.password == "44332211"
 
     def test_custom_wsdl_path(self) -> None:
-        client = OneCSOAPClient(
-            "http://host", "u", "p", wsdl_path="/custom/ws/Service.1cws"
-        )
+        client = OneCSOAPClient("http://host", "u", "p", wsdl_path="/custom/ws/Service.1cws")
         assert client.endpoint_url == "http://host/custom/ws/Service.1cws"
 
 
@@ -356,8 +354,11 @@ class TestSOAPMethods:
             soap_client, "_soap_request", new_callable=AsyncMock, return_value=booking_xml
         ):
             result = await soap_client.book_fitting(
-                person="Іван", phone="0501234567", station_id="ST-001",
-                date="2026-02-20", time="09:00",
+                person="Іван",
+                phone="0501234567",
+                station_id="ST-001",
+                date="2026-02-20",
+                time="09:00",
             )
 
         assert result["booking_id"] == "new-guid"
@@ -422,9 +423,13 @@ class TestSOAPMethods:
             soap_client, "_soap_request", new_callable=AsyncMock, return_value=booking_xml
         ) as mock_req:
             await soap_client.book_fitting(
-                person="Марія", phone="0507654321", station_id="ST-002",
-                date="2026-02-21", time="14:00",
-                vehicle_info="BMW X5 2020", tire_diameter=18,
+                person="Марія",
+                phone="0507654321",
+                station_id="ST-002",
+                date="2026-02-21",
+                time="14:00",
+                vehicle_info="BMW X5 2020",
+                tire_diameter=18,
                 service_type="full_service",
             )
 

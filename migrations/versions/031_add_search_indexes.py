@@ -19,9 +19,7 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute(
-        "CREATE INDEX IF NOT EXISTS idx_calls_scenario ON calls (scenario)"
-    )
+    op.execute("CREATE INDEX IF NOT EXISTS idx_calls_scenario ON calls (scenario)")
     # GIN index for full-text search on call_turns content
     # Using 'simple' config to handle Ukrainian/Russian without stemming issues
     op.execute(

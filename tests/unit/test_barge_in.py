@@ -74,9 +74,7 @@ class _FakeConn:
 class TestTranscriptReaderLoop:
     """Tests for the _transcript_reader_loop that drives barge-in detection."""
 
-    def _make_pipeline(
-        self, stt: _FakeSTT, barge_in: asyncio.Event | None = None
-    ) -> CallPipeline:
+    def _make_pipeline(self, stt: _FakeSTT, barge_in: asyncio.Event | None = None) -> CallPipeline:
         """Create a minimal CallPipeline with fakes."""
         conn = _FakeConn()
         tts = MagicMock()
@@ -97,9 +95,11 @@ class TestTranscriptReaderLoop:
     @pytest.mark.asyncio
     async def test_sets_barge_in_on_interim_while_speaking(self) -> None:
         """Interim transcript while _speaking=True should trigger barge-in."""
-        stt = _FakeSTT([
-            Transcript(text="Алло", is_final=False, confidence=0.8),
-        ])
+        stt = _FakeSTT(
+            [
+                Transcript(text="Алло", is_final=False, confidence=0.8),
+            ]
+        )
         barge_in = asyncio.Event()
         pipeline = self._make_pipeline(stt, barge_in)
         pipeline._speaking = True
@@ -113,9 +113,11 @@ class TestTranscriptReaderLoop:
     @pytest.mark.asyncio
     async def test_no_barge_in_on_interim_when_not_speaking(self) -> None:
         """Interim transcript while _speaking=False should NOT trigger barge-in."""
-        stt = _FakeSTT([
-            Transcript(text="Алло", is_final=False, confidence=0.8),
-        ])
+        stt = _FakeSTT(
+            [
+                Transcript(text="Алло", is_final=False, confidence=0.8),
+            ]
+        )
         barge_in = asyncio.Event()
         pipeline = self._make_pipeline(stt, barge_in)
         pipeline._speaking = False
@@ -156,9 +158,11 @@ class TestTranscriptReaderLoop:
     @pytest.mark.asyncio
     async def test_ignores_empty_interim(self) -> None:
         """Interim with empty text should not trigger barge-in."""
-        stt = _FakeSTT([
-            Transcript(text="  ", is_final=False, confidence=0.1),
-        ])
+        stt = _FakeSTT(
+            [
+                Transcript(text="  ", is_final=False, confidence=0.1),
+            ]
+        )
         barge_in = asyncio.Event()
         pipeline = self._make_pipeline(stt, barge_in)
         pipeline._speaking = True
@@ -170,9 +174,11 @@ class TestTranscriptReaderLoop:
     @pytest.mark.asyncio
     async def test_ignores_empty_final(self) -> None:
         """Final with empty text should not be queued."""
-        stt = _FakeSTT([
-            Transcript(text="", is_final=True, confidence=0.0),
-        ])
+        stt = _FakeSTT(
+            [
+                Transcript(text="", is_final=True, confidence=0.0),
+            ]
+        )
         pipeline = self._make_pipeline(stt)
 
         await pipeline._transcript_reader_loop()

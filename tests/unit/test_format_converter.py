@@ -44,8 +44,16 @@ class TestAnthropicToolsToOpenAI:
 
     def test_multiple_tools(self) -> None:
         tools = [
-            {"name": "tool_a", "description": "A", "input_schema": {"type": "object", "properties": {}}},
-            {"name": "tool_b", "description": "B", "input_schema": {"type": "object", "properties": {}}},
+            {
+                "name": "tool_a",
+                "description": "A",
+                "input_schema": {"type": "object", "properties": {}},
+            },
+            {
+                "name": "tool_b",
+                "description": "B",
+                "input_schema": {"type": "object", "properties": {}},
+            },
         ]
         result = anthropic_tools_to_openai(tools)
         assert len(result) == 2

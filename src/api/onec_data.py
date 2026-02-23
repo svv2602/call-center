@@ -69,14 +69,16 @@ async def onec_status() -> dict[str, Any]:
                 import asyncio
 
                 resp = await asyncio.wait_for(
-                    onec.get_pickup_points("ProKoleso"), timeout=3.0,
+                    onec.get_pickup_points("ProKoleso"),
+                    timeout=3.0,
                 )
                 result["status"] = "reachable" if resp is not None else "error"
         else:
             import asyncio
 
             resp = await asyncio.wait_for(
-                onec.get_pickup_points("ProKoleso"), timeout=3.0,
+                onec.get_pickup_points("ProKoleso"),
+                timeout=3.0,
             )
             result["status"] = "reachable" if resp is not None else "error"
     except Exception as exc:
@@ -86,7 +88,11 @@ async def onec_status() -> dict[str, Any]:
     # Cache info
     if redis:
         for network in ("ProKoleso", "Tshina"):
-            pickup_info: dict[str, Any] = {"ttl_seconds": None, "cache_age_seconds": None, "count": 0}
+            pickup_info: dict[str, Any] = {
+                "ttl_seconds": None,
+                "cache_age_seconds": None,
+                "count": 0,
+            }
             stock_info: dict[str, Any] = {"ttl_seconds": None, "count": 0}
 
             # Pickup points cache
@@ -140,10 +146,16 @@ async def onec_status() -> dict[str, Any]:
 
                 auth = aiohttp.BasicAuth(settings.onec.username, settings.onec.password)
                 timeout = aiohttp.ClientTimeout(total=3)
-                async with aiohttp.ClientSession(timeout=timeout, auth=auth) as sess, sess.get(
-                    result["soap_endpoint"], params={"wsdl": ""},
-                ) as resp:
-                    result["soap_status"] = "reachable" if resp.status < 400 else f"error_{resp.status}"
+                async with (
+                    aiohttp.ClientSession(timeout=timeout, auth=auth) as sess,
+                    sess.get(
+                        result["soap_endpoint"],
+                        params={"wsdl": ""},
+                    ) as resp,
+                ):
+                    result["soap_status"] = (
+                        "reachable" if resp.status < 400 else f"error_{resp.status}"
+                    )
             except Exception:
                 result["soap_status"] = "unreachable"
         else:

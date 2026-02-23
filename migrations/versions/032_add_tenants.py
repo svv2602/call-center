@@ -38,9 +38,7 @@ def upgrade() -> None:
     """)
 
     op.execute("CREATE INDEX ix_tenants_slug ON tenants (slug)")
-    op.execute(
-        "CREATE INDEX ix_tenants_is_active ON tenants (is_active) WHERE is_active = true"
-    )
+    op.execute("CREATE INDEX ix_tenants_is_active ON tenants (is_active) WHERE is_active = true")
 
     # FK: knowledge_sources -> tenants (watched pages per-network)
     op.execute(

@@ -187,9 +187,7 @@ class TestPostHelper:
             onec_client, "_request", new_callable=AsyncMock, return_value={"ok": True}
         ) as mock_request:
             result = await onec_client._post("/test/path", json_data={"key": "val"})
-            mock_request.assert_called_once_with(
-                "POST", "/test/path", json_data={"key": "val"}
-            )
+            mock_request.assert_called_once_with("POST", "/test/path", json_data={"key": "val"})
             assert result == {"ok": True}
 
 

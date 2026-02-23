@@ -74,7 +74,10 @@ class TestStaticPageCategory:
         from src.knowledge.scraper import ProKolesoScraper
 
         scraper = ProKolesoScraper()
-        assert scraper._extract_category("https://prokoleso.ua/ua/polzovatelskoe-soglashenie/") == "policies"
+        assert (
+            scraper._extract_category("https://prokoleso.ua/ua/polzovatelskoe-soglashenie/")
+            == "policies"
+        )
 
     def test_contacts_page(self) -> None:
         from src.knowledge.scraper import ProKolesoScraper
@@ -93,7 +96,12 @@ class TestStaticPageCategory:
         from src.knowledge.scraper import ProKolesoScraper
 
         scraper = ProKolesoScraper()
-        assert scraper._extract_category("https://prokoleso.ua/ua/info/testy-i-obzory-shin/some-article") == "comparisons"
+        assert (
+            scraper._extract_category(
+                "https://prokoleso.ua/ua/info/testy-i-obzory-shin/some-article"
+            )
+            == "comparisons"
+        )
 
 
 # ─── API endpoint tests (via mocking) ───────────────────────

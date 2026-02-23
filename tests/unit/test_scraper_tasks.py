@@ -260,14 +260,16 @@ class TestGetScraperConfig:
 
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(
-            return_value=json.dumps({
-                "min_date": "2024-01-01",
-                "max_date": "2024-12-31",
-                "dedup_llm_check": True,
-                "schedule_enabled": False,
-                "schedule_hour": 9,
-                "schedule_day_of_week": "friday",
-            })
+            return_value=json.dumps(
+                {
+                    "min_date": "2024-01-01",
+                    "max_date": "2024-12-31",
+                    "dedup_llm_check": True,
+                    "schedule_enabled": False,
+                    "schedule_hour": 9,
+                    "schedule_day_of_week": "friday",
+                }
+            )
         )
 
         mock_settings = MagicMock()

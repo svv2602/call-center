@@ -144,9 +144,7 @@ class TestCompressToolResult:
     def test_knowledge_truncates_at_500(self) -> None:
         """Knowledge content now truncated at 500 chars (down from 800)."""
         content_600 = "B" * 600
-        data = {
-            "articles": [{"title": "Test", "content": content_600}]
-        }
+        data = {"articles": [{"title": "Test", "content": content_600}]}
         result = compress_tool_result("search_knowledge_base", data)
         assert "..." in result
         # Should contain first 500 chars + "..."
@@ -170,11 +168,51 @@ class TestCompressToolResult:
         data = {
             "total": 5,
             "items": [
-                {"id": "1", "brand": "Michelin", "model": "Primacy 4", "size": "205/55 R16", "price": 3200, "in_stock": True, "season": "summer"},
-                {"id": "2", "brand": "Continental", "model": "PremiumContact 6", "size": "205/55 R16", "price": 3500, "in_stock": True, "season": "summer"},
-                {"id": "3", "brand": "Nokian", "model": "Hakka Green 3", "size": "205/55 R16", "price": 2800, "in_stock": True, "season": "summer"},
-                {"id": "4", "brand": "Bridgestone", "model": "Turanza T005", "size": "205/55 R16", "price": 3100, "in_stock": False, "season": "summer"},
-                {"id": "5", "brand": "Goodyear", "model": "EfficientGrip", "size": "205/55 R16", "price": 2900, "in_stock": True, "season": "summer"},
+                {
+                    "id": "1",
+                    "brand": "Michelin",
+                    "model": "Primacy 4",
+                    "size": "205/55 R16",
+                    "price": 3200,
+                    "in_stock": True,
+                    "season": "summer",
+                },
+                {
+                    "id": "2",
+                    "brand": "Continental",
+                    "model": "PremiumContact 6",
+                    "size": "205/55 R16",
+                    "price": 3500,
+                    "in_stock": True,
+                    "season": "summer",
+                },
+                {
+                    "id": "3",
+                    "brand": "Nokian",
+                    "model": "Hakka Green 3",
+                    "size": "205/55 R16",
+                    "price": 2800,
+                    "in_stock": True,
+                    "season": "summer",
+                },
+                {
+                    "id": "4",
+                    "brand": "Bridgestone",
+                    "model": "Turanza T005",
+                    "size": "205/55 R16",
+                    "price": 3100,
+                    "in_stock": False,
+                    "season": "summer",
+                },
+                {
+                    "id": "5",
+                    "brand": "Goodyear",
+                    "model": "EfficientGrip",
+                    "size": "205/55 R16",
+                    "price": 2900,
+                    "in_stock": True,
+                    "season": "summer",
+                },
             ],
         }
         result = compress_tool_result("search_tires", data)
@@ -191,7 +229,16 @@ class TestCompressToolResult:
         data = {
             "total": 1,
             "items": [
-                {"id": "1", "brand": "Michelin", "model": "Primacy", "size": "205/55", "price": 3200, "in_stock": True, "season": "winter", "sku": "MIC-123"},
+                {
+                    "id": "1",
+                    "brand": "Michelin",
+                    "model": "Primacy",
+                    "size": "205/55",
+                    "price": 3200,
+                    "in_stock": True,
+                    "season": "winter",
+                    "sku": "MIC-123",
+                },
             ],
         }
         result = compress_tool_result("search_tires", data)

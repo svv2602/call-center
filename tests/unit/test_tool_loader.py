@@ -75,9 +75,7 @@ class TestGetToolsWithOverrides:
     @pytest.mark.asyncio
     async def test_merges_input_schema_override(self) -> None:
         custom_schema = {"type": "object", "properties": {"q": {"type": "string"}}}
-        row = _make_override_row(
-            "check_availability", input_schema_override=custom_schema
-        )
+        row = _make_override_row("check_availability", input_schema_override=custom_schema)
         engine, _ = _make_engine(rows=[row])
 
         tools = await get_tools_with_overrides(engine)
@@ -155,9 +153,7 @@ class TestGetToolsWithOverrides:
     async def test_ignores_empty_description_override(self) -> None:
         """Override with empty/None description should not clear the original."""
         original = next(t for t in ALL_TOOLS if t["name"] == "search_tires")
-        row = _make_override_row(
-            "search_tires", description=None, input_schema_override=None
-        )
+        row = _make_override_row("search_tires", description=None, input_schema_override=None)
         engine, _ = _make_engine(rows=[row])
 
         tools = await get_tools_with_overrides(engine)

@@ -18,6 +18,7 @@ from tests.unit.mocks.mock_tts import MockTTSEngine
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 async def _aiter(*events):
     """Create an async iterator from a sequence of events."""
     for e in events:
@@ -32,6 +33,7 @@ async def _collect(aiter):
 # ---------------------------------------------------------------------------
 # AudioReady dataclass
 # ---------------------------------------------------------------------------
+
 
 class TestAudioReadyDataclass:
     def test_fields(self):
@@ -49,14 +51,13 @@ class TestAudioReadyDataclass:
 # Basic synthesis
 # ---------------------------------------------------------------------------
 
+
 class TestBasicSynthesis:
     @pytest.mark.asyncio
     async def test_single_sentence(self):
         tts = MockTTSEngine()
         synth = StreamingTTSSynthesizer(tts)
-        events = await _collect(
-            synth.process(_aiter(SentenceReady(text="Привіт, як справи?")))
-        )
+        events = await _collect(synth.process(_aiter(SentenceReady(text="Привіт, як справи?"))))
         assert len(events) == 1
         assert isinstance(events[0], AudioReady)
         assert len(events[0].audio) > 0
@@ -82,15 +83,14 @@ class TestBasicSynthesis:
         tts = MockTTSEngine()
         synth = StreamingTTSSynthesizer(tts)
         text = "Шини 225/45 R17 зимові."
-        events = await _collect(
-            synth.process(_aiter(SentenceReady(text=text)))
-        )
+        events = await _collect(synth.process(_aiter(SentenceReady(text=text))))
         assert events[0].text == text
 
 
 # ---------------------------------------------------------------------------
 # Tool call passthrough
 # ---------------------------------------------------------------------------
+
 
 class TestToolCallPassthrough:
     @pytest.mark.asyncio
@@ -100,9 +100,7 @@ class TestToolCallPassthrough:
         tc_start = ToolCallStart(id="t1", name="search_tires")
         tc_delta = ToolCallDelta(id="t1", arguments_chunk='{"size":')
         tc_end = ToolCallEnd(id="t1")
-        events = await _collect(
-            synth.process(_aiter(tc_start, tc_delta, tc_end))
-        )
+        events = await _collect(synth.process(_aiter(tc_start, tc_delta, tc_end)))
         assert events == [tc_start, tc_delta, tc_end]
         assert tts.synthesize_count == 0
 
@@ -128,6 +126,7 @@ class TestToolCallPassthrough:
 # StreamDone passthrough
 # ---------------------------------------------------------------------------
 
+
 class TestStreamDonePassthrough:
     @pytest.mark.asyncio
     async def test_stream_done_passes_through(self):
@@ -152,20 +151,20 @@ class TestStreamDonePassthrough:
 # TTS error propagation
 # ---------------------------------------------------------------------------
 
+
 class TestTTSError:
     @pytest.mark.asyncio
     async def test_error_propagates(self):
         tts = MockTTSEngine(error=RuntimeError("TTS service unavailable"))
         synth = StreamingTTSSynthesizer(tts, prefetch=False)
         with pytest.raises(RuntimeError, match="TTS service unavailable"):
-            await _collect(
-                synth.process(_aiter(SentenceReady(text="Привіт.")))
-            )
+            await _collect(synth.process(_aiter(SentenceReady(text="Привіт."))))
 
 
 # ---------------------------------------------------------------------------
 # Convenience function
 # ---------------------------------------------------------------------------
+
 
 class TestConvenienceFunction:
     @pytest.mark.asyncio
@@ -187,6 +186,7 @@ class TestConvenienceFunction:
 # ---------------------------------------------------------------------------
 # Integration-style: realistic event sequence
 # ---------------------------------------------------------------------------
+
 
 class TestRealisticSequence:
     @pytest.mark.asyncio

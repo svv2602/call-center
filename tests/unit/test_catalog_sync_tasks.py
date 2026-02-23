@@ -91,9 +91,7 @@ class TestCatalogFullSync:
             patch(_PATCH_ONEC, return_value=mock_onec) as mock_onec_cls,
             patch(_PATCH_SYNC, return_value=mock_sync),
         ):
-            mock_get_settings.return_value = _mock_settings(
-                timeout=120, full_sync_timeout=600
-            )
+            mock_get_settings.return_value = _mock_settings(timeout=120, full_sync_timeout=600)
             mock_redis_cls.from_url.return_value = _mock_redis()
 
             result = await _catalog_full_sync_async(mock_task)
@@ -204,9 +202,7 @@ class TestCatalogIncrementalSync:
             patch(_PATCH_ONEC, return_value=mock_onec) as mock_onec_cls,
             patch(_PATCH_SYNC, return_value=mock_sync),
         ):
-            mock_get_settings.return_value = _mock_settings(
-                timeout=120, full_sync_timeout=600
-            )
+            mock_get_settings.return_value = _mock_settings(timeout=120, full_sync_timeout=600)
             mock_redis_cls.from_url.return_value = _mock_redis()
 
             result = await _catalog_incremental_sync_async(mock_task)

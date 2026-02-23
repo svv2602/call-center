@@ -380,7 +380,8 @@ class TestAllPermissionsConsistency:
         assert "onec_data" in PERMISSION_GROUPS
         assert "system" not in PERMISSION_GROUPS
         assert PERMISSION_GROUPS["configuration"] == [
-            "configuration:read", "configuration:write",
+            "configuration:read",
+            "configuration:write",
         ]
         assert PERMISSION_GROUPS["monitoring"] == ["monitoring:read"]
         assert PERMISSION_GROUPS["onec_data"] == ["onec_data:read"]

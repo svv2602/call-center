@@ -152,10 +152,10 @@ class OneCSOAPClient:
         params += f"<ns:StationID>{escape(station_id)}</ns:StationID>"
         params += f"<ns:Date>{escape(date)}</ns:Date>"
         params += f"<ns:Time>{escape(time)}</ns:Time>"
-        params += '<ns:Status>Записан</ns:Status>'
-        params += '<ns:CheckBalance>true</ns:CheckBalance>'
-        params += '<ns:CallBack>false</ns:CallBack>'
-        params += '<ns:ClientMode>1</ns:ClientMode>'
+        params += "<ns:Status>Записан</ns:Status>"
+        params += "<ns:CheckBalance>true</ns:CheckBalance>"
+        params += "<ns:CallBack>false</ns:CallBack>"
+        params += "<ns:ClientMode>1</ns:ClientMode>"
         if comment:
             params += f"<ns:Comment>{escape(comment)}</ns:Comment>"
 
@@ -199,7 +199,7 @@ class OneCSOAPClient:
             Dict with status info.
         """
         params = f"<ns:GUID>{escape(guid)}</ns:GUID>"
-        params += '<ns:UPP>true</ns:UPP>'
+        params += "<ns:UPP>true</ns:UPP>"
 
         body = f"<ns:GetCancelRecords>{params}</ns:GetCancelRecords>"
         root = await self._soap_request(body)

@@ -96,10 +96,12 @@ class TestRSSFetcherDiscovery:
         mock_resp.text = AsyncMock(return_value=SAMPLE_RSS)
 
         mock_session = AsyncMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_resp),
-            __aexit__=AsyncMock(),
-        ))
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=mock_resp),
+                __aexit__=AsyncMock(),
+            )
+        )
         fetcher._session = mock_session
 
         articles = await fetcher.discover_articles(max_articles=20)
@@ -122,10 +124,12 @@ class TestRSSFetcherDiscovery:
         mock_resp.text = AsyncMock(return_value=SAMPLE_RSS)
 
         mock_session = AsyncMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_resp),
-            __aexit__=AsyncMock(),
-        ))
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=mock_resp),
+                __aexit__=AsyncMock(),
+            )
+        )
         fetcher._session = mock_session
 
         articles = await fetcher.discover_articles(max_articles=20)
@@ -142,10 +146,12 @@ class TestRSSFetcherDiscovery:
         mock_resp.text = AsyncMock(return_value=SAMPLE_RSS)
 
         mock_session = AsyncMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_resp),
-            __aexit__=AsyncMock(),
-        ))
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=mock_resp),
+                __aexit__=AsyncMock(),
+            )
+        )
         fetcher._session = mock_session
 
         articles = await fetcher.discover_articles(max_articles=1)
@@ -162,16 +168,16 @@ class TestRSSFetcherDiscovery:
         mock_resp.text = AsyncMock(return_value=SAMPLE_RSS)
 
         mock_session = AsyncMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_resp),
-            __aexit__=AsyncMock(),
-        ))
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=mock_resp),
+                __aexit__=AsyncMock(),
+            )
+        )
         fetcher._session = mock_session
 
         # Only articles from Feb 10 and later
-        articles = await fetcher.discover_articles(
-            min_date=datetime.date(2025, 2, 10)
-        )
+        articles = await fetcher.discover_articles(min_date=datetime.date(2025, 2, 10))
         assert len(articles) == 1
         assert "winterreifen" in articles[0]["url"].lower()
 
@@ -185,10 +191,12 @@ class TestRSSFetcherDiscovery:
         mock_resp.status = 404
 
         mock_session = AsyncMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_resp),
-            __aexit__=AsyncMock(),
-        ))
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=mock_resp),
+                __aexit__=AsyncMock(),
+            )
+        )
         fetcher._session = mock_session
 
         articles = await fetcher.discover_articles()
@@ -219,21 +227,23 @@ class TestRSSFetcherFetchArticle:
         mock_resp.text = AsyncMock(return_value=html)
 
         mock_session = AsyncMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_resp),
-            __aexit__=AsyncMock(),
-        ))
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=mock_resp),
+                __aexit__=AsyncMock(),
+            )
+        )
         fetcher._session = mock_session
 
         with patch("src.knowledge.fetchers.rss_fetcher.trafilatura") as mock_traf:
-            mock_traf.extract.return_value = "Der große Winterreifentest mit 50 verschiedenen Modellen. " * 10
+            mock_traf.extract.return_value = (
+                "Der große Winterreifentest mit 50 verschiedenen Modellen. " * 10
+            )
             mock_metadata = MagicMock()
             mock_metadata.title = "Winterreifen-Test 2025"
             mock_traf.extract_metadata.return_value = mock_metadata
 
-            result = await fetcher.fetch_article(
-                "https://example.com/test", published="2025-02-10"
-            )
+            result = await fetcher.fetch_article("https://example.com/test", published="2025-02-10")
 
         assert result is not None
         assert result.title == "Winterreifen-Test 2025"
@@ -251,10 +261,12 @@ class TestRSSFetcherFetchArticle:
         mock_resp.text = AsyncMock(return_value="<html><body>Short</body></html>")
 
         mock_session = AsyncMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_resp),
-            __aexit__=AsyncMock(),
-        ))
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=mock_resp),
+                __aexit__=AsyncMock(),
+            )
+        )
         fetcher._session = mock_session
 
         with patch("src.knowledge.fetchers.rss_fetcher.trafilatura") as mock_traf:
@@ -274,10 +286,12 @@ class TestRSSFetcherFetchArticle:
         mock_resp.status = 500
 
         mock_session = AsyncMock()
-        mock_session.get = MagicMock(return_value=AsyncMock(
-            __aenter__=AsyncMock(return_value=mock_resp),
-            __aexit__=AsyncMock(),
-        ))
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=mock_resp),
+                __aexit__=AsyncMock(),
+            )
+        )
         fetcher._session = mock_session
 
         result = await fetcher.fetch_article("https://example.com/test")

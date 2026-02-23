@@ -107,7 +107,9 @@ async def list_articles(
     category: str | None = Query(None),
     active: bool | None = Query(None),
     search: str | None = Query(None, description="Full-text search in title and content"),
-    tenant_id: str | None = Query(None, description="Filter by tenant UUID (NULL = shared articles)"),
+    tenant_id: str | None = Query(
+        None, description="Filter by tenant UUID (NULL = shared articles)"
+    ),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     _: dict[str, Any] = _perm_r,

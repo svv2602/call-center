@@ -611,13 +611,15 @@ async def list_watched_pages(
         params["tenant_id"] = tenant_id
 
     async with engine.begin() as conn:
-        total = (await conn.execute(
-            text(f"""
+        total = (
+            await conn.execute(
+                text(f"""
                 SELECT COUNT(*) FROM knowledge_sources ks
                 WHERE ks.source_type = 'watched_page' {tenant_filter}
             """),
-            params,
-        )).scalar()
+                params,
+            )
+        ).scalar()
 
         result = await conn.execute(
             text(f"""

@@ -177,7 +177,9 @@ class TestParallelToolExecution:
         text, history = await agent.process_message("test", [])
         assert text == "Done"
         # Both tool results should be in history (one with error)
-        tool_msg = [m for m in history if m.get("role") == "user" and isinstance(m.get("content"), list)]
+        tool_msg = [
+            m for m in history if m.get("role") == "user" and isinstance(m.get("content"), list)
+        ]
         assert len(tool_msg) == 1
         results = tool_msg[0]["content"]
         assert len(results) == 2
@@ -221,7 +223,9 @@ class TestParallelToolExecution:
         )
         _, history = await agent.process_message("test", [])
 
-        tool_msg = [m for m in history if m.get("role") == "user" and isinstance(m.get("content"), list)]
+        tool_msg = [
+            m for m in history if m.get("role") == "user" and isinstance(m.get("content"), list)
+        ]
         results = tool_msg[0]["content"]
         ids = {r["tool_use_id"] for r in results}
         assert ids == {"id_search", "id_avail"}

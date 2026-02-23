@@ -24,9 +24,7 @@ def upgrade() -> None:
             ADD COLUMN is_discovery BOOLEAN NOT NULL DEFAULT false,
             ADD COLUMN parent_id UUID REFERENCES knowledge_sources(id) ON DELETE CASCADE
     """)
-    op.execute(
-        "CREATE INDEX ix_knowledge_sources_parent_id ON knowledge_sources (parent_id)"
-    )
+    op.execute("CREATE INDEX ix_knowledge_sources_parent_id ON knowledge_sources (parent_id)")
 
 
 def downgrade() -> None:

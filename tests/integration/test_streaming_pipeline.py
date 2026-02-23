@@ -100,9 +100,7 @@ class TestTextFlowsThroughAllLayers:
     @pytest.mark.asyncio
     async def test_text_flows_through_all_layers(self) -> None:
         """LLM text → sentence buffer → TTS → AudioSocket → verify audio + spoken_text."""
-        loop, router, conn = _build_loop(
-            [_text_stream("Привіт! Я допоможу вам підібрати шини.")]
-        )
+        loop, router, conn = _build_loop([_text_stream("Привіт! Я допоможу вам підібрати шини.")])
 
         history: list[dict[str, Any]] = []
         result = await loop.run_turn("Привіт", history)

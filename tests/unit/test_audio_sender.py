@@ -364,7 +364,9 @@ class TestCancelEventPassthrough:
         call_count = 0
         original_send = conn.send_audio
 
-        async def _tracking_send(audio_data: bytes, cancel_event: asyncio.Event | None = None) -> bool:
+        async def _tracking_send(
+            audio_data: bytes, cancel_event: asyncio.Event | None = None
+        ) -> bool:
             nonlocal call_count
             call_count += 1
             if call_count == 2:

@@ -30,10 +30,15 @@ class TestTranslationPrompt:
         """Ukrainian source should NOT add translation addendum."""
         from src.knowledge.article_processor import _SYSTEM_PROMPT, process_article
 
-        _ok_json = json.dumps({
-            "is_useful": True, "skip_reason": None,
-            "title": "Test", "category": "general", "content": "Content",
-        })
+        _ok_json = json.dumps(
+            {
+                "is_useful": True,
+                "skip_reason": None,
+                "title": "Test",
+                "category": "general",
+                "content": "Content",
+            }
+        )
         mock_llm = AsyncMock(return_value=_ok_json)
 
         with patch("src.knowledge.article_processor.llm_complete", mock_llm):
@@ -52,10 +57,15 @@ class TestTranslationPrompt:
         """German source should add translation addendum."""
         from src.knowledge.article_processor import process_article
 
-        _ok_json = json.dumps({
-            "is_useful": True, "skip_reason": None,
-            "title": "Test", "category": "comparisons", "content": "Зимові шини",
-        })
+        _ok_json = json.dumps(
+            {
+                "is_useful": True,
+                "skip_reason": None,
+                "title": "Test",
+                "category": "comparisons",
+                "content": "Зимові шини",
+            }
+        )
         mock_llm = AsyncMock(return_value=_ok_json)
 
         with patch("src.knowledge.article_processor.llm_complete", mock_llm):
@@ -76,10 +86,15 @@ class TestTranslationPrompt:
         """English source should add translation addendum."""
         from src.knowledge.article_processor import process_article
 
-        _ok_json = json.dumps({
-            "is_useful": True, "skip_reason": None,
-            "title": "Test", "category": "comparisons", "content": "Content",
-        })
+        _ok_json = json.dumps(
+            {
+                "is_useful": True,
+                "skip_reason": None,
+                "title": "Test",
+                "category": "comparisons",
+                "content": "Content",
+            }
+        )
         mock_llm = AsyncMock(return_value=_ok_json)
 
         with patch("src.knowledge.article_processor.llm_complete", mock_llm):
@@ -98,10 +113,15 @@ class TestTranslationPrompt:
         """Default source_language is 'uk' (no translation)."""
         from src.knowledge.article_processor import _TRANSLATION_ADDENDUM, process_article
 
-        _ok_json = json.dumps({
-            "is_useful": False, "skip_reason": "promo",
-            "title": "T", "category": "general", "content": "",
-        })
+        _ok_json = json.dumps(
+            {
+                "is_useful": False,
+                "skip_reason": "promo",
+                "title": "T",
+                "category": "general",
+                "content": "",
+            }
+        )
         mock_llm = AsyncMock(return_value=_ok_json)
 
         with patch("src.knowledge.article_processor.llm_complete", mock_llm):

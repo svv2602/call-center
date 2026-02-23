@@ -241,25 +241,19 @@ class TestBuildSystemPromptWithContext:
 
     def test_stage_confirmed_injects_offer_fitting(self) -> None:
         """confirmed stage injects OFFER_FITTING."""
-        result = build_system_prompt_with_context(
-            "base", is_modular=True, order_stage="confirmed"
-        )
+        result = build_system_prompt_with_context("base", is_modular=True, order_stage="confirmed")
         assert "Замовлення підтверджено" in result
         assert "шиномонтаж" in result
 
     def test_stage_draft_no_injection(self) -> None:
         """draft stage doesn't inject any extra content."""
-        result = build_system_prompt_with_context(
-            "base", is_modular=True, order_stage="draft"
-        )
+        result = build_system_prompt_with_context("base", is_modular=True, order_stage="draft")
         assert _STAGE_ORDER_CONFIRMATION not in result
         assert _STAGE_OFFER_FITTING not in result
 
     def test_no_stage_no_injection(self) -> None:
         """No stage = no injection."""
-        result = build_system_prompt_with_context(
-            "base", is_modular=True, order_stage=None
-        )
+        result = build_system_prompt_with_context("base", is_modular=True, order_stage=None)
         assert "Підтвердження замовлення" not in result
         assert "Замовлення підтверджено" not in result
 

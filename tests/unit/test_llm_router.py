@@ -228,7 +228,13 @@ class TestLLMRouterRouting:
         }
         router._initialized = True
 
-        tools = [{"name": "search", "description": "Search", "input_schema": {"type": "object", "properties": {}}}]
+        tools = [
+            {
+                "name": "search",
+                "description": "Search",
+                "input_schema": {"type": "object", "properties": {}},
+            }
+        ]
         result = await router.complete(
             LLMTask.AGENT,
             messages=[{"role": "user", "content": "hi"}],
@@ -313,7 +319,13 @@ class TestLLMRouterProviderOverride:
         }
         router._initialized = True
 
-        tools = [{"name": "search", "description": "Search", "input_schema": {"type": "object", "properties": {}}}]
+        tools = [
+            {
+                "name": "search",
+                "description": "Search",
+                "input_schema": {"type": "object", "properties": {}},
+            }
+        ]
         result = await router.complete(
             LLMTask.AGENT,
             messages=[{"role": "user", "content": "hi"}],

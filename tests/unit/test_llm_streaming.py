@@ -30,6 +30,7 @@ from src.llm.router import LLMRouter
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_response(text: str = "ok", provider: str = "test") -> LLMResponse:
     return LLMResponse(
         text=text,
@@ -78,6 +79,7 @@ def _setup_router_with_mock(provider_mock: AsyncMock) -> LLMRouter:
 # ---------------------------------------------------------------------------
 # 1. Event types
 # ---------------------------------------------------------------------------
+
 
 class TestStreamEventTypes:
     """Test creation of all streaming event types."""
@@ -128,6 +130,7 @@ class TestStreamEventTypes:
 # ---------------------------------------------------------------------------
 # 2. Base provider fallback streaming
 # ---------------------------------------------------------------------------
+
 
 class TestBaseProviderStreamFallback:
     """Default stream_with_tools falls back to complete_with_tools."""
@@ -222,6 +225,7 @@ class TestBaseProviderStreamFallback:
 # 3. OpenAI SSE chunk parser
 # ---------------------------------------------------------------------------
 
+
 class TestOpenAIStreamChunkParser:
     """Test openai_stream_chunk_to_events for various chunk types."""
 
@@ -243,15 +247,19 @@ class TestOpenAIStreamChunkParser:
 
     def test_tool_call_start_chunk(self) -> None:
         chunk = {
-            "choices": [{
-                "delta": {
-                    "tool_calls": [{
-                        "id": "call_123",
-                        "function": {"name": "search_tires", "arguments": ""},
-                    }],
-                },
-                "finish_reason": None,
-            }],
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "id": "call_123",
+                                "function": {"name": "search_tires", "arguments": ""},
+                            }
+                        ],
+                    },
+                    "finish_reason": None,
+                }
+            ],
         }
         events = openai_stream_chunk_to_events(chunk, "openai", "gpt-4o")
         assert len(events) == 1
@@ -261,15 +269,19 @@ class TestOpenAIStreamChunkParser:
 
     def test_tool_call_delta_chunk(self) -> None:
         chunk = {
-            "choices": [{
-                "delta": {
-                    "tool_calls": [{
-                        "id": "",
-                        "function": {"arguments": '{"size":'},
-                    }],
-                },
-                "finish_reason": None,
-            }],
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "id": "",
+                                "function": {"arguments": '{"size":'},
+                            }
+                        ],
+                    },
+                    "finish_reason": None,
+                }
+            ],
         }
         events = openai_stream_chunk_to_events(chunk, "openai", "gpt-4o")
         assert len(events) == 1
@@ -279,15 +291,19 @@ class TestOpenAIStreamChunkParser:
     def test_tool_call_start_and_delta_in_one(self) -> None:
         """First chunk with id + name + arguments fragment."""
         chunk = {
-            "choices": [{
-                "delta": {
-                    "tool_calls": [{
-                        "id": "call_456",
-                        "function": {"name": "check_availability", "arguments": '{"sku"'},
-                    }],
-                },
-                "finish_reason": None,
-            }],
+            "choices": [
+                {
+                    "delta": {
+                        "tool_calls": [
+                            {
+                                "id": "call_456",
+                                "function": {"name": "check_availability", "arguments": '{"sku"'},
+                            }
+                        ],
+                    },
+                    "finish_reason": None,
+                }
+            ],
         }
         events = openai_stream_chunk_to_events(chunk, "openai", "gpt-4o")
         assert len(events) == 2
@@ -339,6 +355,7 @@ class TestOpenAIStreamChunkParser:
 # 4. Router _resolve_chain
 # ---------------------------------------------------------------------------
 
+
 class TestResolveChain:
     """Test _resolve_chain helper."""
 
@@ -386,6 +403,7 @@ class TestResolveChain:
 # ---------------------------------------------------------------------------
 # 5. Router complete_stream
 # ---------------------------------------------------------------------------
+
 
 class TestRouterCompleteStream:
     """Test complete_stream with mock providers."""
@@ -572,6 +590,7 @@ class TestRouterCompleteStream:
 # ---------------------------------------------------------------------------
 # 6. Feature flag
 # ---------------------------------------------------------------------------
+
 
 class TestStreamingFeatureFlag:
     """Test FF_STREAMING_LLM feature flag."""

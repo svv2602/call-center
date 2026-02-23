@@ -75,7 +75,10 @@ async def _generate_promo_summary_async(task: Any, article_id: str) -> dict[str,
         # Generate summary via LLM router (or direct Anthropic fallback)
         content_truncated = row.content[:3000] if len(row.content) > 3000 else row.content
         messages = [
-            {"role": "user", "content": f"Назва акції: {row.title}\n\nПовний текст:\n{content_truncated}"}
+            {
+                "role": "user",
+                "content": f"Назва акції: {row.title}\n\nПовний текст:\n{content_truncated}",
+            }
         ]
 
         summary = await llm_complete(

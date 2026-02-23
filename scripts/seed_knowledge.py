@@ -12,9 +12,18 @@ import sys
 
 
 CATEGORY_PATTERNS = [
-    "faq", "guides", "comparisons", "brands", "procedures",
-    "delivery", "warranty", "returns", "policies", "general",
-    "fitting", "promotions",
+    "faq",
+    "guides",
+    "comparisons",
+    "brands",
+    "procedures",
+    "delivery",
+    "warranty",
+    "returns",
+    "policies",
+    "general",
+    "fitting",
+    "promotions",
 ]
 
 

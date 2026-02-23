@@ -28,9 +28,7 @@ _tools_cache_ts: float = 0.0
 TOOLS_CACHE_REDIS_KEY = "tools:overrides_cache_ts"
 
 
-async def get_tools_with_overrides(
-    engine: AsyncEngine, redis: Any = None
-) -> list[dict[str, Any]]:
+async def get_tools_with_overrides(engine: AsyncEngine, redis: Any = None) -> list[dict[str, Any]]:
     """Load ALL_TOOLS and merge active DB overrides.
 
     Cached in-process; invalidated when Redis key changes.

@@ -53,16 +53,12 @@ class TestBuildSystemPromptSecurity:
     """Test build_system_prompt_with_context with caller context."""
 
     def test_caller_phone_injected(self) -> None:
-        prompt = build_system_prompt_with_context(
-            SYSTEM_PROMPT, caller_phone="+380501234567"
-        )
+        prompt = build_system_prompt_with_context(SYSTEM_PROMPT, caller_phone="+380501234567")
         assert "+380501234567" in prompt
         assert "CallerID" in prompt
 
     def test_order_id_injected(self) -> None:
-        prompt = build_system_prompt_with_context(
-            SYSTEM_PROMPT, order_id="order-abc"
-        )
+        prompt = build_system_prompt_with_context(SYSTEM_PROMPT, order_id="order-abc")
         assert "order-abc" in prompt
 
     def test_no_context_returns_base_prompt_with_season(self) -> None:

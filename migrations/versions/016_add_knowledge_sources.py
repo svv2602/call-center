@@ -35,9 +35,7 @@ def upgrade() -> None:
     """)
     op.execute("CREATE INDEX ix_knowledge_sources_status ON knowledge_sources (status)")
     op.execute("CREATE INDEX ix_knowledge_sources_source_site ON knowledge_sources (source_site)")
-    op.execute(
-        "CREATE INDEX ix_knowledge_sources_article_id ON knowledge_sources (article_id)"
-    )
+    op.execute("CREATE INDEX ix_knowledge_sources_article_id ON knowledge_sources (article_id)")
 
 
 def downgrade() -> None:

@@ -378,9 +378,7 @@ async def _get_agent_response(trigger: str) -> str:
     messages = [{"role": "user", "content": trigger}]
 
     try:
-        return await llm_complete(
-            LLMTask.QUALITY_SCORING, messages, system=system, max_tokens=512
-        )
+        return await llm_complete(LLMTask.QUALITY_SCORING, messages, system=system, max_tokens=512)
     except Exception as exc:
         return f"[error: {exc}]"
 
@@ -404,9 +402,7 @@ async def _judge_response(
 
     messages = [{"role": "user", "content": judge_prompt}]
 
-    response_text = await llm_complete(
-        LLMTask.QUALITY_SCORING, messages, max_tokens=256
-    )
+    response_text = await llm_complete(LLMTask.QUALITY_SCORING, messages, max_tokens=256)
 
     if not response_text:
         return {"passed": False, "reason": "LLM returned empty response"}

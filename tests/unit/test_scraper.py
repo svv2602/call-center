@@ -34,25 +34,46 @@ class TestExtractCategory:
         return ProKolesoScraper()
 
     def test_novosti_maps_to_general(self, scraper: ProKolesoScraper) -> None:
-        assert scraper._extract_category("https://prokoleso.ua/ua/info/novosti/tire-news/") == "general"
+        assert (
+            scraper._extract_category("https://prokoleso.ua/ua/info/novosti/tire-news/")
+            == "general"
+        )
 
     def test_testy_maps_to_comparisons(self, scraper: ProKolesoScraper) -> None:
-        assert scraper._extract_category("https://prokoleso.ua/ua/info/testy-i-obzory-shin/best-2024/") == "comparisons"
+        assert (
+            scraper._extract_category("https://prokoleso.ua/ua/info/testy-i-obzory-shin/best-2024/")
+            == "comparisons"
+        )
 
     def test_vse_o_shinah_maps_to_guides(self, scraper: ProKolesoScraper) -> None:
-        assert scraper._extract_category("https://prokoleso.ua/ua/info/vse-o-shinah/tire-pressure/") == "guides"
+        assert (
+            scraper._extract_category("https://prokoleso.ua/ua/info/vse-o-shinah/tire-pressure/")
+            == "guides"
+        )
 
     def test_vse_o_diskah_maps_to_guides(self, scraper: ProKolesoScraper) -> None:
-        assert scraper._extract_category("https://prokoleso.ua/ua/info/vse-o-diskah/pcd-explained/") == "guides"
+        assert (
+            scraper._extract_category("https://prokoleso.ua/ua/info/vse-o-diskah/pcd-explained/")
+            == "guides"
+        )
 
     def test_pokupatelu_maps_to_faq(self, scraper: ProKolesoScraper) -> None:
-        assert scraper._extract_category("https://prokoleso.ua/ua/info/pokupatelu/how-to-buy/") == "faq"
+        assert (
+            scraper._extract_category("https://prokoleso.ua/ua/info/pokupatelu/how-to-buy/")
+            == "faq"
+        )
 
     def test_unknown_slug_defaults_to_general(self, scraper: ProKolesoScraper) -> None:
-        assert scraper._extract_category("https://prokoleso.ua/ua/info/random-unknown-slug/article/") == "general"
+        assert (
+            scraper._extract_category("https://prokoleso.ua/ua/info/random-unknown-slug/article/")
+            == "general"
+        )
 
     def test_case_insensitive(self, scraper: ProKolesoScraper) -> None:
-        assert scraper._extract_category("https://prokoleso.ua/ua/info/NOVOSTI/something/") == "general"
+        assert (
+            scraper._extract_category("https://prokoleso.ua/ua/info/NOVOSTI/something/")
+            == "general"
+        )
 
 
 # ─── HTML parsing ────────────────────────────────────────────
@@ -370,7 +391,9 @@ class TestFetchArticle:
         scraper = ProKolesoScraper()
         scraper._session = mock_session
 
-        result = await scraper.fetch_article("https://prokoleso.ua/ua/info/testy-i-obzory-shin/test-2024/")
+        result = await scraper.fetch_article(
+            "https://prokoleso.ua/ua/info/testy-i-obzory-shin/test-2024/"
+        )
         assert result is not None
         assert isinstance(result, ScrapedArticle)
         assert result.title == "Тест зимових шин 2024"

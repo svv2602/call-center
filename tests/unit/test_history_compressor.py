@@ -51,9 +51,7 @@ class TestCompressHistory:
             {"role": "user", "content": "Перевір наявність"},
             {
                 "role": "user",
-                "content": [
-                    {"type": "tool_result", "tool_use_id": "t2", "content": tool_content}
-                ],
+                "content": [{"type": "tool_result", "tool_use_id": "t2", "content": tool_content}],
             },
         ]
         result = compress_history(messages, keep_recent=5)

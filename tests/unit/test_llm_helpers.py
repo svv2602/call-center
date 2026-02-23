@@ -46,9 +46,7 @@ class TestLlmComplete:
     async def test_router_empty_text_falls_back(self) -> None:
         router = _mock_router("")
         mock_client = AsyncMock()
-        mock_client.messages.create = AsyncMock(
-            return_value=_mock_anthropic_response("fallback")
-        )
+        mock_client.messages.create = AsyncMock(return_value=_mock_anthropic_response("fallback"))
 
         with patch("src.llm.helpers.anthropic.AsyncAnthropic", return_value=mock_client):
             result = await llm_complete(
@@ -73,9 +71,7 @@ class TestLlmComplete:
     @pytest.mark.asyncio
     async def test_router_none_skips_to_fallback(self) -> None:
         mock_client = AsyncMock()
-        mock_client.messages.create = AsyncMock(
-            return_value=_mock_anthropic_response("direct")
-        )
+        mock_client.messages.create = AsyncMock(return_value=_mock_anthropic_response("direct"))
 
         with patch("src.llm.helpers.anthropic.AsyncAnthropic", return_value=mock_client):
             result = await llm_complete(
@@ -88,9 +84,7 @@ class TestLlmComplete:
         router = _mock_router("from global")
 
         with patch("src.llm.get_router", return_value=router):
-            result = await llm_complete(
-                LLMTask.AGENT, [{"role": "user", "content": "hi"}]
-            )
+            result = await llm_complete(LLMTask.AGENT, [{"role": "user", "content": "hi"}])
         assert result == "from global"
 
     @pytest.mark.asyncio
@@ -132,9 +126,7 @@ class TestLlmComplete:
     @pytest.mark.asyncio
     async def test_fallback_uses_settings_model(self) -> None:
         mock_client = AsyncMock()
-        mock_client.messages.create = AsyncMock(
-            return_value=_mock_anthropic_response("ok")
-        )
+        mock_client.messages.create = AsyncMock(return_value=_mock_anthropic_response("ok"))
 
         mock_settings = MagicMock()
         mock_settings.anthropic.api_key = "test-key"
@@ -144,9 +136,7 @@ class TestLlmComplete:
             patch("src.llm.helpers.anthropic.AsyncAnthropic", return_value=mock_client),
             patch("src.llm.helpers.get_settings", return_value=mock_settings),
         ):
-            await llm_complete(
-                LLMTask.AGENT, [{"role": "user", "content": "hi"}], router=None
-            )
+            await llm_complete(LLMTask.AGENT, [{"role": "user", "content": "hi"}], router=None)
 
         call_kwargs = mock_client.messages.create.call_args.kwargs
         assert call_kwargs["model"] == "claude-test-model"
@@ -154,9 +144,7 @@ class TestLlmComplete:
     @pytest.mark.asyncio
     async def test_system_passed_to_sdk_fallback(self) -> None:
         mock_client = AsyncMock()
-        mock_client.messages.create = AsyncMock(
-            return_value=_mock_anthropic_response("ok")
-        )
+        mock_client.messages.create = AsyncMock(return_value=_mock_anthropic_response("ok"))
 
         with patch("src.llm.helpers.anthropic.AsyncAnthropic", return_value=mock_client):
             await llm_complete(

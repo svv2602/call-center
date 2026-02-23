@@ -209,16 +209,38 @@ class TestImportCallEndpoint:
         turns_data = [
             {"turn_number": 1, "speaker": "customer", "content": "Привіт", "llm_latency_ms": None},
             {"turn_number": 2, "speaker": "bot", "content": "Вітаю!", "llm_latency_ms": 350},
-            {"turn_number": 3, "speaker": "customer", "content": "Шини 205/55 R16", "llm_latency_ms": None},
-            {"turn_number": 4, "speaker": "bot", "content": "Шукаю для вас...", "llm_latency_ms": 420},
+            {
+                "turn_number": 3,
+                "speaker": "customer",
+                "content": "Шини 205/55 R16",
+                "llm_latency_ms": None,
+            },
+            {
+                "turn_number": 4,
+                "speaker": "bot",
+                "content": "Шукаю для вас...",
+                "llm_latency_ms": 420,
+            },
         ]
         turns_rows = _make_turn_rows(turns_data)
         turns_result = MagicMock()
         turns_result.__iter__ = MagicMock(return_value=iter(turns_rows))
 
         tc_data = [
-            {"turn_number": 2, "tool_name": "search_tires", "tool_args": {"width": 205}, "tool_result": {"items": []}, "duration_ms": 150},
-            {"turn_number": 4, "tool_name": "check_availability", "tool_args": {"sku": "ABC"}, "tool_result": {"available": True}, "duration_ms": 80},
+            {
+                "turn_number": 2,
+                "tool_name": "search_tires",
+                "tool_args": {"width": 205},
+                "tool_result": {"items": []},
+                "duration_ms": 150,
+            },
+            {
+                "turn_number": 4,
+                "tool_name": "check_availability",
+                "tool_args": {"sku": "ABC"},
+                "tool_result": {"available": True},
+                "duration_ms": 80,
+            },
         ]
         tc_rows = _make_turn_rows(tc_data)
         tc_result = MagicMock()
@@ -334,9 +356,17 @@ class TestImportCallEndpoint:
         sandbox_turn_results = []
         for td in turns_data:
             speaker = "agent" if td["speaker"] == "bot" else "customer"
-            sandbox_turn_results.append(_make_result(first=_sandbox_turn_row(td["turn_number"], speaker)))
+            sandbox_turn_results.append(
+                _make_result(first=_sandbox_turn_row(td["turn_number"], speaker))
+            )
 
-        all_results = [call_result, turns_result, tc_result, _make_result(first=conv), *sandbox_turn_results]
+        all_results = [
+            call_result,
+            turns_result,
+            tc_result,
+            _make_result(first=conv),
+            *sandbox_turn_results,
+        ]
         result_iter = iter(all_results)
 
         async def capture_execute(query, params=None):
@@ -358,7 +388,9 @@ class TestImportCallEndpoint:
         await import_call(req, {"user_id": "test"})
 
         # Find turn inserts with history (agent turns)
-        history_params = [p for p in executed_params if "history" in p and p.get("history") is not None]
+        history_params = [
+            p for p in executed_params if "history" in p and p.get("history") is not None
+        ]
         assert len(history_params) == 2  # 2 agent turns
 
         # First agent turn (turn 2): history should have customer message only
@@ -391,7 +423,13 @@ class TestImportCallEndpoint:
         turns_result.__iter__ = MagicMock(return_value=iter(_make_turn_rows(turns_data)))
 
         tc_data = [
-            {"turn_number": 2, "tool_name": "search_tires", "tool_args": {}, "tool_result": {}, "duration_ms": 100},
+            {
+                "turn_number": 2,
+                "tool_name": "search_tires",
+                "tool_args": {},
+                "tool_result": {},
+                "duration_ms": 100,
+            },
         ]
         tc_result = MagicMock()
         tc_result.__iter__ = MagicMock(return_value=iter(_make_turn_rows(tc_data)))
@@ -402,7 +440,10 @@ class TestImportCallEndpoint:
         customer_turn = _sandbox_turn_row(1, "customer")
 
         all_results = [
-            call_result, turns_result, tc_result, _make_result(first=conv),
+            call_result,
+            turns_result,
+            tc_result,
+            _make_result(first=conv),
             _make_result(first=customer_turn),
             _make_result(first=agent_turn),
             MagicMock(),  # tool call insert
@@ -450,14 +491,23 @@ class TestImportCallEndpoint:
         turns_result.__iter__ = MagicMock(return_value=iter(_make_turn_rows(turns_data)))
 
         tc_data = [
-            {"turn_number": 2, "tool_name": "search_tires", "tool_args": {}, "tool_result": {}, "duration_ms": 100},
+            {
+                "turn_number": 2,
+                "tool_name": "search_tires",
+                "tool_args": {},
+                "tool_result": {},
+                "duration_ms": 100,
+            },
         ]
         tc_result = MagicMock()
         tc_result.__iter__ = MagicMock(return_value=iter(_make_turn_rows(tc_data)))
 
         conv = _conv_row()
         all_results = [
-            call_result, turns_result, tc_result, _make_result(first=conv),
+            call_result,
+            turns_result,
+            tc_result,
+            _make_result(first=conv),
             _make_result(first=_sandbox_turn_row(1, "customer")),
             _make_result(first=_sandbox_turn_row(2, "agent")),
             MagicMock(),
@@ -482,7 +532,9 @@ class TestImportCallEndpoint:
         await import_call(req, {"user_id": "test"})
 
         # The tool call INSERT should contain 'false' for is_mock
-        tc_queries = [(q, p) for q, p in executed_queries if "sandbox_tool_calls" in q and "INSERT" in q]
+        tc_queries = [
+            (q, p) for q, p in executed_queries if "sandbox_tool_calls" in q and "INSERT" in q
+        ]
         assert len(tc_queries) == 1
         assert "false" in tc_queries[0][0].lower()
 
@@ -507,7 +559,10 @@ class TestImportCallEndpoint:
 
         conv = _conv_row()
         all_results = [
-            call_result, turns_result, tc_result, _make_result(first=conv),
+            call_result,
+            turns_result,
+            tc_result,
+            _make_result(first=conv),
             _make_result(first=_sandbox_turn_row(1, "customer")),
             _make_result(first=_sandbox_turn_row(2, "agent")),
         ]
@@ -568,7 +623,10 @@ class TestImportCallEndpoint:
 
         conv = _conv_row()
         all_results = [
-            call_result, turns_result, tc_result, _make_result(first=conv),
+            call_result,
+            turns_result,
+            tc_result,
+            _make_result(first=conv),
             _make_result(first=_sandbox_turn_row(1, "customer")),
         ]
         result_iter = iter(all_results)
@@ -615,7 +673,10 @@ class TestImportCallEndpoint:
 
         conv = _conv_row()
         all_results = [
-            call_result, turns_result, tc_result, _make_result(first=conv),
+            call_result,
+            turns_result,
+            tc_result,
+            _make_result(first=conv),
             _make_result(first=_sandbox_turn_row(1, "customer")),
         ]
         result_iter = iter(all_results)
@@ -658,14 +719,23 @@ class TestImportCallEndpoint:
 
         # Tool call references turn 99 which doesn't exist
         tc_data = [
-            {"turn_number": 99, "tool_name": "search_tires", "tool_args": {}, "tool_result": {}, "duration_ms": 100},
+            {
+                "turn_number": 99,
+                "tool_name": "search_tires",
+                "tool_args": {},
+                "tool_result": {},
+                "duration_ms": 100,
+            },
         ]
         tc_result = MagicMock()
         tc_result.__iter__ = MagicMock(return_value=iter(_make_turn_rows(tc_data)))
 
         conv = _conv_row()
         all_results = [
-            call_result, turns_result, tc_result, _make_result(first=conv),
+            call_result,
+            turns_result,
+            tc_result,
+            _make_result(first=conv),
             _make_result(first=_sandbox_turn_row(1, "customer")),
             # No tool call insert should happen
         ]

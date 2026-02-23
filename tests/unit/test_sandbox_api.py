@@ -87,9 +87,7 @@ class TestConversationEndpoints:
 
         req = ConversationUpdate(status="invalid_status")
         with pytest.raises(HTTPException) as exc_info:
-            await update_conversation(
-                "12345678-1234-1234-1234-123456789012", req, {}
-            )
+            await update_conversation("12345678-1234-1234-1234-123456789012", req, {})
         assert exc_info.value.status_code == 400
 
     @pytest.mark.asyncio

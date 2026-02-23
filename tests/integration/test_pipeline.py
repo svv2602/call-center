@@ -141,8 +141,12 @@ class TestPipelineWithCustomTemplates:
         }
 
         pipeline = CallPipeline(
-            _make_conn(), MockSTTEngine(), MockTTSEngine(),
-            _make_agent(), CallSession(uuid4()), STTConfig(),
+            _make_conn(),
+            MockSTTEngine(),
+            MockTTSEngine(),
+            _make_agent(),
+            CallSession(uuid4()),
+            STTConfig(),
             templates=custom_templates,
         )
         assert pipeline._templates["farewell"] == "Дякуємо за дзвінок, на все добре!"
@@ -156,8 +160,12 @@ class TestPipelineWithCustomTemplates:
         }
 
         pipeline = CallPipeline(
-            _make_conn(), MockSTTEngine(), MockTTSEngine(),
-            _make_agent(), CallSession(uuid4()), STTConfig(),
+            _make_conn(),
+            MockSTTEngine(),
+            MockTTSEngine(),
+            _make_agent(),
+            CallSession(uuid4()),
+            STTConfig(),
             templates=custom_templates,
         )
         assert pipeline._templates["error"] == "Виникла технічна помилка, перепрошуємо."
@@ -166,8 +174,12 @@ class TestPipelineWithCustomTemplates:
     async def test_none_templates_uses_defaults(self) -> None:
         """Passing templates=None should fall back to _DEFAULT_TEMPLATES."""
         pipeline = CallPipeline(
-            _make_conn(), MockSTTEngine(), MockTTSEngine(),
-            _make_agent(), CallSession(uuid4()), STTConfig(),
+            _make_conn(),
+            MockSTTEngine(),
+            MockTTSEngine(),
+            _make_agent(),
+            CallSession(uuid4()),
+            STTConfig(),
             templates=None,
         )
         assert pipeline._templates == _DEFAULT_TEMPLATES
@@ -179,8 +191,12 @@ class TestPipelineWithCustomTemplates:
         partial = {"greeting": "Часткове привітання"}
 
         pipeline = CallPipeline(
-            _make_conn(), MockSTTEngine(), MockTTSEngine(),
-            _make_agent(), CallSession(uuid4()), STTConfig(),
+            _make_conn(),
+            MockSTTEngine(),
+            MockTTSEngine(),
+            _make_agent(),
+            CallSession(uuid4()),
+            STTConfig(),
             templates=partial,
         )
         assert pipeline._templates["greeting"] == "Часткове привітання"

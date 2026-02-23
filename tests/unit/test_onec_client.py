@@ -132,7 +132,6 @@ class TestOneCClientRequests:
             mock_get.assert_called_once_with("/Trade/hs/site/novapost/branch")
             assert result["data"][0]["Ref"] == "xyz"
 
-
     @pytest.mark.asyncio
     async def test_get_pickup_points(self, onec_client: OneCClient) -> None:
         mock_response = {

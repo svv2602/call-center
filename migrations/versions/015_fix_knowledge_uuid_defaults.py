@@ -20,12 +20,8 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.execute(
-        "ALTER TABLE knowledge_articles ALTER COLUMN id SET DEFAULT gen_random_uuid()"
-    )
-    op.execute(
-        "ALTER TABLE knowledge_embeddings ALTER COLUMN id SET DEFAULT gen_random_uuid()"
-    )
+    op.execute("ALTER TABLE knowledge_articles ALTER COLUMN id SET DEFAULT gen_random_uuid()")
+    op.execute("ALTER TABLE knowledge_embeddings ALTER COLUMN id SET DEFAULT gen_random_uuid()")
 
 
 def downgrade() -> None:

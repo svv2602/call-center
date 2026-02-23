@@ -42,6 +42,7 @@ def _patch_engine_with_conn(conn: AsyncMock) -> Any:
 
 # ── fixtures ─────────────────────────────────────────────
 
+
 @pytest.fixture()
 def client() -> TestClient:
     app = FastAPI()
@@ -50,6 +51,7 @@ def client() -> TestClient:
 
 
 # ── Tests ────────────────────────────────────────────────
+
 
 class TestListTenants:
     @patch("src.api.auth.get_settings")
