@@ -82,6 +82,21 @@ async function loadDashboard() {
     }
 }
 
+function _activateGrafana() {
+    try {
+        const grafanaBlock = document.getElementById('grafanaBlock');
+        const grafanaFrame = document.getElementById('grafanaFrame');
+        if (!grafanaBlock || !grafanaFrame) return;
+        const baseUrl = window.location.origin.replace(/:\d+$/, ':3000');
+        const dashPath = '/d/calls-overview/calls-overview?orgId=1&refresh=30s&kiosk';
+        grafanaFrame.onerror = () => { grafanaBlock.style.display = 'none'; };
+        grafanaFrame.src = baseUrl + dashPath;
+        grafanaBlock.style.display = '';
+    } catch {
+        // Grafana unavailable — leave block hidden
+    }
+}
+
 async function exportStatsCSV() {
     try {
         const params = _selectedTenantId ? `?tenant_id=${_selectedTenantId}` : '';
@@ -127,6 +142,7 @@ export function init() {
 
         await _loadTenants();
         _renderTenantFilter();
+        _activateGrafana();
         loadDashboard();
         if (canAnalytics) setRefreshTimer(loadDashboard, 30000);
     });
