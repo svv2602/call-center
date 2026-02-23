@@ -429,22 +429,39 @@ function toggleTurnSelect(turnId) {
     renderConversationView();
 }
 
-function _populateIntentSelect() {
-    const sel = document.getElementById('sandboxGroupIntent');
-    sel.innerHTML = `<option value="">${t('sandbox.intentSelectPlaceholder')}</option>` +
-        INTENT_OPTIONS.map(o => `<option value="${o.value}">${o.value} — ${t(o.i18nKey)}</option>`).join('');
+function _populateGroupIntentCheckboxes() {
+    const container = document.getElementById('sandboxGroupIntentCheckboxes');
+    container.innerHTML = INTENT_OPTIONS.filter(o => o.value !== 'other').map(o =>
+        `<label class="flex items-center gap-1.5 text-xs text-neutral-700 dark:text-neutral-300 cursor-pointer">
+            <input type="checkbox" value="${o.value}" class="groupIntentCb cursor-pointer"> ${t(o.i18nKey)}
+        </label>`
+    ).join('') + `<label class="flex items-center gap-1.5 text-xs text-neutral-700 dark:text-neutral-300 cursor-pointer">
+        <input type="checkbox" value="__other__" class="groupIntentCb cursor-pointer"
+            onchange="document.getElementById('sandboxGroupIntentCustom').style.display=this.checked?'':'none'"> ${t('sandbox.intentOther')}
+    </label>`;
+}
+
+function _collectGroupIntentLabel() {
+    const checkboxes = document.querySelectorAll('.groupIntentCb:checked');
+    const values = [];
+    let hasOther = false;
+    checkboxes.forEach(cb => {
+        if (cb.value === '__other__') { hasOther = true; return; }
+        values.push(cb.value);
+    });
+    if (hasOther) {
+        const custom = document.getElementById('sandboxGroupIntentCustom').value.trim();
+        if (custom) {
+            custom.split(',').map(s => s.trim()).filter(Boolean).forEach(v => {
+                if (!values.includes(v)) values.push(v);
+            });
+        }
+    }
+    return values.join(', ');
 }
 
 function onIntentChange() {
-    const sel = document.getElementById('sandboxGroupIntent');
-    const custom = document.getElementById('sandboxGroupIntentCustom');
-    if (sel.value === 'other') {
-        custom.style.display = '';
-        custom.focus();
-    } else {
-        custom.style.display = 'none';
-        custom.value = '';
-    }
+    // kept for backward compat — no-op with checkboxes
 }
 
 function selectPatternType(type) {
@@ -476,8 +493,8 @@ function selectPatternType(type) {
 function showGroupModal() {
     if (_selectedTurnIds.size < 1) return;
 
-    // Populate intent dropdown
-    _populateIntentSelect();
+    // Populate intent checkboxes
+    _populateGroupIntentCheckboxes();
     document.getElementById('sandboxGroupIntentCustom').style.display = 'none';
     document.getElementById('sandboxGroupIntentCustom').value = '';
 
@@ -528,9 +545,7 @@ function showGroupModal() {
 }
 
 async function submitGroup() {
-    const intentSel = document.getElementById('sandboxGroupIntent').value;
-    const intentCustom = document.getElementById('sandboxGroupIntentCustom').value.trim();
-    const intentLabel = (intentSel === 'other' ? intentCustom : intentSel) || '';
+    const intentLabel = _collectGroupIntentLabel();
     if (!intentLabel) { showToast(t('sandbox.intentRequired'), 'error'); return; }
 
     const patternType = document.getElementById('sandboxGroupType').value;
