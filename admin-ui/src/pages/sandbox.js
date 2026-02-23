@@ -218,6 +218,7 @@ function renderConversationView() {
                         <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="document.getElementById('sandboxConvInfo').toggleAttribute('open')" title="${t('sandbox.convInfo')}">&#9432;</button>
                         <button class="${markingBtnClass} ${tw.btnSm}" onclick="window._pages.sandbox.toggleMarking()">${markingLabel}</button>
                         <button class="${conv.is_baseline ? tw.btnPrimary : tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.toggleBaseline('${conv.id}', ${!!conv.is_baseline})">${conv.is_baseline ? t('sandbox.unmarkBaseline') : t('sandbox.markBaseline')}</button>
+                        ${conv.is_baseline ? `<button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.replayConversation('${conv.id}')" title="${t('sandbox.replayHint')}">${t('sandbox.replay')}</button>` : ''}
                         ${isActive ? `<button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.archiveConversation()">${t('sandbox.archiveConversation')}</button>` : ''}
                     </div>
                 </div>
