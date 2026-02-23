@@ -173,7 +173,7 @@ function showPermissionsEditor(userId, role, permsJson) {
     `;
 
     for (const [group, perms] of Object.entries(PERMISSION_GROUPS)) {
-        html += `<div class="mb-3"><div class="text-xs font-semibold text-neutral-500 uppercase mb-1">${escapeHtml(group)}</div><div class="flex flex-wrap gap-x-4 gap-y-1">`;
+        html += `<div class="mb-3"><div class="text-xs mb-1"><span class="font-semibold text-neutral-700 dark:text-neutral-200">${t('users.permGroup.' + group)}</span> <span class="text-neutral-400 dark:text-neutral-500">— ${t('users.permGroupHint.' + group)}</span></div><div class="flex flex-wrap gap-x-4 gap-y-1">`;
         for (const perm of perms) {
             const action = perm.split(':')[1];
             const checked = isWildcard || effective.includes(perm) ? 'checked' : '';

@@ -157,6 +157,7 @@ export const HELP_PAGES = {
             { titleKey: 'help.users.creating.steps', contentKey: 'help.users.creating.stepsContent' },
             { titleKey: 'help.users.roles.title', contentKey: 'help.users.roles.content' },
             { titleKey: 'help.users.permissions.title', contentKey: 'help.users.permissions.content' },
+            { titleKey: 'help.users.permissions.groups.title', contentKey: 'help.users.permissions.groups.content' },
             { titleKey: 'help.users.permissions.steps', contentKey: 'help.users.permissions.stepsContent' },
         ],
         tipsKey: 'help.users.tips',
