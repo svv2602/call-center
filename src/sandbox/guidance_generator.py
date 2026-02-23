@@ -1,20 +1,16 @@
 """Generate guidance notes for conversation patterns via LLM.
 
-Uses LLM router (with fallback providers) or direct Anthropic SDK
+Uses unified llm_complete helper (router → Anthropic fallback)
 to draft a system prompt instruction from a turn group's dialogue fragment.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 
-import anthropic
-
-from src.config import get_settings
-
-if TYPE_CHECKING:
-    from anthropic.types import MessageParam
+from src.llm.helpers import llm_complete
+from src.llm.models import LLMTask
 
 logger = logging.getLogger(__name__)
 
@@ -75,76 +71,47 @@ async def generate_guidance(
     user_message = _build_user_message(turns, intent_label, pattern_type, correction)
     messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
 
-    # Try LLM router first
-    try:
-        reply = await _generate_via_router(_SYSTEM_PROMPT, messages)
-        if reply:
-            return reply
-    except Exception:
-        logger.debug("LLM router not available for guidance generation, trying direct SDK")
+    provider_override = await _get_sandbox_provider_override()
 
-    # Fallback: direct Anthropic SDK
     try:
-        settings = get_settings()
-        client = anthropic.AsyncAnthropic(api_key=settings.anthropic.api_key)
-        response = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=300,
+        return await llm_complete(
+            LLMTask.AGENT,
+            messages,
             system=_SYSTEM_PROMPT,
-            messages=cast("list[MessageParam]", messages),
+            max_tokens=300,
+            provider_override=provider_override,
         )
-        block = response.content[0] if response.content else None
-        return block.text if block and hasattr(block, "text") else ""
     except Exception:
         logger.exception("Failed to generate guidance note")
         return ""
 
 
-async def _generate_via_router(
-    system: str,
-    messages: list[dict[str, Any]],
-) -> str | None:
-    """Try generating via LLM router. Returns None if router unavailable."""
-    from src.llm import get_router
-    from src.llm.models import LLMTask
-
-    router = get_router()
-    if router is None:
-        return None
-
-    provider_override = await _get_sandbox_provider_override(router)
-
-    response = await router.complete(
-        LLMTask.AGENT,
-        messages,
-        system=system,
-        max_tokens=300,
-        provider_override=provider_override,
-    )
-    return response.text or None
-
-
-async def _get_sandbox_provider_override(router: Any) -> str | None:
+async def _get_sandbox_provider_override() -> str | None:
     """Read auto_customer_model from Redis LLM config for sandbox provider override."""
     try:
         import json
 
         from redis.asyncio import Redis
 
-        from src.config import get_settings as _get_settings
+        from src.config import get_settings
+        from src.llm import get_router
         from src.llm.router import REDIS_CONFIG_KEY
 
-        _settings = _get_settings()
-        _redis = Redis.from_url(_settings.redis.url, decode_responses=True)
+        router = get_router()
+        if router is None:
+            return None
+
+        settings = get_settings()
+        redis = Redis.from_url(settings.redis.url, decode_responses=True)
         try:
-            raw = await _redis.get(REDIS_CONFIG_KEY)
+            raw = await redis.get(REDIS_CONFIG_KEY)
             if raw:
                 llm_cfg = json.loads(raw)
                 ac_model = (llm_cfg.get("sandbox") or {}).get("auto_customer_model", "")
                 if ac_model and ac_model in router.providers:
                     return ac_model
         finally:
-            await _redis.aclose()
+            await redis.aclose()
     except Exception:
         logger.debug("Failed to read auto_customer_model from Redis", exc_info=True)
     return None

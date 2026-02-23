@@ -184,8 +184,6 @@ async def _run_scraper_async(task: Any, *, triggered_by: str = "manual") -> dict
                     title=scraped.title,
                     content=scraped.content,
                     source_url=url,
-                    api_key=settings.anthropic.api_key,
-                    model=config["llm_model"],
                     llm_router=get_router(),
                     is_promotion=_is_promo,
                 )
@@ -347,8 +345,6 @@ async def _scrape_single_url_async(
             title=scraped.title,
             content=scraped.content,
             source_url=url,
-            api_key=settings.anthropic.api_key,
-            model=config["llm_model"],
             llm_router=get_router(),
             is_promotion=_is_promotion,
             is_shop_info=_is_shop_info,
@@ -643,8 +639,6 @@ async def _rescrape_watched_pages_async(task: Any) -> dict[str, Any]:
                     title=scraped.title,
                     content=scraped.content,
                     source_url=page_url,
-                    api_key=settings.anthropic.api_key,
-                    model=config["llm_model"],
                     llm_router=get_router(),
                     is_shop_info=True,
                 )
@@ -917,8 +911,6 @@ async def _handle_discovery_page(
                 title=scraped.title,
                 content=scraped.content,
                 source_url=child_url,
-                api_key=settings.anthropic.api_key,
-                model=config["llm_model"],
                 llm_router=get_router(),
                 is_promotion=True,
             )
@@ -1242,7 +1234,6 @@ async def _run_source_async(
                     title=scraped.title,
                     content=scraped.content,
                     source_url=url,
-                    api_key=settings.anthropic.api_key,
                     llm_router=get_router(),
                     source_language=source_language,
                 )

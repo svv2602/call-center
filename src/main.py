@@ -1170,11 +1170,6 @@ async def main() -> None:
             from src.llm import set_router
 
             set_router(_llm_router)
-
-            # Share router with Celery tasks
-            from src.tasks.quality_evaluator import set_llm_router as set_evaluator_router
-
-            set_evaluator_router(_llm_router)
         except Exception:
             logger.warning(
                 "LLM router init failed — falling back to direct Anthropic", exc_info=True

@@ -1,20 +1,16 @@
 """Auto-generate customer responses for sandbox testing.
 
-Uses LLM router (with fallback providers) or direct Anthropic SDK
+Uses unified llm_complete helper (router → Anthropic fallback)
 to simulate customer behavior in various personas.
 """
 
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 
-import anthropic
-
-from src.config import get_settings
-
-if TYPE_CHECKING:
-    from anthropic.types import MessageParam
+from src.llm.helpers import llm_complete
+from src.llm.models import LLMTask
 
 logger = logging.getLogger(__name__)
 
@@ -88,71 +84,47 @@ async def generate_customer_reply(
             {"role": "user", "content": "Привіт, я менеджер шинного магазину. Чим можу допомогти?"}
         ]
 
-    # Try LLM router first (supports Gemini, OpenAI, etc.), fall back to direct Anthropic SDK
-    try:
-        reply = await _generate_via_router(system, messages)
-        if reply:
-            return reply
-    except Exception:
-        logger.debug("LLM router not available for auto-customer, trying direct SDK")
+    provider_override = await _get_sandbox_provider_override()
 
     try:
-        settings = get_settings()
-        client = anthropic.AsyncAnthropic(api_key=settings.anthropic.api_key)
-        response = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=200,
+        return await llm_complete(
+            LLMTask.AGENT,
+            messages,
             system=system,
-            messages=cast("list[MessageParam]", messages),
+            max_tokens=200,
+            provider_override=provider_override,
         )
-        block = response.content[0] if response.content else None
-        return block.text if block and hasattr(block, "text") else ""
     except Exception:
         logger.exception("Failed to generate customer reply")
         return "Так, добре."
 
 
-async def _generate_via_router(
-    system: str,
-    messages: list[dict[str, Any]],
-) -> str | None:
-    """Try generating via LLM router. Returns None if router unavailable."""
-    from src.llm import get_router
-    from src.llm.models import LLMTask
-
-    router = get_router()
-    if router is None:
-        return None
-
-    # Check if a specific auto-customer model is configured in Redis
-    provider_override: str | None = None
+async def _get_sandbox_provider_override() -> str | None:
+    """Read auto_customer_model from Redis LLM config for sandbox provider override."""
     try:
         import json
 
         from redis.asyncio import Redis
 
-        from src.config import get_settings as _get_settings
+        from src.config import get_settings
+        from src.llm import get_router
         from src.llm.router import REDIS_CONFIG_KEY
 
-        _settings = _get_settings()
-        _redis = Redis.from_url(_settings.redis.url, decode_responses=True)
+        router = get_router()
+        if router is None:
+            return None
+
+        settings = get_settings()
+        redis = Redis.from_url(settings.redis.url, decode_responses=True)
         try:
-            raw = await _redis.get(REDIS_CONFIG_KEY)
+            raw = await redis.get(REDIS_CONFIG_KEY)
             if raw:
                 llm_cfg = json.loads(raw)
                 ac_model = (llm_cfg.get("sandbox") or {}).get("auto_customer_model", "")
                 if ac_model and ac_model in router.providers:
-                    provider_override = ac_model
+                    return ac_model
         finally:
-            await _redis.aclose()
+            await redis.aclose()
     except Exception:
         logger.debug("Failed to read auto_customer_model from Redis", exc_info=True)
-
-    response = await router.complete(
-        LLMTask.AGENT,
-        messages,
-        system=system,
-        max_tokens=200,
-        provider_override=provider_override,
-    )
-    return response.text or None
+    return None

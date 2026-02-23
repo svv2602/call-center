@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from src.llm.helpers import llm_complete
 from src.llm.models import (
     LLMResponse,
     LLMTask,
@@ -31,6 +32,7 @@ __all__ = [
     "ToolCallStart",
     "Usage",
     "get_router",
+    "llm_complete",
     "set_router",
 ]
 

@@ -9,16 +9,14 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 
-import anthropic
 from sqlalchemy import text
-
-if TYPE_CHECKING:
-    from anthropic.types import MessageParam
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.config import get_settings
+from src.llm.helpers import llm_complete
+from src.llm.models import LLMTask
 from src.tasks.celery_app import app
 
 logger = logging.getLogger(__name__)
@@ -143,32 +141,9 @@ async def _analyze_failed_calls_async(
         # Analyze with LLM (try LLM router first, fall back to direct Anthropic)
         messages = [{"role": "user", "content": ANALYSIS_PROMPT + combined_text}]
 
-        response_text = ""
-        try:
-            from src.llm import get_router
-
-            llm_router = get_router()
-            if llm_router is not None:
-                from src.llm.models import LLMTask
-
-                llm_response = await llm_router.complete(
-                    LLMTask.PROMPT_OPTIMIZER,
-                    messages,
-                    max_tokens=1024,
-                )
-                response_text = llm_response.text.strip()
-        except Exception:
-            pass
-
-        if not response_text:
-            client = anthropic.Anthropic(api_key=settings.anthropic.api_key)
-            response = client.messages.create(
-                model=settings.quality.llm_model,
-                max_tokens=1024,
-                messages=cast("list[MessageParam]", messages),
-            )
-            content_block = response.content[0]
-            response_text = content_block.text.strip() if hasattr(content_block, "text") else ""
+        response_text = await llm_complete(
+            LLMTask.PROMPT_OPTIMIZER, messages, max_tokens=1024
+        )
 
         if response_text.startswith("```"):
             response_text = response_text.split("\n", 1)[1].rsplit("```", 1)[0].strip()

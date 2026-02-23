@@ -7,7 +7,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import TYPE_CHECKING, Any, cast
+from typing import Any
 from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -19,9 +19,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from src.agent.prompt_manager import SAFETY_CACHE_REDIS_KEY
 from src.api.auth import require_permission
 from src.config import get_settings
-
-if TYPE_CHECKING:
-    from anthropic.types import MessageParam
+from src.llm.helpers import llm_complete
+from src.llm.models import LLMTask
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/training/safety-rules", tags=["training"])
@@ -321,16 +320,6 @@ async def run_regression_test(_: dict[str, Any] = _perm_x) -> dict[str, Any]:
     if not rules:
         return {"results": [], "passed": 0, "failed": 0, "total": 0}
 
-    # Get LLM router or fall back to direct Anthropic
-    llm_router = None
-    try:
-        from src.llm import get_router
-
-        llm_router = get_router()
-    except Exception:
-        pass
-
-    settings = get_settings()
     results: list[dict[str, Any]] = []
     passed = 0
     failed = 0
@@ -340,18 +329,10 @@ async def run_regression_test(_: dict[str, Any] = _perm_x) -> dict[str, Any]:
         expected = rule["expected_behavior"]
 
         # Step 1: Get agent response to trigger input
-        agent_response = await _get_agent_response(
-            trigger, llm_router, settings.anthropic.api_key, settings.anthropic.model
-        )
+        agent_response = await _get_agent_response(trigger)
 
         # Step 2: Judge whether agent response matches expected behavior
-        judgement = await _judge_response(
-            trigger,
-            expected,
-            agent_response,
-            llm_router,
-            settings.anthropic.api_key,
-        )
+        judgement = await _judge_response(trigger, expected, agent_response)
 
         is_pass = judgement.get("passed", False)
         if is_pass:
@@ -375,12 +356,7 @@ async def run_regression_test(_: dict[str, Any] = _perm_x) -> dict[str, Any]:
     return {"results": results, "passed": passed, "failed": failed, "total": len(rules)}
 
 
-async def _get_agent_response(
-    trigger: str,
-    llm_router: Any,
-    api_key: str,
-    model: str,
-) -> str:
+async def _get_agent_response(trigger: str) -> str:
     """Send trigger_input to the agent LLM and get response text."""
     from src.agent.prompt_manager import (
         format_safety_rules_section,
@@ -401,33 +377,10 @@ async def _get_agent_response(
 
     messages = [{"role": "user", "content": trigger}]
 
-    if llm_router is not None:
-        try:
-            from src.llm.models import LLMTask
-
-            resp = await llm_router.complete(
-                LLMTask.QUALITY_SCORING,
-                messages,
-                system=system,
-                max_tokens=512,
-            )
-            return resp.text or ""
-        except Exception:
-            pass
-
-    # Fallback: direct Anthropic
     try:
-        import anthropic
-
-        client = anthropic.AsyncAnthropic(api_key=api_key)
-        resp = await client.messages.create(
-            model=model,
-            max_tokens=512,
-            system=system,
-            messages=cast("list[MessageParam]", messages),
+        return await llm_complete(
+            LLMTask.QUALITY_SCORING, messages, system=system, max_tokens=512
         )
-        block = resp.content[0] if resp.content else None
-        return block.text if block and hasattr(block, "text") else ""
     except Exception as exc:
         return f"[error: {exc}]"
 
@@ -436,8 +389,6 @@ async def _judge_response(
     trigger: str,
     expected: str,
     actual: str,
-    llm_router: Any,
-    api_key: str,
 ) -> dict[str, Any]:
     """Use LLM-as-judge to evaluate if actual response matches expected behavior."""
     import json as _json
@@ -453,35 +404,12 @@ async def _judge_response(
 
     messages = [{"role": "user", "content": judge_prompt}]
 
-    response_text = ""
-    if llm_router is not None:
-        try:
-            from src.llm.models import LLMTask
-
-            resp = await llm_router.complete(
-                LLMTask.QUALITY_SCORING,
-                messages,
-                max_tokens=256,
-            )
-            response_text = resp.text or ""
-        except Exception:
-            pass
+    response_text = await llm_complete(
+        LLMTask.QUALITY_SCORING, messages, max_tokens=256
+    )
 
     if not response_text:
-        # Fallback: direct Anthropic
-        try:
-            import anthropic
-
-            client = anthropic.AsyncAnthropic(api_key=api_key)
-            resp = await client.messages.create(
-                model="claude-haiku-4-5-20251001",
-                max_tokens=256,
-                messages=cast("list[MessageParam]", messages),
-            )
-            block = resp.content[0] if resp.content else None
-            response_text = block.text if block and hasattr(block, "text") else ""
-        except Exception as exc:
-            return {"passed": False, "reason": f"Judge error: {exc}"}
+        return {"passed": False, "reason": "LLM returned empty response"}
 
     # Parse JSON from response
     try:

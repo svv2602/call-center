@@ -1,6 +1,6 @@
 """LLM-based article processor for scraped content.
 
-Uses Claude (Haiku) to clean up scraped articles:
+Uses llm_complete helper (router → Anthropic fallback) to clean up scraped articles:
 - Remove marketing/promotional content
 - Classify as useful or skip
 - Pick KB category
@@ -12,12 +12,10 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, cast
+from typing import Any
 
-import anthropic
-
-if TYPE_CHECKING:
-    from anthropic.types import MessageParam
+from src.llm.helpers import llm_complete
+from src.llm.models import LLMTask
 
 logger = logging.getLogger(__name__)
 
@@ -109,8 +107,6 @@ async def process_article(
     title: str,
     content: str,
     source_url: str,
-    api_key: str,
-    model: str = "claude-haiku-4-5-20251001",
     llm_router: object | None = None,
     source_language: str = "uk",
     is_promotion: bool = False,
@@ -122,8 +118,6 @@ async def process_article(
         title: Original article title.
         content: Raw scraped content.
         source_url: Source URL for context.
-        api_key: Anthropic API key.
-        model: Model to use (default: Haiku for cost efficiency).
         llm_router: Optional LLMRouter for multi-provider routing.
         source_language: ISO language code of the source article (e.g. 'uk', 'de', 'en').
             When not 'uk', adds translation instructions to the prompt.
@@ -155,29 +149,16 @@ Title: {title}
 Content:
 {truncated}"""
 
-    messages = [{"role": "user", "content": user_message}]
+    messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
 
     try:
-        if llm_router is not None:
-            from src.llm.models import LLMTask
-
-            llm_response = await llm_router.complete(  # type: ignore[attr-defined]
-                LLMTask.ARTICLE_PROCESSOR,
-                messages,
-                system=system_prompt,
-                max_tokens=4096,
-            )
-            raw_text = llm_response.text.strip()
-        else:
-            client = anthropic.AsyncAnthropic(api_key=api_key)
-            response = await client.messages.create(
-                model=model,
-                max_tokens=4096,
-                system=system_prompt,
-                messages=cast("list[MessageParam]", messages),
-            )
-            block = response.content[0]
-            raw_text = block.text.strip() if hasattr(block, "text") else ""
+        raw_text = await llm_complete(
+            LLMTask.ARTICLE_PROCESSOR,
+            messages,
+            system=system_prompt,
+            max_tokens=4096,
+            router=llm_router,
+        )
 
         # Strip markdown code fences if present
         if raw_text.startswith("```"):
