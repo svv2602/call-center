@@ -17,6 +17,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.config import get_settings
+from src.llm import get_router
 from src.tasks.celery_app import app
 
 logger = logging.getLogger(__name__)
@@ -71,20 +72,32 @@ async def _generate_promo_summary_async(task: Any, article_id: str) -> dict[str,
         if row.category != "promotions":
             return {"article_id": article_id, "status": "skipped", "reason": "not_promotions"}
 
-        # Generate summary via Haiku
-        client = anthropic.AsyncAnthropic(api_key=settings.anthropic.api_key)
+        # Generate summary via LLM router (or direct Anthropic fallback)
         content_truncated = row.content[:3000] if len(row.content) > 3000 else row.content
+        messages = [
+            {"role": "user", "content": f"Назва акції: {row.title}\n\nПовний текст:\n{content_truncated}"}
+        ]
 
-        response = await client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=200,
-            system=_SUMMARY_SYSTEM_PROMPT,
-            messages=[
-                {"role": "user", "content": f"Назва акції: {row.title}\n\nПовний текст:\n{content_truncated}"}
-            ],
-        )
+        llm_router = get_router()
+        if llm_router is not None:
+            from src.llm.models import LLMTask
 
-        summary = response.content[0].text.strip() if response.content else ""
+            llm_response = await llm_router.complete(
+                LLMTask.ARTICLE_PROCESSOR,
+                messages,
+                system=_SUMMARY_SYSTEM_PROMPT,
+                max_tokens=200,
+            )
+            summary = llm_response.text.strip()
+        else:
+            client = anthropic.AsyncAnthropic(api_key=settings.anthropic.api_key)
+            response = await client.messages.create(
+                model="claude-haiku-4-5-20251001",
+                max_tokens=200,
+                system=_SUMMARY_SYSTEM_PROMPT,
+                messages=messages,
+            )
+            summary = response.content[0].text.strip() if response.content else ""
 
         if not summary:
             return {"article_id": article_id, "error": "empty_summary"}
