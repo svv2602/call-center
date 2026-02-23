@@ -45,7 +45,7 @@ Respond ONLY with valid JSON (no markdown fences):
   "is_useful": true/false,
   "skip_reason": "reason if not useful, null otherwise",
   "title": "cleaned article title in Ukrainian",
-  "category": "one of: brands, guides, faq, comparisons, policies, procedures, returns, warranty, delivery, general",
+  "category": "one of: brands, guides, faq, comparisons, policies, procedures, returns, warranty, delivery, promotions, news, general",
   "content": "cleaned article content in Ukrainian markdown"
 }"""
 
@@ -66,7 +66,7 @@ Respond ONLY with valid JSON (no markdown fences):
   "is_useful": true,
   "skip_reason": null,
   "title": "short descriptive title of the promotion in Ukrainian",
-  "category": "policies",
+  "category": "promotions",
   "content": "cleaned promotion summary in Ukrainian markdown"
 }"""
 
@@ -86,7 +86,7 @@ Respond ONLY with valid JSON (no markdown fences):
   "is_useful": true,
   "skip_reason": null,
   "title": "cleaned article title in Ukrainian",
-  "category": "one of: brands, guides, faq, comparisons, policies, procedures, returns, warranty, delivery, general",
+  "category": "one of: brands, guides, faq, comparisons, policies, procedures, returns, warranty, delivery, promotions, news, general",
   "content": "cleaned article content in Ukrainian markdown"
 }"""
 
