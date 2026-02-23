@@ -295,15 +295,26 @@ async def create_sandbox_agent(
         except Exception:
             logger.debug("Failed to read sandbox default model from Redis", exc_info=True)
 
+    # Determine the effective model for this agent
+    effective_model = model or sandbox_default_model
+
+    # If no explicit provider_override was passed but the effective model
+    # is a router provider key (e.g. "gemini-flash"), auto-resolve it so
+    # that LLMAgent uses the router instead of the direct Anthropic SDK.
+    effective_provider = provider_override
+    effective_router = llm_router
+    if effective_provider is None and effective_router is not None and effective_model in effective_router.providers:
+        effective_provider = effective_model
+
     return LLMAgent(
         api_key=settings.anthropic.api_key,
-        model=model or sandbox_default_model,
+        model=effective_model,
         tool_router=tool_router,
         tools=tools,
-        llm_router=llm_router if provider_override else None,
+        llm_router=effective_router if effective_provider else None,
         system_prompt=system_prompt,
         prompt_version_name=prompt_version_name,
-        provider_override=provider_override,
+        provider_override=effective_provider,
         few_shot_context=few_shot_context,
         safety_context=safety_context,
         promotions_context=promotions_context,

@@ -863,25 +863,24 @@ async def send_message(
     # Create sandbox agent and process
     prompt_version_id = conv.prompt_version_id
 
-    # Pass live infrastructure for "live" tool mode
+    # Get Redis client — needed for reading LLM config (sandbox default model)
+    # and for live tool mode (caching, knowledge search, etc.)
     onec_client = None
     redis_client = None
     knowledge_search = None
     store_client = None
-    if conv.tool_mode == "live":
-        try:
-            # Use sys.modules to get the actual running main module
-            # (avoids __main__ vs src.main module identity issue)
-            import sys
+    try:
+        import sys
 
-            main_mod = sys.modules.get("__main__") or sys.modules.get("src.main")
-            if main_mod:
+        main_mod = sys.modules.get("__main__") or sys.modules.get("src.main")
+        if main_mod:
+            redis_client = getattr(main_mod, "_redis", None)
+            if conv.tool_mode == "live":
                 onec_client = getattr(main_mod, "_onec_client", None)
-                redis_client = getattr(main_mod, "_redis", None)
                 knowledge_search = getattr(main_mod, "_knowledge_search", None)
                 store_client = getattr(main_mod, "_store_client", None)
-        except Exception:
-            logger.debug("Could not get live clients from main module", exc_info=True)
+    except Exception:
+        logger.debug("Could not get clients from main module", exc_info=True)
 
     agent = await create_sandbox_agent(
         engine,

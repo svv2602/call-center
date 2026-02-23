@@ -133,8 +133,8 @@ class TestCreateSandboxAgent:
         assert agent._provider_override == "gemini-flash"
 
     @pytest.mark.asyncio
-    async def test_no_router_without_provider_override(self) -> None:
-        """Agent should NOT use LLM router when provider_override is None."""
+    async def test_no_router_when_default_model_is_anthropic(self) -> None:
+        """Agent should NOT use LLM router when default model is Anthropic (not a router provider)."""
         from src.sandbox.agent_runner import create_sandbox_agent
 
         mock_engine = AsyncMock()
@@ -151,6 +151,52 @@ class TestCreateSandboxAgent:
         mock_conn.execute.return_value = mock_tool_result
 
         mock_router = MagicMock()
+        mock_router.providers = {"gemini-flash": MagicMock()}
+
+        with patch("src.sandbox.agent_runner.get_settings") as mock_settings:
+            mock_settings.return_value = MagicMock(
+                anthropic=MagicMock(api_key="test-key", model="claude-sonnet-4-5-20250929"),
+                database=MagicMock(url="postgresql+asyncpg://test"),
+            )
+            # No redis_client → default model = "claude-haiku-4-5-20251001" (not in router.providers)
+            agent = await create_sandbox_agent(
+                mock_engine,
+                tool_mode="mock",
+                llm_router=mock_router,
+            )
+
+        assert agent is not None
+        assert agent._llm_router is None
+        assert agent._provider_override is None
+        assert agent._model == "claude-haiku-4-5-20251001"
+
+    @pytest.mark.asyncio
+    async def test_auto_resolves_router_provider_from_redis_config(self) -> None:
+        """When sandbox default model from Redis is a router provider, auto-resolve provider_override."""
+        from src.sandbox.agent_runner import create_sandbox_agent
+
+        mock_engine = AsyncMock()
+        mock_conn = AsyncMock()
+        mock_engine.begin.return_value.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_engine.begin.return_value.__aexit__ = AsyncMock(return_value=False)
+
+        mock_result = MagicMock()
+        mock_result.first.return_value = None
+        mock_conn.execute.return_value = mock_result
+
+        mock_tool_result = MagicMock()
+        mock_tool_result.__iter__ = MagicMock(return_value=iter([]))
+        mock_conn.execute.return_value = mock_tool_result
+
+        mock_router = MagicMock()
+        mock_router.providers = {"gemini-flash": MagicMock(), "openai-gpt41-mini": MagicMock()}
+
+        # Simulate Redis returning sandbox.default_model = "gemini-flash"
+        import json
+
+        redis_config = json.dumps({"sandbox": {"default_model": "gemini-flash"}})
+        mock_redis = AsyncMock()
+        mock_redis.get.return_value = redis_config
 
         with patch("src.sandbox.agent_runner.get_settings") as mock_settings:
             mock_settings.return_value = MagicMock(
@@ -161,12 +207,13 @@ class TestCreateSandboxAgent:
                 mock_engine,
                 tool_mode="mock",
                 llm_router=mock_router,
-                # provider_override not set → router should be None
+                redis_client=mock_redis,
             )
 
         assert agent is not None
-        assert agent._llm_router is None
-        assert agent._provider_override is None
+        assert agent._llm_router is mock_router
+        assert agent._provider_override == "gemini-flash"
+        assert agent._model == "gemini-flash"
 
 
 class TestProcessSandboxTurn:
