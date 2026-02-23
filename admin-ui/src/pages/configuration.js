@@ -24,6 +24,70 @@ async function reloadConfig() {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  1C Integration Status
+// ═══════════════════════════════════════════════════════════
+async function loadOnecStatus() {
+    const container = document.getElementById('onecStatusContainer');
+    if (!container) return;
+    container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+    try {
+        const data = await api('/admin/onec-status');
+        renderOnecStatus(data);
+    } catch (e) {
+        container.innerHTML = `<div class="${tw.emptyState}">${t('settings.onecLoadFailed', {error: escapeHtml(e.message)})}</div>`;
+    }
+}
+
+function _statusBadge(status) {
+    if (status === 'reachable') return `<span class="${tw.badgeGreen}">${t('settings.onecReachable')}</span>`;
+    if (status === 'not_configured') return `<span class="${tw.badge}">${t('settings.onecNotConfigured')}</span>`;
+    if (status === 'unreachable') return `<span class="${tw.badgeRed}">${t('settings.onecUnreachable')}</span>`;
+    return `<span class="${tw.badgeYellow}">${escapeHtml(status)}</span>`;
+}
+
+function renderOnecStatus(data) {
+    const container = document.getElementById('onecStatusContainer');
+    if (!container) return;
+
+    const aiOrders = data.ai_orders_total !== null && data.ai_orders_total !== undefined
+        ? data.ai_orders_total
+        : '—';
+
+    let html = `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-3">`;
+
+    // SOAP Status card
+    html += `<div class="rounded-lg border border-neutral-200 dark:border-neutral-700 p-4">
+        <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-1">${t('settings.onecSoapStatus')}</div>
+        <div class="text-sm font-medium mb-1">${_statusBadge(data.soap_status || 'not_configured')}</div>
+        ${data.soap_endpoint ? `<div class="text-xs text-neutral-400 dark:text-neutral-500 font-mono truncate" title="${escapeHtml(data.soap_endpoint)}">${escapeHtml(data.soap_endpoint)}</div>` : ''}
+    </div>`;
+
+    // REST Status card
+    html += `<div class="rounded-lg border border-neutral-200 dark:border-neutral-700 p-4">
+        <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-1">${t('settings.onecRestStatus')}</div>
+        <div class="text-sm font-medium mb-1">${_statusBadge(data.rest_status || 'not_configured')}</div>
+        ${data.rest_endpoint ? `<div class="text-xs text-neutral-400 dark:text-neutral-500 font-mono truncate" title="${escapeHtml(data.rest_endpoint)}">${escapeHtml(data.rest_endpoint)}</div>` : ''}
+    </div>`;
+
+    // AI Orders counter card
+    html += `<div class="rounded-lg border border-neutral-200 dark:border-neutral-700 p-4">
+        <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-1">${t('settings.onecAiOrders')}</div>
+        <div class="text-2xl font-bold text-neutral-900 dark:text-neutral-50">${escapeHtml(String(aiOrders))}</div>
+        <div class="text-xs text-neutral-400 dark:text-neutral-500">${t('settings.onecAiOrdersHint')}</div>
+    </div>`;
+
+    // SOAP Timeout card
+    html += `<div class="rounded-lg border border-neutral-200 dark:border-neutral-700 p-4">
+        <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-1">${t('settings.onecSoapTimeout')}</div>
+        <div class="text-2xl font-bold text-neutral-900 dark:text-neutral-50">${data.soap_timeout || '—'}<span class="text-sm font-normal text-neutral-400 ml-1">${t('common.seconds')}</span></div>
+        <div class="text-xs text-neutral-400 dark:text-neutral-500">ONEC_SOAP_TIMEOUT</div>
+    </div>`;
+
+    html += `</div>`;
+    container.innerHTML = html;
+}
+
+// ═══════════════════════════════════════════════════════════
 //  LLM Routing
 // ═══════════════════════════════════════════════════════════
 async function loadLLMConfig() {
@@ -413,12 +477,15 @@ async function testLLMProvider(key) {
 }
 
 export function init() {
-    registerPageLoader('configuration', loadLLMConfig);
+    registerPageLoader('configuration', () => {
+        loadOnecStatus();
+        loadLLMConfig();
+    });
 }
 
 window._pages = window._pages || {};
 window._pages.configuration = {
-    reloadConfig, loadLLMConfig, toggleLLMProvider, updateLLMModel,
+    reloadConfig, loadOnecStatus, loadLLMConfig, toggleLLMProvider, updateLLMModel,
     onAddTypeChange, onAddModelInput, saveNewProvider,
     updateTaskRoute, addFallback, removeFallback, moveFallback, testLLMProvider,
     saveSandboxDefaults,

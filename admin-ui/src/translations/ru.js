@@ -22,6 +22,7 @@ export default {
     'common.showing': 'Показано: {shown} из {total}',
     'common.filters': 'Фильтры',
     'common.actions': 'Действия',
+    'common.seconds': 'сек',
 
     // Login
     'login.title': 'Call Center AI',
@@ -412,6 +413,19 @@ export default {
     'settings.reloadConfirm': 'Перезагрузить конфигурацию из окружения?',
     'settings.configReloaded': 'Конфигурация перезагружена:\n',
     'settings.reloadFailed': 'Ошибка перезагрузки: {error}',
+    // 1C Integration
+    'settings.onecIntegration': 'Интеграция 1С',
+    'settings.onecDescription': 'Статус SOAP-сервиса шиномонтажа, REST API и счётчик AI-заказов.',
+    'settings.onecLoadStatus': 'Загрузить статус 1С',
+    'settings.onecLoadFailed': 'Не удалось загрузить статус 1С: {error}',
+    'settings.onecSoapStatus': 'SOAP шиномонтаж',
+    'settings.onecRestStatus': 'REST API 1С',
+    'settings.onecAiOrders': 'AI-заказов создано',
+    'settings.onecAiOrdersHint': 'Через прямую интеграцию 1С',
+    'settings.onecSoapTimeout': 'Таймаут SOAP',
+    'settings.onecReachable': 'Доступен',
+    'settings.onecUnreachable': 'Недоступен',
+    'settings.onecNotConfigured': 'Не настроен',
     // LLM Routing
     'settings.llmRouting': 'Маршрутизация LLM',
     'settings.llmRoutingDesc': 'Мультипровайдерный роутинг LLM: управление провайдерами, задачами и fallback-цепочками.',
@@ -1348,6 +1362,9 @@ export default {
 
     'help.configuration.reload.title': 'Перезагрузка конфигурации',
     'help.configuration.reload.content': '<p>Кнопка <strong>«Перезагрузить конфиг»</strong> применяет безопасные параметры конфигурации <strong>без перезапуска</strong> сервера:</p><ul><li>Фича-флаги (напр. включение/выключение маршрутизации LLM)</li><li>Параметры качества (пороги оценки)</li><li>Уровни логирования</li></ul><p>Критические параметры (порты, подключения к БД) требуют полного перезапуска.</p>',
+
+    'help.configuration.onec.title': 'Интеграция 1С',
+    'help.configuration.onec.content': '<p>Секция показывает статус прямой интеграции с 1С:</p><ul><li><strong>SOAP шиномонтаж</strong> — SOAP-сервис TireAssemblyExchange для записи на шиномонтаж (расписание, бронирование, отмена)</li><li><strong>REST API 1С</strong> — REST-эндпоинт для создания заказов и получения точек выдачи</li><li><strong>AI-заказов создано</strong> — счётчик заказов, созданных AI-агентом через прямую интеграцию с 1С (номера AI-1, AI-2, ...)</li><li><strong>Таймаут SOAP</strong> — настраиваемый таймаут для SOAP-запросов (env: ONEC_SOAP_TIMEOUT)</li></ul>',
 
     'help.configuration.llm.title': 'Маршрутизация LLM',
     'help.configuration.llm.content': '<p>Мультипровайдерная маршрутизация позволяет распределять LLM-запросы между несколькими провайдерами:</p><ul><li><strong>Таблица провайдеров</strong> — все подключённые LLM-провайдеры с их статусом:<ul><li><strong>Модель</strong> — название модели (можно изменить)</li><li><strong>Enabled</strong> — включён/выключен</li><li><strong>Статус</strong> — OK (зелёный) / DOWN (красный) / не проверен (серый)</li><li><strong>API Key</strong> — наличие ключа в переменных окружения</li></ul></li><li><strong>Тест</strong> — кнопка проверки провайдера (отправляет тестовый запрос)</li></ul>',

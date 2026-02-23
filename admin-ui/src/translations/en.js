@@ -22,6 +22,7 @@ export default {
     'common.showing': 'Showing: {shown} of {total}',
     'common.filters': 'Filters',
     'common.actions': 'Actions',
+    'common.seconds': 'sec',
 
     // Login
     'login.title': 'Call Center AI',
@@ -412,6 +413,19 @@ export default {
     'settings.reloadConfirm': 'Reload configuration from environment?',
     'settings.configReloaded': 'Config reloaded:\n',
     'settings.reloadFailed': 'Reload failed: {error}',
+    // 1C Integration
+    'settings.onecIntegration': '1C Integration',
+    'settings.onecDescription': 'Tire fitting SOAP service status, REST API, and AI order counter.',
+    'settings.onecLoadStatus': 'Load 1C Status',
+    'settings.onecLoadFailed': 'Failed to load 1C status: {error}',
+    'settings.onecSoapStatus': 'SOAP Tire Fitting',
+    'settings.onecRestStatus': '1C REST API',
+    'settings.onecAiOrders': 'AI Orders Created',
+    'settings.onecAiOrdersHint': 'Via direct 1C integration',
+    'settings.onecSoapTimeout': 'SOAP Timeout',
+    'settings.onecReachable': 'Reachable',
+    'settings.onecUnreachable': 'Unreachable',
+    'settings.onecNotConfigured': 'Not configured',
     // LLM Routing
     'settings.llmRouting': 'LLM Routing',
     'settings.llmRoutingDesc': 'Multi-provider LLM routing: manage providers, tasks, and fallback chains.',
@@ -1348,6 +1362,9 @@ export default {
 
     'help.configuration.reload.title': 'Configuration reload',
     'help.configuration.reload.content': '<p>The <strong>"Reload config"</strong> button applies safe configuration parameters <strong>without restarting</strong> the server:</p><ul><li>Feature flags (e.g., enabling/disabling LLM routing)</li><li>Quality parameters (scoring thresholds)</li><li>Logging levels</li></ul><p>Critical parameters (ports, DB connections) require a full restart.</p>',
+
+    'help.configuration.onec.title': '1C Integration',
+    'help.configuration.onec.content': '<p>This section shows the status of direct 1C integration:</p><ul><li><strong>SOAP Tire Fitting</strong> — TireAssemblyExchange SOAP service for fitting bookings (schedule, book, cancel)</li><li><strong>1C REST API</strong> — REST endpoint for order creation and pickup points</li><li><strong>AI Orders Created</strong> — counter of orders created by the AI agent via direct 1C integration (numbers AI-1, AI-2, ...)</li><li><strong>SOAP Timeout</strong> — configurable SOAP request timeout (env: ONEC_SOAP_TIMEOUT)</li></ul>',
 
     'help.configuration.llm.title': 'LLM routing',
     'help.configuration.llm.content': '<p>Multi-provider routing distributes LLM requests across multiple providers:</p><ul><li><strong>Providers table</strong> — all connected LLM providers with status:<ul><li><strong>Model</strong> — model name (editable)</li><li><strong>Enabled</strong> — on/off</li><li><strong>Status</strong> — OK (green) / DOWN (red) / unchecked (gray)</li><li><strong>API Key</strong> — key presence in environment variables</li></ul></li><li><strong>Test</strong> — provider check button (sends a test request)</li></ul>',

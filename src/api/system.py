@@ -180,3 +180,66 @@ async def system_status(
         pass
 
     return result
+
+
+@router.get("/admin/onec-status")
+async def onec_status(
+    _: dict[str, Any] = _perm_r,
+) -> dict[str, Any]:
+    """1C integration status: SOAP service health and AI order counter."""
+    from redis.asyncio import Redis
+
+    settings = get_settings()
+    result: dict[str, Any] = {
+        "onec_configured": bool(settings.onec.username),
+    }
+
+    # SOAP client status — check if endpoint is reachable
+    if settings.onec.username:
+        result["soap_endpoint"] = f"{settings.onec.url}{settings.onec.soap_wsdl_path}"
+        result["soap_timeout"] = settings.onec.soap_timeout
+        try:
+            import aiohttp
+
+            auth = aiohttp.BasicAuth(settings.onec.username, settings.onec.password)
+            timeout = aiohttp.ClientTimeout(total=5)
+            async with aiohttp.ClientSession(timeout=timeout, auth=auth) as session, session.get(
+                    result["soap_endpoint"],
+                    params={"wsdl": ""},
+                ) as resp:
+                    result["soap_status"] = "reachable" if resp.status < 400 else f"error_{resp.status}"
+        except Exception as e:
+            result["soap_status"] = "unreachable"
+            logger.debug("SOAP health check failed: %s", e)
+
+        # REST API status
+        result["rest_endpoint"] = settings.onec.url
+        try:
+            import aiohttp
+
+            auth = aiohttp.BasicAuth(settings.onec.username, settings.onec.password)
+            timeout = aiohttp.ClientTimeout(total=5)
+            async with aiohttp.ClientSession(timeout=timeout, auth=auth) as session, session.get(
+                    f"{settings.onec.url}/Trade/hs/site/points/",
+                    params={"TradingNetwork": "ProKoleso"},
+                ) as resp:
+                    result["rest_status"] = "reachable" if resp.status < 400 else f"error_{resp.status}"
+        except Exception as e:
+            result["rest_status"] = "unreachable"
+            logger.debug("1C REST health check failed: %s", e)
+    else:
+        result["soap_status"] = "not_configured"
+        result["rest_status"] = "not_configured"
+
+    # AI order counter from Redis
+    try:
+        r = Redis.from_url(settings.redis.url, decode_responses=True)
+        try:
+            ai_order_seq = await r.get("order:ai_sequence")
+            result["ai_orders_total"] = int(ai_order_seq) if ai_order_seq else 0
+        finally:
+            await r.aclose()
+    except Exception:
+        result["ai_orders_total"] = None
+
+    return result

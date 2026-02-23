@@ -119,6 +119,7 @@ export const HELP_PAGES = {
         overviewKey: 'help.configuration.overview',
         sections: [
             { titleKey: 'help.configuration.reload.title', contentKey: 'help.configuration.reload.content' },
+            { titleKey: 'help.configuration.onec.title', contentKey: 'help.configuration.onec.content' },
             { titleKey: 'help.configuration.llm.title', contentKey: 'help.configuration.llm.content' },
             { titleKey: 'help.configuration.llm.steps', contentKey: 'help.configuration.llm.stepsContent' },
             { titleKey: 'help.configuration.tasks.title', contentKey: 'help.configuration.tasks.content' },
