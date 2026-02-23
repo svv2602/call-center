@@ -78,13 +78,13 @@ class TestTimeOfDayGreeting:
             result = _time_of_day_greeting()
         assert result == expected
 
-    def test_greeting_replaces_in_template(self) -> None:
-        """Greeting template with 'Добрий день' gets replaced."""
-        assert "Добрий день" in GREETING_TEXT
+    def test_greeting_replaces_placeholder_in_template(self) -> None:
+        """Greeting template with '{time_greeting}' placeholder gets replaced."""
+        assert "{time_greeting}" in GREETING_TEXT
         morning = "До́брий ра́нок"
-        replaced = GREETING_TEXT.replace("Добрий день", morning, 1)
+        replaced = GREETING_TEXT.replace("{time_greeting}", morning)
         assert morning in replaced
-        assert "Добрий день" not in replaced
+        assert "{time_greeting}" not in replaced
 
 
 # ---------------------------------------------------------------------------

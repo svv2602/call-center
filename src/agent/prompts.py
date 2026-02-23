@@ -274,7 +274,7 @@ PRONUNCIATION_RULES = """\
 SYSTEM_PROMPT = _SYSTEM_PROMPT_TEMPLATE.format(pronunciation_rules=PRONUNCIATION_RULES)
 
 GREETING_TEXT = (
-    "Добрий день! Інтерне́т-магази́н шин, мене́ зва́ти Оле́на. "
+    "{time_greeting}! Інтерне́т-магази́н шин, мене́ зва́ти Оле́на. "
     "Зверні́ть ува́гу, що цей дзвіно́к обро́бляється автомати́чною систе́мою. "
     "Чим мо́жу вам допомогти́?"
 )

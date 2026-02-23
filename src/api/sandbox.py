@@ -172,7 +172,7 @@ async def get_agent_phrases(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
 
     return {
         "fixed": [
-            {"key": "greeting", "label": "Приветствие", "text": GREETING_TEXT},
+            {"key": "greeting", "label": "Приветствие", "text": GREETING_TEXT.replace("{time_greeting}", "До́брий день")},
             {"key": "farewell", "label": "Прощание", "text": FAREWELL_TEXT},
             {"key": "farewell_order", "label": "Прощание (заказ)", "text": FAREWELL_ORDER_TEXT},
             {"key": "transfer", "label": "Переключение на оператора", "text": TRANSFER_TEXT},

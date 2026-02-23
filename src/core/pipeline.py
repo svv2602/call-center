@@ -240,7 +240,7 @@ class CallPipeline:
     async def _play_greeting(self) -> None:
         """Play the greeting message, adapted to the time of day and agent name."""
         greeting = self._templates.get("greeting", GREETING_TEXT)
-        greeting = greeting.replace("Добрий день", _time_of_day_greeting(), 1)
+        greeting = greeting.replace("{time_greeting}", _time_of_day_greeting())
         greeting = greeting.replace("{agent_name}", self._agent_name or "Олена")
         # Append scenario-specific suffix if IVR intent was resolved
         suffix = _SCENARIO_GREETING_SUFFIX.get(self._session.scenario or "")

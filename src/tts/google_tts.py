@@ -79,8 +79,11 @@ _BREAK_RULES: list[tuple[re.Pattern[str], str]] = [
 ]
 
 # Phrases to pre-cache at startup — includes all wait pool variants
+# GREETING_TEXT contains {time_greeting} placeholder — pre-cache all 3 variants
 CACHED_PHRASES = [
-    GREETING_TEXT,
+    GREETING_TEXT.replace("{time_greeting}", "До́брий ра́нок"),
+    GREETING_TEXT.replace("{time_greeting}", "До́брий день"),
+    GREETING_TEXT.replace("{time_greeting}", "До́брий ве́чір"),
     WAIT_TEXT,
     TRANSFER_TEXT,
     FAREWELL_TEXT,
