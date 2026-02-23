@@ -70,16 +70,34 @@ class TestTTSConfig:
         config = TTSConfig()
         assert config.sample_rate_hertz == 8000
 
+    def test_default_break_values(self) -> None:
+        config = TTSConfig()
+        assert config.break_comma_ms == 100
+        assert config.break_period_ms == 200
+        assert config.break_exclamation_ms == 250
+        assert config.break_colon_ms == 200
+        assert config.break_semicolon_ms == 150
+        assert config.break_em_dash_ms == 150
+
+    def test_custom_break_values(self) -> None:
+        config = TTSConfig(break_comma_ms=50, break_period_ms=300)
+        assert config.break_comma_ms == 50
+        assert config.break_period_ms == 300
+
 
 class TestSSMLConversion:
     """Test SSML generation with natural pauses."""
 
+    def _engine(self, **kwargs: int) -> GoogleTTSEngine:
+        config = TTSConfig(**kwargs) if kwargs else TTSConfig()
+        return GoogleTTSEngine(config=config)
+
     def test_simple_text_wrapped_in_speak(self) -> None:
-        result = GoogleTTSEngine._to_ssml("Привіт")
+        result = self._engine()._to_ssml("Привіт")
         assert result == "<speak>Привіт</speak>"
 
     def test_xml_entities_escaped(self) -> None:
-        result = GoogleTTSEngine._to_ssml("Ціна < 1000 & знижка > 5%")
+        result = self._engine()._to_ssml("Ціна < 1000 & знижка > 5%")
         assert "&lt;" in result
         assert "&amp;" in result
         assert "&gt;" in result
@@ -87,30 +105,44 @@ class TestSSMLConversion:
         assert result.endswith("</speak>")
 
     def test_break_after_comma(self) -> None:
-        result = GoogleTTSEngine._to_ssml("Добрий день, як справи")
+        result = self._engine()._to_ssml("Добрий день, як справи")
         assert ',<break time="100ms"/> як' in result
 
     def test_break_after_em_dash(self) -> None:
-        result = GoogleTTSEngine._to_ssml("шини зимові — нешиповані")
+        result = self._engine()._to_ssml("шини зимові — нешиповані")
         assert '—<break time="150ms"/> нешиповані' in result
 
     def test_break_after_colon(self) -> None:
-        result = GoogleTTSEngine._to_ssml("Результат: знайдено 3 варіанти")
+        result = self._engine()._to_ssml("Результат: знайдено 3 варіанти")
         assert ':<break time="200ms"/> знайдено' in result
 
     def test_multiple_breaks_in_one_text(self) -> None:
         text = "Добрий день, ось варіанти: Michelin — 2500 грн, Nokian — 2200 грн"
-        result = GoogleTTSEngine._to_ssml(text)
+        result = self._engine()._to_ssml(text)
         assert result.count("<break") == 5  # 2 commas + 1 colon + 2 em-dashes
 
     def test_no_breaks_in_clean_text(self) -> None:
-        result = GoogleTTSEngine._to_ssml("Привіт як справи")
+        result = self._engine()._to_ssml("Привіт як справи")
         assert "<break" not in result
 
     def test_comma_without_space_no_break(self) -> None:
         """Comma not followed by space (e.g. numbers) should not get a break."""
-        result = GoogleTTSEngine._to_ssml("розмір 225/45R17")
+        result = self._engine()._to_ssml("розмір 225/45R17")
         assert "<break" not in result
+
+    def test_custom_comma_break(self) -> None:
+        """Custom break_comma_ms is reflected in SSML output."""
+        result = self._engine(break_comma_ms=300)._to_ssml("Привіт, світ")
+        assert ',<break time="300ms"/> світ' in result
+
+    def test_custom_period_break(self) -> None:
+        result = self._engine(break_period_ms=400)._to_ssml("Перше. Друге")
+        assert '.<break time="400ms"/> Друге' in result
+
+    def test_zero_break_disables_pause(self) -> None:
+        """Setting break to 0ms still inserts a break tag (0ms = no audible pause)."""
+        result = self._engine(break_comma_ms=0)._to_ssml("Один, два")
+        assert ',<break time="0ms"/> два' in result
 
 
 class TestSSMLFallback:

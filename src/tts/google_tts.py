@@ -61,22 +61,6 @@ _TTS_SUBSTITUTIONS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\+380(\d{2})(\d{3})(\d{2})(\d{2})"), r"+380, \1, \2, \3, \4"),
 ]
 
-# SSML break insertion patterns (applied after XML escaping)
-_BREAK_RULES: list[tuple[re.Pattern[str], str]] = [
-    # After comma + space: subtle pause extending natural comma break
-    (re.compile(r",(\s)"), r',<break time="100ms"/>\1'),
-    # After em-dash + space: thinking/contrast pause
-    (re.compile(r"—(\s)"), r'—<break time="150ms"/>\1'),
-    # After colon + space: anticipation before explanation/list
-    (re.compile(r":(\s)"), r':<break time="200ms"/>\1'),
-    # After semicolon + space: separating related clauses
-    (re.compile(r";(\s)"), r';<break time="150ms"/>\1'),
-    # After period + space (mid-sentence abbreviation excluded by sentence splitter):
-    # adds finality pause between sentences within same TTS chunk
-    (re.compile(r"\.(\s)"), r'.<break time="200ms"/>\1'),
-    # After exclamation/question + space: emotional pause
-    (re.compile(r"([!?])(\s)"), r'\1<break time="250ms"/>\2'),
-]
 
 # Phrases to pre-cache at startup — includes all wait pool variants
 # GREETING_TEXT contains {time_greeting} placeholder — pre-cache all 3 variants
@@ -116,6 +100,19 @@ class GoogleTTSEngine:
         self._cache_hits = 0
         self._cache_misses = 0
         self._ssml_supported: bool = True
+        self._break_rules = self._build_break_rules()
+
+    def _build_break_rules(self) -> list[tuple[re.Pattern[str], str]]:
+        """Build SSML break rules from config values."""
+        c = self._config
+        return [
+            (re.compile(r",(\s)"), rf',<break time="{c.break_comma_ms}ms"/>\1'),
+            (re.compile(r"—(\s)"), rf'—<break time="{c.break_em_dash_ms}ms"/>\1'),
+            (re.compile(r":(\s)"), rf':<break time="{c.break_colon_ms}ms"/>\1'),
+            (re.compile(r";(\s)"), rf';<break time="{c.break_semicolon_ms}ms"/>\1'),
+            (re.compile(r"\.(\s)"), rf'.<break time="{c.break_period_ms}ms"/>\1'),
+            (re.compile(r"([!?])(\s)"), rf'\1<break time="{c.break_exclamation_ms}ms"/>\2'),
+        ]
 
     async def initialize(self) -> None:
         """Initialize the TTS client and pre-cache common phrases."""
@@ -205,8 +202,7 @@ class GoogleTTSEngine:
         normalized = text.replace(_COMBINING_ACUTE, "")
         return hashlib.sha256(normalized.encode()).hexdigest()
 
-    @staticmethod
-    def _to_ssml(text: str) -> str:
+    def _to_ssml(self, text: str) -> str:
         """Convert plain text to SSML with natural pauses.
 
         Escapes XML entities, then inserts <break> tags after commas,
@@ -215,7 +211,7 @@ class GoogleTTSEngine:
         so the SSML only adds breaks.
         """
         ssml = xml.sax.saxutils.escape(text)
-        for pattern, replacement in _BREAK_RULES:
+        for pattern, replacement in self._break_rules:
             ssml = pattern.sub(replacement, ssml)
         return f"<speak>{ssml}</speak>"
 

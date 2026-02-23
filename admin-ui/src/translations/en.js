@@ -478,6 +478,14 @@ export default {
     'settings.ttsTestSuccess': 'Synthesis completed ({duration}ms)',
     'settings.ttsTestFailed': 'Synthesis failed: {error}',
     'settings.ttsLoadFailed': 'Failed to load TTS settings: {error}',
+    'settings.ttsBreaksTitle': 'Punctuation Break Durations',
+    'settings.ttsBreaksDesc': 'SSML break durations after punctuation marks (ms). Affects speech rhythm.',
+    'settings.ttsBreakComma': 'Comma',
+    'settings.ttsBreakPeriod': 'Period',
+    'settings.ttsBreakExclamation': 'Question/Exclamation',
+    'settings.ttsBreakColon': 'Colon',
+    'settings.ttsBreakSemicolon': 'Semicolon',
+    'settings.ttsBreakEmDash': 'Em Dash',
     // Telegram Notifications
     'settings.telegram': 'Telegram Notifications',
     'settings.telegramDesc': 'Configure Telegram bot for receiving Alertmanager alerts.',
@@ -1413,6 +1421,9 @@ export default {
 
     'help.configuration.tts.title': 'TTS Voice Settings',
     'help.configuration.tts.content': '<p>Manage Google Cloud TTS voice without restarting the system:</p><ul><li><strong>Voice</strong> — choose from available voices (Wavenet, Neural2, Chirp3-HD)</li><li><strong>Speaking Rate</strong> — from 0.25 (very slow) to 4.0 (very fast), recommended 0.85–1.0</li><li><strong>Pitch</strong> — from -20 to +20 semitones; not all voices support pitch</li></ul><p>The "Test Voice" button synthesizes a test phrase with current settings.</p>',
+
+    'help.configuration.ttsBreaks.title': 'Punctuation Break Durations',
+    'help.configuration.ttsBreaks.content': '<p>Configure SSML break (<code>&lt;break&gt;</code>) durations after punctuation marks. Affects speech rhythm and naturalness:</p><ul><li><strong>Comma</strong> — pause between clauses (default 100ms)</li><li><strong>Period</strong> — pause between sentences (200ms)</li><li><strong>Question/Exclamation</strong> — emotional pause (250ms)</li><li><strong>Colon</strong> — pause before explanation (200ms)</li><li><strong>Semicolon</strong> — pause between related clauses (150ms)</li><li><strong>Em Dash</strong> — contrast/clarification pause (150ms)</li></ul><p>A value of 0ms disables the break for that punctuation mark. Valid range: 0–1000ms.</p>',
 
     'help.configuration.affects.title': 'What changes affect',
     'help.configuration.affects.content': '<div class="help-affects"><p><strong>Disabling a provider</strong> — if it\'s the only one for a task with no fallbacks, that task will stop working.</p><p><strong>Changing model</strong> — instantly affects all new requests. A more powerful model = better quality, but more expensive and slower.</p><p><strong>Task routing</strong> — lets you use cheaper models for non-critical tasks (quality, scraping) and powerful ones for customer dialogues.</p><p><strong>TTS settings</strong> — new voice/rate/pitch apply to new calls; current calls continue with the old voice.</p></div>',

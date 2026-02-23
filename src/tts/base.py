@@ -18,6 +18,12 @@ class TTSConfig:
     speaking_rate: float = 0.93
     pitch: float = -1.0
     sample_rate_hertz: int = 8000
+    break_comma_ms: int = 100
+    break_period_ms: int = 200
+    break_exclamation_ms: int = 250
+    break_colon_ms: int = 200
+    break_semicolon_ms: int = 150
+    break_em_dash_ms: int = 150
 
 
 @runtime_checkable

@@ -56,10 +56,26 @@ async def _get_redis() -> Redis:
     return _redis
 
 
+_BREAK_FIELDS = (
+    "break_comma_ms",
+    "break_period_ms",
+    "break_exclamation_ms",
+    "break_colon_ms",
+    "break_semicolon_ms",
+    "break_em_dash_ms",
+)
+
+
 class TTSConfigPatch(BaseModel):
     voice_name: str | None = None
     speaking_rate: float | None = None
     pitch: float | None = None
+    break_comma_ms: int | None = None
+    break_period_ms: int | None = None
+    break_exclamation_ms: int | None = None
+    break_colon_ms: int | None = None
+    break_semicolon_ms: int | None = None
+    break_em_dash_ms: int | None = None
 
     @field_validator("voice_name")
     @classmethod
@@ -82,14 +98,28 @@ class TTSConfigPatch(BaseModel):
             raise ValueError("pitch must be between -20.0 and 20.0")
         return v
 
+    @field_validator(*_BREAK_FIELDS)
+    @classmethod
+    def validate_break_ms(cls, v: int | None) -> int | None:
+        if v is not None and not (0 <= v <= 1000):
+            raise ValueError("break duration must be between 0 and 1000 ms")
+        return v
+
 
 def _get_env_defaults() -> dict[str, Any]:
     """Get TTS defaults from env vars / Settings."""
     settings = get_settings()
+    tts = settings.google_tts
     return {
-        "voice_name": settings.google_tts.voice,
-        "speaking_rate": settings.google_tts.speaking_rate,
-        "pitch": settings.google_tts.pitch,
+        "voice_name": tts.voice,
+        "speaking_rate": tts.speaking_rate,
+        "pitch": tts.pitch,
+        "break_comma_ms": tts.break_comma_ms,
+        "break_period_ms": tts.break_period_ms,
+        "break_exclamation_ms": tts.break_exclamation_ms,
+        "break_colon_ms": tts.break_colon_ms,
+        "break_semicolon_ms": tts.break_semicolon_ms,
+        "break_em_dash_ms": tts.break_em_dash_ms,
     }
 
 
@@ -156,6 +186,10 @@ async def update_tts_config(request: TTSConfigPatch, _: dict[str, Any] = _perm_w
         config["speaking_rate"] = request.speaking_rate
     if request.pitch is not None:
         config["pitch"] = request.pitch
+    for field in _BREAK_FIELDS:
+        value = getattr(request, field)
+        if value is not None:
+            config[field] = value
 
     await redis.set(REDIS_KEY, json.dumps(config))
     logger.info("TTS config updated: %s", config)
@@ -221,6 +255,12 @@ async def _reinitialize_with_config(config: dict[str, Any]) -> None:
         voice_name=config.get("voice_name", "uk-UA-Wavenet-A"),
         speaking_rate=config.get("speaking_rate", 0.93),
         pitch=config.get("pitch", -1.0),
+        break_comma_ms=config.get("break_comma_ms", 100),
+        break_period_ms=config.get("break_period_ms", 200),
+        break_exclamation_ms=config.get("break_exclamation_ms", 250),
+        break_colon_ms=config.get("break_colon_ms", 200),
+        break_semicolon_ms=config.get("break_semicolon_ms", 150),
+        break_em_dash_ms=config.get("break_em_dash_ms", 150),
     )
 
     try:

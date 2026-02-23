@@ -49,9 +49,16 @@ def app():
 def _env_patch():
     """Patch Settings to return known TTS defaults."""
     mock_settings = MagicMock()
-    mock_settings.return_value.google_tts.voice = "uk-UA-Wavenet-A"
-    mock_settings.return_value.google_tts.speaking_rate = 0.93
-    mock_settings.return_value.google_tts.pitch = -1.0
+    tts = mock_settings.return_value.google_tts
+    tts.voice = "uk-UA-Wavenet-A"
+    tts.speaking_rate = 0.93
+    tts.pitch = -1.0
+    tts.break_comma_ms = 100
+    tts.break_period_ms = 200
+    tts.break_exclamation_ms = 250
+    tts.break_colon_ms = 200
+    tts.break_semicolon_ms = 150
+    tts.break_em_dash_ms = 150
     mock_settings.return_value.redis.url = "redis://localhost"
     return mock_settings
 
@@ -209,6 +216,73 @@ class TestPatchConfig:
                 )
 
         assert response.status_code == 422
+
+    @pytest.mark.asyncio()
+    async def test_update_break_fields(self, app: Any, mock_redis: AsyncMock) -> None:
+        with (
+            patch("src.api.auth.require_admin", _fake_require_perm),
+            patch("src.api.tts_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.api.tts_config.get_settings", _env_patch()),
+            patch("src.api.tts_config._reinitialize_with_config", new_callable=AsyncMock),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.patch(
+                    "/admin/tts/config",
+                    json={"break_comma_ms": 200, "break_period_ms": 400},
+                )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["config"]["break_comma_ms"] == 200
+        assert data["config"]["break_period_ms"] == 400
+
+    @pytest.mark.asyncio()
+    async def test_validation_break_out_of_range(self, app: Any, mock_redis: AsyncMock) -> None:
+        with (
+            patch("src.api.auth.require_admin", _fake_require_perm),
+            patch("src.api.tts_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.api.tts_config.get_settings", _env_patch()),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.patch(
+                    "/admin/tts/config",
+                    json={"break_comma_ms": 1500},
+                )
+
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio()
+    async def test_validation_break_negative(self, app: Any, mock_redis: AsyncMock) -> None:
+        with (
+            patch("src.api.auth.require_admin", _fake_require_perm),
+            patch("src.api.tts_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.api.tts_config.get_settings", _env_patch()),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.patch(
+                    "/admin/tts/config",
+                    json={"break_em_dash_ms": -10},
+                )
+
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio()
+    async def test_break_fields_in_env_defaults(self, app: Any, mock_redis: AsyncMock) -> None:
+        with (
+            patch("src.api.auth.require_admin", _fake_require_perm),
+            patch("src.api.tts_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.api.tts_config.get_settings", _env_patch()),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get("/admin/tts/config")
+
+        data = response.json()
+        assert data["config"]["break_comma_ms"] == 100
+        assert data["config"]["break_period_ms"] == 200
+        assert data["config"]["break_exclamation_ms"] == 250
+        assert data["config"]["break_colon_ms"] == 200
+        assert data["config"]["break_semicolon_ms"] == 150
+        assert data["config"]["break_em_dash_ms"] == 150
 
 
 class TestPostTest:

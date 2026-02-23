@@ -478,6 +478,14 @@ export default {
     'settings.ttsTestSuccess': 'Синтез выполнен ({duration}мс)',
     'settings.ttsTestFailed': 'Ошибка синтеза: {error}',
     'settings.ttsLoadFailed': 'Не удалось загрузить настройки TTS: {error}',
+    'settings.ttsBreaksTitle': 'Паузы на знаках препинания',
+    'settings.ttsBreaksDesc': 'Длительность SSML-пауз после знаков препинания (мс). Влияет на ритм речи.',
+    'settings.ttsBreakComma': 'Запятая',
+    'settings.ttsBreakPeriod': 'Точка',
+    'settings.ttsBreakExclamation': 'Вопрос/Восклицание',
+    'settings.ttsBreakColon': 'Двоеточие',
+    'settings.ttsBreakSemicolon': 'Точка с запятой',
+    'settings.ttsBreakEmDash': 'Тире',
     // Telegram Notifications
     'settings.telegram': 'Уведомления Telegram',
     'settings.telegramDesc': 'Настройка Telegram-бота для получения алертов от Alertmanager.',
@@ -1413,6 +1421,9 @@ export default {
 
     'help.configuration.tts.title': 'Голосовые настройки TTS',
     'help.configuration.tts.content': '<p>Управление голосом Google Cloud TTS без перезапуска системы:</p><ul><li><strong>Голос</strong> — выбор из списка доступных голосов (Wavenet, Neural2, Chirp3-HD)</li><li><strong>Скорость речи</strong> — от 0.25 (очень медленно) до 4.0 (очень быстро), рекомендуется 0.85–1.0</li><li><strong>Тональность</strong> — от -20 до +20 полутонов; не все голоса поддерживают pitch</li></ul><p>Кнопка «Тест голоса» синтезирует тестовую фразу с текущими настройками.</p>',
+
+    'help.configuration.ttsBreaks.title': 'Паузы на знаках препинания',
+    'help.configuration.ttsBreaks.content': '<p>Настройка длительности SSML-пауз (<code>&lt;break&gt;</code>) после знаков препинания. Влияет на ритм и естественность речи:</p><ul><li><strong>Запятая</strong> — пауза между частями предложения (по умолчанию 100мс)</li><li><strong>Точка</strong> — пауза между предложениями (200мс)</li><li><strong>Вопрос/Восклицание</strong> — эмоциональная пауза (250мс)</li><li><strong>Двоеточие</strong> — пауза перед пояснением (200мс)</li><li><strong>Точка с запятой</strong> — пауза между связанными предложениями (150мс)</li><li><strong>Тире</strong> — пауза при контрасте/уточнении (150мс)</li></ul><p>Значение 0 мс отключает паузу для данного знака. Допустимый диапазон: 0–1000 мс.</p>',
 
     'help.configuration.affects.title': 'На что влияют изменения',
     'help.configuration.affects.content': '<div class="help-affects"><p><strong>Отключение провайдера</strong> — если он единственный для задачи и нет фоллбэков, задача перестанет работать.</p><p><strong>Смена модели</strong> — мгновенно влияет на все новые запросы. Более мощная модель = лучше качество, но дороже и медленнее.</p><p><strong>Маршрутизация задач</strong> — позволяет использовать дешёвые модели для некритичных задач (качество, скрапинг) и мощные — для диалогов с клиентами.</p><p><strong>Настройки TTS</strong> — новый голос/скорость/тональность применяются к новым звонкам; текущие звонки продолжают со старым голосом.</p></div>',

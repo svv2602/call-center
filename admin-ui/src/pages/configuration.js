@@ -429,6 +429,18 @@ async function loadTTSConfig() {
     }
 }
 
+function _breakSlider(id, labelKey, value) {
+    return `<div>
+        <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+            ${t(labelKey)}: <span id="${id}Value" class="font-mono">${value}</span><span class="text-neutral-400">мс</span>
+        </label>
+        <input id="${id}Range" type="range" min="0" max="500" step="10" value="${value}"
+            class="w-full max-w-xs accent-blue-600"
+            oninput="document.getElementById('${id}Value').textContent = this.value">
+        <div class="flex justify-between text-[10px] text-neutral-400 max-w-xs"><span>0</span><span>250</span><span>500</span></div>
+    </div>`;
+}
+
 function renderTTSConfig(data) {
     const container = document.getElementById('ttsConfigContainer');
     if (!container) return;
@@ -440,6 +452,13 @@ function renderTTSConfig(data) {
     const voiceName = config.voice_name || 'uk-UA-Wavenet-A';
     const speakingRate = config.speaking_rate ?? 0.93;
     const pitch = config.pitch ?? -1.0;
+
+    const breakComma = config.break_comma_ms ?? 100;
+    const breakPeriod = config.break_period_ms ?? 200;
+    const breakExclamation = config.break_exclamation_ms ?? 250;
+    const breakColon = config.break_colon_ms ?? 200;
+    const breakSemicolon = config.break_semicolon_ms ?? 150;
+    const breakEmDash = config.break_em_dash_ms ?? 150;
 
     const sourceBadge = source === 'redis'
         ? `<span class="${tw.badgeGreen}">Redis</span>`
@@ -480,6 +499,22 @@ function renderTTSConfig(data) {
                     oninput="document.getElementById('ttsPitchValue').textContent = parseFloat(this.value).toFixed(1)">
                 <div class="flex justify-between text-[10px] text-neutral-400 max-w-xs"><span>-20</span><span>0</span><span>+20</span></div>
             </div>
+
+            <details class="mt-2">
+                <summary class="cursor-pointer text-xs font-medium text-neutral-700 dark:text-neutral-300 select-none">
+                    ${t('settings.ttsBreaksTitle')}
+                </summary>
+                <p class="text-[11px] text-neutral-500 dark:text-neutral-400 mt-1 mb-2">${t('settings.ttsBreaksDesc')}</p>
+                <div class="space-y-3 pl-1">
+                    ${_breakSlider('ttsBreakComma', 'settings.ttsBreakComma', breakComma)}
+                    ${_breakSlider('ttsBreakPeriod', 'settings.ttsBreakPeriod', breakPeriod)}
+                    ${_breakSlider('ttsBreakExclamation', 'settings.ttsBreakExclamation', breakExclamation)}
+                    ${_breakSlider('ttsBreakColon', 'settings.ttsBreakColon', breakColon)}
+                    ${_breakSlider('ttsBreakSemicolon', 'settings.ttsBreakSemicolon', breakSemicolon)}
+                    ${_breakSlider('ttsBreakEmDash', 'settings.ttsBreakEmDash', breakEmDash)}
+                </div>
+            </details>
+
             <div class="flex flex-wrap items-center gap-2 pt-2">
                 <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.configuration.saveTTSConfig()">${t('common.save')}</button>
                 <button class="${tw.btnSm} border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800" onclick="window._pages.configuration.testTTS()">${t('settings.ttsTest')}</button>
@@ -494,10 +529,25 @@ async function saveTTSConfig() {
     const speakingRate = parseFloat(document.getElementById('ttsRateRange')?.value);
     const pitch = parseFloat(document.getElementById('ttsPitchRange')?.value);
 
+    const payload = { voice_name: voiceName, speaking_rate: speakingRate, pitch };
+
+    const breakIds = [
+        ['ttsBreakCommaRange', 'break_comma_ms'],
+        ['ttsBreakPeriodRange', 'break_period_ms'],
+        ['ttsBreakExclamationRange', 'break_exclamation_ms'],
+        ['ttsBreakColonRange', 'break_colon_ms'],
+        ['ttsBreakSemicolonRange', 'break_semicolon_ms'],
+        ['ttsBreakEmDashRange', 'break_em_dash_ms'],
+    ];
+    for (const [elId, key] of breakIds) {
+        const el = document.getElementById(elId);
+        if (el) payload[key] = parseInt(el.value, 10);
+    }
+
     try {
         const result = await api('/admin/tts/config', {
             method: 'PATCH',
-            body: JSON.stringify({ voice_name: voiceName, speaking_rate: speakingRate, pitch }),
+            body: JSON.stringify(payload),
         });
         _ttsConfig = { config: result.config, source: result.source, known_voices: _ttsConfig?.known_voices || [] };
         renderTTSConfig(_ttsConfig);
