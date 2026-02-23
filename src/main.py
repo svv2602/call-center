@@ -32,6 +32,7 @@ from src.agent.prompt_manager import (
     get_safety_rules_for_prompt,
     inject_pronunciation_rules,
 )
+from src.agent.prompts import assemble_prompt
 from src.agent.tool_loader import get_tools_with_overrides
 from src.api.admin_users import router as admin_users_router
 from src.api.analytics import router as analytics_router
@@ -51,11 +52,11 @@ from src.api.sandbox import router as sandbox_router
 from src.api.scraper import router as scraper_router
 from src.api.system import router as system_router
 from src.api.tenants import router as tenants_router
-from src.api.tts_config import router as tts_config_router
 from src.api.training_dialogues import router as training_dialogues_router
 from src.api.training_safety import router as training_safety_router
 from src.api.training_templates import router as training_templates_router
 from src.api.training_tools import router as training_tools_router
+from src.api.tts_config import router as tts_config_router
 from src.api.vehicles import router as vehicles_router
 from src.api.websocket import router as websocket_router
 from src.config import Settings, get_settings
@@ -721,12 +722,19 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             except Exception:
                 logger.debug("Safety rules loading failed", exc_info=True)
 
+        # Modular prompt assembly: if no DB/A-B prompt, assemble from modules
+        is_modular = False
+        if system_prompt is None:
+            system_prompt = assemble_prompt(
+                scenario=session.scenario,
+                include_pronunciation=False,  # added separately via inject_pronunciation_rules
+            )
+            is_modular = True
+
         # Inject pronunciation rules from Redis into system prompt
         if _redis is not None:
             pron_rules = await get_pronunciation_rules(_redis)
-            if system_prompt is not None:
-                system_prompt = inject_pronunciation_rules(system_prompt, pron_rules)
-            # else: fallback SYSTEM_PROMPT already has rules baked in
+            system_prompt = inject_pronunciation_rules(system_prompt, pron_rules)
 
         # Load tenant promotions into prompt context
         promotions_context = None
@@ -818,6 +826,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             few_shot_context=few_shot_context,
             safety_context=safety_context,
             promotions_context=promotions_context,
+            is_modular=is_modular,
         )
 
         # Initialize pattern search (if asyncpg pool available)
@@ -853,6 +862,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 pii_vault=vault,
                 few_shot_context=few_shot_context,
                 safety_context=safety_context,
+                is_modular=is_modular,
             )
 
         # Run the pipeline (greeting → listen → STT → LLM → TTS loop)

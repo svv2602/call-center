@@ -161,62 +161,52 @@ class TestFormatSafetyRulesSection:
         assert idx_a < idx_b
 
 
-# ── _build_system_prompt injection ───────────────────────────
+# ── build_system_prompt_with_context injection ───────────────────────────
 
 
 class TestSystemPromptInjection:
-    """Test that LLMAgent._build_system_prompt includes few-shot and safety sections."""
+    """Test that build_system_prompt_with_context includes few-shot and safety sections."""
 
     def test_includes_sections_when_provided(self) -> None:
-        from src.agent.agent import LLMAgent
+        from src.agent.prompts import SYSTEM_PROMPT, build_system_prompt_with_context
 
-        agent = LLMAgent(
-            api_key="test-key",
+        prompt = build_system_prompt_with_context(
+            SYSTEM_PROMPT,
             few_shot_context="## Приклади діалогів\ntest example",
             safety_context="## Додаткові правила безпеки\n- [CRITICAL] test rule",
         )
-        prompt = agent._build_system_prompt()
         assert "## Приклади діалогів" in prompt
         assert "## Додаткові правила безпеки" in prompt
 
     def test_omits_sections_when_none(self) -> None:
-        from src.agent.agent import LLMAgent
+        from src.agent.prompts import SYSTEM_PROMPT, build_system_prompt_with_context
 
-        agent = LLMAgent(api_key="test-key")
-        prompt = agent._build_system_prompt()
+        prompt = build_system_prompt_with_context(SYSTEM_PROMPT)
         assert "Приклади діалогів" not in prompt
         assert "Додаткові правила безпеки" not in prompt
 
     def test_safety_before_few_shot_before_season(self) -> None:
-        from src.agent.agent import LLMAgent
+        from src.agent.prompts import SYSTEM_PROMPT, build_system_prompt_with_context
 
-        agent = LLMAgent(
-            api_key="test-key",
+        prompt = build_system_prompt_with_context(
+            SYSTEM_PROMPT,
             few_shot_context="## Few-shot section",
             safety_context="## Safety section",
         )
-        prompt = agent._build_system_prompt()
         # Safety should appear before few-shot, both before season hint
         idx_safety = prompt.index("## Safety section")
         idx_fewshot = prompt.index("## Few-shot section")
         idx_season = prompt.index("## Підказка по сезону")
         assert idx_safety < idx_fewshot < idx_season
 
-    def test_streaming_loop_includes_sections(self) -> None:
-        """StreamingAgentLoop._build_system_prompt also injects sections."""
-        from unittest.mock import MagicMock
+    def test_streaming_loop_uses_shared_builder(self) -> None:
+        """StreamingAgentLoop also uses build_system_prompt_with_context."""
+        from src.agent.prompts import SYSTEM_PROMPT, build_system_prompt_with_context
 
-        from src.agent.streaming_loop import StreamingAgentLoop
-
-        loop = StreamingAgentLoop(
-            llm_router=MagicMock(),
-            tool_router=MagicMock(),
-            tts=MagicMock(),
-            conn=MagicMock(),
-            barge_in_event=MagicMock(),
+        prompt = build_system_prompt_with_context(
+            SYSTEM_PROMPT,
             few_shot_context="## Few-shot section",
             safety_context="## Safety section",
         )
-        prompt = loop._build_system_prompt()
         assert "## Few-shot section" in prompt
         assert "## Safety section" in prompt

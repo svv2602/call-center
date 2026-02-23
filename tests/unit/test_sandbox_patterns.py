@@ -148,24 +148,24 @@ class TestPatternSearch:
 
 
 class TestAgentPatternContext:
-    """Test that agent.py correctly passes pattern_context."""
+    """Test that build_system_prompt_with_context correctly handles pattern_context."""
 
     @pytest.mark.asyncio
     async def test_build_system_prompt_with_pattern_context(self) -> None:
-        from src.agent.agent import LLMAgent
+        from src.agent.prompts import SYSTEM_PROMPT, build_system_prompt_with_context
 
-        agent = LLMAgent(api_key="test-key")
-        prompt = agent._build_system_prompt(pattern_context="## Test patterns\n- Test pattern")
+        prompt = build_system_prompt_with_context(
+            SYSTEM_PROMPT, pattern_context="## Test patterns\n- Test pattern"
+        )
 
         assert "## Test patterns" in prompt
         assert "Test pattern" in prompt
 
     @pytest.mark.asyncio
     async def test_build_system_prompt_without_pattern_context(self) -> None:
-        from src.agent.agent import LLMAgent
+        from src.agent.prompts import SYSTEM_PROMPT, build_system_prompt_with_context
 
-        agent = LLMAgent(api_key="test-key")
-        prompt = agent._build_system_prompt()
+        prompt = build_system_prompt_with_context(SYSTEM_PROMPT)
 
         assert "Test patterns" not in prompt
         # Season hint is always present

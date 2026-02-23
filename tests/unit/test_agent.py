@@ -164,12 +164,11 @@ class TestSystemPrompt:
         import datetime
         from unittest.mock import patch
 
-        from src.agent.agent import LLMAgent
+        from src.agent.prompts import build_system_prompt_with_context
 
-        agent = LLMAgent(api_key="test-key")
-        with patch("src.agent.agent.datetime") as mock_dt:
+        with patch("src.agent.prompts.datetime") as mock_dt:
             mock_dt.date.today.return_value = datetime.date(2025, 1, 15)
-            prompt = agent._build_system_prompt()
+            prompt = build_system_prompt_with_context(SYSTEM_PROMPT)
         assert "зимовий сезон" in prompt
         assert "Підказка по сезону" in prompt
 
@@ -177,40 +176,36 @@ class TestSystemPrompt:
         import datetime
         from unittest.mock import patch
 
-        from src.agent.agent import LLMAgent
+        from src.agent.prompts import build_system_prompt_with_context
 
-        agent = LLMAgent(api_key="test-key")
-        with patch("src.agent.agent.datetime") as mock_dt:
+        with patch("src.agent.prompts.datetime") as mock_dt:
             mock_dt.date.today.return_value = datetime.date(2025, 7, 15)
-            prompt = agent._build_system_prompt()
+            prompt = build_system_prompt_with_context(SYSTEM_PROMPT)
         assert "літній сезон" in prompt
 
     def test_season_hint_transition(self) -> None:
         import datetime
         from unittest.mock import patch
 
-        from src.agent.agent import LLMAgent
+        from src.agent.prompts import build_system_prompt_with_context
 
-        agent = LLMAgent(api_key="test-key")
-        with patch("src.agent.agent.datetime") as mock_dt:
+        with patch("src.agent.prompts.datetime") as mock_dt:
             mock_dt.date.today.return_value = datetime.date(2025, 4, 15)
-            prompt = agent._build_system_prompt()
+            prompt = build_system_prompt_with_context(SYSTEM_PROMPT)
         assert "міжсезоння" in prompt
 
     def test_custom_system_prompt(self) -> None:
-        from src.agent.agent import LLMAgent
+        from src.agent.prompts import build_system_prompt_with_context
 
         custom = "Custom prompt for testing"
-        agent = LLMAgent(api_key="test-key", system_prompt=custom)
-        prompt = agent._build_system_prompt()
+        prompt = build_system_prompt_with_context(custom)
         assert prompt.startswith(custom)
         assert "Підказка по сезону" in prompt
 
     def test_fallback_to_hardcoded_prompt(self) -> None:
-        from src.agent.agent import LLMAgent
+        from src.agent.prompts import build_system_prompt_with_context
 
-        agent = LLMAgent(api_key="test-key")
-        prompt = agent._build_system_prompt()
+        prompt = build_system_prompt_with_context(SYSTEM_PROMPT)
         assert prompt.startswith(SYSTEM_PROMPT)
 
     def test_prompt_version_name_default(self) -> None:

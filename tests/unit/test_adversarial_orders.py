@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from src.agent.agent import LLMAgent
-from src.agent.prompts import PROMPT_VERSION, SYSTEM_PROMPT
+from src.agent.prompts import PROMPT_VERSION, SYSTEM_PROMPT, build_system_prompt_with_context
 from src.agent.tools import ORDER_TOOLS
 
 
@@ -50,22 +50,23 @@ class TestConfirmOrderToolSafety:
 
 
 class TestBuildSystemPromptSecurity:
-    """Test _build_system_prompt with caller context."""
+    """Test build_system_prompt_with_context with caller context."""
 
     def test_caller_phone_injected(self) -> None:
-        agent = LLMAgent(api_key="test-key")
-        prompt = agent._build_system_prompt(caller_phone="+380501234567")
+        prompt = build_system_prompt_with_context(
+            SYSTEM_PROMPT, caller_phone="+380501234567"
+        )
         assert "+380501234567" in prompt
         assert "CallerID" in prompt
 
     def test_order_id_injected(self) -> None:
-        agent = LLMAgent(api_key="test-key")
-        prompt = agent._build_system_prompt(order_id="order-abc")
+        prompt = build_system_prompt_with_context(
+            SYSTEM_PROMPT, order_id="order-abc"
+        )
         assert "order-abc" in prompt
 
     def test_no_context_returns_base_prompt_with_season(self) -> None:
-        agent = LLMAgent(api_key="test-key")
-        prompt = agent._build_system_prompt()
+        prompt = build_system_prompt_with_context(SYSTEM_PROMPT)
         assert prompt.startswith(SYSTEM_PROMPT)
         assert "Підказка по сезону" in prompt
 

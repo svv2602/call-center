@@ -8,7 +8,6 @@ and loop back to the LLM with results.
 from __future__ import annotations
 
 import asyncio  # noqa: TC003
-import datetime
 import json
 import logging
 import time
@@ -16,7 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from src.agent.agent import MAX_HISTORY_MESSAGES, MAX_TOOL_CALLS_PER_TURN
-from src.agent.prompts import SYSTEM_PROMPT
+from src.agent.prompts import SYSTEM_PROMPT, build_system_prompt_with_context
 from src.agent.tool_result_compressor import compress_tool_result
 from src.core.audio_sender import send_audio_stream
 from src.core.sentence_buffer import buffer_sentences
@@ -68,6 +67,7 @@ class StreamingAgentLoop:
         max_tool_rounds: int = MAX_TOOL_CALLS_PER_TURN,
         few_shot_context: str | None = None,
         safety_context: str | None = None,
+        is_modular: bool = False,
     ) -> None:
         self._llm_router = llm_router
         self._tool_router = tool_router
@@ -81,6 +81,7 @@ class StreamingAgentLoop:
         self._max_tool_rounds = max_tool_rounds
         self._few_shot_context = few_shot_context
         self._safety_context = safety_context
+        self._is_modular = is_modular
 
     async def run_turn(
         self,
@@ -89,6 +90,7 @@ class StreamingAgentLoop:
         caller_phone: str | None = None,
         order_id: str | None = None,
         pattern_context: str | None = None,
+        order_stage: str | None = None,
     ) -> TurnResult:
         """Run a full conversation turn with streaming audio output.
 
@@ -112,7 +114,16 @@ class StreamingAgentLoop:
         masked_phone = caller_phone
         if self._pii_vault is not None and caller_phone:
             masked_phone = self._pii_vault.mask(caller_phone)
-        system = self._build_system_prompt(masked_phone, order_id, pattern_context)
+        system = build_system_prompt_with_context(
+            self._system_prompt,
+            is_modular=self._is_modular,
+            order_stage=order_stage,
+            safety_context=self._safety_context,
+            few_shot_context=self._few_shot_context,
+            caller_phone=masked_phone,
+            order_id=order_id,
+            pattern_context=pattern_context,
+        )
 
         spoken_parts: list[str] = []
         total_input_tokens = 0
@@ -241,40 +252,3 @@ class StreamingAgentLoop:
             disconnected=disconnected,
         )
 
-    def _build_system_prompt(
-        self,
-        caller_phone: str | None = None,
-        order_id: str | None = None,
-        pattern_context: str | None = None,
-    ) -> str:
-        """Build system prompt with caller context and season hint."""
-        parts = [self._system_prompt]
-
-        # Safety rules and few-shot examples (before dynamic per-turn sections)
-        if self._safety_context:
-            parts.append(self._safety_context)
-        if self._few_shot_context:
-            parts.append(self._few_shot_context)
-
-        month = datetime.date.today().month
-        if month in (11, 12, 1, 2, 3):
-            hint = "Зараз зимовий сезон — запитай: «Зимові чи всесезонні?»"
-        elif month in (5, 6, 7, 8, 9):
-            hint = "Зараз літній сезон — запитай: «Літні чи всесезонні?»"
-        else:
-            hint = "Зараз міжсезоння — запитай: «Літні, зимові чи всесезонні?»"
-
-        parts.append(f"\n## Підказка по сезону\n- {hint}")
-        parts.append("- Якщо клієнт обирає нетиповий сезон — не заперечуй, виконуй запит")
-
-        if caller_phone or order_id:
-            parts.append("\n## Контекст дзвінка")
-            if caller_phone:
-                parts.append(f"- CallerID клієнта: {caller_phone}")
-            if order_id:
-                parts.append(f"- Поточне замовлення (чорновик): {order_id}")
-
-        if pattern_context:
-            parts.append(pattern_context)
-
-        return "\n".join(parts)

@@ -6,14 +6,18 @@ Manages conversation flow, tool routing, and context window.
 from __future__ import annotations
 
 import contextlib
-import datetime
 import logging
 import time
 from typing import TYPE_CHECKING, Any
 
 import anthropic
 
-from src.agent.prompts import ERROR_TEXT, PROMPT_VERSION, SYSTEM_PROMPT
+from src.agent.prompts import (
+    ERROR_TEXT,
+    PROMPT_VERSION,
+    SYSTEM_PROMPT,
+    build_system_prompt_with_context,
+)
 from src.agent.tool_result_compressor import compress_tool_result
 from src.agent.tools import ALL_TOOLS
 
@@ -96,6 +100,7 @@ class LLMAgent:
         few_shot_context: str | None = None,
         safety_context: str | None = None,
         promotions_context: str | None = None,
+        is_modular: bool = False,
     ) -> None:
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._model = model
@@ -109,6 +114,7 @@ class LLMAgent:
         self._few_shot_context = few_shot_context
         self._safety_context = safety_context
         self._promotions_context = promotions_context
+        self._is_modular = is_modular
         # Accumulated usage from last process_message call (all LLM rounds)
         self.last_input_tokens: int = 0
         self.last_output_tokens: int = 0
@@ -126,6 +132,7 @@ class LLMAgent:
         caller_phone: str | None = None,
         order_id: str | None = None,
         pattern_context: str | None = None,
+        order_stage: str | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         """Process a user message and return the agent's text response.
 
@@ -167,7 +174,17 @@ class LLMAgent:
         masked_phone = caller_phone
         if self._pii_vault is not None and caller_phone:
             masked_phone = self._pii_vault.mask(caller_phone)
-        system = self._build_system_prompt(masked_phone, order_id, pattern_context)
+        system = build_system_prompt_with_context(
+            self._system_prompt,
+            is_modular=self._is_modular,
+            order_stage=order_stage,
+            safety_context=self._safety_context,
+            few_shot_context=self._few_shot_context,
+            promotions_context=self._promotions_context,
+            caller_phone=masked_phone,
+            order_id=order_id,
+            pattern_context=pattern_context,
+        )
 
         response_text = ""
         tool_call_count = 0
@@ -316,47 +333,6 @@ class LLMAgent:
                 break
 
         return response_text, conversation_history
-
-    def _build_system_prompt(
-        self,
-        caller_phone: str | None = None,
-        order_id: str | None = None,
-        pattern_context: str | None = None,
-    ) -> str:
-        """Build system prompt with caller context and season hint appended."""
-        parts = [self._system_prompt]
-
-        # Safety rules, few-shot examples, and promotions context
-        if self._safety_context:
-            parts.append(self._safety_context)
-        if self._few_shot_context:
-            parts.append(self._few_shot_context)
-        if self._promotions_context:
-            parts.append(self._promotions_context)
-
-        # Dynamic season hint
-        month = datetime.date.today().month
-        if month in (11, 12, 1, 2, 3):
-            hint = "Зараз зимовий сезон — запитай: «Зимові чи всесезонні?»"
-        elif month in (5, 6, 7, 8, 9):
-            hint = "Зараз літній сезон — запитай: «Літні чи всесезонні?»"
-        else:  # April, October
-            hint = "Зараз міжсезоння — запитай: «Літні, зимові чи всесезонні?»"
-
-        parts.append(f"\n## Підказка по сезону\n- {hint}")
-        parts.append("- Якщо клієнт обирає нетиповий сезон — не заперечуй, виконуй запит")
-
-        if caller_phone or order_id:
-            parts.append("\n## Контекст дзвінка")
-            if caller_phone:
-                parts.append(f"- CallerID клієнта: {caller_phone}")
-            if order_id:
-                parts.append(f"- Поточне замовлення (чорновик): {order_id}")
-
-        if pattern_context:
-            parts.append(pattern_context)
-
-        return "\n".join(parts)
 
     @property
     def prompt_version_name(self) -> str:

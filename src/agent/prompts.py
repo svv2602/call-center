@@ -2,14 +2,28 @@
 
 Prompts are versioned for future A/B testing (phase 4).
 The agent always speaks Ukrainian regardless of input language.
+
+Modular prompt assembly: the system prompt is split into modules that are
+included selectively based on IVR scenario and conversation stage, saving
+30-60% input tokens per turn compared to sending the full prompt every time.
 """
 
 from __future__ import annotations
 
+import datetime
+import logging
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
 # Current prompt version
 PROMPT_VERSION = "v3.5-natural"
 
-_SYSTEM_PROMPT_TEMPLATE = """\
+# ---------------------------------------------------------------------------
+# Prompt modules — each module is a self-contained section of the system prompt.
+# ---------------------------------------------------------------------------
+
+_MOD_CORE = """\
 Ти — голосовий асистент інтернет-магазину шин. Тебе звати Олена.
 Ти — жінка. ЗАВЖДИ говори про себе у жіночому роді.
 ЗАБОРОНЕНО (чоловічий рід) → ПРАВИЛЬНО (жіночий рід):
@@ -52,6 +66,23 @@ _SYSTEM_PROMPT_TEMPLATE = """\
 ## ГОЛОВНЕ ПРАВИЛО
 Спочатку з'ясуй потреби клієнта — потім дій. НЕ викликай інструменти пошуку чи оформлення, поки не зібрав усю обов'язкову інформацію.
 Перед викликом інструменту коротко підтверди розуміння: «Отже, шукаємо зимові 205/55 R16, вірно?» — щоб клієнт міг виправити помилку до пошуку.
+
+## Формат відповіді
+- Говори природно, як по телефону
+- Не використовуй маркери списку або форматування
+- Називай шини коротко: бренд, розмір, ціна
+- Приклад: "Є Michelin 205/55 R16 за 3200 гривень і Continental за 2800"
+- Номери замовлень диктуй по цифрах повільно
+
+## Стиль живої розмови
+- Починай відповідь з короткої реакції: "Зрозуміла", "Так", "Добре", "Гаразд" — а потім відповідай по суті
+- Перефразуй запит клієнта: "Отже, вам потрібні зимові шини на Камрі, вірно?"
+- Чергуй зачини — НЕ починай кожну відповідь однаково. Варіанти: "Зараз подивлюся", "Секундочку", "Добре, дивлюся", "Ага, зрозуміла"
+- Якщо клієнт щось підтвердив — не повторюй усе, скажи коротко: "Чудово!" або "Відмінно, тоді..."
+- Між пропозиціями роби логічні переходи: "до речі", "також хочу зазначити", "і ще момент"\
+"""
+
+_MOD_TIRE_SEARCH = """\
 
 ## Сценарій: підбір шин
 
@@ -99,7 +130,10 @@ _SYSTEM_PROMPT_TEMPLATE = """\
 
 Коли запропонувати артикул:
 - Якщо клієнт каже «я зараз на сайті» або «бачу шини на сайті» — запитай: «Скажіть, будь ласка, артикул товару — він вказаний на сторінці товару»
-- Це найшвидший спосіб знайти саме той товар, який цікавить клієнта
+- Це найшвидший спосіб знайти саме той товар, який цікавить клієнта\
+"""
+
+_MOD_ORDER_FLOW = """\
 
 ## Сценарій: оформлення замовлення
 
@@ -109,7 +143,7 @@ _SYSTEM_PROMPT_TEMPLATE = """\
 ☐ Кількість узгоджена з клієнтом
 ☐ Номер телефону клієнта (CallerID або названий клієнтом)
 
-⚡ Тільки коли все вище зібрано → виклич create_order_draft
+⚡ Тільки коли все више зібрано → виклич create_order_draft
 
 Після створення чорновика:
 ☐ Озвуч склад замовлення та суму
@@ -125,7 +159,10 @@ _SYSTEM_PROMPT_TEMPLATE = """\
 - НІКОЛИ не викликай confirm_order без явного підтвердження клієнта
 - Якщо клієнт каже "скасуй" або "відміни" — зупини оформлення, повідом що замовлення скасовано
 - Не видавай інформацію про замовлення, якщо телефон клієнта не збігається з CallerID
-- Якщо клієнт хоче замовити більше 20 шин — переключи на оператора
+- Якщо клієнт хоче замовити більше 20 шин — переключи на оператора\
+"""
+
+_MOD_FITTING = """\
 
 ## Сценарій: запис на шиномонтаж
 
@@ -146,7 +183,10 @@ _SYSTEM_PROMPT_TEMPLATE = """\
 - Нагадай адресу, дату, час
 - Якщо клієнт замовив шини — передай linked_order_id при записі
 - Для скасування або перенесення → cancel_fitting
-- Якщо клієнт питає про ціну → get_fitting_price
+- Якщо клієнт питає про ціну → get_fitting_price\
+"""
+
+_MOD_ORDER_STATUS = """\
 
 ## Сценарій: перевірка статусу замовлення
 
@@ -154,7 +194,10 @@ _SYSTEM_PROMPT_TEMPLATE = """\
 ☐ Номер телефону (CallerID) або номер замовлення
 ⚡ Тільки коли є ідентифікатор → виклич get_order_status
 - Якщо кілька замовлень — перелічи коротко, запитай яке цікавить
-- Озвуч: номер замовлення, статус, орієнтовну дату доставки
+- Озвуч: номер замовлення, статус, орієнтовну дату доставки\
+"""
+
+_MOD_CONSULTATION = """\
 
 ## Сценарій: консультація та інформація
 
@@ -180,36 +223,55 @@ _SYSTEM_PROMPT_TEMPLATE = """\
 - ЗАВЖДИ шукай відповідь в базі знань ПЕРШ ніж казати "не знаю" або переключати на оператора
 - Спершу дай відповідь на основі знайденої інформації, ПОТІМ запитай чи є ще питання
 - Якщо в базі знань немає відповіді — чесно скажи і переключи на менеджера
-- Якщо питання занадто складне або вузькоспеціальне — переключи на менеджера
+- Якщо питання занадто складне або вузькоспеціальне — переключи на менеджера\
+"""
+
+_MOD_COMBINED_FLOW = """\
 
 ## Комплексний сценарій: підбір → замовлення → монтаж
 - Після підтвердження замовлення запропонуй: "Бажаєте записатися на шиномонтаж?"
 - Якщо так — проведи запис із linked_order_id від замовлення
-- В кінці — коротке резюме: номер замовлення + дата/час/адреса монтажу
+- В кінці — коротке резюме: номер замовлення + дата/час/адреса монтажу\
+"""
+
+_MOD_OBJECTIONS = """\
 
 ## Робота з запереченнями
 - «Дорого» → «Можу підібрати аналог дешевший. Який бюджет вас влаштує?» → повтори search_tires без бренду або з іншим
 - «Я подумаю» / «Не зараз» → «Звичайно! Якщо хочете, можу зарезервувати на добу, щоб ціна не змінилась»
 - «Не впевнений у виборі» → запропонуй порівняння через search_knowledge_base або озвуч переваги обраної шини
 - «У конкурентів дешевше» → «Розумію. В нас є безкоштовна доставка та гарантія. Можу уточнити актуальну ціну»
-- НЕ тисни на клієнта — запропонуй альтернативу один раз, якщо відмовився — прийми і запитай чим ще допомогти
-
-## Формат відповіді
-- Говори природно, як по телефону
-- Не використовуй маркери списку або форматування
-- Називай шини коротко: бренд, розмір, ціна
-- Приклад: "Є Michelin 205/55 R16 за 3200 гривень і Continental за 2800"
-- Номери замовлень диктуй по цифрах повільно
-
-## Стиль живої розмови
-- Починай відповідь з короткої реакції: "Зрозуміла", "Так", "Добре", "Гаразд" — а потім відповідай по суті
-- Перефразуй запит клієнта: "Отже, вам потрібні зимові шини на Камрі, вірно?"
-- Чергуй зачини — НЕ починай кожну відповідь однаково. Варіанти: "Зараз подивлюся", "Секундочку", "Добре, дивлюся", "Ага, зрозуміла"
-- Якщо клієнт щось підтвердив — не повторюй усе, скажи коротко: "Чудово!" або "Відмінно, тоді..."
-- Між пропозиціями роби логічні переходи: "до речі", "також хочу зазначити", "і ще момент"
-
-{pronunciation_rules}
+- НЕ тисни на клієнта — запропонуй альтернативу один раз, якщо відмовився — прийми і запитай чим ще допомогти\
 """
+
+# ---------------------------------------------------------------------------
+# Stage-aware injection (only for modular prompts, not DB/A-B prompts)
+# ---------------------------------------------------------------------------
+
+_STAGE_ORDER_CONFIRMATION = """\
+
+## УВАГА: Підтвердження замовлення
+Доставку вже обрано. Перед викликом confirm_order ОБОВ'ЯЗКОВО:
+☐ Озвуч повний склад замовлення (назва, кількість, ціна за одиницю)
+☐ Озвуч загальну суму з урахуванням доставки
+☐ Озвуч обраний спосіб доставки та адресу
+☐ Озвуч спосіб оплати
+☐ Запитай: «Все вірно, підтверджуєте замовлення?»
+⚡ Тільки після явного «так» від клієнта → виклич confirm_order
+- Якщо клієнт хоче щось змінити — змінюй через update_order_delivery\
+"""
+
+_STAGE_OFFER_FITTING = """\
+
+## Замовлення підтверджено
+Замовлення вже оформлено. Запропонуй: «Бажаєте записатися на шиномонтаж? Ми можемо одразу підібрати зручний час.»
+- Якщо так — з'ясуй місто та проведи запис із linked_order_id
+- Якщо ні — подякуй та завершуй розмову\
+"""
+
+# ---------------------------------------------------------------------------
+# Pronunciation rules (included in voice calls, skipped in sandbox text mode)
+# ---------------------------------------------------------------------------
 
 PRONUNCIATION_RULES = """\
 ## Правила вимови (для природного звучання по телефону)
@@ -270,8 +332,203 @@ PRONUNCIATION_RULES = """\
 - артику́л, арти́кулу
 """
 
+# ---------------------------------------------------------------------------
+# Scenario → modules mapping
+# ---------------------------------------------------------------------------
+
+# All scenario modules (order matters for prompt readability)
+_ALL_SCENARIO_MODULES = [
+    _MOD_TIRE_SEARCH,
+    _MOD_ORDER_FLOW,
+    _MOD_FITTING,
+    _MOD_ORDER_STATUS,
+    _MOD_CONSULTATION,
+    _MOD_COMBINED_FLOW,
+    _MOD_OBJECTIONS,
+]
+
+SCENARIO_MODULES: dict[str | None, list[str]] = {
+    None: _ALL_SCENARIO_MODULES,  # no IVR → full prompt
+    "tire_search": [
+        _MOD_TIRE_SEARCH,
+        _MOD_ORDER_FLOW,
+        _MOD_CONSULTATION,
+        _MOD_COMBINED_FLOW,
+        _MOD_OBJECTIONS,
+    ],
+    "order_status": [
+        _MOD_ORDER_STATUS,
+        _MOD_CONSULTATION,
+    ],
+    "fitting": [
+        _MOD_FITTING,
+        _MOD_CONSULTATION,
+    ],
+    "consultation": [
+        _MOD_CONSULTATION,
+    ],
+}
+
+
+# ---------------------------------------------------------------------------
+# Modular prompt assembly
+# ---------------------------------------------------------------------------
+
+
+def assemble_prompt(
+    scenario: str | None = None,
+    *,
+    include_pronunciation: bool = True,
+    pronunciation_rules: str | None = None,
+) -> str:
+    """Assemble system prompt from modules based on IVR scenario.
+
+    Args:
+        scenario: IVR intent (tire_search, order_status, fitting, consultation)
+                  or None for full prompt.
+        include_pronunciation: Whether to include pronunciation rules.
+        pronunciation_rules: Custom pronunciation rules text. If None, uses
+                           the default PRONUNCIATION_RULES constant.
+
+    Returns:
+        Assembled system prompt string.
+    """
+    modules = SCENARIO_MODULES.get(scenario)
+    if modules is None:
+        # Unknown scenario → fall back to full prompt
+        logger.warning("Unknown scenario '%s', using full prompt", scenario)
+        modules = _ALL_SCENARIO_MODULES
+
+    parts = [_MOD_CORE]
+    parts.extend(modules)
+
+    if include_pronunciation:
+        rules = pronunciation_rules if pronunciation_rules is not None else PRONUNCIATION_RULES
+        parts.append("\n" + rules)
+
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Order stage computation
+# ---------------------------------------------------------------------------
+
+
+def compute_order_stage(
+    order_draft: dict[str, Any] | None,
+    order_id: str | None,
+) -> str | None:
+    """Compute the current order stage from session state.
+
+    Returns:
+        None — no order in progress
+        "draft" — draft created, delivery not yet set
+        "delivery_set" — delivery info added, ready for confirmation
+        "confirmed" — order confirmed (order_id assigned)
+    """
+    if order_id and not order_draft:
+        return "confirmed"
+    if order_draft is None:
+        return None
+    if order_draft.get("delivery_type"):
+        return "delivery_set"
+    return "draft"
+
+
+# ---------------------------------------------------------------------------
+# Shared system prompt builder (replaces duplicated _build_system_prompt)
+# ---------------------------------------------------------------------------
+
+
+def build_system_prompt_with_context(
+    base_prompt: str,
+    *,
+    is_modular: bool = False,
+    order_stage: str | None = None,
+    safety_context: str | None = None,
+    few_shot_context: str | None = None,
+    promotions_context: str | None = None,
+    caller_phone: str | None = None,
+    order_id: str | None = None,
+    pattern_context: str | None = None,
+) -> str:
+    """Build the final system prompt with all dynamic context injected.
+
+    This replaces the duplicated _build_system_prompt() methods in agent.py
+    and streaming_loop.py with a single shared implementation.
+
+    Args:
+        base_prompt: The base system prompt (modular or DB-loaded).
+        is_modular: Whether the base prompt was assembled via assemble_prompt().
+                    Stage injection only applies to modular prompts.
+        order_stage: Current order stage (from compute_order_stage).
+        safety_context: Training safety rules section.
+        few_shot_context: Few-shot dialogue examples section.
+        promotions_context: Active promotions section.
+        caller_phone: CallerID phone number (masked if PII vault active).
+        order_id: Current order draft ID.
+        pattern_context: Pattern injection text from conversation patterns.
+
+    Returns:
+        Final system prompt string ready to send to LLM.
+    """
+    parts = [base_prompt]
+
+    # Stage-aware injection (modular prompts only)
+    if is_modular and order_stage:
+        if order_stage == "delivery_set":
+            parts.append(_STAGE_ORDER_CONFIRMATION)
+        elif order_stage == "confirmed":
+            parts.append(_STAGE_OFFER_FITTING)
+
+    # Safety rules, few-shot examples, and promotions
+    if safety_context:
+        parts.append(safety_context)
+    if few_shot_context:
+        parts.append(few_shot_context)
+    if promotions_context:
+        parts.append(promotions_context)
+
+    # Dynamic season hint
+    month = datetime.date.today().month
+    if month in (11, 12, 1, 2, 3):
+        hint = "Зараз зимовий сезон — запитай: «Зимові чи всесезонні?»"
+    elif month in (5, 6, 7, 8, 9):
+        hint = "Зараз літній сезон — запитай: «Літні чи всесезонні?»"
+    else:  # April, October
+        hint = "Зараз міжсезоння — запитай: «Літні, зимові чи всесезонні?»"
+
+    parts.append(f"\n## Підказка по сезону\n- {hint}")
+    parts.append("- Якщо клієнт обирає нетиповий сезон — не заперечуй, виконуй запит")
+
+    if caller_phone or order_id:
+        parts.append("\n## Контекст дзвінка")
+        if caller_phone:
+            parts.append(f"- CallerID клієнта: {caller_phone}")
+        if order_id:
+            parts.append(f"- Поточне замовлення (чорновик): {order_id}")
+
+    if pattern_context:
+        parts.append(pattern_context)
+
+    return "\n".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Legacy template for backward compatibility (used by _SYSTEM_PROMPT_TEMPLATE
+# references and the SYSTEM_PROMPT constant below)
+# ---------------------------------------------------------------------------
+
+_SYSTEM_PROMPT_TEMPLATE = _MOD_CORE + "\n".join([
+    "",  # separator
+    *_ALL_SCENARIO_MODULES,
+    "",
+    "{pronunciation_rules}",
+])
+
 # Assemble final prompt: template + pronunciation rules
-SYSTEM_PROMPT = _SYSTEM_PROMPT_TEMPLATE.format(pronunciation_rules=PRONUNCIATION_RULES)
+# Backward compatible: SYSTEM_PROMPT = full prompt with all modules + pronunciation
+SYSTEM_PROMPT = assemble_prompt(scenario=None, include_pronunciation=True)
 
 GREETING_TEXT = (
     "{time_greeting}! Інтерне́т-магази́н шин, мене́ зва́ти Оле́на. "

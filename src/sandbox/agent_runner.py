@@ -25,10 +25,9 @@ from src.agent.prompt_manager import (
     format_promotions_context,
     format_safety_rules_section,
     get_few_shot_examples,
-    get_pronunciation_rules,
     get_safety_rules_for_prompt,
-    inject_pronunciation_rules,
 )
+from src.agent.prompts import assemble_prompt
 from src.agent.tool_loader import get_tools_with_overrides
 from src.config import get_settings
 from src.sandbox.mock_tools import build_mock_tool_router
@@ -301,10 +300,9 @@ async def create_sandbox_agent(
             soap_client=soap_client,
         )
 
-    # Inject pronunciation rules from Redis
-    if redis is not None and system_prompt is not None:
-        pron_rules = await get_pronunciation_rules(redis)
-        system_prompt = inject_pronunciation_rules(system_prompt, pron_rules)
+    # Modular prompt assembly for sandbox: skip pronunciation (text mode, no TTS)
+    if system_prompt is None:
+        system_prompt = assemble_prompt(scenario=None, include_pronunciation=False)
 
     # Load few-shot examples and safety rules
     few_shot_context = None
