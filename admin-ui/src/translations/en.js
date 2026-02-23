@@ -998,7 +998,6 @@ export default {
     'sandbox.generateGuidanceFailed': 'Failed to generate: {error}',
     'sandbox.editPattern': 'Edit pattern',
     'sandbox.patternSaved': 'Pattern saved',
-    'sandbox.intentHint': 'One or several, comma-separated',
     'sandbox.titleRequired': 'Enter a conversation title',
     'sandbox.ratingCommentPlaceholder': 'Comment (Enter to save)',
     'sandbox.convInfo': 'Conversation details',

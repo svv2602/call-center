@@ -1287,12 +1287,53 @@ async function loadPatterns() {
     }
 }
 
+function _renderIntentCheckboxes(selectedValues) {
+    const container = document.getElementById('editPatternIntentCheckboxes');
+    const selected = selectedValues.map(s => s.trim()).filter(Boolean);
+    // Known intents (excluding "other")
+    const knownValues = INTENT_OPTIONS.filter(o => o.value !== 'other').map(o => o.value);
+    const customValues = selected.filter(v => !knownValues.includes(v));
+
+    container.innerHTML = INTENT_OPTIONS.filter(o => o.value !== 'other').map(o => {
+        const checked = selected.includes(o.value) ? 'checked' : '';
+        return `<label class="flex items-center gap-1.5 text-xs text-neutral-700 dark:text-neutral-300 cursor-pointer">
+            <input type="checkbox" value="${o.value}" ${checked} class="editPatternIntentCb cursor-pointer"> ${t(o.i18nKey)}
+        </label>`;
+    }).join('') + `<label class="flex items-center gap-1.5 text-xs text-neutral-700 dark:text-neutral-300 cursor-pointer">
+        <input type="checkbox" value="__other__" ${customValues.length ? 'checked' : ''} class="editPatternIntentCb cursor-pointer"
+            onchange="document.getElementById('editPatternIntentCustom').classList.toggle('hidden', !this.checked)"> ${t('sandbox.intentOther')}
+    </label>`;
+
+    const customInput = document.getElementById('editPatternIntentCustom');
+    customInput.value = customValues.join(', ');
+    customInput.classList.toggle('hidden', !customValues.length);
+}
+
+function _collectIntentLabel() {
+    const checkboxes = document.querySelectorAll('.editPatternIntentCb:checked');
+    const values = [];
+    let hasOther = false;
+    checkboxes.forEach(cb => {
+        if (cb.value === '__other__') { hasOther = true; return; }
+        values.push(cb.value);
+    });
+    if (hasOther) {
+        const custom = document.getElementById('editPatternIntentCustom').value.trim();
+        if (custom) {
+            custom.split(',').map(s => s.trim()).filter(Boolean).forEach(v => {
+                if (!values.includes(v)) values.push(v);
+            });
+        }
+    }
+    return values.join(', ');
+}
+
 async function showEditPatternModal(patternId) {
     try {
         const data = await api(`/admin/sandbox/patterns/${patternId}`);
         const item = data.item;
         document.getElementById('editPatternId').value = patternId;
-        document.getElementById('editPatternIntent').value = item.intent_label || '';
+        _renderIntentCheckboxes((item.intent_label || '').split(','));
         document.getElementById('editPatternGuidance').value = item.guidance_note || '';
         document.getElementById('editPatternTags').value = (item.tags || []).join(', ');
         document.getElementById('sandboxEditPatternModal').classList.add('show');
@@ -1303,7 +1344,7 @@ async function showEditPatternModal(patternId) {
 
 async function savePattern() {
     const patternId = document.getElementById('editPatternId').value;
-    const intentLabel = document.getElementById('editPatternIntent').value.trim();
+    const intentLabel = _collectIntentLabel();
     if (!intentLabel) { showToast(t('sandbox.intentRequired'), 'error'); return; }
     const guidanceNote = document.getElementById('editPatternGuidance').value.trim();
     if (!guidanceNote) { showToast(t('sandbox.guidanceRequired'), 'error'); return; }
