@@ -1713,6 +1713,48 @@ async def delete_turn_group(
 # ── Phase 4: Pattern Bank ────────────────────────────────────
 
 
+@router.post("/turn-groups/{group_id}/generate-guidance")
+async def generate_guidance_note(group_id: UUID, _: dict[str, Any] = _perm_w) -> dict[str, Any]:
+    """Generate a guidance note draft for a turn group using LLM."""
+    from src.sandbox.guidance_generator import generate_guidance
+
+    engine = await _get_engine()
+
+    async with engine.begin() as conn:
+        # Load group
+        group_result = await conn.execute(
+            text("""
+                SELECT intent_label, pattern_type, correction, turn_ids
+                FROM sandbox_turn_groups WHERE id = :id
+            """),
+            {"id": str(group_id)},
+        )
+        group_row = group_result.first()
+        if not group_row:
+            raise HTTPException(status_code=404, detail="Turn group not found")
+
+        # Load turns
+        turn_ids = group_row.turn_ids
+        turns_result = await conn.execute(
+            text("""
+                SELECT speaker, content FROM sandbox_turns
+                WHERE id = ANY(:turn_ids)
+                ORDER BY turn_number, created_at
+            """),
+            {"turn_ids": turn_ids},
+        )
+        turns = [dict(row._mapping) for row in turns_result]
+
+    guidance = await generate_guidance(
+        turns=turns,
+        intent_label=group_row.intent_label,
+        pattern_type=group_row.pattern_type,
+        correction=group_row.correction,
+    )
+
+    return {"guidance_note": guidance}
+
+
 @router.post("/turn-groups/{group_id}/export")
 async def export_turn_group(
     group_id: UUID,

@@ -583,6 +583,31 @@ function showExportModal(groupId) {
     document.getElementById('sandboxExportGroupId').value = groupId;
     document.getElementById('sandboxExportGuidance').value = '';
     document.getElementById('sandboxExportModal').classList.add('show');
+    // Auto-generate guidance on open
+    generateGuidance();
+}
+
+async function generateGuidance() {
+    const groupId = document.getElementById('sandboxExportGroupId').value;
+    if (!groupId) return;
+
+    const btn = document.getElementById('sandboxGenerateGuidanceBtn');
+    const textarea = document.getElementById('sandboxExportGuidance');
+
+    btn.disabled = true;
+    textarea.placeholder = t('sandbox.generatingGuidance');
+
+    try {
+        const data = await api(`/admin/sandbox/turn-groups/${groupId}/generate-guidance`, { method: 'POST' });
+        if (data.guidance_note) {
+            textarea.value = data.guidance_note;
+        }
+    } catch (e) {
+        showToast(t('sandbox.generateGuidanceFailed', { error: e.message }), 'error');
+    } finally {
+        btn.disabled = false;
+        textarea.placeholder = t('sandbox.guidanceHint');
+    }
 }
 
 async function submitExport() {
@@ -1894,6 +1919,7 @@ window._pages.sandbox = {
     selectPatternType,
     deleteGroup,
     showExportModal,
+    generateGuidance,
     submitExport,
     loadPatterns,
     togglePatternActive,
