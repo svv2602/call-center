@@ -343,8 +343,9 @@ function renderTurn(turn) {
     let ratingHtml = '';
     let branchHtml = '';
     if (!isCustomer) {
+        const effectiveRating = (turn.id === _ratingTurnId && _pendingRating) ? _pendingRating : turn.rating;
         const stars = [1, 2, 3, 4, 5].map(s => {
-            const filled = turn.rating && s <= turn.rating;
+            const filled = effectiveRating && s <= effectiveRating;
             const color = filled ? 'text-amber-400' : 'text-neutral-300 dark:text-neutral-600';
             return `<span class="cursor-pointer ${color} text-lg" onclick="window._pages.sandbox.rateTurn('${turn.id}', ${s})">&#9733;</span>`;
         }).join('');
@@ -374,7 +375,7 @@ function renderTurn(turn) {
     const alignClass = isCustomer ? 'ml-auto max-w-[80%]' : 'mr-auto max-w-[80%]';
 
     return `
-        <div class="${bgClass} ${alignClass} rounded-lg px-3 py-2">
+        <div class="${bgClass} ${alignClass} rounded-lg px-3 py-2" data-turn-id="${turn.id}">
             <div class="flex items-start gap-1">
                 ${checkboxHtml}
                 <div class="flex-1 min-w-0">
@@ -574,8 +575,10 @@ function rateTurn(turnId, stars) {
     _ratingTurnId = turnId;
     _pendingRating = stars;
     renderConversationView();
-    // Focus the comment input after render
+    // Scroll to rated turn and focus comment input
     setTimeout(() => {
+        const turnEl = document.querySelector(`[data-turn-id="${turnId}"]`);
+        if (turnEl) turnEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
         const inp = document.getElementById('ratingCommentInput');
         if (inp) inp.focus();
     }, 0);
