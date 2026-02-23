@@ -392,7 +392,10 @@ _SCENARIO_EMPHASIS: dict[str, str] = {
 
 
 async def _resolve_caller_id(channel_uuid: str) -> str | None:
-    """Resolve caller phone number from Asterisk ARI."""
+    """Resolve caller phone number from Asterisk channel variable CALLER_NUMBER.
+
+    Set in dialplan: Set(CALLER_NUMBER=${CALLERID(num)})
+    """
     settings = get_settings()
     if not settings.ari.url:
         return None
@@ -407,11 +410,13 @@ async def _resolve_caller_id(channel_uuid: str) -> str | None:
         )
         await ari.open()
         try:
-            return await ari.get_caller_id(channel_uuid)
+            raw = await ari.get_channel_variable(channel_uuid, "CALLER_NUMBER")
+            if raw and raw.strip():
+                return raw.strip()
         finally:
             await ari.close()
     except Exception:
-        logger.debug("ARI CallerID lookup failed", exc_info=True)
+        logger.debug("ARI CALLER_NUMBER lookup failed", exc_info=True)
 
     return None
 
