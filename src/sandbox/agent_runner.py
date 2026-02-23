@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from src.agent.agent import ToolRouter
     from src.llm.router import LLMRouter
     from src.onec_client.client import OneCClient
+    from src.onec_client.soap import OneCSOAPClient
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,7 @@ def _register_live_tools(
     knowledge_search: Any = None,
     tenant_id: str = "",
     store_client: Any = None,
+    soap_client: OneCSOAPClient | None = None,
 ) -> None:
     """Override mock handlers with real handlers where available."""
     # Register real knowledge search (pgvector) if available
@@ -169,6 +171,54 @@ def _register_live_tools(
     else:
         logger.info("Live tool mode: no OneCClient — get_pickup_points remains mock")
 
+    if soap_client is not None:
+
+        async def _get_fitting_slots_soap(**kwargs: Any) -> dict[str, Any]:
+            station_id = kwargs.get("station_id", "")
+            date_from = kwargs.get("date_from", "")
+            date_to = kwargs.get("date_to", date_from)
+            slots = await soap_client.get_station_schedule(
+                date_from=date_from, date_to=date_to, station_id=station_id
+            )
+            return {"station_id": station_id, "slots": slots}
+
+        async def _book_fitting_soap(**kwargs: Any) -> dict[str, Any]:
+            return await soap_client.book_fitting(
+                person=kwargs.get("customer_name", ""),
+                phone=kwargs.get("customer_phone", ""),
+                station_id=kwargs.get("station_id", ""),
+                date=kwargs.get("date", ""),
+                time=kwargs.get("time", ""),
+                vehicle_info=kwargs.get("vehicle_info", ""),
+                tire_diameter=kwargs.get("tire_diameter", 0),
+                service_type=kwargs.get("service_type", "tire_change"),
+            )
+
+        async def _cancel_fitting_soap(**kwargs: Any) -> dict[str, Any]:
+            booking_id = kwargs.get("booking_id", "")
+            result = await soap_client.cancel_booking(booking_id)
+            return {
+                "booking_id": booking_id,
+                "status": result.get("status", "cancelled"),
+                "message": result.get("message", "Запис скасовано"),
+            }
+
+        async def _get_customer_bookings_soap(**kwargs: Any) -> dict[str, Any]:
+            phone = kwargs.get("phone", "")
+            station_id = kwargs.get("station_id", "")
+            bookings = await soap_client.get_customer_bookings(
+                phone=phone, station_id=station_id
+            )
+            return {"total": len(bookings), "bookings": bookings}
+
+        router.register("get_fitting_slots", _get_fitting_slots_soap)
+        router.register("book_fitting", _book_fitting_soap)
+        router.register("cancel_fitting", _cancel_fitting_soap)
+        router.register("get_customer_bookings", _get_customer_bookings_soap)
+        logger.info("Live SOAP tools registered: fitting slots, book, cancel, customer bookings")
+    else:
+        logger.info("Live tool mode: no OneCSOAPClient — fitting SOAP tools remain mock")
+
 
 async def create_sandbox_agent(
     engine: AsyncEngine,
@@ -184,6 +234,7 @@ async def create_sandbox_agent(
     knowledge_search: Any = None,
     tenant_id: str = "",
     store_client: Any = None,
+    soap_client: OneCSOAPClient | None = None,
 ) -> LLMAgent:
     """Create an LLMAgent configured for sandbox testing.
 
@@ -200,6 +251,7 @@ async def create_sandbox_agent(
         redis_client: Optional Redis client for tool caching.
         tenant: Optional tenant dict with enabled_tools/prompt_suffix.
         knowledge_search: Optional KnowledgeSearch for pgvector-backed search.
+        soap_client: Optional 1C SOAP client for fitting tools.
 
     Returns:
         Configured LLMAgent instance.
@@ -240,6 +292,7 @@ async def create_sandbox_agent(
             knowledge_search=knowledge_search,
             tenant_id=tenant_id,
             store_client=store_client,
+            soap_client=soap_client,
         )
 
     # Inject pronunciation rules from Redis

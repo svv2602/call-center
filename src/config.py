@@ -68,6 +68,8 @@ class OneCSettings(BaseSettings):
     full_sync_timeout: int = 1200  # Separate timeout for full catalog upload (~60K items)
     sync_interval_minutes: int = 5
     stock_cache_ttl: int = 300  # Redis TTL for stock cache (seconds)
+    soap_wsdl_path: str = "/Trade/ws/TireAssemblyExchange.1cws"
+    soap_timeout: int = 30  # Interactive SOAP timeout (shorter than REST sync)
 
     model_config = {"env_prefix": "ONEC_"}
 

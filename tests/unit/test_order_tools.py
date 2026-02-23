@@ -22,7 +22,7 @@ class TestOrderToolsList:
 
     def test_all_tools_is_combined(self) -> None:
         assert ALL_TOOLS == MVP_TOOLS + ORDER_TOOLS + FITTING_TOOLS
-        assert len(ALL_TOOLS) == 15
+        assert len(ALL_TOOLS) == 16
 
     def test_canonical_tool_names(self) -> None:
         """Tool names must match canonical list from 00-overview.md."""
@@ -43,6 +43,7 @@ class TestOrderToolsList:
             "book_fitting",
             "cancel_fitting",
             "get_fitting_price",
+            "get_customer_bookings",
             "search_knowledge_base",
         }
         assert all_names == expected

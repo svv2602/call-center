@@ -158,7 +158,7 @@ class TestSystemPrompt:
         assert "замовлення" in SYSTEM_PROMPT.lower()
 
     def test_all_tools_count(self) -> None:
-        assert len(ALL_TOOLS) == 15
+        assert len(ALL_TOOLS) == 16
 
     def test_season_hint_winter(self) -> None:
         import datetime

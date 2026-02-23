@@ -186,6 +186,21 @@ MOCK_RESPONSES: dict[str, Any] = {
         },
         "currency": "UAH",
     },
+    "get_customer_bookings": {
+        "total": 1,
+        "bookings": [
+            {
+                "booking_id": "FIT-2026-0010",
+                "station_id": "station-001",
+                "station_name": "Твоя Шина Центральний",
+                "date": "2026-02-25",
+                "time": "10:00",
+                "status": "Записан",
+                "person": "Іван Петренко",
+                "phone": "0501234567",
+            }
+        ],
+    },
     "search_knowledge_base": "dynamic",  # handled by _search_knowledge_mock
 }
 

@@ -14,7 +14,7 @@ import logging
 import time
 import uuid
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -73,6 +73,7 @@ class CallSession:
         self.transferred: bool = False
         self.transfer_reason: str | None = None
         self.order_id: str | None = None
+        self.order_draft: dict[str, Any] | None = None
         self.tenant_id: str | None = None
         self.tenant_slug: str | None = None
         self.network_id: str | None = None
@@ -156,6 +157,7 @@ class CallSession:
             "transferred": self.transferred,
             "transfer_reason": self.transfer_reason,
             "order_id": self.order_id,
+            "order_draft": self.order_draft,
             "tenant_id": self.tenant_id,
             "tenant_slug": self.tenant_slug,
             "network_id": self.network_id,
@@ -189,6 +191,7 @@ class CallSession:
         session.transferred = data.get("transferred", False)
         session.transfer_reason = data.get("transfer_reason")
         session.order_id = data.get("order_id")
+        session.order_draft = data.get("order_draft")
         session.tenant_id = data.get("tenant_id")
         session.tenant_slug = data.get("tenant_slug")
         session.network_id = data.get("network_id")

@@ -139,17 +139,103 @@ class OneCClient:
         """GET /Trade/hs/site/novapost/branch"""
         return await self._get("/Trade/hs/site/novapost/branch")
 
+    # --- Order creation (direct 1C REST) ---
+
+    async def create_order_1c(
+        self,
+        order_number: str,
+        items: list[dict[str, Any]],
+        customer_phone: str,
+        payment_method: str = "cod",
+        delivery_type: str = "pickup",
+        delivery_address: str = "",
+        delivery_city: str = "",
+        pickup_point_id: str = "",
+        customer_name: str = "",
+        network: str = "ProKoleso",
+    ) -> dict[str, Any]:
+        """Create an order directly in 1C ERP.
+
+        POST /Trade/hs/site/zakaz/
+
+        Args:
+            order_number: Order number (e.g. "AI-42").
+            items: List of {product_id, quantity, price?}.
+            customer_phone: Customer phone.
+            payment_method: "cod", "online", or "card_on_delivery".
+            delivery_type: "pickup" or "delivery".
+            delivery_address: Delivery address (for delivery type).
+            delivery_city: Delivery city (for delivery type).
+            pickup_point_id: Pickup point ID (for pickup type).
+            customer_name: Customer name.
+            network: Trading network ("ProKoleso" or "Tshina").
+
+        Returns:
+            1C response dict.
+        """
+        # Map payment method to 1C code
+        payment_map = {"cod": "1", "online": "6", "card_on_delivery": "4"}
+        payment_code = payment_map.get(payment_method, "1")
+
+        # Map delivery type
+        delivery_map = {"pickup": "Точки выдачи", "delivery": "NovaPost"}
+        delivery_1c = delivery_map.get(delivery_type, "Точки выдачи")
+
+        # Map network to store code
+        store_map = {"ProKoleso": "prokoleso", "Tshina": "tshina"}
+        store_code = store_map.get(network, network.lower())
+
+        # Build items list for 1C
+        order_items = []
+        for item in items:
+            order_item: dict[str, Any] = {
+                "sku": item.get("product_id", ""),
+                "quantity": item.get("quantity", 1),
+            }
+            if "price" in item:
+                order_item["price"] = item["price"]
+            order_items.append(order_item)
+
+        body: dict[str, Any] = {
+            "order_number": order_number,
+            "store": store_code,
+            "order_channel": "AI_AGENT",
+            "fizlico": "ФизЛицо",
+            "phone": customer_phone,
+            "payment_type": payment_code,
+            "delivery_type": delivery_1c,
+            "items": order_items,
+        }
+
+        if customer_name:
+            body["person"] = customer_name
+        if delivery_address:
+            body["delivery_address"] = delivery_address
+        if delivery_city:
+            body["delivery_city"] = delivery_city
+        if pickup_point_id:
+            body["pickup_point_id"] = pickup_point_id
+
+        return await self._post("/Trade/hs/site/zakaz/", json_data=body)
+
     # --- HTTP helpers ---
 
     async def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         """Make a GET request with circuit breaker and retry."""
         return await self._request("GET", path, params=params)
 
+    async def _post(
+        self, path: str, json_data: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
+        """Make a POST request with circuit breaker and retry."""
+        return await self._request("POST", path, json_data=json_data)
+
     async def _request(
         self,
         method: str,
         path: str,
         params: dict[str, Any] | None = None,
+        json_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Make an HTTP request with circuit breaker, retry, and error handling."""
         if self._session is None:
@@ -163,6 +249,7 @@ class OneCClient:
                 method,
                 url,
                 params=params,
+                json_data=json_data,
             )
             return result
         except CircuitBreakerError as err:
@@ -174,13 +261,14 @@ class OneCClient:
         method: str,
         url: str,
         params: dict[str, Any] | None = None,
+        json_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute request with retry for 429/503."""
         last_exc: Exception | None = None
 
         for attempt in range(_MAX_RETRIES + 1):
             try:
-                return await self._do_request(method, url, params=params)
+                return await self._do_request(method, url, params=params, json_data=json_data)
             except OneCAPIError as exc:
                 last_exc = exc
                 if exc.status not in _RETRYABLE_STATUSES:
@@ -204,11 +292,18 @@ class OneCClient:
         method: str,
         url: str,
         params: dict[str, Any] | None = None,
+        json_data: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Execute a single HTTP request."""
         assert self._session is not None
 
-        async with self._session.request(method, url, params=params) as resp:
+        kwargs: dict[str, Any] = {}
+        if params is not None:
+            kwargs["params"] = params
+        if json_data is not None:
+            kwargs["json"] = json_data
+
+        async with self._session.request(method, url, **kwargs) as resp:
             if resp.status == 401:
                 logger.critical("1C API authentication failed — check credentials")
 

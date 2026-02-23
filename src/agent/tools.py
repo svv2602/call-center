@@ -402,6 +402,27 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
         },
     },
     {
+        "name": "get_customer_bookings",
+        "description": (
+            "Перевірити існуючі записи клієнта на шиномонтаж за номером телефону. "
+            "Використовуй, коли клієнт запитує про свої записи або хоче перевірити бронювання."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {
+                    "type": "string",
+                    "description": "Номер телефону (0XXXXXXXXX)",
+                },
+                "station_id": {
+                    "type": "string",
+                    "description": "ID станції (опціонально)",
+                },
+            },
+            "required": ["phone"],
+        },
+    },
+    {
         "name": "search_knowledge_base",
         "description": (
             "Пошук по базі знань магазину: акції, доставка, оплата, повернення, "

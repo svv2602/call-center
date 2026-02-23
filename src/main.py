@@ -76,6 +76,7 @@ from src.monitoring.metrics import (
     orders_created_total,
 )
 from src.onec_client.client import OneCClient
+from src.onec_client.soap import OneCSOAPClient
 from src.store_client.client import StoreClient
 from src.stt.base import STTConfig
 from src.stt.google_stt import GoogleSTTEngine
@@ -203,6 +204,7 @@ _redis: Redis | None = None
 _store_client: StoreClient | None = None
 _tts_engine: GoogleTTSEngine | None = None
 _onec_client: OneCClient | None = None
+_soap_client: OneCSOAPClient | None = None
 _embedding_task: asyncio.Task | None = None  # type: ignore[type-arg]
 _db_engine: Any = None
 _call_logger: Any = None  # CallLogger for persisting calls to PostgreSQL
@@ -387,6 +389,7 @@ _SCENARIO_TOOLS: dict[str, set[str]] = {
         "book_fitting",
         "cancel_fitting",
         "get_fitting_price",
+        "get_customer_bookings",
         "search_knowledge_base",
         "transfer_to_operator",
     },
@@ -963,21 +966,116 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
     router.register("check_availability", _check_availability)
     router.register("get_order_status", client.search_orders)
 
-    async def _create_order_with_metric(**kwargs: Any) -> Any:
-        result = await client.create_order(**kwargs)
+    async def _create_order_draft(**kwargs: Any) -> Any:
+        """Save order draft to session (1C order is one-step, created on confirm)."""
+        session.order_draft = {
+            "items": kwargs.get("items", []),
+            "customer_phone": kwargs.get("customer_phone", ""),
+        }
+        return {
+            "order_id": f"DRAFT-{session.channel_uuid}",
+            "status": "draft",
+            "items": kwargs.get("items", []),
+            "message": "Чорновик замовлення створено. Вкажіть спосіб доставки.",
+        }
+
+    async def _update_order_delivery(**kwargs: Any) -> Any:
+        """Update session order_draft with delivery info."""
+        if session.order_draft is not None:
+            session.order_draft["delivery_type"] = kwargs.get("delivery_type", "pickup")
+            session.order_draft["city"] = kwargs.get("city", "")
+            session.order_draft["address"] = kwargs.get("address", "")
+            session.order_draft["pickup_point_id"] = kwargs.get("pickup_point_id", "")
+            return {
+                "order_id": kwargs.get("order_id", f"DRAFT-{session.channel_uuid}"),
+                "delivery_type": kwargs.get("delivery_type"),
+                "status": "delivery_set",
+                "message": "Доставку оновлено. Підтвердіть замовлення.",
+            }
+        # Fallback to Store API if no draft in session
+        return await client.update_delivery(**kwargs)
+
+    async def _confirm_order(**kwargs: Any) -> Any:
+        """Confirm order: try 1C direct, fallback to Store API."""
+        if session.order_draft is not None and _onec_client is not None:
+            try:
+                # Generate AI order number via Redis sequence
+                order_seq = 1
+                if _redis is not None:
+                    order_seq = await _redis.incr("order:ai_sequence")
+                order_number = f"AI-{order_seq}"
+
+                network = session.network_id or "ProKoleso"
+                draft = session.order_draft
+                result = await _onec_client.create_order_1c(
+                    order_number=order_number,
+                    items=draft.get("items", []),
+                    customer_phone=draft.get("customer_phone", ""),
+                    payment_method=kwargs.get("payment_method", "cod"),
+                    delivery_type=draft.get("delivery_type", "pickup"),
+                    delivery_address=draft.get("address", ""),
+                    delivery_city=draft.get("city", ""),
+                    pickup_point_id=draft.get("pickup_point_id", ""),
+                    customer_name=kwargs.get("customer_name", ""),
+                    network=network,
+                )
+                session.order_id = order_number
+                session.order_draft = None
+                orders_created_total.inc()
+                return {
+                    "order_id": order_number,
+                    "status": "confirmed",
+                    "payment_method": kwargs.get("payment_method", "cod"),
+                    "message": f"Замовлення {order_number} підтверджено.",
+                    "onec_response": result,
+                }
+            except Exception:
+                logger.warning(
+                    "1C order creation failed for call %s, falling back to Store API",
+                    session.channel_uuid,
+                    exc_info=True,
+                )
+                # Fallback: use Store API 3-step flow
+                session.order_draft = None
+
+        # Store API fallback (or no draft)
+        result = await client.confirm_order(**kwargs)
         if isinstance(result, dict) and result.get("id"):
             orders_created_total.inc()
         return result
 
     async def _book_fitting_with_metric(**kwargs: Any) -> Any:
+        """Book fitting: try SOAP, fallback to Store API."""
+        if _soap_client is not None:
+            try:
+                result = await _soap_client.book_fitting(
+                    person=kwargs.get("customer_name", ""),
+                    phone=kwargs.get("customer_phone", ""),
+                    station_id=kwargs.get("station_id", ""),
+                    date=kwargs.get("date", ""),
+                    time=kwargs.get("time", ""),
+                    vehicle_info=kwargs.get("vehicle_info", ""),
+                    tire_diameter=kwargs.get("tire_diameter", 0),
+                    service_type=kwargs.get("service_type", "tire_change"),
+                )
+                if result.get("booking_id"):
+                    fittings_booked_total.inc()
+                return result
+            except Exception:
+                logger.warning(
+                    "SOAP book_fitting failed for call %s, falling back to Store API",
+                    session.channel_uuid,
+                    exc_info=True,
+                )
+
         result = await client.book_fitting(**kwargs)
         if isinstance(result, dict) and result.get("id"):
             fittings_booked_total.inc()
         return result
 
-    router.register("create_order_draft", _create_order_with_metric)
-    router.register("update_order_delivery", client.update_delivery)
-    router.register("confirm_order", client.confirm_order)
+    router.register("create_order_draft", _create_order_draft)
+    router.register("update_order_delivery", _update_order_delivery)
+    router.register("confirm_order", _confirm_order)
 
     async def _get_pickup_points(city: str = "") -> dict[str, Any]:
         network = session.network_id or "ProKoleso"
@@ -1028,10 +1126,72 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
 
     router.register("get_pickup_points", _get_pickup_points)
     router.register("get_fitting_stations", client.get_fitting_stations)
-    router.register("get_fitting_slots", client.get_fitting_slots)
+
+    async def _get_fitting_slots(**kwargs: Any) -> Any:
+        """Get fitting slots: try SOAP, fallback to Store API."""
+        if _soap_client is not None:
+            try:
+                station_id = kwargs.get("station_id", "")
+                date_from = kwargs.get("date_from", "")
+                date_to = kwargs.get("date_to", date_from)
+                slots = await _soap_client.get_station_schedule(
+                    date_from=date_from,
+                    date_to=date_to,
+                    station_id=station_id,
+                )
+                return {"station_id": station_id, "slots": slots}
+            except Exception:
+                logger.warning(
+                    "SOAP get_station_schedule failed for call %s, falling back to Store API",
+                    session.channel_uuid,
+                    exc_info=True,
+                )
+        return await client.get_fitting_slots(**kwargs)
+
+    router.register("get_fitting_slots", _get_fitting_slots)
     router.register("book_fitting", _book_fitting_with_metric)
-    router.register("cancel_fitting", client.cancel_fitting)
+
+    async def _cancel_fitting(**kwargs: Any) -> Any:
+        """Cancel fitting: try SOAP, fallback to Store API."""
+        if _soap_client is not None:
+            try:
+                booking_id = kwargs.get("booking_id", "")
+                result = await _soap_client.cancel_booking(booking_id)
+                return {
+                    "booking_id": booking_id,
+                    "status": result.get("status", "cancelled"),
+                    "message": result.get("message", "Запис скасовано"),
+                }
+            except Exception:
+                logger.warning(
+                    "SOAP cancel_booking failed for call %s, falling back to Store API",
+                    session.channel_uuid,
+                    exc_info=True,
+                )
+        return await client.cancel_fitting(**kwargs)
+
+    router.register("cancel_fitting", _cancel_fitting)
     router.register("get_fitting_price", client.get_fitting_price)
+
+    async def _get_customer_bookings(**kwargs: Any) -> dict[str, Any]:
+        """Get customer bookings from SOAP service."""
+        if _soap_client is not None:
+            try:
+                phone = kwargs.get("phone", "")
+                station_id = kwargs.get("station_id", "")
+                bookings = await _soap_client.get_customer_bookings(
+                    phone=phone, station_id=station_id
+                )
+                return {"total": len(bookings), "bookings": bookings}
+            except Exception:
+                logger.warning(
+                    "SOAP get_customer_bookings failed for call %s",
+                    session.channel_uuid,
+                    exc_info=True,
+                )
+        return {"total": 0, "bookings": [], "message": "Сервіс записів тимчасово недоступний"}
+
+    router.register("get_customer_bookings", _get_customer_bookings)
     async def _search_knowledge(**kwargs: Any) -> dict[str, Any]:
         if _knowledge_search is not None:
             results = await _knowledge_search.search(
@@ -1124,7 +1284,7 @@ async def _periodic_embedding_check(interval_minutes: int = 5) -> None:
 async def main() -> None:
     """Main application entry point."""
     global _audio_server, _redis, _store_client, _tts_engine
-    global _onec_client, _embedding_task, _db_engine, _llm_router, _asyncpg_pool
+    global _onec_client, _soap_client, _embedding_task, _db_engine, _llm_router, _asyncpg_pool
     global _knowledge_search, _search_embedding_gen
 
     settings = get_settings()
@@ -1219,6 +1379,17 @@ async def main() -> None:
             await _onec_client.open()
             logger.info("OneCClient initialized: %s", settings.onec.url)
 
+            # Initialize SOAP client for tire fitting service
+            _soap_client = OneCSOAPClient(
+                base_url=settings.onec.url,
+                username=settings.onec.username,
+                password=settings.onec.password,
+                wsdl_path=settings.onec.soap_wsdl_path,
+                timeout=settings.onec.soap_timeout,
+            )
+            await _soap_client.open()
+            logger.info("OneCSOAPClient initialized: %s", _soap_client.endpoint_url)
+
             # Catalog sync is delegated to Celery (catalog_full_sync + catalog_incremental_sync)
             logger.info(
                 "Catalog sync delegated to Celery (full daily 05:00, incremental every 5 min)"
@@ -1228,6 +1399,7 @@ async def main() -> None:
                 "1C integration init failed — MVP tools will use fallback HTTP", exc_info=True
             )
             _onec_client = None
+            _soap_client = None
             _db_engine = None
     else:
         logger.info("1C integration not configured (ONEC_USERNAME empty)")
@@ -1345,6 +1517,10 @@ async def main() -> None:
     if _onec_client is not None:
         await _onec_client.close()
         logger.info("OneCClient closed")
+
+    if _soap_client is not None:
+        await _soap_client.close()
+        logger.info("OneCSOAPClient closed")
 
     if _search_embedding_gen is not None:
         await _search_embedding_gen.close()

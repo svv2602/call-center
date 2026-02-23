@@ -10,7 +10,7 @@ from src.agent.tools import ALL_TOOLS, FITTING_TOOLS, MVP_TOOLS, ORDER_TOOLS
 class TestFittingToolsList:
     """Test FITTING_TOOLS list structure."""
 
-    def test_six_fitting_tools_defined(self) -> None:
+    def test_fitting_tools_defined(self) -> None:
         tool_names = {t["name"] for t in FITTING_TOOLS}
         assert tool_names == {
             "get_fitting_stations",
@@ -18,12 +18,13 @@ class TestFittingToolsList:
             "book_fitting",
             "cancel_fitting",
             "get_fitting_price",
+            "get_customer_bookings",
             "search_knowledge_base",
         }
 
     def test_all_tools_is_combined(self) -> None:
         assert ALL_TOOLS == MVP_TOOLS + ORDER_TOOLS + FITTING_TOOLS
-        assert len(ALL_TOOLS) == 15
+        assert len(ALL_TOOLS) == 16
 
     def test_canonical_tool_names(self) -> None:
         """Tool names must match canonical list from 00-overview.md."""
@@ -46,6 +47,7 @@ class TestFittingToolsList:
             "book_fitting",
             "cancel_fitting",
             "get_fitting_price",
+            "get_customer_bookings",
             "search_knowledge_base",
         }
         assert all_names == expected
@@ -155,6 +157,28 @@ class TestGetFittingPriceSchema:
         props = tool["input_schema"]["properties"]
         assert "station_id" in props
         assert "service_type" in props
+
+
+class TestGetCustomerBookingsSchema:
+    """Test get_customer_bookings tool schema."""
+
+    @pytest.fixture
+    def tool(self) -> dict:
+        return next(t for t in FITTING_TOOLS if t["name"] == "get_customer_bookings")
+
+    def test_phone_required(self, tool: dict) -> None:
+        assert tool["input_schema"]["required"] == ["phone"]
+
+    def test_has_optional_station_id(self, tool: dict) -> None:
+        props = tool["input_schema"]["properties"]
+        assert "station_id" in props
+
+    def test_phone_is_string(self, tool: dict) -> None:
+        props = tool["input_schema"]["properties"]
+        assert props["phone"]["type"] == "string"
+
+    def test_description_mentions_bookings(self, tool: dict) -> None:
+        assert "записи" in tool["description"].lower() or "бронюванн" in tool["description"].lower()
 
 
 class TestSearchKnowledgeBaseSchema:
