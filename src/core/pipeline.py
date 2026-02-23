@@ -29,6 +29,7 @@ from src.agent.prompts import (
     WAIT_SEARCH_POOL,
     WAIT_STATUS_POOL,
     WAIT_TEXT,
+    compute_order_stage,
 )
 from src.core.audio_socket import AudioSocketConnection, PacketType
 from src.core.call_session import SILENCE_TIMEOUT_SEC, CallSession, CallState
@@ -66,7 +67,9 @@ def _time_of_day_greeting() -> str:
         return "До́брий ра́нок"
     if 12 <= hour < 18:
         return "До́брий день"
-    return "До́брий ве́чір"
+    if 18 <= hour < 23:
+        return "До́брий ве́чір"
+    return "До́брої но́чі"
 
 
 # --- Contextual wait-phrase selection with rotation ---
@@ -343,6 +346,11 @@ class CallPipeline:
                 except Exception:
                     logger.warning("Pattern search failed, continuing without", exc_info=True)
 
+            # Compute order stage for stage-aware prompt injection
+            order_stage = compute_order_stage(
+                self._session.order_draft, self._session.order_id
+            )
+
             if self._streaming_loop is not None:
                 # STREAMING PATH — add user turn to session (streaming loop uses separate _llm_history)
                 self._session.add_user_turn(
@@ -361,6 +369,7 @@ class CallPipeline:
                             caller_phone=self._session.caller_phone,
                             order_id=self._session.order_id,
                             pattern_context=pattern_context,
+                            order_stage=order_stage,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )

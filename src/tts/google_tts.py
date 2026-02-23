@@ -84,6 +84,7 @@ CACHED_PHRASES = [
     GREETING_TEXT.replace("{time_greeting}", "До́брий ра́нок"),
     GREETING_TEXT.replace("{time_greeting}", "До́брий день"),
     GREETING_TEXT.replace("{time_greeting}", "До́брий ве́чір"),
+    GREETING_TEXT.replace("{time_greeting}", "До́брої но́чі"),
     WAIT_TEXT,
     TRANSFER_TEXT,
     FAREWELL_TEXT,
