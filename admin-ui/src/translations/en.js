@@ -998,6 +998,26 @@ export default {
     'sandbox.convInfo': 'Conversation details',
     'sandbox.routerModel': 'router',
 
+    // Sandbox: Group modal improvements
+    'sandbox.intentSelectPlaceholder': '— Select intent —',
+    'sandbox.intentGreeting': 'Greeting and conversation start',
+    'sandbox.intentTireSearch': 'Tire search by parameters',
+    'sandbox.intentClarification': 'Clarifying parameters with customer',
+    'sandbox.intentRecommendation': 'Product recommendation',
+    'sandbox.intentAvailabilityCheck': 'Availability check',
+    'sandbox.intentOrderCreation': 'Order creation',
+    'sandbox.intentOrderStatus': 'Order status check',
+    'sandbox.intentFittingBooking': 'Fitting booking',
+    'sandbox.intentConsultation': 'Consultation (general questions)',
+    'sandbox.intentObjectionHandling': 'Objection handling',
+    'sandbox.intentUpsell': 'Upsell / cross-sell',
+    'sandbox.intentFarewell': 'Conversation farewell',
+    'sandbox.intentOther': 'Other...',
+    'sandbox.intentCustomPlaceholder': 'Enter custom intent...',
+    'sandbox.previewSelectedTurns': 'Selected turns ({count})',
+    'sandbox.positiveDesc': 'Good example of agent response',
+    'sandbox.negativeDesc': 'Example needing correction',
+
     // Sandbox: Agent Phrases tab
     'sandbox.tabPhrases': 'Agent Phrases',
     'sandbox.phrasesTitle': 'Agent Phrases (TTS, no LLM)',

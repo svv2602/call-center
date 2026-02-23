@@ -941,19 +941,31 @@
 
     <!-- Turn Group Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxGroupModal">
-        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-md w-[90%] max-h-[80vh] overflow-y-auto">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-lg w-[90%] max-h-[80vh] overflow-y-auto">
             <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxGroupModal')">&times;</span>
             <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.createGroup">Создать группу</h3>
+            <!-- Preview of selected turns -->
+            <div id="sandboxGroupPreview" class="mb-3"></div>
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.intentLabel">Интент</label>
-                <input type="text" id="sandboxGroupIntent" placeholder="tire_search_clarification" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <select id="sandboxGroupIntent" onchange="window._pages.sandbox.onIntentChange()" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500"></select>
+                <input type="text" id="sandboxGroupIntentCustom" style="display:none" data-i18n-placeholder="sandbox.intentCustomPlaceholder" placeholder="Введите свой интент..." class="w-full mt-2 px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
             </div>
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.patternType">Тип паттерна</label>
-                <select id="sandboxGroupType" onchange="document.getElementById('sandboxGroupCorrectionWrap').style.display=this.value==='negative'?'block':'none'" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                    <option value="positive">Positive</option>
-                    <option value="negative">Negative</option>
-                </select>
+                <input type="hidden" id="sandboxGroupType" value="positive">
+                <div class="grid grid-cols-2 gap-3">
+                    <div id="sandboxGroupTypePositive" onclick="window._pages.sandbox.selectPatternType('positive')" class="cursor-pointer rounded-lg border-2 border-green-500 ring-2 ring-green-200 dark:ring-green-800 bg-green-50 dark:bg-green-950 p-3 text-center transition-all">
+                        <div class="text-lg text-green-600 dark:text-green-400 mb-1">&#10003;</div>
+                        <div class="text-sm font-medium text-green-700 dark:text-green-300" data-i18n="sandbox.positive">Положительный</div>
+                        <div class="text-xs text-green-600 dark:text-green-400 mt-1" data-i18n="sandbox.positiveDesc">Хороший пример ответа агента</div>
+                    </div>
+                    <div id="sandboxGroupTypeNegative" onclick="window._pages.sandbox.selectPatternType('negative')" class="cursor-pointer rounded-lg border-2 border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 p-3 text-center transition-all">
+                        <div class="text-lg text-neutral-400 dark:text-neutral-500 mb-1">&#10007;</div>
+                        <div class="text-sm font-medium text-neutral-500 dark:text-neutral-400" data-i18n="sandbox.negative">Отрицательный</div>
+                        <div class="text-xs text-neutral-400 dark:text-neutral-500 mt-1" data-i18n="sandbox.negativeDesc">Пример, требующий исправления</div>
+                    </div>
+                </div>
             </div>
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.avgRating">Оценка</label>
@@ -972,7 +984,8 @@
             </div>
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.tags">Теги</label>
-                <input type="text" id="sandboxGroupTags" placeholder="tag1, tag2" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input type="text" id="sandboxGroupTags" list="sandboxGroupTagsList" placeholder="tag1, tag2" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <datalist id="sandboxGroupTagsList"></datalist>
             </div>
             <button onclick="window._pages.sandbox.submitGroup()" class="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="sandbox.createGroup">Создать группу</button>
         </div>

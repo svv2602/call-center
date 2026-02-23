@@ -7,6 +7,23 @@ import * as tw from '../tw.js';
 import { renderPagination, buildParams } from '../pagination.js';
 import { makeSortable } from '../sorting.js';
 
+// ─── Intent options for group modal ──────────────────────────
+const INTENT_OPTIONS = [
+    { value: 'greeting', i18nKey: 'sandbox.intentGreeting' },
+    { value: 'tire_search', i18nKey: 'sandbox.intentTireSearch' },
+    { value: 'clarification', i18nKey: 'sandbox.intentClarification' },
+    { value: 'recommendation', i18nKey: 'sandbox.intentRecommendation' },
+    { value: 'availability_check', i18nKey: 'sandbox.intentAvailabilityCheck' },
+    { value: 'order_creation', i18nKey: 'sandbox.intentOrderCreation' },
+    { value: 'order_status', i18nKey: 'sandbox.intentOrderStatus' },
+    { value: 'fitting_booking', i18nKey: 'sandbox.intentFittingBooking' },
+    { value: 'consultation', i18nKey: 'sandbox.intentConsultation' },
+    { value: 'objection_handling', i18nKey: 'sandbox.intentObjectionHandling' },
+    { value: 'upsell', i18nKey: 'sandbox.intentUpsell' },
+    { value: 'farewell', i18nKey: 'sandbox.intentFarewell' },
+    { value: 'other', i18nKey: 'sandbox.intentOther' },
+];
+
 // ─── State ───────────────────────────────────────────────────
 let _activeTab = 'chat';
 let _currentConvId = null;
@@ -412,20 +429,108 @@ function toggleTurnSelect(turnId) {
     renderConversationView();
 }
 
+function _populateIntentSelect() {
+    const sel = document.getElementById('sandboxGroupIntent');
+    sel.innerHTML = `<option value="">${t('sandbox.intentSelectPlaceholder')}</option>` +
+        INTENT_OPTIONS.map(o => `<option value="${o.value}">${o.value} — ${t(o.i18nKey)}</option>`).join('');
+}
+
+function onIntentChange() {
+    const sel = document.getElementById('sandboxGroupIntent');
+    const custom = document.getElementById('sandboxGroupIntentCustom');
+    if (sel.value === 'other') {
+        custom.style.display = '';
+        custom.focus();
+    } else {
+        custom.style.display = 'none';
+        custom.value = '';
+    }
+}
+
+function selectPatternType(type) {
+    document.getElementById('sandboxGroupType').value = type;
+    const posCard = document.getElementById('sandboxGroupTypePositive');
+    const negCard = document.getElementById('sandboxGroupTypeNegative');
+    if (type === 'positive') {
+        posCard.className = 'cursor-pointer rounded-lg border-2 border-green-500 ring-2 ring-green-200 dark:ring-green-800 bg-green-50 dark:bg-green-950 p-3 text-center transition-all';
+        posCard.querySelector('div:first-child').className = 'text-lg text-green-600 dark:text-green-400 mb-1';
+        posCard.querySelector('div:nth-child(2)').className = 'text-sm font-medium text-green-700 dark:text-green-300';
+        posCard.querySelector('div:nth-child(3)').className = 'text-xs text-green-600 dark:text-green-400 mt-1';
+        negCard.className = 'cursor-pointer rounded-lg border-2 border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 p-3 text-center transition-all';
+        negCard.querySelector('div:first-child').className = 'text-lg text-neutral-400 dark:text-neutral-500 mb-1';
+        negCard.querySelector('div:nth-child(2)').className = 'text-sm font-medium text-neutral-500 dark:text-neutral-400';
+        negCard.querySelector('div:nth-child(3)').className = 'text-xs text-neutral-400 dark:text-neutral-500 mt-1';
+    } else {
+        negCard.className = 'cursor-pointer rounded-lg border-2 border-red-500 ring-2 ring-red-200 dark:ring-red-800 bg-red-50 dark:bg-red-950 p-3 text-center transition-all';
+        negCard.querySelector('div:first-child').className = 'text-lg text-red-600 dark:text-red-400 mb-1';
+        negCard.querySelector('div:nth-child(2)').className = 'text-sm font-medium text-red-700 dark:text-red-300';
+        negCard.querySelector('div:nth-child(3)').className = 'text-xs text-red-600 dark:text-red-400 mt-1';
+        posCard.className = 'cursor-pointer rounded-lg border-2 border-neutral-300 dark:border-neutral-600 bg-white dark:bg-neutral-800 p-3 text-center transition-all';
+        posCard.querySelector('div:first-child').className = 'text-lg text-neutral-400 dark:text-neutral-500 mb-1';
+        posCard.querySelector('div:nth-child(2)').className = 'text-sm font-medium text-neutral-500 dark:text-neutral-400';
+        posCard.querySelector('div:nth-child(3)').className = 'text-xs text-neutral-400 dark:text-neutral-500 mt-1';
+    }
+    document.getElementById('sandboxGroupCorrectionWrap').style.display = type === 'negative' ? 'block' : 'none';
+}
+
 function showGroupModal() {
     if (_selectedTurnIds.size < 1) return;
-    document.getElementById('sandboxGroupIntent').value = '';
-    document.getElementById('sandboxGroupType').value = 'positive';
-    document.getElementById('sandboxGroupRating').value = '';
+
+    // Populate intent dropdown
+    _populateIntentSelect();
+    document.getElementById('sandboxGroupIntentCustom').style.display = 'none';
+    document.getElementById('sandboxGroupIntentCustom').value = '';
+
+    // Pattern type cards — default positive
+    selectPatternType('positive');
+
+    // Auto-fill rating from selected turns' average
+    const selectedTurns = _turns.filter(t => _selectedTurnIds.has(t.id));
+    const ratings = selectedTurns.map(t => t.rating).filter(r => r != null);
+    if (ratings.length > 0) {
+        const avg = Math.round(ratings.reduce((a, b) => a + b, 0) / ratings.length);
+        document.getElementById('sandboxGroupRating').value = String(avg);
+    } else {
+        document.getElementById('sandboxGroupRating').value = '';
+    }
+
     document.getElementById('sandboxGroupComment').value = '';
     document.getElementById('sandboxGroupCorrection').value = '';
     document.getElementById('sandboxGroupTags').value = '';
-    document.getElementById('sandboxGroupCorrectionWrap').style.display = 'none';
+
+    // Preview selected turns
+    const previewEl = document.getElementById('sandboxGroupPreview');
+    const previewItems = selectedTurns.map(turn => {
+        const role = turn.role === 'user' ? t('sandbox.customer') : t('sandbox.agent');
+        const badgeColor = turn.role === 'user'
+            ? 'bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-300'
+            : 'bg-purple-100 text-purple-700 dark:bg-purple-900 dark:text-purple-300';
+        const text = escapeHtml((turn.content || '').slice(0, 100)) + ((turn.content || '').length > 100 ? '...' : '');
+        return `<div class="flex items-start gap-2 py-1.5 border-b border-neutral-100 dark:border-neutral-800 last:border-0">
+            <span class="shrink-0 text-xs px-1.5 py-0.5 rounded font-medium ${badgeColor}">${role}</span>
+            <span class="text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed">${text}</span>
+        </div>`;
+    }).join('');
+    previewEl.innerHTML = `<details open>
+        <summary class="text-sm font-medium text-neutral-700 dark:text-neutral-300 cursor-pointer mb-1">${t('sandbox.previewSelectedTurns', { count: selectedTurns.length })}</summary>
+        <div class="max-h-40 overflow-y-auto border border-neutral-200 dark:border-neutral-700 rounded-md px-3 py-1">${previewItems}</div>
+    </details>`;
+
+    // Populate tag suggestions from existing groups
+    const allTags = new Set();
+    for (const g of _turnGroups) {
+        if (g.tags) g.tags.forEach(tag => allTags.add(tag));
+    }
+    const datalist = document.getElementById('sandboxGroupTagsList');
+    datalist.innerHTML = Array.from(allTags).map(tag => `<option value="${escapeHtml(tag)}">`).join('');
+
     document.getElementById('sandboxGroupModal').classList.add('show');
 }
 
 async function submitGroup() {
-    const intentLabel = document.getElementById('sandboxGroupIntent').value.trim();
+    const intentSel = document.getElementById('sandboxGroupIntent').value;
+    const intentCustom = document.getElementById('sandboxGroupIntentCustom').value.trim();
+    const intentLabel = (intentSel === 'other' ? intentCustom : intentSel) || '';
     if (!intentLabel) { showToast(t('sandbox.intentRequired'), 'error'); return; }
 
     const patternType = document.getElementById('sandboxGroupType').value;
@@ -1785,6 +1890,8 @@ window._pages.sandbox = {
     toggleTurnSelect,
     showGroupModal,
     submitGroup,
+    onIntentChange,
+    selectPatternType,
     deleteGroup,
     showExportModal,
     submitExport,

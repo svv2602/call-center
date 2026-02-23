@@ -998,6 +998,26 @@ export default {
     'sandbox.convInfo': 'Параметры диалога',
     'sandbox.routerModel': 'router',
 
+    // Sandbox: Group modal improvements
+    'sandbox.intentSelectPlaceholder': '— Выберите интент —',
+    'sandbox.intentGreeting': 'Приветствие и начало диалога',
+    'sandbox.intentTireSearch': 'Поиск шин по параметрам',
+    'sandbox.intentClarification': 'Уточнение параметров у клиента',
+    'sandbox.intentRecommendation': 'Рекомендация товара',
+    'sandbox.intentAvailabilityCheck': 'Проверка наличия',
+    'sandbox.intentOrderCreation': 'Оформление заказа',
+    'sandbox.intentOrderStatus': 'Проверка статуса заказа',
+    'sandbox.intentFittingBooking': 'Запись на шиномонтаж',
+    'sandbox.intentConsultation': 'Консультация (общие вопросы)',
+    'sandbox.intentObjectionHandling': 'Работа с возражениями',
+    'sandbox.intentUpsell': 'Допродажа / кросс-продажа',
+    'sandbox.intentFarewell': 'Завершение разговора',
+    'sandbox.intentOther': 'Другой...',
+    'sandbox.intentCustomPlaceholder': 'Введите свой интент...',
+    'sandbox.previewSelectedTurns': 'Выбранные реплики ({count})',
+    'sandbox.positiveDesc': 'Хороший пример ответа агента',
+    'sandbox.negativeDesc': 'Пример, требующий исправления',
+
     // Sandbox: Agent Phrases tab
     'sandbox.tabPhrases': 'Фразы агента',
     'sandbox.phrasesTitle': 'Фразы агента (TTS без LLM)',
