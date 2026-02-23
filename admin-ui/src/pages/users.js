@@ -8,6 +8,7 @@ import { renderPagination, buildParams } from '../pagination.js';
 import * as tw from '../tw.js';
 
 let _offset = 0;
+const _userPermsCache = {};
 
 const PERMISSION_GROUPS = {
     sandbox: ['sandbox:read', 'sandbox:write', 'sandbox:delete'],
@@ -55,6 +56,7 @@ async function loadUsers(offset) {
     try {
         const data = await api(`/admin/users?${params}`);
         const users = data.users || [];
+        for (const u of users) _userPermsCache[u.id] = u.permissions;
         if (users.length === 0) {
             container.innerHTML = `<div class="${tw.emptyState}">${t('users.noUsers')}</div>`;
             renderPagination({ containerId: 'usersPagination', total: 0, offset: 0 });
@@ -83,7 +85,7 @@ async function loadUsers(offset) {
                                 <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.users.changeRole('${u.id}', 'operator')">${t('users.roleOperator')}</button>
                                 <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.users.changeRole('${u.id}', 'content_manager')">${t('users.roleContentManager')}</button>
                                 <div class="border-t border-neutral-200 dark:border-neutral-700 my-1"></div>
-                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" data-id="${escapeHtml(u.id)}" data-role="${escapeHtml(u.role)}" data-perms="${escapeHtml(JSON.stringify(u.permissions))}" onclick="window._pages.users.showPermissionsEditor(this.dataset.id, this.dataset.role, this.dataset.perms)">${t('users.editPermissions')}</button>
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" data-id="${escapeHtml(u.id)}" data-role="${escapeHtml(u.role)}" onclick="window._pages.users.showPermissionsEditor(this.dataset.id, this.dataset.role)">${t('users.editPermissions')}</button>
                                 <div class="border-t border-neutral-200 dark:border-neutral-700 my-1"></div>
                                 <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.users.toggleUser('${u.id}', ${u.is_active})">${u.is_active ? t('common.deactivate') : t('common.activate')}</button>
                                 <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" data-id="${escapeHtml(u.id)}" data-name="${escapeHtml(u.username)}" onclick="window._pages.users.resetUserPassword(this.dataset.id, this.dataset.name)">${t('users.resetPwd')}</button>
@@ -153,10 +155,8 @@ async function resetUserPassword(userId, username) {
     } catch (e) { showToast(t('users.resetFailed', {error: e.message}), 'error'); }
 }
 
-function showPermissionsEditor(userId, role, permsJson) {
-    let customPerms = null;
-    try { customPerms = JSON.parse(permsJson); } catch { customPerms = null; }
-    if (customPerms === 'null' || permsJson === 'null') customPerms = null;
+function showPermissionsEditor(userId, role) {
+    const customPerms = _userPermsCache[userId] ?? null;
     const isCustom = customPerms !== null;
     const defaults = ROLE_DEFAULTS[role] || [];
     const effective = isCustom ? customPerms : defaults;
