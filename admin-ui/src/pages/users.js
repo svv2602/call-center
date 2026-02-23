@@ -22,7 +22,9 @@ const PERMISSION_GROUPS = {
     analytics: ['analytics:read', 'analytics:export'],
     llm_config: ['llm_config:read', 'llm_config:write'],
     notifications: ['notifications:read', 'notifications:write'],
-    system: ['system:read', 'system:write'],
+    configuration: ['configuration:read', 'configuration:write'],
+    monitoring: ['monitoring:read'],
+    onec_data: ['onec_data:read'],
     vehicles: ['vehicles:read', 'vehicles:write'],
     pronunciation: ['pronunciation:read', 'pronunciation:write'],
 };

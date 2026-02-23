@@ -46,14 +46,14 @@ const PAGE_PERMISSIONS = {
     tools: 'training:read',
     sandbox: 'sandbox:read',
     operators: 'operators:read',
-    monitoring: 'system:read',
-    configuration: 'system:read',
+    monitoring: 'monitoring:read',
+    configuration: 'configuration:read',
     tenants: 'tenants:read',
     notifications: 'notifications:read',
     users: 'users:read',
     audit: 'audit:read',
     vehicles: 'vehicles:read',
-    'onec-data': 'system:read',
+    'onec-data': 'onec_data:read',
 };
 
 export function applyRoleVisibility() {

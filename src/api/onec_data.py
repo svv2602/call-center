@@ -23,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/admin/onec", tags=["onec-data"])
 
-_perm_r = Depends(require_permission("system:read"))
+_perm_r = Depends(require_permission("onec_data:read"))
 
 
 def _get_main_module() -> Any:

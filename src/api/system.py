@@ -25,8 +25,8 @@ _engine: AsyncEngine | None = None
 _start_time = time.time()
 
 # Module-level dependencies to satisfy B008 lint rule
-_perm_r = Depends(require_permission("system:read"))
-_perm_w = Depends(require_permission("system:write"))
+_perm_r = Depends(require_permission("monitoring:read"))
+_perm_w = Depends(require_permission("configuration:write"))
 
 
 async def _get_engine() -> AsyncEngine:

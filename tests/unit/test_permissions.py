@@ -361,3 +361,26 @@ class TestAllPermissionsConsistency:
 
     def test_all_permissions_sorted(self) -> None:
         assert sorted(ALL_PERMISSIONS) == ALL_PERMISSIONS
+
+    def test_new_granular_permissions_present(self) -> None:
+        assert "configuration:read" in ALL_PERMISSIONS
+        assert "configuration:write" in ALL_PERMISSIONS
+        assert "monitoring:read" in ALL_PERMISSIONS
+        assert "onec_data:read" in ALL_PERMISSIONS
+
+    def test_old_system_permissions_removed(self) -> None:
+        assert "system:read" not in ALL_PERMISSIONS
+        assert "system:write" not in ALL_PERMISSIONS
+
+    def test_permission_groups_have_new_groups(self) -> None:
+        from src.api.permissions import PERMISSION_GROUPS
+
+        assert "configuration" in PERMISSION_GROUPS
+        assert "monitoring" in PERMISSION_GROUPS
+        assert "onec_data" in PERMISSION_GROUPS
+        assert "system" not in PERMISSION_GROUPS
+        assert PERMISSION_GROUPS["configuration"] == [
+            "configuration:read", "configuration:write",
+        ]
+        assert PERMISSION_GROUPS["monitoring"] == ["monitoring:read"]
+        assert PERMISSION_GROUPS["onec_data"] == ["onec_data:read"]
