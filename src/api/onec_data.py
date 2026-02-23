@@ -57,10 +57,28 @@ async def onec_status() -> dict[str, Any]:
     if onec is None:
         return result
 
-    # Check 1C reachability via a lightweight call
+    # Check 1C reachability — try cache first, then lightweight HTTP HEAD
     try:
-        resp = await onec.get_pickup_points("ProKoleso")
-        result["status"] = "reachable" if resp is not None else "error"
+        if redis:
+            # If we have cached pickup data, 1C was reachable recently
+            cached = await redis.get("onec:points:ProKoleso")
+            if cached:
+                result["status"] = "reachable"
+            else:
+                # Quick HTTP check with 3s timeout (no heavy data fetch)
+                import asyncio
+
+                resp = await asyncio.wait_for(
+                    onec.get_pickup_points("ProKoleso"), timeout=3.0,
+                )
+                result["status"] = "reachable" if resp is not None else "error"
+        else:
+            import asyncio
+
+            resp = await asyncio.wait_for(
+                onec.get_pickup_points("ProKoleso"), timeout=3.0,
+            )
+            result["status"] = "reachable" if resp is not None else "error"
     except Exception as exc:
         result["status"] = "unreachable"
         result["error"] = str(exc)[:200]
@@ -100,6 +118,41 @@ async def onec_status() -> dict[str, Any]:
                     }
             except Exception:
                 pass
+
+    # SOAP / REST / AI-orders info (from system settings + Redis)
+    try:
+        from src.config import get_settings
+
+        settings = get_settings()
+        if settings.onec.username:
+            result["soap_endpoint"] = f"{settings.onec.url}{settings.onec.soap_wsdl_path}"
+            result["soap_timeout"] = settings.onec.soap_timeout
+            result["rest_endpoint"] = settings.onec.url
+
+            # SOAP reachability (lightweight check with 3s timeout)
+            try:
+                import aiohttp
+
+                auth = aiohttp.BasicAuth(settings.onec.username, settings.onec.password)
+                timeout = aiohttp.ClientTimeout(total=3)
+                async with aiohttp.ClientSession(timeout=timeout, auth=auth) as sess, sess.get(
+                    result["soap_endpoint"], params={"wsdl": ""},
+                ) as resp:
+                    result["soap_status"] = "reachable" if resp.status < 400 else f"error_{resp.status}"
+            except Exception:
+                result["soap_status"] = "unreachable"
+        else:
+            result["soap_status"] = "not_configured"
+
+        # AI order counter from Redis
+        if redis:
+            try:
+                ai_order_seq = await redis.get("order:ai_sequence")
+                result["ai_orders_total"] = int(ai_order_seq) if ai_order_seq else 0
+            except Exception:
+                result["ai_orders_total"] = None
+    except Exception:
+        pass
 
     return result
 

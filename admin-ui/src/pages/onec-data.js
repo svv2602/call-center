@@ -114,9 +114,70 @@ async function loadStatus() {
             </div>
             ${cacheInfo}
         `;
+
+        // SOAP / REST / AI orders cards
+        _renderSoapStatus(data);
     } catch (err) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('common.failedToLoad', { error: err.message })}</div>`;
     }
+}
+
+function _soapBadge(status) {
+    if (status === 'reachable') return `<span class="${tw.badgeGreen}">${t('onec.connected')}</span>`;
+    if (status === 'not_configured') return `<span class="${tw.badge}">${t('onec.notConfigured')}</span>`;
+    if (status === 'unreachable') return `<span class="${tw.badgeRed}">${t('onec.disconnected')}</span>`;
+    return `<span class="${tw.badgeYellow}">${escapeHtml(status)}</span>`;
+}
+
+function _renderSoapStatus(data) {
+    const container = document.getElementById('onecSoapStatusContainer');
+    if (!container) return;
+
+    // Only show if we have SOAP data
+    if (!data.soap_status && data.ai_orders_total == null) {
+        container.innerHTML = '';
+        return;
+    }
+
+    const aiOrders = data.ai_orders_total != null ? data.ai_orders_total : '—';
+
+    let html = `<div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">`;
+
+    // SOAP Status
+    if (data.soap_status) {
+        html += `<div class="rounded-lg border border-neutral-200 dark:border-neutral-700 p-3">
+            <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-1">${t('onec.soapStatus')}</div>
+            <div class="text-sm font-medium mb-1">${_soapBadge(data.soap_status)}</div>
+            ${data.soap_endpoint ? `<div class="text-xs text-neutral-400 dark:text-neutral-500 font-mono truncate" title="${escapeHtml(data.soap_endpoint)}">${escapeHtml(data.soap_endpoint)}</div>` : ''}
+        </div>`;
+    }
+
+    // REST Status (same as main status)
+    if (data.rest_endpoint) {
+        html += `<div class="rounded-lg border border-neutral-200 dark:border-neutral-700 p-3">
+            <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-1">${t('onec.restStatus')}</div>
+            <div class="text-sm font-medium mb-1">${_soapBadge(data.status || 'not_configured')}</div>
+            <div class="text-xs text-neutral-400 dark:text-neutral-500 font-mono truncate" title="${escapeHtml(data.rest_endpoint)}">${escapeHtml(data.rest_endpoint)}</div>
+        </div>`;
+    }
+
+    // AI Orders
+    html += `<div class="rounded-lg border border-neutral-200 dark:border-neutral-700 p-3">
+        <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-1">${t('onec.aiOrders')}</div>
+        <div class="text-2xl font-bold text-neutral-900 dark:text-neutral-50">${escapeHtml(String(aiOrders))}</div>
+        <div class="text-xs text-neutral-400 dark:text-neutral-500">${t('onec.aiOrdersHint')}</div>
+    </div>`;
+
+    // SOAP Timeout
+    if (data.soap_timeout) {
+        html += `<div class="rounded-lg border border-neutral-200 dark:border-neutral-700 p-3">
+            <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-1">${t('onec.soapTimeout')}</div>
+            <div class="text-2xl font-bold text-neutral-900 dark:text-neutral-50">${data.soap_timeout}<span class="text-sm font-normal text-neutral-400 ml-1">${t('common.seconds')}</span></div>
+        </div>`;
+    }
+
+    html += `</div>`;
+    container.innerHTML = html;
 }
 
 function _formatAge(seconds) {
