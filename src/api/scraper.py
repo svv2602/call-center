@@ -559,6 +559,8 @@ _VALID_CATEGORIES = {
     "returns",
     "warranty",
     "delivery",
+    "promotions",
+    "news",
 }
 
 KnowledgeCategory = Literal[
@@ -572,6 +574,8 @@ KnowledgeCategory = Literal[
     "returns",
     "warranty",
     "delivery",
+    "promotions",
+    "news",
 ]
 
 

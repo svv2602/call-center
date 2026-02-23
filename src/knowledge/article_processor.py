@@ -222,6 +222,8 @@ _VALID_CATEGORIES = {
     "warranty",
     "delivery",
     "general",
+    "promotions",
+    "news",
 }
 
 
