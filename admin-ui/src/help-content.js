@@ -54,6 +54,8 @@ export const HELP_PAGES = {
             { titleKey: 'help.knowledge.scraper.title', contentKey: 'help.knowledge.scraper.content' },
             { titleKey: 'help.knowledge.watched.title', contentKey: 'help.knowledge.watched.content' },
             { titleKey: 'help.knowledge.watched.steps', contentKey: 'help.knowledge.watched.stepsContent' },
+            { titleKey: 'help.knowledge.promotions.title', contentKey: 'help.knowledge.promotions.content' },
+            { titleKey: 'help.knowledge.promotions.steps', contentKey: 'help.knowledge.promotions.stepsContent' },
             { titleKey: 'help.knowledge.affects.title', contentKey: 'help.knowledge.affects.content' },
         ],
         tipsKey: 'help.knowledge.tips',
