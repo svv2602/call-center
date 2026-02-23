@@ -766,6 +766,8 @@ export default {
     'tenants.nameRequired': 'Название и Network ID обязательны',
     'tenants.slugRequired': 'Slug обязателен',
     'tenants.invalidConfigJson': 'Некорректный JSON в конфигурации',
+    'tenants.extensions': 'Extensions (Asterisk)',
+    'tenants.extensionsHint': 'Номера extensions Asterisk, через запятую',
 
     // Vehicles
     'nav.onecData': 'Данные 1С',

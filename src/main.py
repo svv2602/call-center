@@ -489,11 +489,19 @@ async def _resolve_ivr_intent(channel_uuid: str) -> str | None:
 async def _resolve_tenant(channel_uuid: str, db_engine: Any) -> dict[str, Any] | None:
     """Resolve tenant for the current call.
 
-    1. Try ARI channel variable TENANT_SLUG (set by Asterisk dialplan).
-    2. Fallback to the first active tenant in DB.
-    3. Returns tenant dict or None.
+    Three-level resolution:
+    1. Try ARI channel variable TENANT_SLUG (direct slug mapping, backward compat).
+    2. Try ARI channel variable CALLED_EXTEN → lookup tenant by extensions[] in DB.
+    3. Fallback to the first active tenant in DB.
+    Returns tenant dict or None.
     """
     slug: str | None = None
+    called_exten: str | None = None
+
+    tenant_columns = (
+        "id, slug, name, network_id, agent_name, greeting, "
+        "enabled_tools, prompt_suffix, config, is_active, extensions"
+    )
 
     # Try ARI (best-effort, may not be configured)
     settings = get_settings()
@@ -509,6 +517,8 @@ async def _resolve_tenant(channel_uuid: str, db_engine: Any) -> dict[str, Any] |
             await ari.open()
             try:
                 slug = await ari.get_channel_variable(channel_uuid, "TENANT_SLUG")
+                if not slug:
+                    called_exten = await ari.get_channel_variable(channel_uuid, "CALLED_EXTEN")
             finally:
                 await ari.close()
         except Exception:
@@ -521,20 +531,29 @@ async def _resolve_tenant(channel_uuid: str, db_engine: Any) -> dict[str, Any] |
         async with db_engine.begin() as conn:
             if slug:
                 result = await conn.execute(
-                    text("""
-                        SELECT id, slug, name, network_id, agent_name, greeting,
-                               enabled_tools, prompt_suffix, config, is_active
+                    text(f"""
+                        SELECT {tenant_columns}
                         FROM tenants
                         WHERE slug = :slug AND is_active = true
                     """),
                     {"slug": slug},
                 )
+            elif called_exten:
+                # Extension-based lookup
+                result = await conn.execute(
+                    text(f"""
+                        SELECT {tenant_columns}
+                        FROM tenants
+                        WHERE :exten = ANY(extensions) AND is_active = true
+                        LIMIT 1
+                    """),
+                    {"exten": called_exten},
+                )
             else:
                 # Fallback: first active tenant
                 result = await conn.execute(
-                    text("""
-                        SELECT id, slug, name, network_id, agent_name, greeting,
-                               enabled_tools, prompt_suffix, config, is_active
+                    text(f"""
+                        SELECT {tenant_columns}
                         FROM tenants
                         WHERE is_active = true
                         ORDER BY created_at

@@ -87,6 +87,7 @@ class TestListTenants:
             "agent_name": "Олена",
             "greeting": None,
             "enabled_tools": [],
+            "extensions": [],
             "prompt_suffix": None,
             "config": {},
             "is_active": True,
@@ -216,6 +217,7 @@ class TestGetTenant:
             "agent_name": "Олена",
             "greeting": None,
             "enabled_tools": [],
+            "extensions": [],
             "prompt_suffix": None,
             "config": {},
             "is_active": True,
@@ -337,3 +339,84 @@ class TestDeleteTenant:
         resp = client.delete(f"/admin/tenants/{tid}", headers=_auth_header())
 
         assert resp.status_code == 404
+
+
+class TestExtensions:
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.tenants._get_engine", new_callable=AsyncMock)
+    def test_create_with_extensions(
+        self, mock_engine_fn: AsyncMock, mock_settings: MagicMock, client: TestClient
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        new_id = uuid4()
+        conn = AsyncMock()
+        row = MagicMock()
+        row.id = new_id
+        # INSERT result
+        insert_result = MagicMock()
+        insert_result.first.return_value = row
+        # Uniqueness check returns no conflict
+        uniqueness_result = MagicMock()
+        uniqueness_result.first.return_value = None
+        conn.execute = AsyncMock(side_effect=[uniqueness_result, insert_result])
+        mock_engine_fn.return_value = _patch_engine_with_conn(conn)
+
+        resp = client.post(
+            "/admin/tenants",
+            json={
+                "slug": "test-net",
+                "name": "Test Network",
+                "network_id": "test-net-id",
+                "extensions": ["7770", "7771"],
+            },
+            headers=_auth_header(),
+        )
+
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["id"] == str(new_id)
+
+    @patch("src.api.auth.get_settings")
+    def test_create_invalid_extensions(self, mock_settings: MagicMock, client: TestClient) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+
+        resp = client.post(
+            "/admin/tenants",
+            json={
+                "slug": "test-net",
+                "name": "Test",
+                "network_id": "test",
+                "extensions": ["abc", "12345678901"],
+            },
+            headers=_auth_header(),
+        )
+
+        assert resp.status_code == 400
+        assert "Invalid extensions" in resp.json()["detail"]
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.tenants._get_engine", new_callable=AsyncMock)
+    def test_update_extensions(
+        self, mock_engine_fn: AsyncMock, mock_settings: MagicMock, client: TestClient
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        tid = uuid4()
+        conn = AsyncMock()
+        row = MagicMock()
+        row.id = tid
+        # Uniqueness check + UPDATE
+        uniqueness_result = MagicMock()
+        uniqueness_result.first.return_value = None
+        update_result = MagicMock()
+        update_result.first.return_value = row
+        conn.execute = AsyncMock(side_effect=[uniqueness_result, update_result])
+        mock_engine_fn.return_value = _patch_engine_with_conn(conn)
+
+        resp = client.patch(
+            f"/admin/tenants/{tid}",
+            json={"extensions": ["7772"]},
+            headers=_auth_header(),
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["message"] == "Tenant updated"

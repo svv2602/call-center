@@ -12,6 +12,7 @@ def _make_tenant_row(
     slug: str = "prokoleso",
     name: str = "ProKoleso",
     network_id: str = "prokoleso-net",
+    extensions: list[str] | None = None,
 ) -> dict[str, Any]:
     """Build a dict that looks like a DB row from the tenants table."""
     import uuid
@@ -24,6 +25,7 @@ def _make_tenant_row(
         "agent_name": "Олена",
         "greeting": None,
         "enabled_tools": [],
+        "extensions": extensions or [],
         "prompt_suffix": None,
         "config": {},
         "is_active": True,
@@ -147,3 +149,61 @@ class TestResolveTenant:
             result = await _resolve_tenant("test-uuid", engine)
 
         assert result is None
+
+    @pytest.mark.asyncio
+    async def test_called_exten_resolves_tenant(self) -> None:
+        """When ARI returns CALLED_EXTEN=7770, tenant with extensions=['7770'] is resolved."""
+        tenant_data = _make_tenant_row(slug="prokoleso", extensions=["7770"])
+        engine = _make_mock_engine([tenant_data])
+
+        mock_ari = AsyncMock()
+        # TENANT_SLUG is empty, CALLED_EXTEN returns 7770
+        mock_ari.get_channel_variable = AsyncMock(
+            side_effect=lambda _uuid, var: None if var == "TENANT_SLUG" else "7770"
+        )
+        mock_ari.open = AsyncMock()
+        mock_ari.close = AsyncMock()
+
+        mock_settings = MagicMock()
+        mock_settings.ari.url = "http://localhost:8088/ari"
+        mock_settings.ari.user = "user"
+        mock_settings.ari.password = "pass"
+
+        with (
+            patch("src.main.get_settings", return_value=mock_settings),
+            patch("src.core.asterisk_ari.AsteriskARIClient", return_value=mock_ari),
+        ):
+            from src.main import _resolve_tenant
+
+            result = await _resolve_tenant("test-uuid", engine)
+
+        assert result is not None
+        assert result["slug"] == "prokoleso"
+        assert result["extensions"] == ["7770"]
+
+    @pytest.mark.asyncio
+    async def test_no_slug_no_exten_falls_back(self) -> None:
+        """When neither TENANT_SLUG nor CALLED_EXTEN is set, fallback to first active."""
+        tenant_data = _make_tenant_row(slug="fallback-tenant")
+        engine = _make_mock_engine([tenant_data])
+
+        mock_ari = AsyncMock()
+        mock_ari.get_channel_variable = AsyncMock(return_value=None)
+        mock_ari.open = AsyncMock()
+        mock_ari.close = AsyncMock()
+
+        mock_settings = MagicMock()
+        mock_settings.ari.url = "http://localhost:8088/ari"
+        mock_settings.ari.user = "user"
+        mock_settings.ari.password = "pass"
+
+        with (
+            patch("src.main.get_settings", return_value=mock_settings),
+            patch("src.core.asterisk_ari.AsteriskARIClient", return_value=mock_ari),
+        ):
+            from src.main import _resolve_tenant
+
+            result = await _resolve_tenant("test-uuid", engine)
+
+        assert result is not None
+        assert result["slug"] == "fallback-tenant"

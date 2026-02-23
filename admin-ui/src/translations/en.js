@@ -766,6 +766,8 @@ export default {
     'tenants.nameRequired': 'Name and Network ID are required',
     'tenants.slugRequired': 'Slug is required',
     'tenants.invalidConfigJson': 'Invalid JSON in configuration',
+    'tenants.extensions': 'Extensions (Asterisk)',
+    'tenants.extensionsHint': 'Asterisk extensions, comma-separated',
 
     // Vehicles
     'nav.onecData': '1C Data',

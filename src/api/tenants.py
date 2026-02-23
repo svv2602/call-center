@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from typing import Any
 from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
@@ -53,6 +54,7 @@ class TenantCreate(BaseModel):
     agent_name: str = Field(default="Олена", max_length=100)
     greeting: str | None = None
     enabled_tools: list[str] = []
+    extensions: list[str] = []
     prompt_suffix: str | None = None
     config: dict[str, Any] = {}
     is_active: bool = True
@@ -64,6 +66,7 @@ class TenantUpdate(BaseModel):
     agent_name: str | None = Field(default=None, max_length=100)
     greeting: str | None = None
     enabled_tools: list[str] | None = None
+    extensions: list[str] | None = None
     prompt_suffix: str | None = None
     config: dict[str, Any] | None = None
     is_active: bool | None = None
@@ -80,6 +83,47 @@ def _validate_tools(tools: list[str]) -> None:
             status_code=400,
             detail=f"Invalid tool names: {', '.join(invalid)}. "
             f"Valid tools: {', '.join(sorted(_VALID_TOOL_NAMES))}",
+        )
+
+
+_EXTENSION_RE = re.compile(r"^\d{1,10}$")
+
+
+def _validate_extensions(extensions: list[str]) -> None:
+    """Raise 400 if any extension is not a numeric string (1-10 digits)."""
+    invalid = [e for e in extensions if not _EXTENSION_RE.match(e)]
+    if invalid:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid extensions: {', '.join(invalid)}. "
+            "Extensions must be numeric strings (1-10 digits).",
+        )
+
+
+async def _check_extension_uniqueness(
+    conn: Any, extensions: list[str], exclude_tenant_id: str | None = None
+) -> None:
+    """Raise 409 if any extension is already assigned to another tenant."""
+    if not extensions:
+        return
+    params: dict[str, Any] = {"extensions": extensions}
+    exclude_clause = ""
+    if exclude_tenant_id:
+        exclude_clause = "AND id != :exclude_id"
+        params["exclude_id"] = exclude_tenant_id
+    result = await conn.execute(
+        text(f"""
+            SELECT slug, extensions FROM tenants
+            WHERE extensions && CAST(:extensions AS text[])
+              AND is_active = true {exclude_clause}
+        """),
+        params,
+    )
+    conflict = result.first()
+    if conflict:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Extension(s) already assigned to tenant '{conflict._mapping['slug']}'",
         )
 
 
@@ -115,8 +159,8 @@ async def list_tenants(
         result = await conn.execute(
             text(f"""
                 SELECT id, slug, name, network_id, agent_name, greeting,
-                       enabled_tools, prompt_suffix, config, is_active,
-                       created_at, updated_at
+                       enabled_tools, extensions, prompt_suffix, config,
+                       is_active, created_at, updated_at
                 FROM tenants
                 WHERE {where_clause}
                 ORDER BY created_at
@@ -138,8 +182,8 @@ async def get_tenant(tenant_id: UUID, _: dict[str, Any] = _perm_r) -> dict[str, 
         result = await conn.execute(
             text("""
                 SELECT id, slug, name, network_id, agent_name, greeting,
-                       enabled_tools, prompt_suffix, config, is_active,
-                       created_at, updated_at
+                       enabled_tools, extensions, prompt_suffix, config,
+                       is_active, created_at, updated_at
                 FROM tenants WHERE id = :id
             """),
             {"id": str(tenant_id)},
@@ -156,19 +200,23 @@ async def create_tenant(request: TenantCreate, _: dict[str, Any] = _perm_w) -> d
     """Create a new tenant."""
     if request.enabled_tools:
         _validate_tools(request.enabled_tools)
+    if request.extensions:
+        _validate_extensions(request.extensions)
 
     engine = await _get_engine()
 
     try:
         async with engine.begin() as conn:
+            if request.extensions:
+                await _check_extension_uniqueness(conn, request.extensions)
             result = await conn.execute(
                 text("""
                     INSERT INTO tenants
                         (slug, name, network_id, agent_name, greeting,
-                         enabled_tools, prompt_suffix, config, is_active)
+                         enabled_tools, extensions, prompt_suffix, config, is_active)
                     VALUES (:slug, :name, :network_id, :agent_name, :greeting,
-                            CAST(:enabled_tools AS text[]), :prompt_suffix,
-                            CAST(:config AS jsonb), :is_active)
+                            CAST(:enabled_tools AS text[]), CAST(:extensions AS text[]),
+                            :prompt_suffix, CAST(:config AS jsonb), :is_active)
                     RETURNING id
                 """),
                 {
@@ -178,6 +226,7 @@ async def create_tenant(request: TenantCreate, _: dict[str, Any] = _perm_w) -> d
                     "agent_name": request.agent_name,
                     "greeting": request.greeting,
                     "enabled_tools": request.enabled_tools,
+                    "extensions": request.extensions,
                     "prompt_suffix": request.prompt_suffix,
                     "config": json.dumps(request.config),
                     "is_active": request.is_active,
@@ -203,6 +252,8 @@ async def update_tenant(
     """Update a tenant (partial update)."""
     if request.enabled_tools is not None:
         _validate_tools(request.enabled_tools)
+    if request.extensions is not None:
+        _validate_extensions(request.extensions)
 
     engine = await _get_engine()
 
@@ -230,6 +281,10 @@ async def update_tenant(
         updates.append("enabled_tools = CAST(:enabled_tools AS text[])")
         params["enabled_tools"] = request.enabled_tools
 
+    if request.extensions is not None:
+        updates.append("extensions = CAST(:extensions AS text[])")
+        params["extensions"] = request.extensions
+
     if request.config is not None:
         updates.append("config = CAST(:config AS jsonb)")
         params["config"] = json.dumps(request.config)
@@ -241,6 +296,8 @@ async def update_tenant(
     set_clause = ", ".join(updates)
 
     async with engine.begin() as conn:
+        if request.extensions is not None:
+            await _check_extension_uniqueness(conn, request.extensions, str(tenant_id))
         result = await conn.execute(
             text(f"""
                 UPDATE tenants

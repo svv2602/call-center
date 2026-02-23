@@ -55,6 +55,7 @@ async function loadTenants(offset) {
                 <th class="${tw.thSortable}" data-sortable>${t('tenants.slug')}</th>
                 <th class="${tw.thSortable}" data-sortable>${t('tenants.name')}</th>
                 <th class="${tw.thSortable}" data-sortable>${t('tenants.networkId')}</th>
+                <th class="${tw.th}">${t('tenants.extensions')}</th>
                 <th class="${tw.th}">${t('tenants.agentName')}</th>
                 <th class="${tw.th}">${t('tenants.enabledTools')}</th>
                 <th class="${tw.thSortable}" data-sortable>${t('tenants.statusCol')}</th>
@@ -73,6 +74,9 @@ async function loadTenants(offset) {
                     <td class="${tw.td}"><span class="font-mono text-xs">${escapeHtml(tn.slug)}</span></td>
                     <td class="${tw.td}">${escapeHtml(tn.name)}</td>
                     <td class="${tw.td}"><span class="font-mono text-xs">${escapeHtml(tn.network_id)}</span></td>
+                    <td class="${tw.td}">${(tn.extensions || []).length > 0
+                        ? (tn.extensions || []).map(e => `<span class="font-mono text-xs inline-block bg-neutral-100 dark:bg-neutral-800 rounded px-1.5 py-0.5 mr-1">${escapeHtml(e)}</span>`).join('')
+                        : `<span class="${tw.mutedText} text-xs">—</span>`}</td>
                     <td class="${tw.td}">${escapeHtml(tn.agent_name || 'Олена')}</td>
                     <td class="${tw.td}">${toolsBadge}</td>
                     <td class="${tw.td}" data-sort-value="${tn.is_active ? 1 : 0}">${statusBadge}</td>
@@ -125,6 +129,7 @@ async function showCreateTenant() {
     document.getElementById('tenantSlug').removeAttribute('readonly');
     document.getElementById('tenantName').value = '';
     document.getElementById('tenantNetworkId').value = '';
+    document.getElementById('tenantExtensions').value = '';
     document.getElementById('tenantAgentName').value = 'Олена';
     document.getElementById('tenantGreeting').value = '';
     document.getElementById('tenantPromptSuffix').value = '';
@@ -145,6 +150,7 @@ async function editTenant(id) {
         document.getElementById('tenantSlug').setAttribute('readonly', 'readonly');
         document.getElementById('tenantName').value = tn.name || '';
         document.getElementById('tenantNetworkId').value = tn.network_id || '';
+        document.getElementById('tenantExtensions').value = (tn.extensions || []).join(', ');
         document.getElementById('tenantAgentName').value = tn.agent_name || 'Олена';
         document.getElementById('tenantGreeting').value = tn.greeting || '';
         document.getElementById('tenantPromptSuffix').value = tn.prompt_suffix || '';
@@ -176,6 +182,8 @@ async function saveTenant() {
     }
 
     const enabled_tools = Array.from(document.querySelectorAll('.tenant-tool-cb:checked')).map(cb => cb.value);
+    const extensionsRaw = document.getElementById('tenantExtensions').value.trim();
+    const extensions = extensionsRaw ? extensionsRaw.split(',').map(e => e.trim()).filter(Boolean) : [];
 
     if (!name || !network_id) {
         showToast(t('tenants.nameRequired'), 'error');
@@ -186,7 +194,7 @@ async function saveTenant() {
         return;
     }
 
-    const body = { name, network_id, agent_name, greeting, enabled_tools, prompt_suffix, config, is_active };
+    const body = { name, network_id, agent_name, greeting, enabled_tools, extensions, prompt_suffix, config, is_active };
     if (!id) body.slug = slug;
 
     try {
