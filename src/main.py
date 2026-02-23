@@ -64,6 +64,7 @@ from src.core.pipeline import CallPipeline
 from src.events.publisher import publish_event
 from src.logging.pii_vault import PIIVault
 from src.logging.structured_logger import setup_logging
+from src.monitoring.cost_tracker import CostBreakdown
 from src.monitoring.metrics import (
     active_calls,
     call_duration_seconds,
@@ -607,6 +608,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         except Exception:
             logger.warning("log_call_start failed", exc_info=True)
 
+    # Per-call cost tracker (created outside try block so it's always available for cleanup)
+    cost = CostBreakdown(llm_model=settings.anthropic.model)
+
     _embedding_gen = None
     try:
         # Per-call STT engine (each call gets its own streaming session)
@@ -818,6 +822,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             barge_in_event=barge_in_event,
             agent_name=tenant.get("agent_name") if tenant else None,
             call_logger=_call_logger,
+            cost_breakdown=cost,
         )
         await pipeline.run()
 
@@ -858,6 +863,10 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         },
     )
 
+    # Finalize call cost: add STT usage and record Prometheus metrics
+    cost.add_stt_usage(session.duration_seconds)
+    cost.record_metrics()
+
     # Persist call end to PostgreSQL
     if _call_logger is not None:
         try:
@@ -868,6 +877,8 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 scenario=session.scenario,
                 transferred=session.transferred,
                 transfer_reason=session.transfer_reason if session.transferred else None,
+                cost_breakdown=cost.to_dict(),
+                total_cost_usd=cost.total_cost,
             )
         except Exception:
             logger.warning("log_call_end failed", exc_info=True)

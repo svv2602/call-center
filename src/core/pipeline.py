@@ -123,6 +123,7 @@ _FAREWELL_SYSTEM_PROMPT = (
 if TYPE_CHECKING:
     from src.agent.agent import LLMAgent
     from src.agent.streaming_loop import StreamingAgentLoop
+    from src.monitoring.cost_tracker import CostBreakdown
     from src.sandbox.patterns import PatternSearch
     from src.tts.base import TTSEngine
 
@@ -155,6 +156,7 @@ class CallPipeline:
         barge_in_event: asyncio.Event | None = None,
         agent_name: str | None = None,
         call_logger: Any = None,
+        cost_breakdown: CostBreakdown | None = None,
     ) -> None:
         self._conn = conn
         self._stt = stt
@@ -167,6 +169,7 @@ class CallPipeline:
         self._streaming_loop = streaming_loop
         self._agent_name = agent_name
         self._call_logger = call_logger
+        self._cost = cost_breakdown
         self._turn_counter = 0
         self._llm_history: list[dict[str, Any]] = []  # persistent LLM context for streaming path
         self._speaking = False
@@ -371,6 +374,13 @@ class CallPipeline:
 
                 llm_latency_ms = int((time.monotonic() - start) * 1000)
 
+                # Track LLM token cost (streaming path)
+                if self._cost is not None and result is not None:
+                    self._cost.add_llm_usage(
+                        result.total_usage.input_tokens,
+                        result.total_usage.output_tokens,
+                    )
+
                 if result is not None and result.spoken_text:
                     self._session.add_assistant_turn(result.spoken_text)
                     await self._log_turn("bot", result.spoken_text, llm_latency_ms=llm_latency_ms)
@@ -416,6 +426,13 @@ class CallPipeline:
                     response_text = ""
 
                 llm_latency_ms = int((time.monotonic() - start) * 1000)
+
+                # Track LLM token cost (blocking path)
+                if self._cost is not None:
+                    self._cost.add_llm_usage(
+                        self._agent.last_input_tokens,
+                        self._agent.last_output_tokens,
+                    )
 
                 # Now record the user turn in session (for DB/analytics)
                 self._session.add_user_turn(
@@ -518,6 +535,10 @@ class CallPipeline:
         if self._conn.is_closed:
             return
 
+        # Track TTS character cost
+        if self._cost is not None:
+            self._cost.add_tts_usage(len(text))
+
         self._session.transition_to(CallState.SPEAKING)
         self._speaking = True
         self._barge_in_event.clear()
@@ -549,6 +570,10 @@ class CallPipeline:
         """
         if self._conn.is_closed:
             return
+
+        # Track TTS character cost
+        if self._cost is not None:
+            self._cost.add_tts_usage(len(text))
 
         self._session.transition_to(CallState.SPEAKING)
         self._speaking = True
