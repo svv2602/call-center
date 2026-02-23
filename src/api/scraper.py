@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.api.auth import require_permission
 from src.config import get_settings
+from src.llm import get_router
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/scraper", tags=["scraper"])
@@ -905,6 +906,7 @@ async def scrape_watched_page_now(page_id: UUID, _: dict[str, Any] = _perm_x) ->
             source_url=page_url,
             api_key=settings.anthropic.api_key,
             model=llm_model,
+            llm_router=get_router(),
             is_shop_info=True,
         )
 
@@ -1115,6 +1117,7 @@ async def _scrape_discovery_page_inline(
                 source_url=child_url,
                 api_key=settings.anthropic.api_key,
                 model=llm_model,
+                llm_router=get_router(),
                 is_promotion=True,
             )
 
