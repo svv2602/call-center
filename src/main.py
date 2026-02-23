@@ -329,6 +329,22 @@ async def readiness_check() -> dict[str, object]:
     }
 
 
+@app.post("/internal/caller-id")
+async def store_caller_id(data: dict[str, str]) -> dict[str, str]:
+    """Store CallerID in Redis for a call UUID.
+
+    Called by Asterisk dialplan before AudioSocket:
+      System(curl -s -X POST http://...:8080/internal/caller-id -H 'Content-Type: application/json' -d '{"uuid":"${CALL_UUID}","number":"${CALLERID(num)}"}')
+    """
+    call_uuid = data.get("uuid", "").strip()
+    number = data.get("number", "").strip()
+    if not call_uuid or not number:
+        return {"status": "ignored"}
+    if _redis is not None:
+        await _redis.set(f"call:caller:{call_uuid}", number, ex=120)
+    return {"status": "ok"}
+
+
 @app.get("/metrics")
 async def metrics_endpoint() -> Response:
     """Prometheus metrics endpoint."""
@@ -392,31 +408,48 @@ _SCENARIO_EMPHASIS: dict[str, str] = {
 
 
 async def _resolve_caller_id(channel_uuid: str) -> str | None:
-    """Resolve caller phone number from Asterisk channel variable CALLER_NUMBER.
+    """Resolve caller phone number from Redis.
 
-    Set in dialplan: Set(CALLER_NUMBER=${CALLERID(num)})
+    Asterisk dialplan stores CallerID before AudioSocket:
+      same => n,Set(CALL_UUID=${UUID()})
+      same => n,System(redis-cli -h <host> SET call:caller:${CALL_UUID} ${CALLERID(num)} EX 120)
+      same => n,AudioSocket(${CALL_UUID},...)
+
+    Fallback: try ARI channel variable CALLER_NUMBER.
     """
-    settings = get_settings()
-    if not settings.ari.url:
-        return None
-
-    try:
-        from src.core.asterisk_ari import AsteriskARIClient
-
-        ari = AsteriskARIClient(
-            url=settings.ari.url,
-            user=settings.ari.user,
-            password=settings.ari.password,
-        )
-        await ari.open()
+    # Primary: read from Redis (set by Asterisk dialplan)
+    if _redis is not None:
         try:
-            raw = await ari.get_channel_variable(channel_uuid, "CALLER_NUMBER")
-            if raw and raw.strip():
-                return raw.strip()
-        finally:
-            await ari.close()
-    except Exception:
-        logger.debug("ARI CALLER_NUMBER lookup failed", exc_info=True)
+            raw = await _redis.get(f"call:caller:{channel_uuid}")
+            if raw:
+                value = raw.decode() if isinstance(raw, bytes) else str(raw)
+                if value.strip():
+                    logger.info("CallerID from Redis: %s for call %s", value.strip(), channel_uuid)
+                    return value.strip()
+        except Exception:
+            logger.debug("Redis CallerID lookup failed", exc_info=True)
+
+    # Fallback: ARI channel variable
+    settings = get_settings()
+    if settings.ari.url:
+        try:
+            from src.core.asterisk_ari import AsteriskARIClient
+
+            ari = AsteriskARIClient(
+                url=settings.ari.url,
+                user=settings.ari.user,
+                password=settings.ari.password,
+            )
+            await ari.open()
+            try:
+                raw_ari = await ari.get_channel_variable(channel_uuid, "CALLER_NUMBER")
+                if raw_ari and raw_ari.strip():
+                    logger.info("CallerID from ARI: %s for call %s", raw_ari.strip(), channel_uuid)
+                    return raw_ari.strip()
+            finally:
+                await ari.close()
+        except Exception:
+            logger.debug("ARI CALLER_NUMBER lookup failed", exc_info=True)
 
     return None
 
