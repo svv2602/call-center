@@ -155,7 +155,9 @@ Content:
         # Only pass router explicitly when it's not None;
         # when None, let llm_complete use its sentinel default
         # to trigger lazy router initialization in Celery workers.
-        llm_kwargs: dict[str, Any] = {"system": system_prompt, "max_tokens": 8192}
+        # Gemini 2.5 Flash uses thinking tokens that count against max_tokens
+        # (~8K thinking + ~8K response). 32768 gives enough room for both.
+        llm_kwargs: dict[str, Any] = {"system": system_prompt, "max_tokens": 32768}
         if llm_router is not None:
             llm_kwargs["router"] = llm_router
         raw_text = await llm_complete(
