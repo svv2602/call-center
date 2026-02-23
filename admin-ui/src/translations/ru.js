@@ -460,6 +460,24 @@ export default {
     'settings.sandboxDefaultsSaved': 'Настройки sandbox сохранены',
     'settings.sandboxDefaultsHint': 'Выбранные модели будут использоваться по умолчанию для новых диалогов sandbox и авто-клиента.',
     'settings.sandboxNoProviders': 'Нет включённых провайдеров',
+
+    'settings.ttsTitle': 'Голосовые настройки TTS',
+    'settings.ttsDesc': 'Настройки голоса Google Cloud TTS: выбор голоса, скорость речи и тональность. Изменения применяются к новым звонкам без перезапуска.',
+    'settings.ttsLoadConfig': 'Загрузить настройки TTS',
+    'settings.ttsSource': 'Источник',
+    'settings.ttsVoice': 'Голос',
+    'settings.ttsSpeakingRate': 'Скорость речи',
+    'settings.ttsPitch': 'Тональность',
+    'settings.ttsTest': 'Тест голоса',
+    'settings.ttsReset': 'Сброс к умолчаниям',
+    'settings.ttsResetConfirm': 'Сбросить настройки TTS к значениям из переменных окружения?',
+    'settings.ttsSaved': 'Настройки TTS сохранены',
+    'settings.ttsSaveFailed': 'Ошибка сохранения TTS: {error}',
+    'settings.ttsResetDone': 'Настройки TTS сброшены к умолчаниям',
+    'settings.ttsTesting': 'Синтез тестовой фразы...',
+    'settings.ttsTestSuccess': 'Синтез выполнен ({duration}мс)',
+    'settings.ttsTestFailed': 'Ошибка синтеза: {error}',
+    'settings.ttsLoadFailed': 'Не удалось загрузить настройки TTS: {error}',
     // Telegram Notifications
     'settings.telegram': 'Уведомления Telegram',
     'settings.telegramDesc': 'Настройка Telegram-бота для получения алертов от Alertmanager.',
@@ -1393,8 +1411,11 @@ export default {
     'help.configuration.tasks.title': 'Маршрутизация задач',
     'help.configuration.tasks.content': '<p>Каждый тип LLM-задачи можно привязать к конкретному провайдеру с цепочкой фоллбэков:</p><ul><li><strong>agent</strong> — основной диалог с клиентом (самая важная задача)</li><li><strong>quality_scoring</strong> — оценка качества звонков</li><li><strong>article_processing</strong> — обработка статей из скрапера</li><li><strong>auto_customer</strong> — генерация сообщений клиента в песочнице</li></ul><p>Для каждой задачи задаётся <strong>основной провайдер</strong> и <strong>фоллбэк-цепочка</strong> (при отказе основного). Порядок фоллбэков определяет приоритет.</p>',
 
+    'help.configuration.tts.title': 'Голосовые настройки TTS',
+    'help.configuration.tts.content': '<p>Управление голосом Google Cloud TTS без перезапуска системы:</p><ul><li><strong>Голос</strong> — выбор из списка доступных голосов (Wavenet, Neural2, Chirp3-HD)</li><li><strong>Скорость речи</strong> — от 0.25 (очень медленно) до 4.0 (очень быстро), рекомендуется 0.85–1.0</li><li><strong>Тональность</strong> — от -20 до +20 полутонов; не все голоса поддерживают pitch</li></ul><p>Кнопка «Тест голоса» синтезирует тестовую фразу с текущими настройками.</p>',
+
     'help.configuration.affects.title': 'На что влияют изменения',
-    'help.configuration.affects.content': '<div class="help-affects"><p><strong>Отключение провайдера</strong> — если он единственный для задачи и нет фоллбэков, задача перестанет работать.</p><p><strong>Смена модели</strong> — мгновенно влияет на все новые запросы. Более мощная модель = лучше качество, но дороже и медленнее.</p><p><strong>Маршрутизация задач</strong> — позволяет использовать дешёвые модели для некритичных задач (качество, скрапинг) и мощные — для диалогов с клиентами.</p></div>',
+    'help.configuration.affects.content': '<div class="help-affects"><p><strong>Отключение провайдера</strong> — если он единственный для задачи и нет фоллбэков, задача перестанет работать.</p><p><strong>Смена модели</strong> — мгновенно влияет на все новые запросы. Более мощная модель = лучше качество, но дороже и медленнее.</p><p><strong>Маршрутизация задач</strong> — позволяет использовать дешёвые модели для некритичных задач (качество, скрапинг) и мощные — для диалогов с клиентами.</p><p><strong>Настройки TTS</strong> — новый голос/скорость/тональность применяются к новым звонкам; текущие звонки продолжают со старым голосом.</p></div>',
 
     'help.configuration.tips': '<ul><li>Используйте <strong>фоллбэки</strong> для критичных задач (agent) — это защитит от сбоя одного провайдера</li><li>Для задач <strong>quality_scoring</strong> и <strong>article_processing</strong> можно использовать более дешёвые модели</li><li>После изменения провайдера нажмите <strong>«Тест»</strong>, чтобы убедиться в работоспособности</li><li><strong>Перезагрузка конфига</strong> не прерывает текущие звонки — изменения применяются к новым запросам</li></ul>',
 

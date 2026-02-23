@@ -48,6 +48,17 @@ _COMBINING_ACUTE = "\u0301"
 _TTS_SUBSTITUTIONS: list[tuple[re.Pattern[str], str]] = [
     # "Проколесо" / "ПроКолесо" → two words for correct TTS pronunciation
     (re.compile(r"(?i)проколесо"), "Про Колесо"),
+    # Tire size format: "205/55 R16" → spoken naturally with pauses
+    # Slash between numbers → space (TTS reads "/" literally)
+    (re.compile(r"(\d{3})/(\d{2,3})\s*R(\d{2})"), r"\1 \2 R\3"),
+    # "RunFlat" → Ukrainian transliteration
+    (re.compile(r"(?i)runflat"), "ранфлет"),
+    # "XL" in tire context → readable
+    (re.compile(r"\bXL\b"), "ікс ел"),
+    # Common abbreviation: "грн" alone (not after digits) reads oddly
+    (re.compile(r"\bгрн\.?(?=\s|$)"), "гривень"),
+    # Phone format normalization: +380... → read as digits with pauses
+    (re.compile(r"\+380(\d{2})(\d{3})(\d{2})(\d{2})"), r"+380, \1, \2, \3, \4"),
 ]
 
 # SSML break insertion patterns (applied after XML escaping)
@@ -58,6 +69,13 @@ _BREAK_RULES: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"—(\s)"), r'—<break time="150ms"/>\1'),
     # After colon + space: anticipation before explanation/list
     (re.compile(r":(\s)"), r':<break time="200ms"/>\1'),
+    # After semicolon + space: separating related clauses
+    (re.compile(r";(\s)"), r';<break time="150ms"/>\1'),
+    # After period + space (mid-sentence abbreviation excluded by sentence splitter):
+    # adds finality pause between sentences within same TTS chunk
+    (re.compile(r"\.(\s)"), r'.<break time="200ms"/>\1'),
+    # After exclamation/question + space: emotional pause
+    (re.compile(r"([!?])(\s)"), r'\1<break time="250ms"/>\2'),
 ]
 
 # Phrases to pre-cache at startup — includes all wait pool variants

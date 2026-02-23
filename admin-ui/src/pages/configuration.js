@@ -7,6 +7,7 @@ import * as tw from '../tw.js';
 
 // ─── State ───────────────────────────────────────────────────
 let _llmConfig = null;
+let _ttsConfig = null;
 
 // ═══════════════════════════════════════════════════════════
 //  Hot-reload конфиг
@@ -412,8 +413,141 @@ async function testLLMProvider(key) {
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  TTS Voice Settings
+// ═══════════════════════════════════════════════════════════
+async function loadTTSConfig() {
+    const container = document.getElementById('ttsConfigContainer');
+    if (!container) return;
+    container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+    try {
+        const data = await api('/admin/tts/config');
+        _ttsConfig = data;
+        renderTTSConfig(data);
+    } catch (e) {
+        container.innerHTML = `<div class="${tw.emptyState}">${t('settings.ttsLoadFailed', {error: escapeHtml(e.message)})}</div>`;
+    }
+}
+
+function renderTTSConfig(data) {
+    const container = document.getElementById('ttsConfigContainer');
+    if (!container) return;
+
+    const config = data.config || {};
+    const source = data.source || 'env';
+    const knownVoices = data.known_voices || [];
+
+    const voiceName = config.voice_name || 'uk-UA-Wavenet-A';
+    const speakingRate = config.speaking_rate ?? 0.93;
+    const pitch = config.pitch ?? -1.0;
+
+    const sourceBadge = source === 'redis'
+        ? `<span class="${tw.badgeGreen}">Redis</span>`
+        : `<span class="${tw.badge}">env</span>`;
+
+    const voiceOptions = knownVoices.map(v =>
+        `<option value="${escapeHtml(v)}" ${v === voiceName ? 'selected' : ''}>${escapeHtml(v)}</option>`
+    ).join('');
+    const isCustomVoice = !knownVoices.includes(voiceName);
+    const customOption = isCustomVoice ? `<option value="${escapeHtml(voiceName)}" selected>${escapeHtml(voiceName)} (custom)</option>` : '';
+
+    container.innerHTML = `
+        <div class="space-y-4">
+            <div class="flex items-center gap-2 text-xs text-neutral-500 dark:text-neutral-400">
+                ${t('settings.ttsSource')}: ${sourceBadge}
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.ttsVoice')}</label>
+                <select id="ttsVoiceSelect" class="${tw.selectSm} w-full max-w-xs">
+                    ${customOption}${voiceOptions}
+                </select>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                    ${t('settings.ttsSpeakingRate')}: <span id="ttsRateValue" class="font-mono">${speakingRate.toFixed(2)}</span>
+                </label>
+                <input id="ttsRateRange" type="range" min="0.25" max="4.0" step="0.01" value="${speakingRate}"
+                    class="w-full max-w-xs accent-blue-600"
+                    oninput="document.getElementById('ttsRateValue').textContent = parseFloat(this.value).toFixed(2)">
+                <div class="flex justify-between text-[10px] text-neutral-400 max-w-xs"><span>0.25</span><span>1.0</span><span>4.0</span></div>
+            </div>
+            <div>
+                <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
+                    ${t('settings.ttsPitch')}: <span id="ttsPitchValue" class="font-mono">${pitch.toFixed(1)}</span>
+                </label>
+                <input id="ttsPitchRange" type="range" min="-20" max="20" step="0.5" value="${pitch}"
+                    class="w-full max-w-xs accent-blue-600"
+                    oninput="document.getElementById('ttsPitchValue').textContent = parseFloat(this.value).toFixed(1)">
+                <div class="flex justify-between text-[10px] text-neutral-400 max-w-xs"><span>-20</span><span>0</span><span>+20</span></div>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 pt-2">
+                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.configuration.saveTTSConfig()">${t('common.save')}</button>
+                <button class="${tw.btnSm} border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800" onclick="window._pages.configuration.testTTS()">${t('settings.ttsTest')}</button>
+                <button class="${tw.btnSm} text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20" onclick="window._pages.configuration.resetTTSConfig()">${t('settings.ttsReset')}</button>
+            </div>
+            <div id="ttsTestResult"></div>
+        </div>`;
+}
+
+async function saveTTSConfig() {
+    const voiceName = document.getElementById('ttsVoiceSelect')?.value;
+    const speakingRate = parseFloat(document.getElementById('ttsRateRange')?.value);
+    const pitch = parseFloat(document.getElementById('ttsPitchRange')?.value);
+
+    try {
+        const result = await api('/admin/tts/config', {
+            method: 'PATCH',
+            body: JSON.stringify({ voice_name: voiceName, speaking_rate: speakingRate, pitch }),
+        });
+        _ttsConfig = { config: result.config, source: result.source, known_voices: _ttsConfig?.known_voices || [] };
+        renderTTSConfig(_ttsConfig);
+        showToast(t('settings.ttsSaved'), 'success');
+    } catch (e) {
+        showToast(t('settings.ttsSaveFailed', {error: e.message}), 'error');
+    }
+}
+
+async function testTTS() {
+    const resultDiv = document.getElementById('ttsTestResult');
+    if (resultDiv) resultDiv.innerHTML = `<div class="text-xs text-neutral-500 py-2">${t('settings.ttsTesting')}</div>`;
+
+    try {
+        const result = await api('/admin/tts/test', { method: 'POST' });
+        if (result.success && result.audio_base64) {
+            if (resultDiv) {
+                resultDiv.innerHTML = `
+                    <div class="mt-2 p-3 bg-neutral-50 dark:bg-neutral-800 rounded-lg">
+                        <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-2">${t('settings.ttsTestSuccess', {duration: result.duration_ms})}</div>
+                        <audio controls autoplay src="data:audio/wav;base64,${result.audio_base64}" class="w-full max-w-xs"></audio>
+                    </div>`;
+            }
+        } else {
+            showToast(t('settings.ttsTestFailed', {error: result.error || 'Unknown'}), 'error');
+            if (resultDiv) resultDiv.innerHTML = '';
+        }
+    } catch (e) {
+        showToast(t('settings.ttsTestFailed', {error: e.message}), 'error');
+        if (resultDiv) resultDiv.innerHTML = '';
+    }
+}
+
+async function resetTTSConfig() {
+    if (!confirm(t('settings.ttsResetConfirm'))) return;
+    try {
+        const result = await api('/admin/tts/config/reset', { method: 'POST' });
+        _ttsConfig = { config: result.config, source: result.source, known_voices: _ttsConfig?.known_voices || [] };
+        renderTTSConfig(_ttsConfig);
+        showToast(t('settings.ttsResetDone'), 'success');
+    } catch (e) {
+        showToast(t('settings.ttsSaveFailed', {error: e.message}), 'error');
+    }
+}
+
 export function init() {
-    registerPageLoader('configuration', loadLLMConfig);
+    registerPageLoader('configuration', () => {
+        loadLLMConfig();
+        loadTTSConfig();
+    });
 }
 
 window._pages = window._pages || {};
@@ -422,4 +556,5 @@ window._pages.configuration = {
     onAddTypeChange, onAddModelInput, saveNewProvider,
     updateTaskRoute, addFallback, removeFallback, moveFallback, testLLMProvider,
     saveSandboxDefaults,
+    loadTTSConfig, saveTTSConfig, testTTS, resetTTSConfig,
 };

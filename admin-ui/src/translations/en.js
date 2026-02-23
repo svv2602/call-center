@@ -460,6 +460,24 @@ export default {
     'settings.sandboxDefaultsSaved': 'Sandbox defaults saved',
     'settings.sandboxDefaultsHint': 'Selected models will be used by default for new sandbox conversations and auto-customer.',
     'settings.sandboxNoProviders': 'No enabled providers',
+
+    'settings.ttsTitle': 'TTS Voice Settings',
+    'settings.ttsDesc': 'Google Cloud TTS voice settings: voice selection, speaking rate, and pitch. Changes apply to new calls without restart.',
+    'settings.ttsLoadConfig': 'Load TTS Settings',
+    'settings.ttsSource': 'Source',
+    'settings.ttsVoice': 'Voice',
+    'settings.ttsSpeakingRate': 'Speaking Rate',
+    'settings.ttsPitch': 'Pitch',
+    'settings.ttsTest': 'Test Voice',
+    'settings.ttsReset': 'Reset to Defaults',
+    'settings.ttsResetConfirm': 'Reset TTS settings to environment variable defaults?',
+    'settings.ttsSaved': 'TTS settings saved',
+    'settings.ttsSaveFailed': 'TTS save failed: {error}',
+    'settings.ttsResetDone': 'TTS settings reset to defaults',
+    'settings.ttsTesting': 'Synthesizing test phrase...',
+    'settings.ttsTestSuccess': 'Synthesis completed ({duration}ms)',
+    'settings.ttsTestFailed': 'Synthesis failed: {error}',
+    'settings.ttsLoadFailed': 'Failed to load TTS settings: {error}',
     // Telegram Notifications
     'settings.telegram': 'Telegram Notifications',
     'settings.telegramDesc': 'Configure Telegram bot for receiving Alertmanager alerts.',
@@ -1393,8 +1411,11 @@ export default {
     'help.configuration.tasks.title': 'Task routing',
     'help.configuration.tasks.content': '<p>Each LLM task type can be assigned to a specific provider with a fallback chain:</p><ul><li><strong>agent</strong> — main customer dialogue (most critical task)</li><li><strong>quality_scoring</strong> — call quality assessment</li><li><strong>article_processing</strong> — scraper article processing</li><li><strong>auto_customer</strong> — customer message generation in sandbox</li></ul><p>Each task has a <strong>primary provider</strong> and a <strong>fallback chain</strong> (used if primary fails). Fallback order determines priority.</p>',
 
+    'help.configuration.tts.title': 'TTS Voice Settings',
+    'help.configuration.tts.content': '<p>Manage Google Cloud TTS voice without restarting the system:</p><ul><li><strong>Voice</strong> — choose from available voices (Wavenet, Neural2, Chirp3-HD)</li><li><strong>Speaking Rate</strong> — from 0.25 (very slow) to 4.0 (very fast), recommended 0.85–1.0</li><li><strong>Pitch</strong> — from -20 to +20 semitones; not all voices support pitch</li></ul><p>The "Test Voice" button synthesizes a test phrase with current settings.</p>',
+
     'help.configuration.affects.title': 'What changes affect',
-    'help.configuration.affects.content': '<div class="help-affects"><p><strong>Disabling a provider</strong> — if it\'s the only one for a task with no fallbacks, that task will stop working.</p><p><strong>Changing model</strong> — instantly affects all new requests. A more powerful model = better quality, but more expensive and slower.</p><p><strong>Task routing</strong> — lets you use cheaper models for non-critical tasks (quality, scraping) and powerful ones for customer dialogues.</p></div>',
+    'help.configuration.affects.content': '<div class="help-affects"><p><strong>Disabling a provider</strong> — if it\'s the only one for a task with no fallbacks, that task will stop working.</p><p><strong>Changing model</strong> — instantly affects all new requests. A more powerful model = better quality, but more expensive and slower.</p><p><strong>Task routing</strong> — lets you use cheaper models for non-critical tasks (quality, scraping) and powerful ones for customer dialogues.</p><p><strong>TTS settings</strong> — new voice/rate/pitch apply to new calls; current calls continue with the old voice.</p></div>',
 
     'help.configuration.tips': '<ul><li>Use <strong>fallbacks</strong> for critical tasks (agent) — this protects against a single provider failure</li><li>For <strong>quality_scoring</strong> and <strong>article_processing</strong> tasks, cheaper models work fine</li><li>After changing a provider, click <strong>"Test"</strong> to verify it works</li><li><strong>Config reload</strong> doesn\'t interrupt current calls — changes apply to new requests</li></ul>',
 

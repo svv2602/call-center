@@ -51,6 +51,7 @@ from src.api.sandbox import router as sandbox_router
 from src.api.scraper import router as scraper_router
 from src.api.system import router as system_router
 from src.api.tenants import router as tenants_router
+from src.api.tts_config import router as tts_config_router
 from src.api.training_dialogues import router as training_dialogues_router
 from src.api.training_safety import router as training_safety_router
 from src.api.training_templates import router as training_templates_router
@@ -105,6 +106,7 @@ app.include_router(sandbox_router)
 app.include_router(scraper_router)
 app.include_router(system_router)
 app.include_router(tenants_router)
+app.include_router(tts_config_router)
 app.include_router(training_dialogues_router)
 app.include_router(training_safety_router)
 app.include_router(training_templates_router)
@@ -1469,6 +1471,9 @@ async def main() -> None:
             )
         )
         await _tts_engine.initialize()
+        from src.tts import set_engine as set_tts_engine
+
+        set_tts_engine(_tts_engine)
         logger.info("TTS engine initialized")
     except Exception:
         logger.warning(
