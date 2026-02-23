@@ -59,19 +59,19 @@ class TestTimeOfDayGreeting:
     @pytest.mark.parametrize(
         ("hour", "expected"),
         [
-            (5, "До́брий ра́нок"),
-            (6, "До́брий ра́нок"),
-            (7, "До́брий ра́нок"),
-            (11, "До́брий ра́нок"),
-            (12, "До́брий день"),
-            (15, "До́брий день"),
-            (17, "До́брий день"),
-            (18, "До́брий ве́чір"),
-            (22, "До́брий ве́чір"),
-            (23, "До́брої но́чі"),
-            (0, "До́брої но́чі"),
-            (3, "До́брої но́чі"),
-            (4, "До́брої но́чі"),
+            (5, "Добрий ранок"),
+            (6, "Добрий ранок"),
+            (7, "Добрий ранок"),
+            (11, "Добрий ранок"),
+            (12, "Добрий день"),
+            (15, "Добрий день"),
+            (17, "Добрий день"),
+            (18, "Добрий вечір"),
+            (22, "Добрий вечір"),
+            (23, "Доброї ночі"),
+            (0, "Доброї ночі"),
+            (3, "Доброї ночі"),
+            (4, "Доброї ночі"),
         ],
     )
     def test_greeting_by_hour(self, hour: int, expected: str) -> None:
@@ -84,7 +84,7 @@ class TestTimeOfDayGreeting:
     def test_greeting_replaces_placeholder_in_template(self) -> None:
         """Greeting template with '{time_greeting}' placeholder gets replaced."""
         assert "{time_greeting}" in GREETING_TEXT
-        morning = "До́брий ра́нок"
+        morning = "Добрий ранок"
         replaced = GREETING_TEXT.replace("{time_greeting}", morning)
         assert morning in replaced
         assert "{time_greeting}" not in replaced
@@ -96,7 +96,11 @@ class TestTimeOfDayGreeting:
 
 
 class TestStressMarks:
-    """Verify U+0301 combining acute accent is present in templates."""
+    """Verify U+0301 combining acute accent is NOT present in templates.
+
+    Stress marks were removed — Chirp3-HD voices ignore them and they
+    waste tokens.  These tests ensure no accidental re-introduction.
+    """
 
     ACCENT = "\u0301"  # combining acute accent
 
@@ -119,23 +123,22 @@ class TestStressMarks:
             FAREWELL_ORDER_TEXT,
         ],
     )
-    def test_template_has_stress_marks(self, text: str) -> None:
-        assert self.ACCENT in text, f"Missing stress marks in: {text!r}"
+    def test_template_has_no_stress_marks(self, text: str) -> None:
+        assert self.ACCENT not in text, f"Unexpected stress marks in: {text!r}"
 
-    def test_greeting_specific_accents(self) -> None:
-        # Key words must have accents (note: capital І in Інтерне́т)
-        assert "Інтерне́т-магази́н" in GREETING_TEXT
-        assert "Оле́на" in GREETING_TEXT
-        assert "автомати́чною" in GREETING_TEXT
+    def test_greeting_specific_words(self) -> None:
+        assert "Інтернет-магазин" in GREETING_TEXT
+        assert "Олена" in GREETING_TEXT
+        assert "автоматичною" in GREETING_TEXT
 
-    def test_farewell_specific_accents(self) -> None:
-        assert "Дя́кую" in FAREWELL_TEXT
-        assert "дзвіно́к" in FAREWELL_TEXT
+    def test_farewell_specific_words(self) -> None:
+        assert "Дякую" in FAREWELL_TEXT
+        assert "дзвінок" in FAREWELL_TEXT
 
-    def test_wait_specific_accents(self) -> None:
-        assert "Зачека́йте" in WAIT_TEXT
-        assert "ла́ска" in WAIT_TEXT
-        assert "дивлю́ся" in WAIT_TEXT
+    def test_wait_specific_words(self) -> None:
+        assert "Зачекайте" in WAIT_TEXT
+        assert "ласка" in WAIT_TEXT
+        assert "дивлюся" in WAIT_TEXT
 
 
 # ---------------------------------------------------------------------------

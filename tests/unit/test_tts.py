@@ -182,8 +182,8 @@ class TestSSMLFallback:
         assert actual_input.text == "Дякую за дзвінок!"
 
     @pytest.mark.asyncio
-    async def test_stress_marks_kept_for_wavenet_voice(self) -> None:
-        """Combining acute accents (U+0301) are preserved for Wavenet/Standard voices."""
+    async def test_stress_marks_stripped_for_wavenet_voice(self) -> None:
+        """Combining acute accents (U+0301) are stripped for all voices (including Wavenet)."""
         from unittest.mock import AsyncMock
 
         engine = GoogleTTSEngine()  # default: uk-UA-Wavenet-A
@@ -199,4 +199,4 @@ class TestSSMLFallback:
         await engine._synthesize_uncached("Дя\u0301кую за дзвіно\u0301к!")
 
         actual_input = engine._client.synthesize_speech.call_args.kwargs["input"]
-        assert actual_input.text == "Дя\u0301кую за дзвіно\u0301к!"
+        assert actual_input.text == "Дякую за дзвінок!"

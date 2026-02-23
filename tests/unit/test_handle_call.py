@@ -29,7 +29,8 @@ def _make_patches(
     """Build a dict of patches for handle_call dependencies."""
     return {
         "db_engine": db_engine,
-        "templates": templates or {
+        "templates": templates
+        or {
             "greeting": "Тестове привітання",
             "farewell": "Тестове прощання",
             "silence_prompt": "Тест тиша",
@@ -51,14 +52,18 @@ class TestHandleCallDBIntegration:
         p = _make_patches(db_engine=MagicMock())
         mock_pm = AsyncMock()
         mock_pm.get_active_templates = AsyncMock(return_value=p["templates"])
-        mock_pm.get_active_prompt = AsyncMock(return_value={"id": None, "name": "test", "system_prompt": "test"})
+        mock_pm.get_active_prompt = AsyncMock(
+            return_value={"id": None, "name": "test", "system_prompt": "test"}
+        )
 
         captured_pipeline_args: dict[str, Any] = {}
 
         class FakePipeline:
             def __init__(self, *args: Any, **kwargs: Any) -> None:
                 # Positional: conn, stt, tts, agent, session, stt_config, templates
-                captured_pipeline_args["templates"] = args[6] if len(args) > 6 else kwargs.get("templates")
+                captured_pipeline_args["templates"] = (
+                    args[6] if len(args) > 6 else kwargs.get("templates")
+                )
 
             async def run(self) -> None:
                 pass
@@ -69,7 +74,9 @@ class TestHandleCallDBIntegration:
             patch("src.main._tts_engine", MagicMock()),
             patch("src.main._store_client", MagicMock()),
             patch("src.main.PromptManager", return_value=mock_pm),
-            patch("src.main.get_tools_with_overrides", new_callable=AsyncMock, return_value=p["tools"]),
+            patch(
+                "src.main.get_tools_with_overrides", new_callable=AsyncMock, return_value=p["tools"]
+            ),
             patch("src.main.GoogleSTTEngine", return_value=MagicMock()),
             patch("src.main.LLMAgent", return_value=MagicMock()),
             patch("src.main.CallPipeline", FakePipeline),
@@ -92,7 +99,9 @@ class TestHandleCallDBIntegration:
         p = _make_patches(db_engine=MagicMock())
         mock_pm = AsyncMock()
         mock_pm.get_active_templates = AsyncMock(return_value=p["templates"])
-        mock_pm.get_active_prompt = AsyncMock(return_value={"id": None, "name": "test", "system_prompt": "test"})
+        mock_pm.get_active_prompt = AsyncMock(
+            return_value={"id": None, "name": "test", "system_prompt": "test"}
+        )
 
         captured_agent_kwargs: dict[str, Any] = {}
 
@@ -178,7 +187,11 @@ class TestHandleCallDBIntegration:
             patch("src.main._tts_engine", MagicMock()),
             patch("src.main._store_client", MagicMock()),
             patch("src.main.PromptManager", return_value=mock_pm),
-            patch("src.main.get_tools_with_overrides", new_callable=AsyncMock, side_effect=RuntimeError("DB down")),
+            patch(
+                "src.main.get_tools_with_overrides",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("DB down"),
+            ),
             patch("src.main.GoogleSTTEngine", return_value=MagicMock()),
             patch("src.main.LLMAgent", return_value=MagicMock()),
             patch("src.main.CallPipeline") as mock_pipeline_cls,
@@ -198,7 +211,9 @@ class TestHandleCallDBIntegration:
 class TestHandleCallTenantIntegration:
     """Test tenant-related behavior in handle_call."""
 
-    def _base_patches(self, db_engine: Any = None, tenant: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _base_patches(
+        self, db_engine: Any = None, tenant: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         """Return common patch set for tenant tests."""
         return {
             "db_engine": db_engine or MagicMock(),
@@ -236,7 +251,9 @@ class TestHandleCallTenantIntegration:
         p = _make_patches(db_engine=MagicMock())
         mock_pm = AsyncMock()
         mock_pm.get_active_templates = AsyncMock(return_value=p["templates"])
-        mock_pm.get_active_prompt = AsyncMock(return_value={"id": None, "name": "test", "system_prompt": "test"})
+        mock_pm.get_active_prompt = AsyncMock(
+            return_value={"id": None, "name": "test", "system_prompt": "test"}
+        )
 
         with (
             patch("src.main._db_engine", p["db_engine"]),
@@ -245,7 +262,9 @@ class TestHandleCallTenantIntegration:
             patch("src.main._store_client", MagicMock()),
             patch("src.main._resolve_tenant", new_callable=AsyncMock, return_value=tenant),
             patch("src.main.PromptManager", return_value=mock_pm),
-            patch("src.main.get_tools_with_overrides", new_callable=AsyncMock, return_value=p["tools"]),
+            patch(
+                "src.main.get_tools_with_overrides", new_callable=AsyncMock, return_value=p["tools"]
+            ),
             patch("src.main.GoogleSTTEngine", return_value=MagicMock()),
             patch("src.main.LLMAgent", return_value=MagicMock()),
             patch("src.main.CallPipeline", FakePipeline),
@@ -298,7 +317,9 @@ class TestHandleCallTenantIntegration:
         p = _make_patches(db_engine=MagicMock(), tools=all_tools)
         mock_pm = AsyncMock()
         mock_pm.get_active_templates = AsyncMock(return_value=p["templates"])
-        mock_pm.get_active_prompt = AsyncMock(return_value={"id": None, "name": "test", "system_prompt": "test"})
+        mock_pm.get_active_prompt = AsyncMock(
+            return_value={"id": None, "name": "test", "system_prompt": "test"}
+        )
 
         with (
             patch("src.main._db_engine", p["db_engine"]),
@@ -307,7 +328,9 @@ class TestHandleCallTenantIntegration:
             patch("src.main._store_client", MagicMock()),
             patch("src.main._resolve_tenant", new_callable=AsyncMock, return_value=tenant),
             patch("src.main.PromptManager", return_value=mock_pm),
-            patch("src.main.get_tools_with_overrides", new_callable=AsyncMock, return_value=all_tools),
+            patch(
+                "src.main.get_tools_with_overrides", new_callable=AsyncMock, return_value=all_tools
+            ),
             patch("src.main.GoogleSTTEngine", return_value=MagicMock()),
             patch("src.main.LLMAgent", FakeAgent),
             patch("src.main.CallPipeline") as mock_pipeline_cls,
@@ -348,7 +371,9 @@ class TestHandleCallTenantIntegration:
 
         class FakePipeline:
             def __init__(self, *args: Any, **kwargs: Any) -> None:
-                captured_pipeline_args["templates"] = args[6] if len(args) > 6 else kwargs.get("templates")
+                captured_pipeline_args["templates"] = (
+                    args[6] if len(args) > 6 else kwargs.get("templates")
+                )
 
             async def run(self) -> None:
                 pass
@@ -356,7 +381,9 @@ class TestHandleCallTenantIntegration:
         p = _make_patches(db_engine=MagicMock())
         mock_pm = AsyncMock()
         mock_pm.get_active_templates = AsyncMock(return_value=p["templates"])
-        mock_pm.get_active_prompt = AsyncMock(return_value={"id": None, "name": "test", "system_prompt": "test"})
+        mock_pm.get_active_prompt = AsyncMock(
+            return_value={"id": None, "name": "test", "system_prompt": "test"}
+        )
 
         with (
             patch("src.main._db_engine", p["db_engine"]),
@@ -365,7 +392,9 @@ class TestHandleCallTenantIntegration:
             patch("src.main._store_client", MagicMock()),
             patch("src.main._resolve_tenant", new_callable=AsyncMock, return_value=tenant),
             patch("src.main.PromptManager", return_value=mock_pm),
-            patch("src.main.get_tools_with_overrides", new_callable=AsyncMock, return_value=p["tools"]),
+            patch(
+                "src.main.get_tools_with_overrides", new_callable=AsyncMock, return_value=p["tools"]
+            ),
             patch("src.main.GoogleSTTEngine", return_value=MagicMock()),
             patch("src.main.LLMAgent", return_value=MagicMock()),
             patch("src.main.CallPipeline", FakePipeline),
@@ -409,11 +438,13 @@ class TestHandleCallTenantIntegration:
         p = _make_patches(db_engine=MagicMock())
         mock_pm = AsyncMock()
         mock_pm.get_active_templates = AsyncMock(return_value=p["templates"])
-        mock_pm.get_active_prompt = AsyncMock(return_value={
-            "id": "test-id",
-            "name": "v2.1",
-            "system_prompt": "Ти — помічник магазину шин.",
-        })
+        mock_pm.get_active_prompt = AsyncMock(
+            return_value={
+                "id": "test-id",
+                "name": "v2.1",
+                "system_prompt": "Ти — помічник магазину шин.",
+            }
+        )
 
         with (
             patch("src.main._db_engine", p["db_engine"]),
@@ -422,7 +453,9 @@ class TestHandleCallTenantIntegration:
             patch("src.main._store_client", MagicMock()),
             patch("src.main._resolve_tenant", new_callable=AsyncMock, return_value=tenant),
             patch("src.main.PromptManager", return_value=mock_pm),
-            patch("src.main.get_tools_with_overrides", new_callable=AsyncMock, return_value=p["tools"]),
+            patch(
+                "src.main.get_tools_with_overrides", new_callable=AsyncMock, return_value=p["tools"]
+            ),
             patch("src.main.GoogleSTTEngine", return_value=MagicMock()),
             patch("src.main.LLMAgent", FakeAgent),
             patch("src.main.CallPipeline") as mock_pipeline_cls,
@@ -464,7 +497,9 @@ class TestHandleCallTenantIntegration:
         p = _make_patches(db_engine=MagicMock())
         mock_pm = AsyncMock()
         mock_pm.get_active_templates = AsyncMock(return_value=p["templates"])
-        mock_pm.get_active_prompt = AsyncMock(return_value={"id": None, "name": "test", "system_prompt": "test"})
+        mock_pm.get_active_prompt = AsyncMock(
+            return_value={"id": None, "name": "test", "system_prompt": "test"}
+        )
 
         with (
             patch("src.main._db_engine", p["db_engine"]),
@@ -473,7 +508,9 @@ class TestHandleCallTenantIntegration:
             patch("src.main._store_client", MagicMock()),
             patch("src.main._resolve_tenant", new_callable=AsyncMock, return_value=tenant),
             patch("src.main.PromptManager", return_value=mock_pm),
-            patch("src.main.get_tools_with_overrides", new_callable=AsyncMock, return_value=p["tools"]),
+            patch(
+                "src.main.get_tools_with_overrides", new_callable=AsyncMock, return_value=p["tools"]
+            ),
             patch("src.main.GoogleSTTEngine", return_value=MagicMock()),
             patch("src.main.LLMAgent", return_value=MagicMock()),
             patch("src.main.CallPipeline") as mock_pipeline_cls,

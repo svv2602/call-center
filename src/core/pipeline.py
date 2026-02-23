@@ -64,12 +64,12 @@ def _time_of_day_greeting() -> str:
     """Return a Ukrainian greeting appropriate for the current Kyiv time."""
     hour = datetime.datetime.now(tz=_KYIV_TZ).hour
     if 5 <= hour < 12:
-        return "До́брий ра́нок"
+        return "Добрий ранок"
     if 12 <= hour < 18:
-        return "До́брий день"
+        return "Добрий день"
     if 18 <= hour < 23:
-        return "До́брий ве́чір"
-    return "До́брої но́чі"
+        return "Добрий вечір"
+    return "Доброї ночі"
 
 
 # --- Contextual wait-phrase selection with rotation ---
@@ -107,20 +107,20 @@ def _rotate(pool: list[str]) -> str:
 
 # --- Contextual farewell prompt ---
 
-# --- Scenario-specific greeting suffixes (stress-marked for TTS) ---
+# --- Scenario-specific greeting suffixes ---
 
 _SCENARIO_GREETING_SUFFIX: dict[str, str] = {
-    "tire_search": "Допомо́жу підібра́ти ши́ни.",
-    "order_status": "Переві́рю ста́тус ва́шого замо́влення.",
-    "fitting": "Запишу́ вас на шиномонта́ж.",
-    "consultation": "Гото́ва відпові́сти на ва́ші пита́ння.",
+    "tire_search": "Допоможу підібрати шини.",
+    "order_status": "Перевірю статус вашого замовлення.",
+    "fitting": "Запишу вас на шиномонтаж.",
+    "consultation": "Готова відповісти на ваші питання.",
 }
 
 
 _FAREWELL_SYSTEM_PROMPT = (
     "Ти — голосовий асистент інтернет-магазину шин Олена. "
-    "Клієнт мовчить. Згенеруй коро́тке проща́ння (1 ре́чення українською), "
-    "підсумуй результа́т розмо́ви. Подя́куй за дзвіно́к."
+    "Клієнт мовчить. Згенеруй коротке прощання (1 речення українською), "
+    "підсумуй результат розмови. Подякуй за дзвінок."
 )
 
 if TYPE_CHECKING:
@@ -347,9 +347,7 @@ class CallPipeline:
                     logger.warning("Pattern search failed, continuing without", exc_info=True)
 
             # Compute order stage for stage-aware prompt injection
-            order_stage = compute_order_stage(
-                self._session.order_draft, self._session.order_id
-            )
+            order_stage = compute_order_stage(self._session.order_draft, self._session.order_id)
 
             if self._streaming_loop is not None:
                 # STREAMING PATH — add user turn to session (streaming loop uses separate _llm_history)
@@ -358,7 +356,9 @@ class CallPipeline:
                     stt_confidence=transcript.confidence,
                     detected_language=transcript.language,
                 )
-                await self._log_turn("customer", transcript.text, stt_confidence=transcript.confidence)
+                await self._log_turn(
+                    "customer", transcript.text, stt_confidence=transcript.confidence
+                )
                 self._session.transition_to(CallState.SPEAKING)
                 start = time.monotonic()
                 try:
@@ -449,7 +449,9 @@ class CallPipeline:
                     stt_confidence=transcript.confidence,
                     detected_language=transcript.language,
                 )
-                await self._log_turn("customer", transcript.text, stt_confidence=transcript.confidence)
+                await self._log_turn(
+                    "customer", transcript.text, stt_confidence=transcript.confidence
+                )
 
                 logger.info(
                     "Turn completed: call=%s, user='%s', agent='%s', llm=%dms",

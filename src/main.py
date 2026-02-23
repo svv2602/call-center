@@ -713,18 +713,18 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             alternative_languages=settings.google_stt.alternative_language_list,
         )
 
-        # Load DB templates, tool overrides, and active prompt (if DB is available)
+        # Load DB templates, tool overrides, and active prompt in parallel
         templates = None
         tools = None
         system_prompt = None
         prompt_version_name = None
         if _db_engine is not None:
             pm = PromptManager(_db_engine)
-            templates = await pm.get_active_templates()
-            tools = await get_tools_with_overrides(_db_engine, redis=_redis)
-
-            # Load active prompt version from DB
-            active_prompt = await pm.get_active_prompt()
+            templates, tools, active_prompt = await asyncio.gather(
+                pm.get_active_templates(),
+                get_tools_with_overrides(_db_engine, redis=_redis),
+                pm.get_active_prompt(),
+            )
             if active_prompt.get("id") is not None:
                 system_prompt = active_prompt["system_prompt"]
                 prompt_version_name = active_prompt["name"]
@@ -749,22 +749,60 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             except Exception:
                 logger.warning("A/B test assignment failed, using default prompt", exc_info=True)
 
-        # Load few-shot dialogue examples and safety rules (if DB available)
+        # Load few-shot, safety rules, pronunciation, and promotions in parallel
         few_shot_context = None
         safety_context = None
-        if _db_engine is not None:
+        promotions_context = None
+
+        async def _load_few_shot() -> dict:
+            if _db_engine is None:
+                return {}
             try:
-                few_shot_examples = await get_few_shot_examples(_db_engine, _redis)
-                few_shot_context = format_few_shot_section(
-                    few_shot_examples, scenario_type=session.scenario
-                )
+                return await get_few_shot_examples(_db_engine, _redis)
             except Exception:
                 logger.debug("Few-shot examples loading failed", exc_info=True)
+                return {}
+
+        async def _load_safety() -> list:
+            if _db_engine is None:
+                return []
             try:
-                safety_rules_extra = await get_safety_rules_for_prompt(_db_engine, _redis)
-                safety_context = format_safety_rules_section(safety_rules_extra)
+                return await get_safety_rules_for_prompt(_db_engine, _redis)
             except Exception:
                 logger.debug("Safety rules loading failed", exc_info=True)
+                return []
+
+        async def _load_pronunciation() -> str:
+            if _redis is None:
+                return ""
+            try:
+                return await get_pronunciation_rules(_redis)
+            except Exception:
+                logger.debug("Pronunciation rules loading failed", exc_info=True)
+                return ""
+
+        async def _load_promotions() -> list:
+            if _db_engine is None or not session.tenant_id:
+                return []
+            try:
+                return await fetch_tenant_promotions(
+                    _db_engine, str(session.tenant_id), redis=_redis
+                )
+            except Exception:
+                logger.debug("Tenant promotions loading failed", exc_info=True)
+                return []
+
+        few_shot_examples, safety_rules_extra, pron_rules, promos = await asyncio.gather(
+            _load_few_shot(),
+            _load_safety(),
+            _load_pronunciation(),
+            _load_promotions(),
+        )
+        few_shot_context = format_few_shot_section(
+            few_shot_examples, scenario_type=session.scenario
+        )
+        safety_context = format_safety_rules_section(safety_rules_extra)
+        promotions_context = format_promotions_context(promos)
 
         # Modular prompt assembly: if no DB/A-B prompt, assemble from modules
         is_modular = False
@@ -775,16 +813,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             )
             is_modular = True
 
-        # Inject pronunciation rules from Redis into system prompt
-        if _redis is not None:
-            pron_rules = await get_pronunciation_rules(_redis)
+        # Inject pronunciation rules into system prompt
+        if pron_rules:
             system_prompt = inject_pronunciation_rules(system_prompt, pron_rules)
-
-        # Load tenant promotions into prompt context
-        promotions_context = None
-        if _db_engine is not None and session.tenant_id:
-            promos = await fetch_tenant_promotions(_db_engine, str(session.tenant_id), redis=_redis)
-            promotions_context = format_promotions_context(promos)
 
         # Apply tenant overrides (tools filter, greeting, prompt suffix)
         if tenant:

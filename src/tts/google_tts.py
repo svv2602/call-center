@@ -37,9 +37,9 @@ logger = logging.getLogger(__name__)
 # Sentence-splitting pattern (split on ., !, ? followed by space or end)
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 
-# Combining acute accent (U+0301) used for stress marks in prompts.
-# Standard/Wavenet voices use these marks for correct stress placement.
-# Chirp3-HD rejects them outright — strip only for Chirp voices.
+# Combining acute accent (U+0301) — strip unconditionally.
+# Stress marks are no longer used in prompts; strip any residual ones
+# that may come from LLM output or external content.
 _COMBINING_ACUTE = "\u0301"
 
 # TTS pronunciation substitutions — applied before SSML conversion.
@@ -116,9 +116,6 @@ class GoogleTTSEngine:
         self._cache_hits = 0
         self._cache_misses = 0
         self._ssml_supported: bool = True
-        # Chirp voices reject combining accent marks (U+0301);
-        # Standard/Wavenet voices use them for correct stress placement
-        self._strip_stress_marks: bool = "chirp" in self._config.voice_name.lower()
 
     async def initialize(self) -> None:
         """Initialize the TTS client and pre-cache common phrases."""
@@ -175,8 +172,8 @@ class GoogleTTSEngine:
         tts_cache_misses_total.inc()
         audio = await self._synthesize_uncached(text)
 
-        # Cache short phrases (likely to repeat)
-        if len(text) < 100:
+        # Cache short phrases (likely to repeat — most agent responses are <200 chars)
+        if len(text) < 200:
             self._cache[key] = audio
 
         return audio
@@ -200,8 +197,13 @@ class GoogleTTSEngine:
 
     @staticmethod
     def _cache_key(text: str) -> str:
-        """Generate a cache key for a text string."""
-        return hashlib.sha256(text.encode()).hexdigest()
+        """Generate a cache key for a text string.
+
+        Strips combining acute accents (U+0301) before hashing so that
+        texts with/without stress marks map to the same cache entry.
+        """
+        normalized = text.replace(_COMBINING_ACUTE, "")
+        return hashlib.sha256(normalized.encode()).hexdigest()
 
     @staticmethod
     def _to_ssml(text: str) -> str:
@@ -222,14 +224,13 @@ class GoogleTTSEngine:
 
         Some voices (e.g. Chirp3-HD) don't support SSML.  On first SSML
         failure we downgrade to plain text for all subsequent calls.
-        Combining accent marks (stress hints from prompts) are stripped —
-        TTS engines handle pronunciation natively.
+        Combining accent marks are always stripped — Chirp3 voices reject them,
+        and stress marks are no longer used in prompts.
         """
         if self._client is None:
             raise RuntimeError("TTS not initialized — call initialize() first")
 
-        if self._strip_stress_marks:
-            text = text.replace(_COMBINING_ACUTE, "")
+        text = text.replace(_COMBINING_ACUTE, "")
 
         for pattern, replacement in _TTS_SUBSTITUTIONS:
             text = pattern.sub(replacement, text)
