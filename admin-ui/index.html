@@ -1059,6 +1059,16 @@
         </div>
     </div>
 
+    <!-- Batch Replay Modal -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxBatchReplayModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-lg w-[90%] max-h-[80vh] overflow-y-auto">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxBatchReplayModal')">&times;</span>
+            <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.batchReplay">Пакетная регрессия</h3>
+            <div id="sandboxBatchReplayBody"></div>
+            <button onclick="window._pages.sandbox.submitBatchReplay()" class="w-full py-2 mt-3 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="sandbox.runBatchReplay">Запустить пакетную регрессию</button>
+        </div>
+    </div>
+
     <!-- Import Call Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxImportCallModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-6xl w-[95%] max-h-[85vh] overflow-hidden flex flex-col">

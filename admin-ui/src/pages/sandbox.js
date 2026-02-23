@@ -1066,13 +1066,12 @@ async function loadRegressionRuns() {
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
 
     try {
-        const data = await api('/admin/sandbox/regression-runs?limit=50');
-        const items = data.items || [];
+        const verdictFilter = document.getElementById('regressionVerdictFilter')?.value || '';
+        let url = '/admin/sandbox/regression-runs?limit=50';
+        if (verdictFilter) url += `&verdict=${verdictFilter}`;
 
-        if (items.length === 0) {
-            container.innerHTML = `<div class="${tw.emptyState}">${t('sandbox.noRegressions')}</div>`;
-            return;
-        }
+        const data = await api(url);
+        const items = data.items || [];
 
         function statusBadge(s) {
             const map = {
@@ -1090,26 +1089,53 @@ async function loadRegressionRuns() {
             return `<span class="${map[s] || tw.badge}">${labelMap[s] || s}</span>`;
         }
 
+        function verdictBadge(v) {
+            if (v === 'approved') return `<span class="${tw.badgeGreen}">${t('sandbox.approved')}</span>`;
+            if (v === 'rejected') return `<span class="${tw.badgeRed}">${t('sandbox.rejected')}</span>`;
+            return `<span class="${tw.badge}">${t('sandbox.pendingVerdict')}</span>`;
+        }
+
+        const filterBar = `
+            <div class="flex gap-2 mb-3 items-center flex-wrap">
+                <select id="regressionVerdictFilter" onchange="window._pages.sandbox.loadRegressionRuns()"
+                    class="px-2 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100">
+                    <option value="">${t('sandbox.all')}</option>
+                    <option value="pending" ${verdictFilter === 'pending' ? 'selected' : ''}>${t('sandbox.pendingVerdict')}</option>
+                    <option value="approved" ${verdictFilter === 'approved' ? 'selected' : ''}>${t('sandbox.approved')}</option>
+                    <option value="rejected" ${verdictFilter === 'rejected' ? 'selected' : ''}>${t('sandbox.rejected')}</option>
+                </select>
+                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.showBatchReplayModal()">${t('sandbox.batchReplay')}</button>
+            </div>`;
+
+        if (items.length === 0) {
+            container.innerHTML = filterBar + `<div class="${tw.emptyState}">${t('sandbox.noRegressions')}</div>`;
+            return;
+        }
+
         const rows = items.map(item => `
-            <tr class="${tw.trHover} cursor-pointer" onclick="window._pages.sandbox.showRegressionDetail('${item.id}')">
-                <td class="${tw.td}" data-label="${t('sandbox.conversationTitle')}">${escapeHtml(item.source_title || '-')}</td>
+            <tr class="${tw.trHover}">
+                <td class="${tw.td} cursor-pointer" onclick="window._pages.sandbox.showRegressionDetail('${item.id}')" data-label="${t('sandbox.conversationTitle')}">${escapeHtml(item.source_title || '-')}</td>
                 <td class="${tw.td}" data-label="${t('sandbox.promptVersion')}">${item.prompt_version_name ? `<span class="${tw.badgeBlue}">${escapeHtml(item.prompt_version_name)}</span>` : '-'}</td>
                 <td class="${tw.td}" data-label="${t('sandbox.status')}">${statusBadge(item.status)}</td>
+                <td class="${tw.td}" data-label="${t('sandbox.verdict')}">${verdictBadge(item.verdict)}</td>
                 <td class="${tw.td}" data-label="${t('sandbox.turnsCompared')}">${item.turns_compared || '-'}</td>
                 <td class="${tw.td}" data-label="${t('sandbox.sourceRating')}">${item.avg_source_rating != null ? parseFloat(item.avg_source_rating).toFixed(1) : '-'}</td>
-                <td class="${tw.td}" data-label="${t('sandbox.error')}">${item.error_message ? `<span class="${tw.mutedText}">${escapeHtml(item.error_message.substring(0, 50))}</span>` : '-'}</td>
                 <td class="${tw.td}" data-label="${t('sandbox.lastActivity')}">${formatDate(item.created_at)}</td>
+                <td class="${tw.td}">
+                    <button class="text-red-500 hover:text-red-700 text-xs" onclick="event.stopPropagation();window._pages.sandbox.deleteRegressionRun('${item.id}')">${t('sandbox.deleteRun')}</button>
+                </td>
             </tr>`).join('');
 
-        container.innerHTML = `
+        container.innerHTML = filterBar + `
             <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}"><thead><tr>
                 <th class="${tw.th}">${t('sandbox.conversationTitle')}</th>
                 <th class="${tw.th}">${t('sandbox.promptVersion')}</th>
                 <th class="${tw.th}">${t('sandbox.status')}</th>
+                <th class="${tw.th}">${t('sandbox.verdict')}</th>
                 <th class="${tw.th}">${t('sandbox.turnsCompared')}</th>
                 <th class="${tw.th}">${t('sandbox.sourceRating')}</th>
-                <th class="${tw.th}">${t('sandbox.error')}</th>
                 <th class="${tw.th}">${t('sandbox.lastActivity')}</th>
+                <th class="${tw.th}"></th>
             </tr></thead><tbody>${rows}</tbody></table></div>`;
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('sandbox.loadFailed', { error: escapeHtml(e.message) })}</div>`;
@@ -1126,18 +1152,40 @@ async function showRegressionDetail(runId) {
         const summary = item.summary || {};
         const diffs = summary.turn_diffs || [];
 
+        function similarityBadge(score) {
+            if (score == null) return '';
+            const pct = Math.round(score * 100);
+            let cls = tw.badgeRed;
+            if (pct >= 85) cls = tw.badgeGreen;
+            else if (pct >= 60) cls = tw.badgeYellow;
+            return `<span class="${cls}" title="${t('sandbox.semanticSimilarity')}">${pct}%</span>`;
+        }
+
+        function starRating(turnNumber, currentRating) {
+            let html = '<span class="inline-flex gap-0.5" title="' + t('sandbox.rateNewResponse') + '">';
+            for (let i = 1; i <= 5; i++) {
+                const filled = currentRating && i <= currentRating;
+                html += `<span class="cursor-pointer text-sm ${filled ? 'text-yellow-400' : 'text-neutral-300 dark:text-neutral-600'}" onclick="event.stopPropagation();window._pages.sandbox.rateRegressionTurn('${runId}',${turnNumber},${i})">★</span>`;
+            }
+            html += '</span>';
+            return html;
+        }
+
         let diffsHtml = '';
         if (diffs.length > 0) {
             diffsHtml = diffs.map(d => `
                 <div class="${tw.card}">
-                    <div class="${tw.mutedText} mb-1">Turn ${d.turn_number}: ${escapeHtml(d.customer_message)}</div>
+                    <div class="flex items-center gap-2 mb-1">
+                        <span class="${tw.mutedText}">Turn ${d.turn_number}: ${escapeHtml(d.customer_message)}</span>
+                        ${similarityBadge(d.similarity_score)}
+                    </div>
                     <div class="grid grid-cols-2 gap-3">
                         <div>
-                            <div class="text-xs font-semibold text-neutral-500 mb-1">${t('sandbox.sourceResponse')}</div>
+                            <div class="text-xs font-semibold text-neutral-500 mb-1">${t('sandbox.sourceResponse')} ${d.source_rating ? `<span class="text-yellow-400">${'★'.repeat(d.source_rating)}</span>` : ''}</div>
                             <div class="text-sm bg-neutral-50 dark:bg-neutral-800 rounded p-2">${escapeHtml(d.source_response)}</div>
                         </div>
                         <div>
-                            <div class="text-xs font-semibold text-neutral-500 mb-1">${t('sandbox.newResponse')}</div>
+                            <div class="text-xs font-semibold text-neutral-500 mb-1">${t('sandbox.newResponse')} ${starRating(d.turn_number, d.new_rating)}</div>
                             <div class="text-sm bg-emerald-50 dark:bg-emerald-950/30 rounded p-2">${escapeHtml(d.new_response)}</div>
                         </div>
                     </div>
@@ -1149,19 +1197,39 @@ async function showRegressionDetail(runId) {
                 </div>`).join('');
         }
 
+        const isCompleted = item.status === 'completed';
+        function verdictBadge(v) {
+            if (v === 'approved') return `<span class="${tw.badgeGreen}">${t('sandbox.approved')}</span>`;
+            if (v === 'rejected') return `<span class="${tw.badgeRed}">${t('sandbox.rejected')}</span>`;
+            return `<span class="${tw.badge}">${t('sandbox.pendingVerdict')}</span>`;
+        }
+
+        const verdictButtons = isCompleted ? `
+            <div class="flex gap-2 items-center">
+                ${verdictBadge(item.verdict)}
+                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.setVerdict('${runId}','approved')">${t('sandbox.approve')}</button>
+                <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.setVerdict('${runId}','rejected')">${t('sandbox.reject')}</button>
+            </div>` : '';
+
         container.innerHTML = `
-            <div class="mb-3">
+            <div class="mb-3 flex gap-2 items-center">
                 <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.sandbox.loadRegressionRuns()">&larr; ${t('sandbox.regression')}</button>
+                <button class="text-red-500 hover:text-red-700 text-sm" onclick="window._pages.sandbox.deleteRegressionRun('${runId}')">${t('sandbox.deleteRun')}</button>
             </div>
             <div class="${tw.card}">
-                <div class="grid grid-cols-4 gap-4 mb-3">
-                    <div><span class="${tw.mutedText}">${t('sandbox.status')}</span><br>${escapeHtml(item.status)}</div>
-                    <div><span class="${tw.mutedText}">${t('sandbox.turnsCompared')}</span><br>${item.turns_compared || 0}</div>
-                    <div><span class="${tw.mutedText}">${t('sandbox.sourceRating')}</span><br>${item.avg_source_rating != null ? parseFloat(item.avg_source_rating).toFixed(1) : '-'}</div>
-                    <div><span class="${tw.mutedText}">${t('sandbox.promptVersion')}</span><br>${escapeHtml(item.prompt_version_name || '-')}</div>
+                <div class="flex justify-between items-start mb-3">
+                    <div class="grid grid-cols-3 sm:grid-cols-6 gap-4 flex-1">
+                        <div><span class="${tw.mutedText}">${t('sandbox.status')}</span><br>${escapeHtml(item.status)}</div>
+                        <div><span class="${tw.mutedText}">${t('sandbox.turnsCompared')}</span><br>${item.turns_compared || 0}</div>
+                        <div><span class="${tw.mutedText}">${t('sandbox.sourceRating')}</span><br>${item.avg_source_rating != null ? parseFloat(item.avg_source_rating).toFixed(1) : '-'}</div>
+                        <div><span class="${tw.mutedText}">${t('sandbox.newRating')}</span><br>${item.avg_new_rating != null ? parseFloat(item.avg_new_rating).toFixed(1) : '-'}</div>
+                        <div><span class="${tw.mutedText}">${t('sandbox.avgSimilarity')}</span><br>${summary.avg_similarity != null ? Math.round(summary.avg_similarity * 100) + '%' : '-'}</div>
+                        <div><span class="${tw.mutedText}">${t('sandbox.promptVersion')}</span><br>${escapeHtml(item.prompt_version_name || '-')}</div>
+                    </div>
                 </div>
-                ${item.error_message ? `<div class="${tw.badgeRed} mb-2">${escapeHtml(item.error_message)}</div>` : ''}
-                ${item.new_conversation_id ? `<button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.openConversation('${item.new_conversation_id}');window._pages.sandbox.showTab('chat')">${t('sandbox.openNewConversation')}</button>` : ''}
+                ${verdictButtons}
+                ${item.error_message ? `<div class="${tw.badgeRed} mb-2 mt-2">${escapeHtml(item.error_message)}</div>` : ''}
+                ${item.new_conversation_id ? `<button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="window._pages.sandbox.openConversation('${item.new_conversation_id}');window._pages.sandbox.showTab('chat')">${t('sandbox.openNewConversation')}</button>` : ''}
             </div>
             ${diffsHtml}`;
     } catch (e) {
@@ -1216,6 +1284,120 @@ async function submitReplay() {
         showToast(t('sandbox.regressionFailed', { error: e.message }), 'error');
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = t('sandbox.submitReplay'); }
+    }
+}
+
+async function deleteRegressionRun(runId) {
+    if (!confirm(t('sandbox.deleteRunConfirm'))) return;
+    try {
+        await api(`/admin/sandbox/regression-runs/${runId}`, { method: 'DELETE' });
+        showToast(t('sandbox.runDeleted'));
+        loadRegressionRuns();
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function rateRegressionTurn(runId, turnNumber, rating) {
+    try {
+        await api(`/admin/sandbox/regression-runs/${runId}/rate`, {
+            method: 'PATCH',
+            body: JSON.stringify({ turn_number: turnNumber, rating }),
+        });
+        showToast(t('sandbox.ratingSaved'));
+        showRegressionDetail(runId);
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function setVerdict(runId, verdict) {
+    try {
+        await api(`/admin/sandbox/regression-runs/${runId}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ verdict }),
+        });
+        showToast(t('sandbox.verdictSet'));
+        showRegressionDetail(runId);
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function showBatchReplayModal() {
+    const modalBody = document.getElementById('sandboxBatchReplayBody');
+    if (!modalBody) return;
+    modalBody.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+    document.getElementById('sandboxBatchReplayModal').classList.add('show');
+
+    try {
+        // Load baselines
+        const convData = await api('/admin/sandbox/conversations?limit=200&status=active');
+        const baselines = (convData.items || []).filter(c => c.is_baseline);
+
+        // Load prompt versions
+        const pvData = await api('/prompts');
+        const versions = pvData.versions || pvData.items || [];
+
+        if (baselines.length === 0) {
+            modalBody.innerHTML = `<div class="${tw.emptyState}">${t('sandbox.noBaselines')}</div>`;
+            return;
+        }
+
+        const versionOptions = versions.map(v => {
+            const activeLabel = v.is_active ? ' *' : '';
+            return `<option value="${v.id}">${escapeHtml(v.name)}${activeLabel}</option>`;
+        }).join('');
+
+        const checkboxes = baselines.map(b => `
+            <label class="flex items-center gap-2 text-sm py-1">
+                <input type="checkbox" name="batchConvId" value="${b.id}" class="rounded">
+                <span>${escapeHtml(b.title)}</span>
+                <span class="${tw.mutedText}">(${b.turns_count || 0} ${t('sandbox.turnsCount').toLowerCase()})</span>
+            </label>`).join('');
+
+        modalBody.innerHTML = `
+            <div class="mb-3">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('sandbox.promptVersion')}</label>
+                <select id="batchReplayPrompt" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100">${versionOptions}</select>
+            </div>
+            <div class="mb-3">
+                <div class="flex justify-between items-center mb-1">
+                    <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300">${t('sandbox.selectBaselines')}</label>
+                    <button type="button" class="text-xs text-blue-600 hover:text-blue-800" onclick="document.querySelectorAll('#sandboxBatchReplayBody input[name=batchConvId]').forEach(c=>c.checked=true)">${t('sandbox.selectAllBaselines')}</button>
+                </div>
+                <div class="max-h-[300px] overflow-y-auto border border-neutral-200 dark:border-neutral-700 rounded p-2">${checkboxes}</div>
+            </div>`;
+    } catch (e) {
+        modalBody.innerHTML = `<div class="${tw.emptyState}">${e.message}</div>`;
+    }
+}
+
+async function submitBatchReplay() {
+    const checked = document.querySelectorAll('#sandboxBatchReplayBody input[name=batchConvId]:checked');
+    const ids = Array.from(checked).map(c => c.value);
+    if (ids.length === 0) {
+        showToast(t('sandbox.batchSelectRequired'), 'error');
+        return;
+    }
+    const promptId = document.getElementById('batchReplayPrompt')?.value;
+    if (!promptId) return;
+
+    const btn = document.querySelector('#sandboxBatchReplayModal button[onclick*="submitBatchReplay"]');
+    if (btn) { btn.disabled = true; btn.textContent = t('sandbox.batchRunning'); }
+
+    try {
+        const data = await api('/admin/sandbox/regression-runs/batch', {
+            method: 'POST',
+            body: JSON.stringify({ conversation_ids: ids, new_prompt_version_id: promptId }),
+        });
+        closeModal('sandboxBatchReplayModal');
+        showToast(t('sandbox.batchCompleted', { completed: data.completed, failed: data.failed }));
+        loadRegressionRuns();
+    } catch (e) {
+        showToast(t('sandbox.batchFailed', { error: e.message }), 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = t('sandbox.runBatchReplay'); }
     }
 }
 
@@ -2004,6 +2186,11 @@ window._pages.sandbox = {
     showRegressionDetail,
     replayConversation,
     submitReplay,
+    deleteRegressionRun,
+    rateRegressionTurn,
+    setVerdict,
+    showBatchReplayModal,
+    submitBatchReplay,
     toggleBaseline,
     // Phase 4: Turn Groups + Patterns
     toggleMarking,

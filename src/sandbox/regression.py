@@ -9,6 +9,7 @@ from __future__ import annotations
 import difflib
 import json
 import logging
+import math
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -21,7 +22,19 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncEngine
 
+    from src.knowledge.embeddings import EmbeddingGenerator
+
 logger = logging.getLogger(__name__)
+
+
+def _cosine_similarity(a: list[float], b: list[float]) -> float:
+    """Compute cosine similarity between two vectors."""
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
+    norm_a = math.sqrt(sum(x * x for x in a))
+    norm_b = math.sqrt(sum(x * x for x in b))
+    if norm_a == 0 or norm_b == 0:
+        return 0.0
+    return dot / (norm_a * norm_b)
 
 
 @dataclass
@@ -34,6 +47,7 @@ class TurnDiff:
     new_response: str
     source_rating: int | None
     diff_lines: list[str]
+    similarity_score: float | None = None
 
 
 @dataclass
@@ -47,6 +61,7 @@ class RegressionResult:
     turn_diffs: list[TurnDiff] = field(default_factory=list)
     new_conversation_id: str | None = None
     error: str | None = None
+    avg_similarity: float | None = None
 
 
 async def run_regression(
@@ -55,6 +70,7 @@ async def run_regression(
     new_prompt_version_id: UUID,
     branch_turn_ids: list[UUID] | None = None,
     created_by: str | None = None,
+    embedding_generator: EmbeddingGenerator | None = None,
 ) -> RegressionResult:
     """Run a regression test: replay source conversation with a new prompt.
 
@@ -65,6 +81,7 @@ async def run_regression(
         branch_turn_ids: Optional ordered list of turn IDs to replay.
                         If None, replays the main branch (no parent_turn_id chain).
         created_by: User ID of the person who initiated the run.
+        embedding_generator: Optional embedding generator for semantic similarity.
 
     Returns:
         RegressionResult with per-turn diffs and aggregate scores.
@@ -252,6 +269,35 @@ async def run_regression(
                 )
             )
 
+    # Compute semantic similarity if embedding generator is available
+    avg_similarity: float | None = None
+    if embedding_generator is not None:
+        try:
+            pairs = [
+                (td.source_response, td.new_response)
+                for td in turn_diffs
+                if td.source_response and td.new_response and td.new_response != "[ERROR]"
+            ]
+            if pairs:
+                all_texts = []
+                for src, new in pairs:
+                    all_texts.extend([src, new])
+                embeddings = await embedding_generator.generate(all_texts)
+                pair_idx = 0
+                for td in turn_diffs:
+                    if td.source_response and td.new_response and td.new_response != "[ERROR]":
+                        src_emb = embeddings[pair_idx * 2]
+                        new_emb = embeddings[pair_idx * 2 + 1]
+                        td.similarity_score = round(_cosine_similarity(src_emb, new_emb), 4)
+                        pair_idx += 1
+                scores = [
+                    td.similarity_score for td in turn_diffs if td.similarity_score is not None
+                ]
+                if scores:
+                    avg_similarity = round(sum(scores) / len(scores), 4)
+        except Exception:
+            logger.warning("Failed to compute semantic similarity", exc_info=True)
+
     # Compute aggregate scores
     source_ratings = [sr["rating"] for sr in source_responses if sr.get("rating") is not None]
     avg_source = sum(source_ratings) / len(source_ratings) if source_ratings else None
@@ -263,4 +309,5 @@ async def run_regression(
         score_diff=None,
         turn_diffs=turn_diffs,
         new_conversation_id=new_conv_id,
+        avg_similarity=avg_similarity,
     )

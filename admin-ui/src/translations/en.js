@@ -1132,6 +1132,33 @@ export default {
     'sandbox.importCallPreview': 'Transcript',
     'sandbox.importCallSelectToPreview': 'Select a call to preview',
 
+    // Regression: delete, rating, verdict, batch, similarity
+    'sandbox.deleteRun': 'Delete',
+    'sandbox.deleteRunConfirm': 'Delete regression run? The generated conversation will also be deleted.',
+    'sandbox.runDeleted': 'Run deleted',
+    'sandbox.verdict': 'Verdict',
+    'sandbox.pendingVerdict': 'Pending',
+    'sandbox.approved': 'Approved',
+    'sandbox.rejected': 'Rejected',
+    'sandbox.approve': 'Approve',
+    'sandbox.reject': 'Reject',
+    'sandbox.verdictSet': 'Verdict set',
+    'sandbox.filterVerdict': 'Verdict',
+    'sandbox.all': 'All',
+    'sandbox.batchReplay': 'Batch Replay',
+    'sandbox.selectBaselines': 'Select baseline conversations',
+    'sandbox.selectAllBaselines': 'Select all',
+    'sandbox.runBatchReplay': 'Run Batch Replay',
+    'sandbox.batchSelectRequired': 'Select at least one conversation',
+    'sandbox.batchRunning': 'Batch replay running...',
+    'sandbox.batchCompleted': 'Batch replay: {completed} completed, {failed} failed',
+    'sandbox.batchFailed': 'Batch replay failed: {error}',
+    'sandbox.noBaselines': 'No baseline conversations',
+    'sandbox.semanticSimilarity': 'Semantic similarity',
+    'sandbox.avgSimilarity': 'Avg similarity',
+    'sandbox.rateNewResponse': 'Rate response',
+    'sandbox.ratingSaved': 'Rating saved',
+
     // Help
     'help.close': 'Close help',
     'help.tipsTitle': 'Useful tips',
@@ -1310,6 +1337,9 @@ export default {
     'help.sandbox.import.content': '<p>You can import <strong>real calls</strong> from the Call Log into the Sandbox. This allows you to analyze problematic dialogues with the full set of Sandbox tools.</p><p><strong>Method 1 — from Sandbox:</strong> click the <strong>📞</strong> button next to "New conversation" in the sidebar, find the call in the table, and click <strong>"Import"</strong>.</p><p><strong>Method 2 — from Call Log:</strong> open call details and click the <strong>"Open in Sandbox"</strong> button.</p><p><strong>What gets imported:</strong></p><ul><li>All turns (customer and agent) in original order</li><li>Tool calls with arguments and results</li><li>Metadata: scenario, tenant, quality score, duration</li></ul><p><strong>Imported conversations are tagged:</strong> <code>imported</code>, <code>call:{id}</code>.</p>',
     'help.sandbox.import.steps': 'Step-by-step: Working with an imported call',
     'help.sandbox.import.stepsContent': '<p><strong>Quick import from Sandbox:</strong></p><ol><li>Click the <strong>📞</strong> button next to "New conversation"</li><li>Find the call by phone number or date</li><li>Click <strong>"Import"</strong> — the conversation opens in chat</li></ol><p><strong>Working with an imported call:</strong></p><ol><li>Review the dialogue and <strong>rate agent responses</strong></li><li>At a problematic point, click <strong>"Branch"</strong> — try an alternative message</li><li>Compare how the agent handles different request variations</li><li>Mark problematic groups and <strong>export to patterns</strong></li><li>Use the patterns to <strong>improve the prompt</strong></li></ol>',
+
+    'help.sandbox.regressionAdvanced.title': 'Advanced Regression Features',
+    'help.sandbox.regressionAdvanced.content': '<p>Additional regression testing capabilities:</p><ul><li><strong>Delete runs</strong> — remove unwanted regression tests along with generated conversations</li><li><strong>Rate new responses</strong> — rate each new agent response on a 1-5 scale, average is calculated automatically</li><li><strong>Verdict (Approve/Reject)</strong> — approve or reject regression results, filter by verdict</li><li><strong>Semantic similarity</strong> — automatic response comparison via embeddings (requires OPENAI_API_KEY). Green ≥85%, yellow ≥60%, red &lt;60%</li><li><strong>Batch replay</strong> — run regression for multiple baseline conversations at once</li></ul>',
 
     'help.sandbox.workflow.title': 'Recommended workflow',
     'help.sandbox.workflow.content': '<p>Complete prompt quality control cycle:</p><ol><li><strong>Create starter templates</strong> for typical scenarios ("Starters" tab)</li><li><strong>Run a series of test dialogues</strong> with the old prompt, rate responses with stars</li><li><strong>Mark the best conversations as baseline</strong> (button in chat header)</li><li><strong>Create a new prompt version</strong> ("Prompts" section)</li><li><strong>Run regression tests</strong> — compare new prompt responses with baseline</li><li><strong>Run new test dialogues</strong> with the new prompt</li><li><strong>If quality is satisfactory</strong> — activate the prompt or start an A/B test</li></ol>',

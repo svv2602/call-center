@@ -85,6 +85,7 @@ export const HELP_PAGES = {
             { titleKey: 'help.sandbox.starters.title', contentKey: 'help.sandbox.starters.content' },
             { titleKey: 'help.sandbox.import.title', contentKey: 'help.sandbox.import.content' },
             { titleKey: 'help.sandbox.import.steps', contentKey: 'help.sandbox.import.stepsContent' },
+            { titleKey: 'help.sandbox.regressionAdvanced.title', contentKey: 'help.sandbox.regressionAdvanced.content' },
             { titleKey: 'help.sandbox.workflow.title', contentKey: 'help.sandbox.workflow.content' },
         ],
         tipsKey: 'help.sandbox.tips',

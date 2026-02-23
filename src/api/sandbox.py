@@ -101,6 +101,20 @@ class PatternUpdate(BaseModel):
     tags: list[str] | None = None
 
 
+class RateRegressionTurn(BaseModel):
+    turn_number: int = Field(..., ge=1)
+    rating: int = Field(..., ge=1, le=5)
+
+
+class RegressionVerdict(BaseModel):
+    verdict: str = Field(..., pattern=r"^(approved|rejected)$")
+
+
+class BatchReplayRequest(BaseModel):
+    conversation_ids: list[UUID] = Field(..., min_length=1, max_length=20)
+    new_prompt_version_id: UUID
+
+
 class ImportCallRequest(BaseModel):
     call_id: UUID
     title: str | None = Field(None, max_length=300)
@@ -492,9 +506,7 @@ async def update_conversation(
 
 
 @router.delete("/conversations/{conversation_id}")
-async def delete_conversation(
-    conversation_id: UUID, _: dict[str, Any] = _perm_d
-) -> dict[str, Any]:
+async def delete_conversation(conversation_id: UUID, _: dict[str, Any] = _perm_d) -> dict[str, Any]:
     """Delete a conversation and all its turns/tool_calls (CASCADE).
 
     Blocks deletion if the conversation is referenced by regression runs
@@ -560,9 +572,7 @@ async def bulk_delete_conversations(
         deleted_count = 0
         if deletable_ids:
             del_result = await conn.execute(
-                text(
-                    "DELETE FROM sandbox_conversations WHERE id = ANY(:ids) RETURNING id"
-                ),
+                text("DELETE FROM sandbox_conversations WHERE id = ANY(:ids) RETURNING id"),
                 {"ids": deletable_ids},
             )
             deleted_count = del_result.rowcount
@@ -578,9 +588,7 @@ async def bulk_delete_conversations(
 
 
 @router.post("/conversations/import-call")
-async def import_call(
-    request: ImportCallRequest, user: dict[str, Any] = _perm_w
-) -> dict[str, Any]:
+async def import_call(request: ImportCallRequest, user: dict[str, Any] = _perm_w) -> dict[str, Any]:
     """Import a real call from calls/call_turns/call_tool_calls into sandbox."""
     engine = await _get_engine()
     call_id = str(request.call_id)
@@ -1407,6 +1415,18 @@ async def replay_conversation(
         assert run_row is not None
         run_id = str(run_row.id)
 
+    # Create embedding generator for semantic similarity (best-effort)
+    emb_gen = None
+    try:
+        from src.knowledge.embeddings import EmbeddingGenerator
+
+        settings = get_settings()
+        if settings.openai.api_key:
+            emb_gen = EmbeddingGenerator(settings.openai.api_key)
+            await emb_gen.open()
+    except Exception:
+        logger.debug("Embedding generator not available for regression similarity")
+
     # Run regression
     try:
         result = await run_regression(
@@ -1415,10 +1435,12 @@ async def replay_conversation(
             new_prompt_version_id=request.new_prompt_version_id,
             branch_turn_ids=request.branch_turn_ids,
             created_by=user_id,
+            embedding_generator=emb_gen,
         )
 
         # Update regression run record
         summary = {
+            "avg_similarity": result.avg_similarity,
             "turn_diffs": [
                 {
                     "turn_number": td.turn_number,
@@ -1427,6 +1449,7 @@ async def replay_conversation(
                     "new_response": td.new_response,
                     "source_rating": td.source_rating,
                     "diff_lines": td.diff_lines,
+                    "similarity_score": td.similarity_score,
                 }
                 for td in result.turn_diffs
             ],
@@ -1478,36 +1501,57 @@ async def replay_conversation(
         raise HTTPException(
             status_code=500, detail="Regression failed. Check server logs."
         ) from exc
+    finally:
+        if emb_gen is not None:
+            await emb_gen.close()
 
 
 @router.get("/regression-runs")
 async def list_regression_runs(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    verdict: str | None = Query(None),
     _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
-    """List regression runs with pagination."""
+    """List regression runs with pagination and optional verdict filter."""
     engine = await _get_engine()
 
+    conditions: list[str] = []
+    params: dict[str, Any] = {"limit": limit, "offset": offset}
+
+    if verdict is not None:
+        if verdict == "pending":
+            conditions.append("r.verdict IS NULL")
+        elif verdict in ("approved", "rejected"):
+            conditions.append("r.verdict = :verdict")
+            params["verdict"] = verdict
+
+    where = ("WHERE " + " AND ".join(conditions)) if conditions else ""
+
     async with engine.begin() as conn:
-        count_result = await conn.execute(text("SELECT COUNT(*) FROM sandbox_regression_runs"))
+        count_result = await conn.execute(
+            text(f"SELECT COUNT(*) FROM sandbox_regression_runs r {where}"),
+            params,
+        )
         total = count_result.scalar()
 
         result = await conn.execute(
-            text("""
+            text(f"""
                 SELECT r.id, r.source_conversation_id, r.new_prompt_version_id,
                        r.new_conversation_id, r.status, r.turns_compared,
                        r.avg_source_rating, r.avg_new_rating, r.score_diff,
-                       r.error_message, r.started_at, r.completed_at, r.created_at,
+                       r.verdict, r.error_message, r.started_at, r.completed_at,
+                       r.created_at,
                        sc.title AS source_title,
                        pv.name AS prompt_version_name
                 FROM sandbox_regression_runs r
                 LEFT JOIN sandbox_conversations sc ON r.source_conversation_id = sc.id
                 LEFT JOIN prompt_versions pv ON r.new_prompt_version_id = pv.id
+                {where}
                 ORDER BY r.created_at DESC
                 LIMIT :limit OFFSET :offset
             """),
-            {"limit": limit, "offset": offset},
+            params,
         )
         items = [dict(row._mapping) for row in result]
 
@@ -1536,6 +1580,274 @@ async def get_regression_run(run_id: UUID, _: dict[str, Any] = _perm_r) -> dict[
             raise HTTPException(status_code=404, detail="Regression run not found")
 
     return {"item": dict(row._mapping)}
+
+
+@router.delete("/regression-runs/{run_id}")
+async def delete_regression_run(run_id: UUID, _: dict[str, Any] = _perm_d) -> dict[str, Any]:
+    """Delete a regression run and its generated conversation."""
+    engine = await _get_engine()
+    rid = str(run_id)
+
+    async with engine.begin() as conn:
+        # Load run to get new_conversation_id
+        run_result = await conn.execute(
+            text("SELECT id, new_conversation_id FROM sandbox_regression_runs WHERE id = :id"),
+            {"id": rid},
+        )
+        run_row = run_result.first()
+        if not run_row:
+            raise HTTPException(status_code=404, detail="Regression run not found")
+
+        new_conv_id = str(run_row.new_conversation_id) if run_row.new_conversation_id else None
+
+        # Delete the regression run
+        await conn.execute(
+            text("DELETE FROM sandbox_regression_runs WHERE id = :id"),
+            {"id": rid},
+        )
+
+        # Delete the generated conversation (CASCADE deletes turns/tool_calls)
+        if new_conv_id:
+            await conn.execute(
+                text("DELETE FROM sandbox_conversations WHERE id = :id"),
+                {"id": new_conv_id},
+            )
+
+    return {"message": "Regression run deleted"}
+
+
+@router.patch("/regression-runs/{run_id}/rate")
+async def rate_regression_turn(
+    run_id: UUID,
+    request: RateRegressionTurn,
+    _: dict[str, Any] = _perm_w,
+) -> dict[str, Any]:
+    """Rate a new response turn in a regression run.
+
+    Updates the summary JSONB and recalculates avg_new_rating / score_diff.
+    """
+    engine = await _get_engine()
+    rid = str(run_id)
+
+    async with engine.begin() as conn:
+        # Load current run
+        run_result = await conn.execute(
+            text("SELECT summary, avg_source_rating FROM sandbox_regression_runs WHERE id = :id"),
+            {"id": rid},
+        )
+        run_row = run_result.first()
+        if not run_row:
+            raise HTTPException(status_code=404, detail="Regression run not found")
+
+        summary = run_row.summary or {}
+        turn_diffs = summary.get("turn_diffs", [])
+
+        # Find and update the turn
+        found = False
+        for td in turn_diffs:
+            if td.get("turn_number") == request.turn_number:
+                td["new_rating"] = request.rating
+                found = True
+                break
+
+        if not found:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Turn {request.turn_number} not found in run summary",
+            )
+
+        # Recalculate avg_new_rating
+        new_ratings = [td["new_rating"] for td in turn_diffs if td.get("new_rating") is not None]
+        avg_new = round(sum(new_ratings) / len(new_ratings), 2) if new_ratings else None
+
+        # Calculate score_diff
+        score_diff = None
+        if avg_new is not None and run_row.avg_source_rating is not None:
+            score_diff = round(avg_new - float(run_row.avg_source_rating), 2)
+
+        await conn.execute(
+            text("""
+                UPDATE sandbox_regression_runs
+                SET summary = :summary, avg_new_rating = :avg_new, score_diff = :score_diff
+                WHERE id = :id
+            """),
+            {
+                "id": rid,
+                "summary": json.dumps(summary),
+                "avg_new": avg_new,
+                "score_diff": score_diff,
+            },
+        )
+
+    return {
+        "avg_new_rating": avg_new,
+        "score_diff": score_diff,
+        "message": "Rating saved",
+    }
+
+
+@router.patch("/regression-runs/{run_id}")
+async def set_regression_verdict(
+    run_id: UUID,
+    request: RegressionVerdict,
+    _: dict[str, Any] = _perm_w,
+) -> dict[str, Any]:
+    """Set verdict (approved/rejected) on a regression run."""
+    engine = await _get_engine()
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                UPDATE sandbox_regression_runs
+                SET verdict = :verdict
+                WHERE id = :id
+                RETURNING id, verdict
+            """),
+            {"id": str(run_id), "verdict": request.verdict},
+        )
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Regression run not found")
+
+    return {"item": dict(row._mapping), "message": "Verdict set"}
+
+
+@router.post("/regression-runs/batch")
+async def batch_replay(
+    request: BatchReplayRequest,
+    user: dict[str, Any] = _perm_w,
+) -> dict[str, Any]:
+    """Batch replay multiple baseline conversations with a new prompt version."""
+    from src.sandbox.regression import run_regression
+
+    engine = await _get_engine()
+    user_id = user.get("user_id")
+
+    # Create embedding generator (best-effort)
+    emb_gen = None
+    try:
+        from src.knowledge.embeddings import EmbeddingGenerator
+
+        settings = get_settings()
+        if settings.openai.api_key:
+            emb_gen = EmbeddingGenerator(settings.openai.api_key)
+            await emb_gen.open()
+    except Exception:
+        logger.debug("Embedding generator not available for batch regression")
+
+    results: list[dict[str, Any]] = []
+    try:
+        for conv_id in request.conversation_ids:
+            # Create regression run record
+            async with engine.begin() as conn:
+                run_result = await conn.execute(
+                    text("""
+                        INSERT INTO sandbox_regression_runs
+                            (source_conversation_id, new_prompt_version_id,
+                             status, created_by, started_at)
+                        VALUES (:source_id, :prompt_id, 'running', :created_by, now())
+                        RETURNING id
+                    """),
+                    {
+                        "source_id": str(conv_id),
+                        "prompt_id": str(request.new_prompt_version_id),
+                        "created_by": user_id,
+                    },
+                )
+                run_row = run_result.first()
+                assert run_row is not None
+                run_id = str(run_row.id)
+
+            try:
+                result = await run_regression(
+                    engine,
+                    source_conversation_id=conv_id,
+                    new_prompt_version_id=request.new_prompt_version_id,
+                    created_by=user_id,
+                    embedding_generator=emb_gen,
+                )
+
+                summary = {
+                    "avg_similarity": result.avg_similarity,
+                    "turn_diffs": [
+                        {
+                            "turn_number": td.turn_number,
+                            "customer_message": td.customer_message,
+                            "source_response": td.source_response,
+                            "new_response": td.new_response,
+                            "source_rating": td.source_rating,
+                            "diff_lines": td.diff_lines,
+                            "similarity_score": td.similarity_score,
+                        }
+                        for td in result.turn_diffs
+                    ],
+                }
+
+                async with engine.begin() as conn:
+                    await conn.execute(
+                        text("""
+                            UPDATE sandbox_regression_runs
+                            SET status = :status, turns_compared = :turns,
+                                avg_source_rating = :avg_source,
+                                avg_new_rating = :avg_new, score_diff = :score_diff,
+                                new_conversation_id = :new_conv_id, summary = :summary,
+                                error_message = :error, completed_at = now()
+                            WHERE id = :id
+                        """),
+                        {
+                            "id": run_id,
+                            "status": "failed" if result.error else "completed",
+                            "turns": result.turns_compared,
+                            "avg_source": result.avg_source_rating,
+                            "avg_new": result.avg_new_rating,
+                            "score_diff": result.score_diff,
+                            "new_conv_id": result.new_conversation_id,
+                            "summary": json.dumps(summary),
+                            "error": result.error,
+                        },
+                    )
+
+                results.append(
+                    {
+                        "run_id": run_id,
+                        "conversation_id": str(conv_id),
+                        "status": "failed" if result.error else "completed",
+                    }
+                )
+
+            except Exception as exc:
+                logger.exception("Batch regression run %s failed", run_id)
+                async with engine.begin() as conn:
+                    await conn.execute(
+                        text("""
+                            UPDATE sandbox_regression_runs
+                            SET status = 'failed', error_message = :error,
+                                completed_at = now()
+                            WHERE id = :id
+                        """),
+                        {"id": run_id, "error": str(exc)},
+                    )
+                results.append(
+                    {
+                        "run_id": run_id,
+                        "conversation_id": str(conv_id),
+                        "status": "failed",
+                        "error": str(exc),
+                    }
+                )
+    finally:
+        if emb_gen is not None:
+            await emb_gen.close()
+
+    completed = sum(1 for r in results if r["status"] == "completed")
+    failed = sum(1 for r in results if r["status"] == "failed")
+
+    return {
+        "results": results,
+        "completed": completed,
+        "failed": failed,
+        "message": f"Batch replay: {completed} completed, {failed} failed",
+    }
 
 
 # ── Phase 4: Turn Groups (conversation fragment marking) ─────
