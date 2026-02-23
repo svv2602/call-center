@@ -391,6 +391,31 @@ _SCENARIO_EMPHASIS: dict[str, str] = {
 }
 
 
+async def _resolve_caller_id(channel_uuid: str) -> str | None:
+    """Resolve caller phone number from Asterisk ARI."""
+    settings = get_settings()
+    if not settings.ari.url:
+        return None
+
+    try:
+        from src.core.asterisk_ari import AsteriskARIClient
+
+        ari = AsteriskARIClient(
+            url=settings.ari.url,
+            user=settings.ari.user,
+            password=settings.ari.password,
+        )
+        await ari.open()
+        try:
+            return await ari.get_caller_id(channel_uuid)
+        finally:
+            await ari.close()
+    except Exception:
+        logger.debug("ARI CallerID lookup failed", exc_info=True)
+
+    return None
+
+
 async def _resolve_ivr_intent(channel_uuid: str) -> str | None:
     """Resolve IVR intent from Asterisk channel variable IVR_INTENT.
 
@@ -514,6 +539,13 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     if ivr_intent:
         session.scenario = ivr_intent
         logger.info("IVR intent resolved: %s for call %s", ivr_intent, conn.channel_uuid)
+
+    # Resolve caller phone number from Asterisk ARI
+    caller_id = await _resolve_caller_id(str(conn.channel_uuid))
+    if caller_id:
+        session.caller_id = caller_id
+        session.caller_phone = caller_id
+        logger.info("CallerID resolved: %s for call %s", caller_id, conn.channel_uuid)
 
     if _redis is not None:
         store = SessionStore(_redis)
