@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { showToast } from '../notifications.js';
-import { formatDate, escapeHtml, closeModal } from '../utils.js';
+import { formatDate, escapeHtml, closeModal, qualityBadge } from '../utils.js';
 import { registerPageLoader } from '../router.js';
 import { t } from '../i18n.js';
 import * as tw from '../tw.js';
@@ -25,6 +25,7 @@ let _starterCache = [];
 let _bulkMode = false;
 let _selectedIds = new Set();
 let _startersOffset = 0;
+let _importCallsOffset = 0;
 
 // ─── Tab switching ───────────────────────────────────────────
 function showTab(tab) {
@@ -1608,6 +1609,89 @@ async function bulkDelete() {
     }
 }
 
+// ─── Import Call from Call Log ────────────────────────────────
+function showImportCallModal() {
+    document.getElementById('importCallSearch').value = '';
+    document.getElementById('importCallDateFrom').value = '';
+    document.getElementById('importCallDateTo').value = '';
+    document.getElementById('importCallsTableContainer').innerHTML = '';
+    document.getElementById('importCallsPagination').innerHTML = '';
+    document.getElementById('sandboxImportCallModal').classList.add('show');
+    loadImportCalls(0);
+}
+
+async function loadImportCalls(offset) {
+    _importCallsOffset = offset;
+    const limit = 15;
+    const search = document.getElementById('importCallSearch').value.trim();
+    const dateFrom = document.getElementById('importCallDateFrom').value;
+    const dateTo = document.getElementById('importCallDateTo').value;
+
+    const params = new URLSearchParams({ limit, offset });
+    if (search) params.set('search', search);
+    if (dateFrom) params.set('date_from', dateFrom);
+    if (dateTo) params.set('date_to', dateTo);
+
+    const container = document.getElementById('importCallsTableContainer');
+    try {
+        const data = await api(`/analytics/calls?${params}`);
+        const calls = data.items || data.calls || [];
+        const total = data.total || calls.length;
+
+        if (!calls.length) {
+            container.innerHTML = `<p class="text-sm text-neutral-500 dark:text-neutral-400 py-4 text-center">${t('sandbox.importCallsNone')}</p>`;
+            document.getElementById('importCallsPagination').innerHTML = '';
+            return;
+        }
+
+        container.innerHTML = `<table class="${tw.table}">
+            <thead><tr>
+                <th class="${tw.th}">${t('calls.date')}</th>
+                <th class="${tw.th}">${t('calls.caller')}</th>
+                <th class="${tw.th}">${t('calls.scenario')}</th>
+                <th class="${tw.th}">${t('calls.duration')}</th>
+                <th class="${tw.th}">${t('calls.quality')}</th>
+                <th class="${tw.th}"></th>
+            </tr></thead>
+            <tbody>${calls.map(c => `<tr class="${tw.trHover}">
+                <td class="${tw.td}">${formatDate(c.started_at || c.created_at)}</td>
+                <td class="${tw.td}">${escapeHtml(c.caller_number || '-')}</td>
+                <td class="${tw.td}">${escapeHtml(c.scenario || '-')}</td>
+                <td class="${tw.td}">${c.duration_seconds || 0}s</td>
+                <td class="${tw.td}">${qualityBadge(c.quality_score)}</td>
+                <td class="${tw.td}"><button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sandbox.importCallById('${c.id}', this)">${t('sandbox.importBtn')}</button></td>
+            </tr>`).join('')}</tbody></table>`;
+
+        renderPagination(document.getElementById('importCallsPagination'), {
+            offset, limit, total,
+            onPage: (o) => loadImportCalls(o),
+        });
+    } catch (e) {
+        container.innerHTML = `<p class="text-sm text-red-500 py-4 text-center">${escapeHtml(e.message)}</p>`;
+    }
+}
+
+async function importCallById(callId, btn) {
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = t('sandbox.importingCall');
+    try {
+        const result = await api('/admin/sandbox/conversations/import-call', {
+            method: 'POST',
+            body: JSON.stringify({ call_id: callId }),
+        });
+        closeModal('sandboxImportCallModal');
+        showToast(t('sandbox.importedCall'));
+        _currentConvId = result.item?.id || result.id;
+        loadSidebar();
+        showTab('chat');
+    } catch (e) {
+        showToast(t('sandbox.importCallFailed', { error: e.message }), 'error');
+        btn.disabled = false;
+        btn.textContent = origText;
+    }
+}
+
 // ─── Init ────────────────────────────────────────────────────
 export function init() {
     registerPageLoader('sandbox', () => {
@@ -1673,4 +1757,8 @@ window._pages.sandbox = {
     deleteStarter,
     useStarter,
     useStarterByIndex,
+    // Import from call
+    showImportCallModal,
+    loadImportCalls,
+    importCallById,
 };

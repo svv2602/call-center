@@ -13,8 +13,8 @@
             }
         })();
     </script>
-  <script type="module" crossorigin src="/assets/index-Bbzd008k.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-hX1wRQRv.css">
+  <script type="module" crossorigin src="/assets/index-CUQRl02_.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-CGPSPgLt.css">
 </head>
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-50 font-sans antialiased">
     <!-- Toast container -->
@@ -466,6 +466,7 @@
                             <div class="p-3 border-b border-neutral-200 dark:border-neutral-700 space-y-2">
                                 <div class="flex gap-1">
                                     <button class="flex-1 inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.sandbox.showNewConvModal()" data-i18n="sandbox.newConversation">+ Новый диалог</button>
+                                    <button class="px-2 py-1.5 text-sm rounded-md transition-colors cursor-pointer border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800" onclick="window._pages.sandbox.showImportCallModal()" data-i18n="sandbox.importFromCall" title="Из звонка">&#128222;</button>
                                     <button id="sandboxBulkToggle" class="px-2 py-1.5 text-sm rounded-md transition-colors cursor-pointer border border-neutral-300 dark:border-neutral-600 text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800" onclick="window._pages.sandbox.toggleBulkMode()" title="Bulk delete">&#9745;</button>
                                 </div>
                                 <input type="text" id="sandboxSearch" data-i18n-placeholder="sandbox.searchPlaceholder" placeholder="Поиск по названию..."
@@ -1012,6 +1013,24 @@
             </div>
             <input type="hidden" id="sandboxReplayConvId">
             <button onclick="window._pages.sandbox.submitReplay()" class="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="sandbox.submitReplay">Запустить</button>
+        </div>
+    </div>
+
+    <!-- Import Call Modal -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxImportCallModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-3xl w-[90%] max-h-[80vh] overflow-y-auto">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxImportCallModal')">&times;</span>
+            <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.importFromCall">Из звонка</h3>
+            <div class="flex gap-2 mb-3 flex-wrap">
+                <input type="text" id="importCallSearch" data-i18n-placeholder="sandbox.importCallSearchPlaceholder" placeholder="Поиск по номеру..."
+                    onkeydown="if(event.key==='Enter')window._pages.sandbox.loadImportCalls(0)"
+                    class="flex-1 min-w-[140px] px-3 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input type="date" id="importCallDateFrom" class="px-2 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <input type="date" id="importCallDateTo" class="px-2 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <button class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" onclick="window._pages.sandbox.loadImportCalls(0)" data-i18n="common.filter">Фильтр</button>
+            </div>
+            <div id="importCallsTableContainer"></div>
+            <div id="importCallsPagination" class="mt-2"></div>
         </div>
     </div>
 

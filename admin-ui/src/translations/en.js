@@ -1053,6 +1053,13 @@ export default {
     'sandbox.bulkDeleted': 'Deleted: {deleted}, skipped: {skipped}',
     'sandbox.bulkDeleteConfirm': 'Delete {count} conversations? All data will be lost.',
     'sandbox.bulkSkipped': 'Some conversations are protected by regression runs and were not deleted.',
+    'sandbox.importFromCall': 'From call',
+    'sandbox.importCallSearchPlaceholder': 'Search by number...',
+    'sandbox.importCallsNone': 'No calls found',
+    'sandbox.importBtn': 'Import',
+    'sandbox.importingCall': 'Importing...',
+    'sandbox.importedCall': 'Call imported to sandbox',
+    'sandbox.importCallFailed': 'Import error: {error}',
 
     // Help
     'help.close': 'Close help',
@@ -1224,9 +1231,9 @@ export default {
     'help.sandbox.starters.content': '<p>Ready-made scenarios for quickly starting a test conversation. Starters appear as cards when creating a new conversation.</p><ul><li><strong>Title</strong> — brief scenario description</li><li><strong>First message</strong> — initial customer message (sent automatically)</li><li><strong>Scenario</strong> — type (tire_search, order_creation, etc.)</li><li><strong>Persona</strong> — customer type (neutral, angry, confused, rushed, detailed)</li></ul><p>Create: <strong>"New starter"</strong> button. Edit / delete via row buttons.</p>',
 
     'help.sandbox.import.title': 'Importing real calls',
-    'help.sandbox.import.content': '<p>You can import <strong>real calls</strong> from the Call Log into the Sandbox. This allows you to analyze problematic dialogues with the full set of Sandbox tools.</p><p><strong>How to import:</strong> open call details in the <strong>"Call Log"</strong> section and click the <strong>"Open in Sandbox"</strong> button.</p><p><strong>What gets imported:</strong></p><ul><li>All turns (customer and agent) in original order</li><li>Tool calls with arguments and results</li><li>Metadata: scenario, tenant, quality score, duration</li></ul><p><strong>Imported conversations are tagged:</strong> <code>imported</code>, <code>call:{id}</code>.</p>',
+    'help.sandbox.import.content': '<p>You can import <strong>real calls</strong> from the Call Log into the Sandbox. This allows you to analyze problematic dialogues with the full set of Sandbox tools.</p><p><strong>Method 1 — from Sandbox:</strong> click the <strong>📞</strong> button next to "New conversation" in the sidebar, find the call in the table, and click <strong>"Import"</strong>.</p><p><strong>Method 2 — from Call Log:</strong> open call details and click the <strong>"Open in Sandbox"</strong> button.</p><p><strong>What gets imported:</strong></p><ul><li>All turns (customer and agent) in original order</li><li>Tool calls with arguments and results</li><li>Metadata: scenario, tenant, quality score, duration</li></ul><p><strong>Imported conversations are tagged:</strong> <code>imported</code>, <code>call:{id}</code>.</p>',
     'help.sandbox.import.steps': 'Step-by-step: Working with an imported call',
-    'help.sandbox.import.stepsContent': '<p><strong>Typical use case:</strong></p><ol><li>In the Call Log, find a <strong>problematic call</strong> (low quality or transferred to operator)</li><li>Open it and click <strong>"Open in Sandbox"</strong></li><li>In the Sandbox, review the dialogue and <strong>rate agent responses</strong></li><li>At a problematic point, click <strong>"Branch"</strong> — try an alternative message</li><li>Compare how the agent handles different request variations</li><li>Mark problematic groups and <strong>export to patterns</strong></li><li>Use the patterns to <strong>improve the prompt</strong></li></ol>',
+    'help.sandbox.import.stepsContent': '<p><strong>Quick import from Sandbox:</strong></p><ol><li>Click the <strong>📞</strong> button next to "New conversation"</li><li>Find the call by phone number or date</li><li>Click <strong>"Import"</strong> — the conversation opens in chat</li></ol><p><strong>Working with an imported call:</strong></p><ol><li>Review the dialogue and <strong>rate agent responses</strong></li><li>At a problematic point, click <strong>"Branch"</strong> — try an alternative message</li><li>Compare how the agent handles different request variations</li><li>Mark problematic groups and <strong>export to patterns</strong></li><li>Use the patterns to <strong>improve the prompt</strong></li></ol>',
 
     'help.sandbox.workflow.title': 'Recommended workflow',
     'help.sandbox.workflow.content': '<p>Complete prompt quality control cycle:</p><ol><li><strong>Create starter templates</strong> for typical scenarios ("Starters" tab)</li><li><strong>Run a series of test dialogues</strong> with the old prompt, rate responses with stars</li><li><strong>Mark the best conversations as baseline</strong> (button in chat header)</li><li><strong>Create a new prompt version</strong> ("Prompts" section)</li><li><strong>Run regression tests</strong> — compare new prompt responses with baseline</li><li><strong>Run new test dialogues</strong> with the new prompt</li><li><strong>If quality is satisfactory</strong> — activate the prompt or start an A/B test</li></ol>',
