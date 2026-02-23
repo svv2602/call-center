@@ -1618,6 +1618,8 @@ function showImportCallModal() {
     document.getElementById('importCallsPagination').innerHTML = '';
     document.getElementById('importCallTranscript').innerHTML =
         `<p class="text-neutral-400 dark:text-neutral-500 text-center py-8">${t('sandbox.importCallSelectToPreview')}</p>`;
+    document.getElementById('importCallPreviewHeader').innerHTML =
+        `<h4 class="text-sm font-semibold text-neutral-700 dark:text-neutral-300">${t('sandbox.importCallPreview')}</h4>`;
     document.getElementById('sandboxImportCallModal').classList.add('show');
     loadImportCalls(0);
 }
@@ -1653,7 +1655,6 @@ async function loadImportCalls(offset) {
                 <th class="${tw.th}">${t('calls.scenario')}</th>
                 <th class="${tw.th}">${t('calls.duration')}</th>
                 <th class="${tw.th}">${t('calls.quality')}</th>
-                <th class="${tw.th}"></th>
             </tr></thead>
             <tbody>${calls.map(c => `<tr class="${tw.trHover} cursor-pointer" data-call-id="${c.id}" onclick="window._pages.sandbox.previewCall('${c.id}', this)">
                 <td class="${tw.td}">${formatDate(c.started_at || c.created_at)}</td>
@@ -1661,7 +1662,6 @@ async function loadImportCalls(offset) {
                 <td class="${tw.td}">${escapeHtml(c.scenario || '-')}</td>
                 <td class="${tw.td}">${c.duration_seconds || 0}s</td>
                 <td class="${tw.td}">${qualityBadge(c.quality_score)}</td>
-                <td class="${tw.td}"><button class="${tw.btnPrimary} ${tw.btnSm}" onclick="event.stopPropagation(); window._pages.sandbox.importCallById('${c.id}', this)">${t('sandbox.importBtn')}</button></td>
             </tr>`).join('')}</tbody></table>`;
 
         renderPagination(document.getElementById('importCallsPagination'), {
@@ -1682,7 +1682,11 @@ async function previewCall(callId, row) {
     row.classList.add('ring-2', 'ring-blue-500', 'bg-blue-50', 'dark:bg-blue-950/20');
 
     const panel = document.getElementById('importCallTranscript');
+    const headerEl = document.getElementById('importCallPreviewHeader');
     panel.innerHTML = `<div class="flex justify-center py-8"><div class="spinner"></div></div>`;
+    // Show import button in header
+    if (headerEl) headerEl.innerHTML = `<h4 class="text-sm font-semibold text-neutral-700 dark:text-neutral-300">${t('sandbox.importCallPreview')}</h4>
+        <button class="${tw.btnPrimary} ${tw.btnSm}" id="importCallPreviewBtn" onclick="window._pages.sandbox.importCallById('${callId}', this)">${t('sandbox.importBtn')}</button>`;
 
     try {
         const data = await api(`/analytics/calls/${callId}`);
