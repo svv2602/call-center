@@ -191,7 +191,10 @@ if (_admin_dir / "assets").is_dir():
 @app.get("/admin")
 async def admin_ui() -> FileResponse:
     """Serve the admin UI."""
-    return FileResponse(str(_admin_dir / "index.html"))
+    return FileResponse(
+        str(_admin_dir / "index.html"),
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 # Module-level references for health checks and shared components
