@@ -151,7 +151,7 @@ async function showCallDetail(callId) {
             html += '</table></div>';
         }
 
-        html += `<div class="flex items-center justify-between mt-4"><h3 class="${tw.sectionTitle}">${t('calls.transcription')}</h3><button class="${tw.btnPrimary} ${tw.btnSm}" data-id="${escapeHtml(callId)}" onclick="window._pages.calls.downloadTranscript(this.dataset.id)">${t('calls.downloadTranscript')}</button></div>`;
+        html += `<div class="flex items-center justify-between mt-4"><h3 class="${tw.sectionTitle}">${t('calls.transcription')}</h3><div class="flex gap-2"><button class="${tw.btnPrimary} ${tw.btnSm}" data-id="${escapeHtml(callId)}" onclick="window._pages.calls.importToSandbox(this.dataset.id, this)">${t('calls.openInSandbox')}</button><button class="${tw.btnPrimary} ${tw.btnSm}" data-id="${escapeHtml(callId)}" onclick="window._pages.calls.downloadTranscript(this.dataset.id)">${t('calls.downloadTranscript')}</button></div></div>`;
         if (turns.length === 0) {
             html += `<div class="${tw.emptyState}">${t('calls.noTranscription')}</div>`;
         } else {
@@ -205,6 +205,36 @@ async function downloadTranscript(callId) {
     }
 }
 
+async function importToSandbox(callId, btn) {
+    const origText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = t('calls.importingToSandbox');
+    try {
+        const data = await api('/admin/sandbox/conversations/import-call', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ call_id: callId }),
+        });
+        showToast(t('calls.importedToSandbox'));
+        closeCallModal();
+        const convId = data.item?.id;
+        if (window._app && window._app.showPage) {
+            window._app.showPage('sandbox');
+            if (convId) {
+                setTimeout(() => {
+                    if (window._pages.sandbox && window._pages.sandbox.openConversation) {
+                        window._pages.sandbox.openConversation(convId);
+                    }
+                }, 300);
+            }
+        }
+    } catch (e) {
+        showToast(t('calls.importFailed', { error: e.message }), 'error');
+        btn.disabled = false;
+        btn.textContent = origText;
+    }
+}
+
 function toggleToolDetail(idx) {
     const row = document.getElementById(`toolDetail-${idx}`);
     if (!row) return;
@@ -228,4 +258,4 @@ export function init() {
 }
 
 window._pages = window._pages || {};
-window._pages.calls = { loadCalls, exportCallsCSV, showCallDetail, closeCallModal, downloadTranscript, toggleToolDetail };
+window._pages.calls = { loadCalls, exportCallsCSV, showCallDetail, closeCallModal, downloadTranscript, importToSandbox, toggleToolDetail };

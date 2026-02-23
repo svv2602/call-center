@@ -100,6 +100,11 @@ class PatternUpdate(BaseModel):
     tags: list[str] | None = None
 
 
+class ImportCallRequest(BaseModel):
+    call_id: UUID
+    title: str | None = Field(None, max_length=300)
+
+
 # ── Agent phrases (read-only reference) ──────────────────────
 
 
@@ -565,6 +570,179 @@ async def bulk_delete_conversations(
         "deleted": deleted_count,
         "skipped": len(skipped_ids),
         "skipped_ids": skipped_ids,
+    }
+
+
+# ── Import real call ──────────────────────────────────────────
+
+
+@router.post("/conversations/import-call")
+async def import_call(
+    request: ImportCallRequest, user: dict[str, Any] = _perm_w
+) -> dict[str, Any]:
+    """Import a real call from calls/call_turns/call_tool_calls into sandbox."""
+    engine = await _get_engine()
+    call_id = str(request.call_id)
+
+    async with engine.begin() as conn:
+        # 1. Load call
+        call_result = await conn.execute(
+            text("""
+                SELECT id, caller_id, started_at, scenario, tenant_id,
+                       quality_score, duration_seconds, prompt_version
+                FROM calls WHERE id = :call_id
+            """),
+            {"call_id": call_id},
+        )
+        call_row = call_result.first()
+        if not call_row:
+            raise HTTPException(status_code=404, detail="Call not found")
+
+        # 2. Load turns
+        turns_result = await conn.execute(
+            text("""
+                SELECT turn_number, speaker, content, llm_latency_ms
+                FROM call_turns WHERE call_id = :call_id
+                ORDER BY turn_number
+            """),
+            {"call_id": call_id},
+        )
+        turns = [dict(row._mapping) for row in turns_result]
+        if not turns:
+            raise HTTPException(status_code=400, detail="Call has no turns")
+
+        # 3. Load tool calls
+        tc_result = await conn.execute(
+            text("""
+                SELECT turn_number, tool_name, tool_args, tool_result, duration_ms
+                FROM call_tool_calls WHERE call_id = :call_id
+                ORDER BY created_at
+            """),
+            {"call_id": call_id},
+        )
+        tool_calls = [dict(row._mapping) for row in tc_result]
+
+        # 4. Create sandbox conversation
+        caller_id = call_row.caller_id or "unknown"
+        started = call_row.started_at
+        date_str = started.strftime("%Y-%m-%d %H:%M") if started else "?"
+        title = request.title or f"Импорт: {caller_id} {date_str}"
+
+        short_id = call_id[:8]
+        tags = ["imported", f"call:{short_id}"]
+        metadata = {
+            "source_call_id": call_id,
+            "imported_at": __import__("datetime")
+            .datetime.now(__import__("datetime").timezone.utc)
+            .isoformat(),
+            "original_quality_score": call_row.quality_score,
+            "original_duration_seconds": call_row.duration_seconds,
+        }
+
+        user_id = user.get("user_id")
+        conv_result = await conn.execute(
+            text("""
+                INSERT INTO sandbox_conversations
+                    (title, tool_mode, tags, scenario_type, tenant_id,
+                     metadata, created_by)
+                VALUES
+                    (:title, 'mock', :tags, :scenario_type,
+                     CAST(:tenant_id AS uuid), :metadata, :created_by)
+                RETURNING id, title, tool_mode, tags, scenario_type, status,
+                          is_baseline, metadata, tenant_id, created_at, updated_at
+            """),
+            {
+                "title": title,
+                "tags": tags,
+                "scenario_type": call_row.scenario,
+                "tenant_id": str(call_row.tenant_id) if call_row.tenant_id else None,
+                "metadata": json.dumps(metadata),
+                "created_by": user_id,
+            },
+        )
+        conv_row = conv_result.first()
+        assert conv_row is not None
+        conv_id = str(conv_row.id)
+
+        # 5. Insert sandbox turns
+        speaker_map = {"bot": "agent", "customer": "customer"}
+        conversation_history: list[dict[str, Any]] = []
+        turn_number_to_sandbox_id: dict[int, str] = {}
+        saved_turns = []
+
+        for turn in turns:
+            speaker = speaker_map.get(turn["speaker"], turn["speaker"])
+            content = turn["content"] or ""
+
+            # Build conversation_history snapshot for agent turns
+            history_snapshot = None
+            if speaker == "agent":
+                # Add the preceding customer message to history
+                # (already added below), then snapshot
+                history_snapshot = json.dumps(list(conversation_history))
+
+            turn_result = await conn.execute(
+                text("""
+                    INSERT INTO sandbox_turns
+                        (conversation_id, turn_number, speaker, content,
+                         llm_latency_ms, conversation_history)
+                    VALUES
+                        (:conv_id, :turn_number, :speaker, :content,
+                         :llm_latency_ms, :history)
+                    RETURNING id, turn_number, speaker, content,
+                              llm_latency_ms, created_at
+                """),
+                {
+                    "conv_id": conv_id,
+                    "turn_number": turn["turn_number"],
+                    "speaker": speaker,
+                    "content": content,
+                    "llm_latency_ms": turn.get("llm_latency_ms"),
+                    "history": history_snapshot,
+                },
+            )
+            turn_row = turn_result.first()
+            assert turn_row is not None
+            saved_turns.append(dict(turn_row._mapping))
+            turn_number_to_sandbox_id[turn["turn_number"]] = str(turn_row.id)
+
+            # Update running conversation history
+            if speaker == "customer":
+                conversation_history.append({"role": "user", "content": content})
+            elif speaker == "agent":
+                conversation_history.append({"role": "assistant", "content": content})
+
+        # 6. Insert sandbox tool calls
+        for tc in tool_calls:
+            sandbox_turn_id = turn_number_to_sandbox_id.get(tc["turn_number"])
+            if not sandbox_turn_id:
+                continue
+            await conn.execute(
+                text("""
+                    INSERT INTO sandbox_tool_calls
+                        (turn_id, tool_name, tool_args, tool_result,
+                         duration_ms, is_mock)
+                    VALUES
+                        (:turn_id, :tool_name, :tool_args, :tool_result,
+                         :duration_ms, false)
+                """),
+                {
+                    "turn_id": sandbox_turn_id,
+                    "tool_name": tc["tool_name"],
+                    "tool_args": json.dumps(tc["tool_args"])
+                    if isinstance(tc["tool_args"], dict)
+                    else tc["tool_args"],
+                    "tool_result": json.dumps(tc["tool_result"])
+                    if isinstance(tc["tool_result"], dict)
+                    else tc["tool_result"],
+                    "duration_ms": tc.get("duration_ms"),
+                },
+            )
+
+    return {
+        "item": dict(conv_row._mapping),
+        "turns": saved_turns,
+        "message": f"Call imported ({len(saved_turns)} turns)",
     }
 
 
