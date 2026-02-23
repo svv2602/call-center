@@ -152,12 +152,16 @@ Content:
     messages: list[dict[str, Any]] = [{"role": "user", "content": user_message}]
 
     try:
+        # Only pass router explicitly when it's not None;
+        # when None, let llm_complete use its sentinel default
+        # to trigger lazy router initialization in Celery workers.
+        llm_kwargs: dict[str, Any] = {"system": system_prompt, "max_tokens": 4096}
+        if llm_router is not None:
+            llm_kwargs["router"] = llm_router
         raw_text = await llm_complete(
             LLMTask.ARTICLE_PROCESSOR,
             messages,
-            system=system_prompt,
-            max_tokens=4096,
-            router=llm_router,
+            **llm_kwargs,
         )
 
         # Strip markdown code fences if present
