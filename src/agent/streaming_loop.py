@@ -7,7 +7,7 @@ and loop back to the LLM with results.
 
 from __future__ import annotations
 
-import asyncio  # noqa: TC003
+import asyncio
 import json
 import logging
 import time
@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from src.agent.agent import MAX_HISTORY_MESSAGES, MAX_TOOL_CALLS_PER_TURN
+from src.agent.history_compressor import compress_history
 from src.agent.prompts import SYSTEM_PROMPT, build_system_prompt_with_context
 from src.agent.tool_result_compressor import compress_tool_result
 from src.core.audio_sender import send_audio_stream
@@ -109,6 +110,9 @@ class StreamingAgentLoop:
             conversation_history[:] = (
                 conversation_history[:1] + conversation_history[-(MAX_HISTORY_MESSAGES - 1) :]
             )
+
+        # Compress old tool results to save tokens
+        conversation_history[:] = compress_history(conversation_history)
 
         # Build system prompt with caller context (mask caller phone)
         masked_phone = caller_phone
@@ -208,33 +212,24 @@ class StreamingAgentLoop:
             if not result.tool_calls:
                 break
 
-            # Execute tool calls
-            tool_results: list[dict[str, Any]] = []
-            for tc in result.tool_calls:
+            # Execute tool calls in parallel
+            async def _execute_one_tool(tc: Any) -> dict[str, Any]:
                 try:
                     args = json.loads(tc.arguments_json) if tc.arguments_json else {}
                 except json.JSONDecodeError:
                     args = {}
-
-                # Restore PII in tool arguments so real values reach Store API
                 if self._pii_vault is not None:
                     args = self._pii_vault.restore_in_args(args)
-
-                tool_result = await self._tool_router.execute(tc.name, args)
-
-                # Compress + mask PII in tool results before adding to LLM history
-                content = compress_tool_result(tc.name, tool_result)
+                raw = await self._tool_router.execute(tc.name, args)
+                content = compress_tool_result(tc.name, raw)
                 if self._pii_vault is not None:
                     content = self._pii_vault.mask(content)
+                return {"type": "tool_result", "tool_use_id": tc.id, "content": content}
 
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tc.id,
-                        "content": content,
-                    }
-                )
-                tool_calls_made += 1
+            tool_results = list(
+                await asyncio.gather(*[_execute_one_tool(tc) for tc in result.tool_calls])
+            )
+            tool_calls_made += len(tool_results)
 
             conversation_history.append({"role": "user", "content": tool_results})
 
@@ -251,4 +246,3 @@ class StreamingAgentLoop:
             interrupted=interrupted,
             disconnected=disconnected,
         )
-

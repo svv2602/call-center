@@ -5,6 +5,7 @@ Manages conversation flow, tool routing, and context window.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import logging
 import time
@@ -12,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import anthropic
 
+from src.agent.history_compressor import compress_history
 from src.agent.prompts import (
     ERROR_TEXT,
     PROMPT_VERSION,
@@ -40,7 +42,9 @@ class ToolRouter:
 
     def __init__(self) -> None:
         self._handlers: dict[str, Any] = {}
-        self._on_execute: Any = None  # optional async callback(name, args, result, duration_ms, success)
+        self._on_execute: Any = (
+            None  # optional async callback(name, args, result, duration_ms, success)
+        )
 
     def set_execute_hook(self, callback: Any) -> None:
         """Set an async callback invoked after each tool execution."""
@@ -169,6 +173,9 @@ class LLMAgent:
             conversation_history[:] = (
                 conversation_history[:1] + conversation_history[-(MAX_HISTORY_MESSAGES - 1) :]
             )
+
+        # Compress old tool results to save tokens
+        conversation_history[:] = compress_history(conversation_history)
 
         # Build system prompt with caller context (mask caller phone)
         masked_phone = caller_phone
@@ -301,29 +308,19 @@ class LLMAgent:
             if not tool_uses:
                 break
 
-            # Execute tool calls and add results
-            tool_results: list[dict[str, Any]] = []
-            for tool_use in tool_uses:
-                # Restore PII in tool arguments so real values reach Store API
-                args = tool_use["input"]
+            # Execute tool calls in parallel and add results
+            async def _execute_one(tu: dict[str, Any]) -> dict[str, Any]:
+                args = tu["input"]
                 if self._pii_vault is not None:
                     args = self._pii_vault.restore_in_args(args)
-
-                result = await self._tool_router.execute(tool_use["name"], args)
-
-                # Compress + mask PII in tool results before adding to LLM history
-                content = compress_tool_result(tool_use["name"], result)
+                raw = await self._tool_router.execute(tu["name"], args)
+                content = compress_tool_result(tu["name"], raw)
                 if self._pii_vault is not None:
                     content = self._pii_vault.mask(content)
+                return {"type": "tool_result", "tool_use_id": tu["id"], "content": content}
 
-                tool_results.append(
-                    {
-                        "type": "tool_result",
-                        "tool_use_id": tool_use["id"],
-                        "content": content,
-                    }
-                )
-                tool_call_count += 1
+            tool_results = list(await asyncio.gather(*[_execute_one(tu) for tu in tool_uses]))
+            tool_call_count += len(tool_results)
 
             conversation_history.append({"role": "user", "content": tool_results})
 

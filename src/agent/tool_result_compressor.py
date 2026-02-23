@@ -28,11 +28,13 @@ def _compress_order_status(result: dict[str, Any]) -> str:
         return str(result)
     orders = []
     for o in result["orders"]:
-        orders.append({
-            k: v
-            for k, v in o.items()
-            if k in ("order_number", "status", "status_label", "total", "estimated_delivery")
-        })
+        orders.append(
+            {
+                k: v
+                for k, v in o.items()
+                if k in ("order_number", "status", "status_label", "total", "estimated_delivery")
+            }
+        )
     out = {k: v for k, v in result.items() if k != "orders"}
     out["orders"] = orders
     return str(out)
@@ -70,8 +72,7 @@ def _compress_pickup_points(result: dict[str, Any]) -> str:
     if "points" not in result:
         return str(result)
     points = [
-        {k: v for k, v in p.items() if k in ("id", "address", "city")}
-        for p in result["points"]
+        {k: v for k, v in p.items() if k in ("id", "address", "city")} for p in result["points"]
     ]
     out = {k: v for k, v in result.items() if k != "points"}
     out["points"] = points
@@ -88,12 +89,44 @@ def _compress_knowledge(result: dict[str, Any]) -> str:
         if "title" in a:
             entry["title"] = a["title"]
         content = a.get("content", "")
-        if len(content) > 800:
-            content = content[:800] + "..."
+        if len(content) > 500:
+            content = content[:500] + "..."
         entry["content"] = content
         articles.append(entry)
     out = {k: v for k, v in result.items() if k != "articles"}
     out["articles"] = articles
+    return str(out)
+
+
+def _compress_search_tires(result: dict[str, Any]) -> str:
+    """Limit to top 3 results, keep only essential fields.
+
+    Drops id (SKU), season (already known from query context).
+    """
+    items = result.get("items", [])
+    essential_keys = ("brand", "model", "size", "price", "in_stock")
+    compressed = [{k: v for k, v in item.items() if k in essential_keys} for item in items[:3]]
+    out: dict[str, Any] = {"total": result.get("total", len(items))}
+    out["items"] = compressed
+    return str(out)
+
+
+def _compress_check_availability(result: dict[str, Any]) -> str:
+    """Keep availability essentials, trim warehouses to first 3."""
+    essential_keys = ("available", "price", "stock_quantity")
+    out = {k: v for k, v in result.items() if k in essential_keys}
+    warehouses = result.get("warehouses")
+    if warehouses:
+        out["warehouses"] = warehouses[:3]
+    return str(out)
+
+
+def _compress_fitting_slots(result: dict[str, Any]) -> str:
+    """Keep date, time, available per slot; drop internal IDs."""
+    slots = result.get("slots", [])
+    compressed = [{k: v for k, v in s.items() if k in ("date", "time", "available")} for s in slots]
+    out = {k: v for k, v in result.items() if k != "slots"}
+    out["slots"] = compressed
     return str(out)
 
 
@@ -104,6 +137,9 @@ _COMPRESSORS: dict[str, Any] = {
     "get_fitting_stations": _compress_fitting_stations,
     "get_pickup_points": _compress_pickup_points,
     "search_knowledge_base": _compress_knowledge,
+    "search_tires": _compress_search_tires,
+    "check_availability": _compress_check_availability,
+    "get_fitting_slots": _compress_fitting_slots,
 }
 
 

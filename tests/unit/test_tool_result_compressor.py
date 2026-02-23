@@ -137,9 +137,20 @@ class TestCompressToolResult:
         assert "article_id" not in result
         assert "category" not in result
         assert "relevance" not in result
-        # Content truncated to 800 + "..."
+        # Content truncated to 500 + "..."
         assert "..." in result
         assert len(result) < len(str(data))
+
+    def test_knowledge_truncates_at_500(self) -> None:
+        """Knowledge content now truncated at 500 chars (down from 800)."""
+        content_600 = "B" * 600
+        data = {
+            "articles": [{"title": "Test", "content": content_600}]
+        }
+        result = compress_tool_result("search_knowledge_base", data)
+        assert "..." in result
+        # Should contain first 500 chars + "..."
+        assert "B" * 500 in result
 
     def test_knowledge_keeps_short_content(self) -> None:
         data = {
@@ -154,14 +165,78 @@ class TestCompressToolResult:
         assert "Short answer" in result
         assert "..." not in result
 
-    def test_search_tires_unchanged(self) -> None:
-        """search_tires has no compressor — returns str(result)."""
-        data = {"total": 5, "items": [{"id": "1", "brand": "Michelin"}]}
-        assert compress_tool_result("search_tires", data) == str(data)
+    def test_search_tires_limits_to_3_items(self) -> None:
+        """search_tires compressor keeps top 3 results with essential fields."""
+        data = {
+            "total": 5,
+            "items": [
+                {"id": "1", "brand": "Michelin", "model": "Primacy 4", "size": "205/55 R16", "price": 3200, "in_stock": True, "season": "summer"},
+                {"id": "2", "brand": "Continental", "model": "PremiumContact 6", "size": "205/55 R16", "price": 3500, "in_stock": True, "season": "summer"},
+                {"id": "3", "brand": "Nokian", "model": "Hakka Green 3", "size": "205/55 R16", "price": 2800, "in_stock": True, "season": "summer"},
+                {"id": "4", "brand": "Bridgestone", "model": "Turanza T005", "size": "205/55 R16", "price": 3100, "in_stock": False, "season": "summer"},
+                {"id": "5", "brand": "Goodyear", "model": "EfficientGrip", "size": "205/55 R16", "price": 2900, "in_stock": True, "season": "summer"},
+            ],
+        }
+        result = compress_tool_result("search_tires", data)
+        assert "Michelin" in result
+        assert "Continental" in result
+        assert "Nokian" in result
+        assert "Bridgestone" not in result  # 4th item dropped
+        assert "Goodyear" not in result  # 5th item dropped
+        assert "'id'" not in result  # id stripped
+        assert "season" not in result  # season stripped
+        assert "total" in result  # total preserved
 
-    def test_check_availability_unchanged(self) -> None:
-        data = {"available": True, "quantity": 12, "price": 3200}
-        assert compress_tool_result("check_availability", data) == str(data)
+    def test_search_tires_essential_fields_only(self) -> None:
+        data = {
+            "total": 1,
+            "items": [
+                {"id": "1", "brand": "Michelin", "model": "Primacy", "size": "205/55", "price": 3200, "in_stock": True, "season": "winter", "sku": "MIC-123"},
+            ],
+        }
+        result = compress_tool_result("search_tires", data)
+        assert "brand" in result
+        assert "model" in result
+        assert "price" in result
+        assert "sku" not in result
+
+    def test_check_availability_compressed(self) -> None:
+        data = {
+            "available": True,
+            "price": 3200,
+            "stock_quantity": 12,
+            "warehouses": [
+                {"id": "w1", "name": "Центральний"},
+                {"id": "w2", "name": "Лівобережний"},
+                {"id": "w3", "name": "Правобережний"},
+                {"id": "w4", "name": "Оболонь"},
+            ],
+            "product_id": "p-123",
+            "updated_at": "2026-02-22T10:00:00",
+        }
+        result = compress_tool_result("check_availability", data)
+        assert "True" in result
+        assert "3200" in result
+        assert "stock_quantity" in result
+        # Warehouses trimmed to first 3
+        assert "Оболонь" not in result
+        # Internal fields dropped
+        assert "product_id" not in result
+        assert "updated_at" not in result
+
+    def test_fitting_slots_compressed(self) -> None:
+        data = {
+            "station_id": "st-1",
+            "slots": [
+                {"slot_id": "s1", "date": "2026-02-25", "time": "10:00", "available": True},
+                {"slot_id": "s2", "date": "2026-02-25", "time": "11:00", "available": False},
+            ],
+        }
+        result = compress_tool_result("get_fitting_slots", data)
+        assert "2026-02-25" in result
+        assert "10:00" in result
+        assert "slot_id" not in result  # internal ID dropped
+        assert "station_id" in result  # top-level field preserved
 
     def test_book_fitting_unchanged(self) -> None:
         data = {"booking_id": "b-1", "status": "confirmed"}

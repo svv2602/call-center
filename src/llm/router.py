@@ -82,7 +82,9 @@ class LLMRouter:
             provider = self._create_provider(key, provider_cfg, api_key)
             if provider is not None:
                 self._providers[key] = provider
-                self._breakers[key] = CircuitBreaker(fail_max=5, timeout_duration=timedelta(seconds=30))
+                self._breakers[key] = CircuitBreaker(
+                    fail_max=5, timeout_duration=timedelta(seconds=30)
+                )
                 logger.info("LLM provider initialized: %s (%s)", key, provider_cfg.get("model"))
 
         self._initialized = True
@@ -257,6 +259,20 @@ class LLMRouter:
                 }
             )
         return models
+
+    async def warmup(self) -> None:
+        """Pre-establish HTTP connections to providers.
+
+        Makes a cheap API call (e.g. count_tokens or minimal completion)
+        to force TCP+TLS handshake. Non-critical — failures are logged
+        and silently ignored.
+        """
+        for key, provider in self._providers.items():
+            try:
+                await provider.health_check()
+                logger.info("LLM warmup OK: %s", key)
+            except Exception:
+                logger.debug("LLM warmup failed for %s (non-critical)", key, exc_info=True)
 
     async def health_check_all(self) -> dict[str, bool]:
         """Run health checks on all initialized providers."""

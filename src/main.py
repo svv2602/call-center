@@ -216,6 +216,8 @@ _asyncpg_pool: Any = None  # asyncpg pool for PatternSearch (pgvector)
 _knowledge_search: Any = None  # KnowledgeSearch (pgvector) for search_knowledge_base tool
 _search_embedding_gen: Any = None  # EmbeddingGenerator shared by KnowledgeSearch
 
+_SENTINEL = object()  # sentinel for optional pre-fetched values
+
 
 @app.get("/health")
 async def health_check() -> dict[str, object]:
@@ -417,13 +419,35 @@ _SCENARIO_EMPHASIS: dict[str, str] = {
         "Запитай місто, потім пропонуй точки та час."
     ),
     "consultation": (
-        "\n\n[IVR-фокус] Клієнт має питання. "
-        "Слухай і шукай відповідь через search_knowledge_base."
+        "\n\n[IVR-фокус] Клієнт має питання. Слухай і шукай відповідь через search_knowledge_base."
     ),
 }
 
 
-async def _resolve_caller_id(channel_uuid: str) -> str | None:
+async def _batch_redis_lookups(channel_uuid: str) -> tuple[str | None, str | None]:
+    """Batch Redis lookups for call start: exten + caller_id.
+
+    Uses a pipeline to fetch both values in a single round-trip.
+    Returns (exten, caller_id) — either may be None.
+    """
+    if _redis is None:
+        return None, None
+    try:
+        pipe = _redis.pipeline(transaction=False)
+        pipe.get(f"call:exten:{channel_uuid}")
+        pipe.get(f"call:caller:{channel_uuid}")
+        results = await pipe.execute()
+        exten = results[0].decode().strip() if results[0] else None
+        caller = results[1].decode().strip() if results[1] else None
+        return exten or None, caller or None
+    except Exception:
+        logger.debug("Redis pipeline failed, falling back", exc_info=True)
+        return None, None
+
+
+async def _resolve_caller_id(
+    channel_uuid: str, *, prefetched: str | None = _SENTINEL
+) -> str | None:
     """Resolve caller phone number from Redis.
 
     Asterisk dialplan stores CallerID before AudioSocket:
@@ -433,17 +457,25 @@ async def _resolve_caller_id(channel_uuid: str) -> str | None:
 
     Fallback: try ARI channel variable CALLER_NUMBER.
     """
-    # Primary: read from Redis (set by Asterisk dialplan)
-    if _redis is not None:
-        try:
-            raw = await _redis.get(f"call:caller:{channel_uuid}")
-            if raw:
-                value = raw.decode() if isinstance(raw, bytes) else str(raw)
-                if value.strip():
-                    logger.info("CallerID from Redis: %s for call %s", value.strip(), channel_uuid)
-                    return value.strip()
-        except Exception:
-            logger.debug("Redis CallerID lookup failed", exc_info=True)
+    # Use pre-fetched value from Redis pipeline if available
+    if prefetched is not _SENTINEL:
+        if prefetched:
+            logger.info("CallerID from Redis pipeline: %s for call %s", prefetched, channel_uuid)
+            return prefetched
+    else:
+        # Standalone Redis read (no pipeline)
+        if _redis is not None:
+            try:
+                raw = await _redis.get(f"call:caller:{channel_uuid}")
+                if raw:
+                    value = raw.decode() if isinstance(raw, bytes) else str(raw)
+                    if value.strip():
+                        logger.info(
+                            "CallerID from Redis: %s for call %s", value.strip(), channel_uuid
+                        )
+                        return value.strip()
+            except Exception:
+                logger.debug("Redis CallerID lookup failed", exc_info=True)
 
     # Fallback: ARI channel variable
     settings = get_settings()
@@ -501,7 +533,12 @@ async def _resolve_ivr_intent(channel_uuid: str) -> str | None:
     return None
 
 
-async def _resolve_tenant(channel_uuid: str, db_engine: Any) -> dict[str, Any] | None:
+async def _resolve_tenant(
+    channel_uuid: str,
+    db_engine: Any,
+    *,
+    prefetched_exten: str | None = _SENTINEL,
+) -> dict[str, Any] | None:
     """Resolve tenant for the current call.
 
     Three-level resolution:
@@ -518,15 +555,23 @@ async def _resolve_tenant(channel_uuid: str, db_engine: Any) -> dict[str, Any] |
         "enabled_tools, prompt_suffix, config, is_active, extensions"
     )
 
-    # 1. Primary: read CALLED_EXTEN from Redis (set by Asterisk curl before AudioSocket)
-    if _redis is not None:
+    # 1. Primary: use pre-fetched exten from Redis pipeline, or read directly
+    if prefetched_exten is not _SENTINEL:
+        called_exten = prefetched_exten
+        if called_exten:
+            logger.info(
+                "CALLED_EXTEN from Redis pipeline: %s for call %s", called_exten, channel_uuid
+            )
+    elif _redis is not None:
         try:
             raw = await _redis.get(f"call:exten:{channel_uuid}")
             if raw:
                 called_exten = raw.decode() if isinstance(raw, bytes) else str(raw)
                 called_exten = called_exten.strip() or None
                 if called_exten:
-                    logger.info("CALLED_EXTEN from Redis: %s for call %s", called_exten, channel_uuid)
+                    logger.info(
+                        "CALLED_EXTEN from Redis: %s for call %s", called_exten, channel_uuid
+                    )
         except Exception:
             logger.debug("Redis CALLED_EXTEN lookup failed", exc_info=True)
 
@@ -546,9 +591,7 @@ async def _resolve_tenant(channel_uuid: str, db_engine: Any) -> dict[str, Any] |
                 try:
                     slug = await ari.get_channel_variable(channel_uuid, "TENANT_SLUG")
                     if not slug:
-                        called_exten = await ari.get_channel_variable(
-                            channel_uuid, "CALLED_EXTEN"
-                        )
+                        called_exten = await ari.get_channel_variable(channel_uuid, "CALLED_EXTEN")
                 finally:
                     await ari.close()
             except Exception:
@@ -607,9 +650,16 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     """
     settings = get_settings()
     session = CallSession(conn.channel_uuid)
+    uuid_str = str(conn.channel_uuid)
 
-    # Resolve tenant for this call
-    tenant = await _resolve_tenant(str(conn.channel_uuid), _db_engine)
+    # Batch Redis lookups (single round-trip) then resolve all in parallel
+    exten, caller_from_redis = await _batch_redis_lookups(uuid_str)
+    tenant, ivr_intent, caller_id = await asyncio.gather(
+        _resolve_tenant(uuid_str, _db_engine, prefetched_exten=exten),
+        _resolve_ivr_intent(uuid_str),
+        _resolve_caller_id(uuid_str, prefetched=caller_from_redis),
+    )
+
     tenant_store_client: StoreClient | None = None
     if tenant:
         session.tenant_id = str(tenant["id"])
@@ -621,15 +671,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             tenant["name"],
             conn.channel_uuid,
         )
-
-    # Resolve IVR intent (set by Asterisk dialplan before AudioSocket)
-    ivr_intent = await _resolve_ivr_intent(str(conn.channel_uuid))
     if ivr_intent:
         session.scenario = ivr_intent
         logger.info("IVR intent resolved: %s for call %s", ivr_intent, conn.channel_uuid)
-
-    # Resolve caller phone number from Asterisk ARI
-    caller_id = await _resolve_caller_id(str(conn.channel_uuid))
     if caller_id:
         session.caller_id = caller_id
         session.caller_phone = caller_id
@@ -970,7 +1014,9 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         network = session.network_id or "ProKoleso"
         return await client.search_tires(network=network, **params)
 
-    async def _check_availability(product_id: str = "", query: str = "", **kw: Any) -> dict[str, Any]:
+    async def _check_availability(
+        product_id: str = "", query: str = "", **kw: Any
+    ) -> dict[str, Any]:
         network = session.network_id or "ProKoleso"
         return await client.check_availability(product_id, query, network=network, **kw)
 
@@ -1122,9 +1168,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     for p in raw_points
                 ]
                 if _redis:
-                    await _redis.setex(
-                        cache_key, 3600, json.dumps(all_points, ensure_ascii=False)
-                    )
+                    await _redis.setex(cache_key, 3600, json.dumps(all_points, ensure_ascii=False))
                 if city:
                     all_points = [
                         p for p in all_points if city.lower() in p.get("city", "").lower()
@@ -1204,6 +1248,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         return {"total": 0, "bookings": [], "message": "Сервіс записів тимчасово недоступний"}
 
     router.register("get_customer_bookings", _get_customer_bookings)
+
     async def _search_knowledge(**kwargs: Any) -> dict[str, Any]:
         if _knowledge_search is not None:
             results = await _knowledge_search.search(
@@ -1341,6 +1386,9 @@ async def main() -> None:
             await _llm_router.initialize(redis=_redis)
             logger.info("LLM router initialized (multi-provider routing enabled)")
 
+            # Pre-establish HTTP connections to reduce first-call latency
+            await _llm_router.warmup()
+
             # Share router globally (avoids __main__ vs src.main module issue)
             from src.llm import set_router
 
@@ -1453,7 +1501,9 @@ async def main() -> None:
             _knowledge_search = KnowledgeSearch(_asyncpg_pool, _search_embedding_gen, redis=_redis)
             logger.info("KnowledgeSearch initialized (pgvector)")
         except Exception:
-            logger.debug("KnowledgeSearch init failed — tool will use StoreClient fallback", exc_info=True)
+            logger.debug(
+                "KnowledgeSearch init failed — tool will use StoreClient fallback", exc_info=True
+            )
             _knowledge_search = None
             if _search_embedding_gen is not None:
                 with contextlib.suppress(Exception):
