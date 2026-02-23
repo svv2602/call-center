@@ -63,7 +63,7 @@ _KYIV_TZ = zoneinfo.ZoneInfo("Europe/Kyiv")
 def _time_of_day_greeting() -> str:
     """Return a Ukrainian greeting appropriate for the current Kyiv time."""
     hour = datetime.datetime.now(tz=_KYIV_TZ).hour
-    if 6 <= hour < 12:
+    if 5 <= hour < 12:
         return "До́брий ра́нок"
     if 12 <= hour < 18:
         return "До́брий день"

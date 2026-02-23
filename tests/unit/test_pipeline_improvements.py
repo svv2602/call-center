@@ -59,6 +59,7 @@ class TestTimeOfDayGreeting:
     @pytest.mark.parametrize(
         ("hour", "expected"),
         [
+            (5, "До́брий ра́нок"),
             (6, "До́брий ра́нок"),
             (7, "До́брий ра́нок"),
             (11, "До́брий ра́нок"),
@@ -70,7 +71,7 @@ class TestTimeOfDayGreeting:
             (23, "До́брої но́чі"),
             (0, "До́брої но́чі"),
             (3, "До́брої но́чі"),
-            (5, "До́брої но́чі"),
+            (4, "До́брої но́чі"),
         ],
     )
     def test_greeting_by_hour(self, hour: int, expected: str) -> None:
