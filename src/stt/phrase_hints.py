@@ -35,41 +35,44 @@ _CACHE_TTL = 60.0  # seconds
 # ═══════════════════════════════════════════════════════════
 
 BRAND_PRONUNCIATIONS: dict[str, list[str]] = {
-    "Bridgestone": ["Бріджстоун", "Бріджстон"],
-    "Michelin": ["Мішлен", "Мішелін"],
-    "Continental": ["Континенталь", "Контінентал"],
-    "Goodyear": ["Гудір", "Гудієр"],
-    "Pirelli": ["Піреллі", "Пірелі"],
-    "Nokian": ["Нокіан", "Нокіен"],
-    "Hankook": ["Ханкук", "Ганкук"],
-    "Yokohama": ["Йокогама", "Йокохама"],
-    "Dunlop": ["Данлоп", "Данлап"],
-    "Toyo": ["Тойо"],
-    "Kumho": ["Кумхо"],
-    "Nexen": ["Нексен", "Нексін"],
-    "Firestone": ["Файрстоун", "Файрстон"],
-    "BFGoodrich": ["Бі Еф Гудріч", "БФ Гудріч"],
+    # Key = canonical brand name (for LLM mapping), values = Cyrillic STT hints only.
+    # STT outputs Cyrillic for uk-UA/ru-RU — Latin hints are useless.
+    "Bridgestone": ["Бріджстоун", "Бріджстон", "Бриджстоун", "Бриджстон"],
+    "Michelin": ["Мішлен", "Мішелін", "Мишлен", "Мишелін"],
+    "Continental": ["Континенталь", "Контінентал", "Контінентал", "Континентал"],
+    "Goodyear": ["Гудір", "Гудієр", "Гудіяр", "Гудьір", "Гудиир"],
+    "Pirelli": ["Піреллі", "Пірелі", "Пирелли", "Пірелі"],
+    "Nokian": ["Нокіан", "Нокіен", "Нокіян", "Нокиан"],
+    "Hankook": ["Ханкук", "Ганкук", "Ханкук", "Хенкук"],
+    "Yokohama": ["Йокогама", "Йокохама", "Йокогама"],
+    "Dunlop": ["Данлоп", "Данлап", "Данлоп"],
+    "Toyo": ["Тойо", "Тойо"],
+    "Kumho": ["Кумхо", "Кумго"],
+    "Nexen": ["Нексен", "Нексін", "Нексен"],
+    "Firestone": ["Файрстоун", "Файрстон", "Файєрстоун"],
+    "BFGoodrich": ["Бі Еф Гудріч", "БФ Гудріч", "Бі Еф Гудрич", "Гудріч"],
     "Falken": ["Фалкен", "Фалькен"],
-    "Maxxis": ["Максіс", "Макксіс"],
+    "Maxxis": ["Максіс", "Макксіс", "Максис"],
     "Cooper": ["Купер"],
     "Lassa": ["Ласса"],
     "Matador": ["Матадор"],
     "Barum": ["Барум"],
-    "Semperit": ["Семперіт"],
+    "Semperit": ["Семперіт", "Семперит"],
     "Sava": ["Сава"],
     "Kleber": ["Клебер"],
-    "Vredestein": ["Вредештайн", "Вредестайн"],
-    "General Tire": ["Дженерал Тайр"],
-    "Nitto": ["Нітто"],
-    "Triangle": ["Тріангл", "Трайенгл"],
+    "Vredestein": ["Вредештайн", "Вредестайн", "Вредештейн", "Вредестін", "Вредештаін"],
+    "General Tire": ["Дженерал Тайр", "Дженерал Тайєр"],
+    "Nitto": ["Нітто", "Нитто"],
+    "Triangle": ["Тріангл", "Трайенгл", "Триангл"],
     "Sailun": ["Сайлун"],
     "Taurus": ["Таурус"],
-    "Росава": [],
-    "Белшина": [],
-    "Кама": [],
+    "Росава": ["Росава"],
+    "Белшина": ["Белшина", "Білшина"],
+    "Кама": ["Кама"],
 }
 
-# Common Ukrainian tire terms that STT may misrecognize
+# Common Ukrainian/Russian tire terms that STT may misrecognize.
+# Cyrillic only — STT for uk-UA/ru-RU never outputs Latin.
 BASE_TERMS_UK: list[str] = [
     "шиномонтаж",
     "шини",
@@ -90,24 +93,23 @@ BASE_TERMS_UK: list[str] = [
     "посадковий діаметр",
     "індекс навантаження",
     "індекс швидкості",
-    "RunFlat",
-    "Ранфлет",
-    "XL",
-    "SUV",
+    "ранфлет",
+    "ранфлєт",
 ]
 
 BASE_STORE_NAMES: list[str] = [
     "ПроКолесо",
-    "ProKoleso",
     "Твоя Шина",
 ]
 
 
 def get_base_phrases() -> list[str]:
-    """Return all base phrases (brands + pronunciations + terms + store names)."""
+    """Return all base phrases (Cyrillic pronunciations + terms + store names).
+
+    Latin brand keys are NOT included — STT for uk-UA/ru-RU outputs Cyrillic only.
+    """
     phrases: list[str] = []
-    for brand, pronunciations in BRAND_PRONUNCIATIONS.items():
-        phrases.append(brand)
+    for pronunciations in BRAND_PRONUNCIATIONS.values():
         phrases.extend(pronunciations)
     phrases.extend(BASE_TERMS_UK)
     phrases.extend(BASE_STORE_NAMES)

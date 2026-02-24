@@ -29,9 +29,11 @@ class TestGetBasePhrases:
         phrases = get_base_phrases()
         assert len(phrases) > 0
 
-    def test_contains_latin_brand(self) -> None:
+    def test_no_latin_brands(self) -> None:
+        """Latin brand keys should NOT be in base phrases (STT outputs Cyrillic)."""
         phrases = get_base_phrases()
-        assert "Michelin" in phrases
+        assert "Michelin" not in phrases
+        assert "Bridgestone" not in phrases
 
     def test_contains_cyrillic_pronunciation(self) -> None:
         phrases = get_base_phrases()
@@ -46,10 +48,12 @@ class TestGetBasePhrases:
         phrases = get_base_phrases()
         assert "ПроКолесо" in phrases
 
-    def test_all_brand_keys_included(self) -> None:
+    def test_all_pronunciations_in_phrases(self) -> None:
+        """All Cyrillic pronunciations should be in base phrases."""
         phrases = get_base_phrases()
-        for brand in BRAND_PRONUNCIATIONS:
-            assert brand in phrases
+        for brand, pronunciations in BRAND_PRONUNCIATIONS.items():
+            for pron in pronunciations:
+                assert pron in phrases, f"{pron} (from {brand}) not in base phrases"
 
     def test_all_pronunciations_included(self) -> None:
         phrases = get_base_phrases()
@@ -294,7 +298,7 @@ class TestGetAllPhrasesFlat:
         result = await get_all_phrases_flat(mock_redis)
 
         assert len(result) > 0
-        assert "Michelin" in result
+        assert "Мішлен" in result
 
 
 class TestUpdateCustomPhrases:
