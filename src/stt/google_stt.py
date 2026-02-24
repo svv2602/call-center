@@ -35,7 +35,7 @@ def _build_adaptation(
     phrases = phrase_hints[:_MAX_PHRASE_HINTS]
     phrase_set = cloud_speech.SpeechAdaptation.AdaptationPhraseSet(
         inline_phrase_set=cloud_speech.PhraseSet(
-            phrases=[cloud_speech.PhraseSet.Phrase(value=p, boost=10.0) for p in phrases],
+            phrases=[cloud_speech.PhraseSet.Phrase(value=p) for p in phrases],
         ),
     )
     return cloud_speech.SpeechAdaptation(phrase_sets=[phrase_set])
@@ -136,12 +136,15 @@ class GoogleSTTEngine:
         self._session_start = time.monotonic()
         self._stream_task = asyncio.create_task(self._recognition_loop())
 
-    async def _recognition_loop(self) -> None:
-        """Main recognition loop: sends audio, receives transcripts."""
-        if self._client is None or self._config is None:
-            return
-
-        recognition_config = cloud_speech.RecognitionConfig(
+    def _build_recognition_config(
+        self, *, with_adaptation: bool = True
+    ) -> cloud_speech.RecognitionConfig:
+        """Build RecognitionConfig, optionally including phrase adaptation."""
+        assert self._config is not None
+        adaptation = None
+        if with_adaptation:
+            adaptation = _build_adaptation(self._config.phrase_hints)
+        return cloud_speech.RecognitionConfig(
             explicit_decoding_config=cloud_speech.ExplicitDecodingConfig(
                 encoding=cloud_speech.ExplicitDecodingConfig.AudioEncoding.LINEAR16,
                 sample_rate_hertz=self._config.sample_rate_hertz,
@@ -149,74 +152,101 @@ class GoogleSTTEngine:
             ),
             language_codes=[self._config.language_code, *self._config.alternative_languages],
             model=self._config.model,
-            adaptation=_build_adaptation(self._config.phrase_hints),
+            adaptation=adaptation,
         )
 
-        streaming_config = cloud_speech.StreamingRecognitionConfig(
-            config=recognition_config,
-            streaming_features=cloud_speech.StreamingRecognitionFeatures(
-                interim_results=self._config.interim_results,
-            ),
-        )
+    async def _recognition_loop(self) -> None:
+        """Main recognition loop: sends audio, receives transcripts."""
+        if self._client is None or self._config is None:
+            return
 
         recognizer = f"projects/{self._project_id}/locations/global/recognizers/_"
 
-        try:
-            # Build request generator
-            async def request_generator() -> AsyncIterator[cloud_speech.StreamingRecognizeRequest]:
-                # First request: config + recognizer
-                yield cloud_speech.StreamingRecognizeRequest(
-                    recognizer=recognizer,
-                    streaming_config=streaming_config,
-                )
+        # Try with adaptation first; if recognizer doesn't support it, retry without
+        for attempt, use_adaptation in enumerate((True, False)):
+            if attempt > 0 and not self._config.phrase_hints:
+                # No point retrying without adaptation if there were no hints
+                break
 
-                # Subsequent requests: audio content
-                while True:
-                    chunk = await self._audio_queue.get()
-                    if chunk is None:
-                        break
-                    yield cloud_speech.StreamingRecognizeRequest(
-                        audio=chunk,
-                    )
-
-            responses = await self._client.streaming_recognize(
-                requests=request_generator(),
+            recognition_config = self._build_recognition_config(with_adaptation=use_adaptation)
+            streaming_config = cloud_speech.StreamingRecognitionConfig(
+                config=recognition_config,
+                streaming_features=cloud_speech.StreamingRecognitionFeatures(
+                    interim_results=self._config.interim_results,
+                ),
             )
 
-            async for response in responses:
-                if not self._running:
+            try:
+                await self._run_streaming(recognizer, streaming_config)
+                return  # normal exit
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                if attempt == 0 and self._config.phrase_hints:
+                    logger.warning(
+                        "STT recognition failed with adaptation, retrying without phrase hints"
+                    )
+                    continue
+                logger.exception("STT recognition error")
+                if self._running:
+                    await self._transcript_queue.put(None)
+
+    async def _run_streaming(
+        self,
+        recognizer: str,
+        streaming_config: cloud_speech.StreamingRecognitionConfig,
+    ) -> None:
+        """Run a single streaming recognition session."""
+        assert self._client is not None
+        assert self._config is not None
+
+        async def request_generator() -> AsyncIterator[cloud_speech.StreamingRecognizeRequest]:
+            # First request: config + recognizer
+            yield cloud_speech.StreamingRecognizeRequest(
+                recognizer=recognizer,
+                streaming_config=streaming_config,
+            )
+
+            # Subsequent requests: audio content
+            while True:
+                chunk = await self._audio_queue.get()
+                if chunk is None:
                     break
+                yield cloud_speech.StreamingRecognizeRequest(
+                    audio=chunk,
+                )
 
-                for result in response.results:
-                    if not result.alternatives:
-                        continue
+        responses = await self._client.streaming_recognize(
+            requests=request_generator(),
+        )
 
-                    best = result.alternatives[0]
-                    language = (
-                        result.language_code if result.language_code else self._config.language_code
-                    )
+        async for response in responses:
+            if not self._running:
+                break
 
-                    transcript = Transcript(
-                        text=best.transcript.strip(),
-                        is_final=result.is_final,
-                        confidence=best.confidence if result.is_final else 0.0,
-                        language=language,
-                    )
+            for result in response.results:
+                if not result.alternatives:
+                    continue
 
-                    if transcript.text:
-                        await self._transcript_queue.put(transcript)
+                best = result.alternatives[0]
+                language = (
+                    result.language_code if result.language_code else self._config.language_code
+                )
 
-                        if result.is_final:
-                            logger.info(
-                                "STT final: '%s' (lang=%s, conf=%.2f)",
-                                transcript.text,
-                                language,
-                                best.confidence,
-                            )
+                transcript = Transcript(
+                    text=best.transcript.strip(),
+                    is_final=result.is_final,
+                    confidence=best.confidence if result.is_final else 0.0,
+                    language=language,
+                )
 
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("STT recognition error")
-            if self._running:
-                await self._transcript_queue.put(None)
+                if transcript.text:
+                    await self._transcript_queue.put(transcript)
+
+                    if result.is_final:
+                        logger.info(
+                            "STT final: '%s' (lang=%s, conf=%.2f)",
+                            transcript.text,
+                            language,
+                            best.confidence,
+                        )
