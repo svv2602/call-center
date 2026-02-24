@@ -8,6 +8,7 @@ SpeechAdaptation at call start.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -45,6 +46,31 @@ async def _get_engine() -> Any:
             settings.database.url, pool_size=2, max_overflow=2, pool_pre_ping=True
         )
     return _engine
+
+
+_LATIN_RE = re.compile(r"^[a-z]+$")
+
+
+class WordOverridesRequest(BaseModel):
+    overrides: dict[str, str]
+
+    @field_validator("overrides")
+    @classmethod
+    def validate_overrides(cls, v: dict[str, str]) -> dict[str, str]:
+        if len(v) > 500:
+            raise ValueError("Maximum 500 word overrides allowed")
+        result: dict[str, str] = {}
+        for key, val in v.items():
+            k = key.strip().lower()
+            vv = val.strip()
+            if not k or not vv:
+                continue
+            if not _LATIN_RE.match(k):
+                raise ValueError(
+                    f"Key '{k}' must contain only lowercase Latin letters (a-z)"
+                )
+            result[k] = vv
+        return result
 
 
 class CustomPhrasesRequest(BaseModel):
@@ -175,4 +201,58 @@ async def reset_stt_phrase_hints(_: dict[str, Any] = _perm_w) -> dict[str, Any]:
         "custom_count": 0,
         "total": len(base),
         "google_limit": 5000,
+    }
+
+
+# ═══════════════════════════════════════════════════════════
+#  Word overrides (transliteration)
+# ═══════════════════════════════════════════════════════════
+
+
+@router.get("/word-overrides")
+async def get_stt_word_overrides(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
+    """Get transliteration word overrides."""
+    from src.stt.phrase_hints import _DEFAULT_WORD_OVERRIDES, get_word_overrides
+
+    redis = await _get_redis()
+    overrides = await get_word_overrides(redis)
+    is_customized = overrides != _DEFAULT_WORD_OVERRIDES
+    return {
+        "overrides": overrides,
+        "count": len(overrides),
+        "is_customized": is_customized,
+    }
+
+
+@router.patch("/word-overrides")
+async def update_stt_word_overrides(
+    request: WordOverridesRequest, _: dict[str, Any] = _perm_w
+) -> dict[str, Any]:
+    """Replace word overrides (full replacement)."""
+    from src.stt.phrase_hints import save_word_overrides
+
+    redis = await _get_redis()
+    overrides = await save_word_overrides(redis, request.overrides)
+    logger.info("STT word overrides updated: %d entries", len(overrides))
+    return {
+        "message": "Word overrides updated",
+        "overrides": overrides,
+        "count": len(overrides),
+        "is_customized": True,
+    }
+
+
+@router.post("/word-overrides/reset")
+async def reset_stt_word_overrides(_: dict[str, Any] = _perm_w) -> dict[str, Any]:
+    """Reset word overrides to hardcoded defaults."""
+    from src.stt.phrase_hints import reset_word_overrides
+
+    redis = await _get_redis()
+    defaults = await reset_word_overrides(redis)
+    logger.info("STT word overrides reset to defaults: %d entries", len(defaults))
+    return {
+        "message": "Word overrides reset to defaults",
+        "overrides": defaults,
+        "count": len(defaults),
+        "is_customized": False,
     }

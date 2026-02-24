@@ -13,6 +13,8 @@ let _customPhrases = [];
 let _baseFilter = '';
 let _autoFilter = '';
 let _customFilter = '';
+let _wordOverrides = {};
+let _overridesFilter = '';
 
 // ═══════════════════════════════════════════════════════════
 //  Load data
@@ -22,9 +24,14 @@ async function loadData() {
     if (!container) return;
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
     try {
-        _data = await api('/admin/stt/phrase-hints');
+        const [hintsData, overridesData] = await Promise.all([
+            api('/admin/stt/phrase-hints'),
+            api('/admin/stt/word-overrides'),
+        ]);
+        _data = hintsData;
         _basePhrases = [...(_data.base_phrases || [])];
         _customPhrases = [...(_data.custom_phrases || [])];
+        _wordOverrides = overridesData.overrides || {};
         render();
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('sttHints.loadFailed', { error: escapeHtml(e.message) })}</div>`;
@@ -76,6 +83,7 @@ function render() {
         <button class="${tw.tabBtn} ${_activeTab === 'base' ? 'border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400 font-semibold' : ''}" onclick="window._pages.sttHints.switchTab('base')">${t('sttHints.tabBase')} (${_basePhrases.length})</button>
         <button class="${tw.tabBtn} ${_activeTab === 'auto' ? 'border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400 font-semibold' : ''}" onclick="window._pages.sttHints.switchTab('auto')">${t('sttHints.tabAuto')} (${(_data.auto_phrases || []).length})</button>
         <button class="${tw.tabBtn} ${_activeTab === 'custom' ? 'border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400 font-semibold' : ''}" onclick="window._pages.sttHints.switchTab('custom')">${t('sttHints.tabCustom')} (${_customPhrases.length})</button>
+        <button class="${tw.tabBtn} ${_activeTab === 'overrides' ? 'border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400 font-semibold' : ''}" onclick="window._pages.sttHints.switchTab('overrides')">${t('sttHints.tabOverrides')} (${Object.keys(_wordOverrides).length})</button>
     </div>`;
 
     // Tab content
@@ -83,6 +91,8 @@ function render() {
         html += renderBaseTab();
     } else if (_activeTab === 'auto') {
         html += renderAutoTab();
+    } else if (_activeTab === 'overrides') {
+        html += renderOverridesTab();
     } else {
         html += renderCustomTab();
     }
@@ -196,6 +206,58 @@ function renderCustomTab() {
     return html;
 }
 
+function renderOverridesTab() {
+    const entries = Object.entries(_wordOverrides);
+    const lower = _overridesFilter.toLowerCase();
+    const filtered = lower
+        ? entries.filter(([k, v]) => k.includes(lower) || v.toLowerCase().includes(lower))
+        : entries;
+    filtered.sort((a, b) => a[0].localeCompare(b[0]));
+
+    let html = `
+        <div class="flex flex-wrap items-center gap-2 mb-3">
+            <input type="text" id="sttOverridesSearch" class="${tw.filterInput} flex-1 min-w-48" placeholder="${t('sttHints.searchPlaceholder')}" value="${escapeHtml(_overridesFilter)}" oninput="window._pages.sttHints.filterOverrides(this.value)">
+            <span class="text-xs text-neutral-400">${filtered.length} / ${entries.length}</span>
+        </div>
+        <div class="flex items-center gap-2 mb-3">
+            <input type="text" id="sttOverrideKeyInput" class="${tw.filterInput} w-48" placeholder="${t('sttHints.overrideLatin')}" onkeydown="if(event.key==='Enter')window._pages.sttHints.addOverride()">
+            <input type="text" id="sttOverrideValInput" class="${tw.filterInput} w-48" placeholder="${t('sttHints.overrideCyrillic')}" onkeydown="if(event.key==='Enter')window._pages.sttHints.addOverride()">
+            <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sttHints.addOverride()">${t('common.add')}</button>
+        </div>
+        <div class="text-[11px] text-neutral-400 dark:text-neutral-500 mb-3">${t('sttHints.overridesHint')}</div>
+        <div class="max-h-96 overflow-y-auto border border-neutral-200 dark:border-neutral-700 rounded-lg mb-3">`;
+
+    if (filtered.length === 0) {
+        html += `<div class="${tw.emptyState}">${t('sttHints.noResults')}</div>`;
+    } else {
+        html += `<table class="w-full text-sm">
+            <thead class="bg-neutral-50 dark:bg-neutral-800 sticky top-0">
+                <tr>
+                    <th class="text-left px-3 py-1.5 font-medium text-neutral-500 dark:text-neutral-400">English</th>
+                    <th class="text-left px-3 py-1.5 font-medium text-neutral-500 dark:text-neutral-400">${t('sttHints.overrideCyrillic')}</th>
+                    <th class="w-8"></th>
+                </tr>
+            </thead>
+            <tbody class="divide-y divide-neutral-100 dark:divide-neutral-800">`;
+        for (const [key, val] of filtered) {
+            html += `<tr class="hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
+                <td class="px-3 py-1.5 font-mono text-xs text-neutral-700 dark:text-neutral-300">${escapeHtml(key)}</td>
+                <td class="px-3 py-1.5 font-mono text-xs text-neutral-700 dark:text-neutral-300">${escapeHtml(val)}</td>
+                <td class="px-1 py-1.5"><button class="text-neutral-400 hover:text-red-500 text-xs" onclick="window._pages.sttHints.removeOverride('${escapeHtml(key.replace(/'/g, "\\'"))}')" title="${t('common.delete')}">&#10005;</button></td>
+            </tr>`;
+        }
+        html += '</tbody></table>';
+    }
+    html += '</div>';
+
+    html += `<div class="flex flex-wrap items-center gap-2">
+        <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.sttHints.saveOverrides()">${t('sttHints.saveCustom')}</button>
+        <button class="${tw.btnSm} text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20" onclick="window._pages.sttHints.resetOverrides()">${t('sttHints.resetBase')}</button>
+    </div>`;
+
+    return html;
+}
+
 // ═══════════════════════════════════════════════════════════
 //  Tab switching
 // ═══════════════════════════════════════════════════════════
@@ -293,6 +355,63 @@ async function saveCustom() {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  Word override operations
+// ═══════════════════════════════════════════════════════════
+function filterOverrides(value) { _overridesFilter = value; render(); }
+
+function addOverride() {
+    const keyInput = document.getElementById('sttOverrideKeyInput');
+    const valInput = document.getElementById('sttOverrideValInput');
+    if (!keyInput || !valInput) return;
+    const key = keyInput.value.trim().toLowerCase();
+    const val = valInput.value.trim();
+    if (!key || !val) return;
+    if (!/^[a-z]+$/.test(key)) {
+        showToast(t('sttHints.overridesLatinOnly'), 'error');
+        return;
+    }
+    if (_wordOverrides[key] !== undefined) {
+        showToast(t('sttHints.duplicateOverride'), 'error');
+        return;
+    }
+    _wordOverrides[key] = val;
+    keyInput.value = '';
+    valInput.value = '';
+    render();
+}
+
+function removeOverride(key) {
+    delete _wordOverrides[key];
+    render();
+}
+
+async function saveOverrides() {
+    try {
+        const resp = await api('/admin/stt/word-overrides', {
+            method: 'PATCH',
+            body: JSON.stringify({ overrides: _wordOverrides }),
+        });
+        _wordOverrides = resp.overrides || _wordOverrides;
+        showToast(t('sttHints.overridesSaved', { count: Object.keys(_wordOverrides).length }), 'success');
+        render();
+    } catch (e) {
+        showToast(t('sttHints.overridesSaveFailed', { error: e.message }), 'error');
+    }
+}
+
+async function resetOverrides() {
+    if (!confirm(t('sttHints.overridesResetConfirm'))) return;
+    try {
+        const resp = await api('/admin/stt/word-overrides/reset', { method: 'POST' });
+        _wordOverrides = resp.overrides || {};
+        showToast(t('sttHints.overridesResetDone'), 'success');
+        render();
+    } catch (e) {
+        showToast(t('sttHints.overridesSaveFailed', { error: e.message }), 'error');
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  Catalog refresh
 // ═══════════════════════════════════════════════════════════
 async function refreshFromCatalog() {
@@ -319,4 +438,5 @@ window._pages.sttHints = {
     addBasePhrase, removeBasePhrase, saveBase, resetBase,
     addCustomPhrase, removeCustomPhrase, saveCustom,
     refreshFromCatalog,
+    filterOverrides, addOverride, removeOverride, saveOverrides, resetOverrides,
 };

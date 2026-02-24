@@ -354,3 +354,141 @@ class TestPostBaseReset:
         data = response.json()
         assert data["base_customized"] is False
         assert data["base_count"] > 0
+
+
+class TestGetWordOverrides:
+    """Test GET /admin/stt/word-overrides."""
+
+    @pytest.mark.asyncio()
+    async def test_returns_defaults_on_empty_redis(
+        self, app: Any, mock_redis: AsyncMock
+    ) -> None:
+        with (
+            patch("src.api.auth.require_admin", _fake_require_perm),
+            patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.api.stt_config.get_settings", _settings_patch()),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get("/admin/stt/word-overrides")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 5  # 5 default overrides
+        assert data["is_customized"] is False
+        assert "weather" in data["overrides"]
+
+    @pytest.mark.asyncio()
+    async def test_returns_custom_overrides(
+        self, app: Any, mock_redis: AsyncMock
+    ) -> None:
+        custom = json.dumps({"hello": "хелло"})
+        mock_redis._store["stt:word_overrides"] = custom.encode()
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_perm),
+            patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.api.stt_config.get_settings", _settings_patch()),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get("/admin/stt/word-overrides")
+
+        data = response.json()
+        assert data["count"] == 1
+        assert data["is_customized"] is True
+        assert data["overrides"]["hello"] == "хелло"
+
+
+class TestPatchWordOverrides:
+    """Test PATCH /admin/stt/word-overrides."""
+
+    @pytest.mark.asyncio()
+    async def test_saves_overrides(self, app: Any, mock_redis: AsyncMock) -> None:
+        with (
+            patch("src.api.auth.require_admin", _fake_require_perm),
+            patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.api.stt_config.get_settings", _settings_patch()),
+            patch("src.stt.phrase_hints.invalidate_cache"),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.patch(
+                    "/admin/stt/word-overrides",
+                    json={"overrides": {"test": "тест", "hello": "хелло"}},
+                )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["count"] == 2
+        assert data["is_customized"] is True
+
+    @pytest.mark.asyncio()
+    async def test_rejects_non_latin_keys(self, app: Any, mock_redis: AsyncMock) -> None:
+        with (
+            patch("src.api.auth.require_admin", _fake_require_perm),
+            patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.api.stt_config.get_settings", _settings_patch()),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.patch(
+                    "/admin/stt/word-overrides",
+                    json={"overrides": {"тест": "test"}},
+                )
+
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio()
+    async def test_rejects_too_many_overrides(self, app: Any, mock_redis: AsyncMock) -> None:
+        overrides = {f"word{i}": f"слово{i}" for i in range(501)}
+        with (
+            patch("src.api.auth.require_admin", _fake_require_perm),
+            patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.api.stt_config.get_settings", _settings_patch()),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.patch(
+                    "/admin/stt/word-overrides",
+                    json={"overrides": overrides},
+                )
+
+        assert response.status_code == 422
+
+    @pytest.mark.asyncio()
+    async def test_normalizes_keys_to_lowercase(self, app: Any, mock_redis: AsyncMock) -> None:
+        with (
+            patch("src.api.auth.require_admin", _fake_require_perm),
+            patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.api.stt_config.get_settings", _settings_patch()),
+            patch("src.stt.phrase_hints.invalidate_cache"),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.patch(
+                    "/admin/stt/word-overrides",
+                    json={"overrides": {"Hello": "хелло"}},
+                )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "hello" in data["overrides"]
+
+
+class TestResetWordOverrides:
+    """Test POST /admin/stt/word-overrides/reset."""
+
+    @pytest.mark.asyncio()
+    async def test_resets_to_defaults(self, app: Any, mock_redis: AsyncMock) -> None:
+        custom = json.dumps({"hello": "хелло"})
+        mock_redis._store["stt:word_overrides"] = custom.encode()
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_perm),
+            patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.api.stt_config.get_settings", _settings_patch()),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.post("/admin/stt/word-overrides/reset")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["is_customized"] is False
+        assert data["count"] == 5  # 5 default overrides
+        assert "weather" in data["overrides"]
+        mock_redis.delete.assert_called_once_with("stt:word_overrides")

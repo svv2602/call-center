@@ -9,13 +9,18 @@ import pytest
 
 from src.stt.phrase_hints import (
     BRAND_PRONUNCIATIONS,
+    WORD_OVERRIDES_REDIS_KEY,
+    _DEFAULT_WORD_OVERRIDES,
     extract_catalog_phrases,
     get_all_phrases_flat,
     get_base_phrases,
     get_phrase_hints,
+    get_word_overrides,
     invalidate_cache,
     refresh_phrase_hints,
     reset_base_to_defaults,
+    reset_word_overrides,
+    save_word_overrides,
     transliterate_to_cyrillic,
     update_base_phrases,
     update_custom_phrases,
@@ -544,3 +549,98 @@ class TestRefreshPreservesCustomBase:
         saved_data = json.loads(mock_redis.set.call_args[0][1])
         assert saved_data["base"] == get_base_phrases()
         assert saved_data["base_customized"] is False
+
+
+class TestGetWordOverrides:
+    """Tests for get_word_overrides()."""
+
+    @pytest.mark.asyncio()
+    async def test_returns_defaults_on_empty_redis(self) -> None:
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+
+        result = await get_word_overrides(mock_redis)
+        assert result == _DEFAULT_WORD_OVERRIDES
+
+    @pytest.mark.asyncio()
+    async def test_returns_redis_data(self) -> None:
+        custom = {"hello": "хелло", "world": "ворлд"}
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(
+            return_value=json.dumps(custom).encode()
+        )
+
+        result = await get_word_overrides(mock_redis)
+        assert result == custom
+
+    @pytest.mark.asyncio()
+    async def test_returns_defaults_on_redis_error(self) -> None:
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(side_effect=RuntimeError("Redis down"))
+
+        result = await get_word_overrides(mock_redis)
+        assert result == _DEFAULT_WORD_OVERRIDES
+
+    @pytest.mark.asyncio()
+    async def test_returns_defaults_on_invalid_json(self) -> None:
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=b"not json")
+
+        result = await get_word_overrides(mock_redis)
+        assert result == _DEFAULT_WORD_OVERRIDES
+
+
+class TestSaveWordOverrides:
+    """Tests for save_word_overrides()."""
+
+    @pytest.mark.asyncio()
+    async def test_saves_to_redis(self) -> None:
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock()
+
+        invalidate_cache()
+        overrides = {"test": "тест"}
+        result = await save_word_overrides(mock_redis, overrides)
+
+        assert result == overrides
+        mock_redis.set.assert_called_once()
+        call_args = mock_redis.set.call_args[0]
+        assert call_args[0] == WORD_OVERRIDES_REDIS_KEY
+        saved = json.loads(call_args[1])
+        assert saved == overrides
+
+
+class TestResetWordOverrides:
+    """Tests for reset_word_overrides()."""
+
+    @pytest.mark.asyncio()
+    async def test_deletes_redis_key_and_returns_defaults(self) -> None:
+        mock_redis = AsyncMock()
+        mock_redis.delete = AsyncMock()
+
+        invalidate_cache()
+        result = await reset_word_overrides(mock_redis)
+
+        assert result == _DEFAULT_WORD_OVERRIDES
+        mock_redis.delete.assert_called_once_with(WORD_OVERRIDES_REDIS_KEY)
+
+
+class TestTransliterateWithOverrides:
+    """Tests that transliteration uses word overrides cache."""
+
+    def test_default_overrides_applied(self) -> None:
+        """Default overrides (weather, season, etc.) should work."""
+        invalidate_cache()
+        result = transliterate_to_cyrillic("Weather")
+        assert result == "Везер"
+
+    def test_season_override(self) -> None:
+        invalidate_cache()
+        result = transliterate_to_cyrillic("All Season")
+        assert result is not None
+        assert "Сізон" in result
+
+    def test_performance_override(self) -> None:
+        invalidate_cache()
+        result = transliterate_to_cyrillic("Performance")
+        assert result == "Перформанс"

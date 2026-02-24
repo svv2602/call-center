@@ -139,6 +139,7 @@ export const HELP_PAGES = {
             { titleKey: 'help.sttHints.base.title', contentKey: 'help.sttHints.base.content' },
             { titleKey: 'help.sttHints.catalog.title', contentKey: 'help.sttHints.catalog.content' },
             { titleKey: 'help.sttHints.custom.title', contentKey: 'help.sttHints.custom.content' },
+            { titleKey: 'help.sttHints.overrides.title', contentKey: 'help.sttHints.overrides.content' },
         ],
         tipsKey: 'help.sttHints.tips',
     },

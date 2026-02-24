@@ -176,13 +176,19 @@ _LATIN_TO_CYRILLIC: dict[str, str] = {
 # Whole-word overrides for common English words in tire names.
 # Phonetic rules for ea/th/etc. are too context-dependent;
 # explicit overrides produce correct Ukrainian pronunciation.
-_WORD_OVERRIDES: dict[str, str] = {
+_DEFAULT_WORD_OVERRIDES: dict[str, str] = {
     "weather": "везер",
     "season": "сізон",
     "terrain": "терейн",
     "performance": "перформанс",
     "summer": "самер",
 }
+
+# ─── Word overrides in-process cache ──────────────────────
+WORD_OVERRIDES_REDIS_KEY = "stt:word_overrides"
+_wo_cache: dict[str, str] = {}
+_wo_cache_ts: float = 0.0
+_WO_CACHE_TTL = 60.0  # seconds
 
 _HAS_LATIN = re.compile(r"[a-zA-Z]")
 _HAS_CYRILLIC = re.compile(r"[а-яА-ЯіїєґІЇЄҐ]")
@@ -204,9 +210,10 @@ def _transliterate_word(word: str) -> str:
 
     lower = word.lower()
 
-    # 0. Whole-word override (exact match)
-    if lower in _WORD_OVERRIDES:
-        cyr = _WORD_OVERRIDES[lower]
+    # 0. Whole-word override (exact match) — uses in-process cache
+    overrides = _wo_cache or _DEFAULT_WORD_OVERRIDES
+    if lower in overrides:
+        cyr = overrides[lower]
         if word[0].isupper():
             cyr = cyr[0].upper() + cyr[1:]
         return cyr
@@ -357,6 +364,54 @@ async def extract_catalog_phrases(db_engine: Any) -> list[str]:
 # ═══════════════════════════════════════════════════════════
 
 
+async def get_word_overrides(redis: Redis) -> dict[str, str]:
+    """Get word overrides from Redis, falling back to hardcoded defaults."""
+    try:
+        raw = await redis.get(WORD_OVERRIDES_REDIS_KEY)
+        if raw:
+            data = json.loads(raw if isinstance(raw, str) else raw.decode())
+            if isinstance(data, dict):
+                return data
+    except Exception:
+        logger.debug("Failed to read word overrides from Redis", exc_info=True)
+    return dict(_DEFAULT_WORD_OVERRIDES)
+
+
+async def save_word_overrides(redis: Redis, overrides: dict[str, str]) -> dict[str, str]:
+    """Save word overrides to Redis and invalidate cache."""
+    global _wo_cache, _wo_cache_ts
+
+    await redis.set(
+        WORD_OVERRIDES_REDIS_KEY,
+        json.dumps(overrides, ensure_ascii=False),
+    )
+    _wo_cache = dict(overrides)
+    _wo_cache_ts = time.monotonic()
+    return overrides
+
+
+async def reset_word_overrides(redis: Redis) -> dict[str, str]:
+    """Delete Redis key — fall back to hardcoded defaults."""
+    global _wo_cache, _wo_cache_ts
+
+    await redis.delete(WORD_OVERRIDES_REDIS_KEY)
+    _wo_cache = dict(_DEFAULT_WORD_OVERRIDES)
+    _wo_cache_ts = time.monotonic()
+    return dict(_DEFAULT_WORD_OVERRIDES)
+
+
+async def _ensure_word_overrides_loaded(redis: Redis) -> None:
+    """Load word overrides into in-process cache if stale."""
+    global _wo_cache, _wo_cache_ts
+
+    now = time.monotonic()
+    if _wo_cache and (now - _wo_cache_ts) < _WO_CACHE_TTL:
+        return
+
+    _wo_cache = await get_word_overrides(redis)
+    _wo_cache_ts = now
+
+
 async def refresh_phrase_hints(db_engine: Any, redis: Redis) -> dict[str, Any]:
     """Rebuild phrase hints: base + auto (from catalog) + custom (preserved).
 
@@ -366,6 +421,9 @@ async def refresh_phrase_hints(db_engine: Any, redis: Redis) -> dict[str, Any]:
     global _cache, _cache_ts
 
     auto = await extract_catalog_phrases(db_engine)
+
+    # Refresh word overrides cache alongside phrase hints
+    await _ensure_word_overrides_loaded(redis)
 
     # Preserve existing custom phrases and check base_customized flag
     custom: list[str] = []
@@ -573,6 +631,8 @@ async def reset_base_to_defaults(redis: Redis) -> dict[str, Any]:
 
 def invalidate_cache() -> None:
     """Invalidate in-process cache (for testing)."""
-    global _cache, _cache_ts
+    global _cache, _cache_ts, _wo_cache, _wo_cache_ts
     _cache = ()
     _cache_ts = 0.0
+    _wo_cache = {}
+    _wo_cache_ts = 0.0
