@@ -2,7 +2,7 @@
 
 Three-level system:
   1. Base dictionary — hardcoded brand pronunciations + tire terms (Ukrainian)
-  2. Auto-extracted — DISTINCT manufacturer names from tire catalog (DB) + transliteration
+  2. Auto-extracted — manufacturer names + model names (in stock) from tire catalog (DB)
   3. Custom — user-managed list via Admin UI
 
 All levels are merged and stored in Redis as a single JSON structure.
@@ -161,6 +161,10 @@ _LATIN_TO_CYRILLIC: dict[str, str] = {
 
 _HAS_LATIN = re.compile(r"[a-zA-Z]")
 _HAS_CYRILLIC = re.compile(r"[а-яА-ЯіїєґІЇЄҐ]")
+# Model name must contain a "real word" (4+ consecutive letters) to be a hint.
+# This filters out internal codes like A502, ADR26, FM601 while keeping
+# real names like Blizzak, Pilot Sport, ContiWinterContact.
+_WORD_4PLUS_LETTERS = re.compile(r"[a-zA-Zа-яА-ЯіїєґІЇЄҐ]{4,}")
 
 
 def _transliterate_word(word: str) -> str:
@@ -218,12 +222,43 @@ def transliterate_to_cyrillic(text: str) -> str | None:
 # ═══════════════════════════════════════════════════════════
 
 
-async def extract_catalog_phrases(db_engine: Any) -> list[str]:
-    """Extract DISTINCT manufacturer names from tire catalog.
+def _add_cyrillic_phrase(phrases: set[str], name: str) -> None:
+    """Add a phrase as Cyrillic: transliterate Latin or keep Cyrillic as-is."""
+    cyr = transliterate_to_cyrillic(name)
+    if cyr:
+        phrases.add(cyr)
+    else:
+        phrases.add(name)
 
-    For each Latin name: add only the Cyrillic transliteration (STT outputs Cyrillic).
-    For Cyrillic names: add as-is.
-    Model names excluded — too numerous (5000+) and mostly noise (codes like '005 RST').
+
+# type_id for discs (wheels/rims) — excluded from STT hints
+_DISC_TYPE_ID = "566"
+
+_SQL_MANUFACTURERS = (
+    "SELECT DISTINCT manufacturer FROM tire_models WHERE manufacturer IS NOT NULL"
+)
+
+# Model names with stock: only tires (not discs), only models that have
+# products currently in stock — filters out discontinued/unavailable models.
+_SQL_MODEL_NAMES = """
+    SELECT DISTINCT tm.name
+    FROM tire_models tm
+    JOIN tire_products tp ON tp.model_id = tm.id
+    JOIN tire_stock ts ON ts.sku = tp.sku
+    WHERE ts.stock_quantity > 0
+      AND tm.type_id != :disc_type_id
+"""
+
+
+async def extract_catalog_phrases(db_engine: Any) -> list[str]:
+    """Extract manufacturer + model names from tire catalog.
+
+    Manufacturers: all distinct names from tire_models.
+    Models: only tire models (not discs) that have products currently in stock.
+    Model names are filtered to contain a real word (4+ letters) — this drops
+    internal codes like A502, ADR26 while keeping Blizzak, Pilot Sport, etc.
+
+    All Latin names are transliterated to Cyrillic (STT outputs Cyrillic only).
     """
     from sqlalchemy import text
 
@@ -231,20 +266,27 @@ async def extract_catalog_phrases(db_engine: Any) -> list[str]:
 
     try:
         async with db_engine.begin() as conn:
-            result = await conn.execute(
-                text("SELECT DISTINCT manufacturer FROM tire_models WHERE manufacturer IS NOT NULL")
-            )
+            # 1. Manufacturer names
+            result = await conn.execute(text(_SQL_MANUFACTURERS))
             for row in result:
                 name = row[0].strip()
                 if not name:
                     continue
-                cyr = transliterate_to_cyrillic(name)
-                if cyr:
-                    # Latin name → add only Cyrillic transliteration
-                    phrases.add(cyr)
-                else:
-                    # Already Cyrillic → add as-is
-                    phrases.add(name)
+                _add_cyrillic_phrase(phrases, name)
+
+            # 2. Model names (tires with stock only)
+            result = await conn.execute(
+                text(_SQL_MODEL_NAMES),
+                {"disc_type_id": _DISC_TYPE_ID},
+            )
+            for row in result:
+                raw = row[0].strip().rstrip(".")
+                if not raw:
+                    continue
+                # Skip codes without real words (A502, FM601, etc.)
+                if not _WORD_4PLUS_LETTERS.search(raw):
+                    continue
+                _add_cyrillic_phrase(phrases, raw)
 
     except Exception:
         logger.exception("Failed to extract catalog phrases")

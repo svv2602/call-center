@@ -117,15 +117,18 @@ class TestExtractCatalogPhrases:
     """Tests for extract_catalog_phrases()."""
 
     @pytest.mark.asyncio()
-    async def test_extracts_manufacturers(self) -> None:
+    async def test_extracts_manufacturers_and_models(self) -> None:
         mock_engine = AsyncMock()
         mock_conn = AsyncMock()
 
         manufacturer_rows = [("Michelin",), ("Nokian",), ("Росава",)]
+        model_rows = [("Pilot Sport 4",), ("Blizzak LM005",), ("A502",)]
 
-        mock_result = MagicMock()
-        mock_result.__iter__ = MagicMock(return_value=iter(manufacturer_rows))
-        mock_conn.execute = AsyncMock(return_value=mock_result)
+        mock_mfr_result = MagicMock()
+        mock_mfr_result.__iter__ = MagicMock(return_value=iter(manufacturer_rows))
+        mock_model_result = MagicMock()
+        mock_model_result.__iter__ = MagicMock(return_value=iter(model_rows))
+        mock_conn.execute = AsyncMock(side_effect=[mock_mfr_result, mock_model_result])
 
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
@@ -137,15 +140,23 @@ class TestExtractCatalogPhrases:
         # Latin originals should NOT be in output (STT outputs Cyrillic)
         assert "Michelin" not in phrases
         assert "Nokian" not in phrases
+        assert "Pilot Sport 4" not in phrases
 
         # Cyrillic originals should be kept as-is
         assert "Росава" in phrases
 
-        # Should contain transliterated Cyrillic variants
+        # Should contain transliterated Cyrillic manufacturers
         assert "Мічелін" in phrases  # Michelin → Мічелін
 
-        # Only one SQL query (manufacturers only, no models)
-        mock_conn.execute.assert_called_once()
+        # Model names with 4+ letter words should be transliterated
+        assert "Пілот Спорт 4" in phrases  # Pilot Sport 4
+        assert "Бліззак Лм005" in phrases  # Blizzak LM005
+
+        # Code-like model names (no 4+ letter word) should be excluded
+        assert "А502" not in phrases  # A502 — short code
+
+        # Two SQL queries: manufacturers + models
+        assert mock_conn.execute.call_count == 2
 
     @pytest.mark.asyncio()
     async def test_deduplication(self) -> None:
@@ -154,10 +165,13 @@ class TestExtractCatalogPhrases:
 
         # Duplicate manufacturer names (Cyrillic — kept as-is)
         manufacturer_rows = [("Тест",), ("Тест",)]
+        model_rows: list[tuple[str]] = []
 
-        mock_result = MagicMock()
-        mock_result.__iter__ = MagicMock(return_value=iter(manufacturer_rows))
-        mock_conn.execute = AsyncMock(return_value=mock_result)
+        mock_mfr_result = MagicMock()
+        mock_mfr_result.__iter__ = MagicMock(return_value=iter(manufacturer_rows))
+        mock_model_result = MagicMock()
+        mock_model_result.__iter__ = MagicMock(return_value=iter(model_rows))
+        mock_conn.execute = AsyncMock(side_effect=[mock_mfr_result, mock_model_result])
 
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
