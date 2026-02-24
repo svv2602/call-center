@@ -111,26 +111,16 @@ class TestExtractCatalogPhrases:
     """Tests for extract_catalog_phrases()."""
 
     @pytest.mark.asyncio()
-    async def test_extracts_manufacturers_and_models(self) -> None:
+    async def test_extracts_manufacturers(self) -> None:
         mock_engine = AsyncMock()
         mock_conn = AsyncMock()
 
         manufacturer_rows = [("Michelin",), ("Nokian",), ("Росава",)]
-        model_rows = [("Pilot Sport 4",), ("Blizzak WS90",)]
 
-        call_count = 0
+        mock_result = MagicMock()
+        mock_result.__iter__ = MagicMock(return_value=iter(manufacturer_rows))
+        mock_conn.execute = AsyncMock(return_value=mock_result)
 
-        async def _execute(query):
-            nonlocal call_count
-            call_count += 1
-            mock_result = MagicMock()
-            if call_count == 1:
-                mock_result.__iter__ = MagicMock(return_value=iter(manufacturer_rows))
-            else:
-                mock_result.__iter__ = MagicMock(return_value=iter(model_rows))
-            return mock_result
-
-        mock_conn.execute = _execute
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_ctx.__aexit__ = AsyncMock(return_value=False)
@@ -142,35 +132,27 @@ class TestExtractCatalogPhrases:
         assert "Michelin" in phrases
         assert "Nokian" in phrases
         assert "Росава" in phrases
-        assert "Pilot Sport 4" in phrases
 
         # Should contain transliterated variants
         transliterated = [p for p in phrases if p.startswith("М") and "ішлен" in p.lower()]
         # Michelin → Мішелін (auto-transliterated)
         assert len(transliterated) >= 1 or "Мічелін" in phrases  # accept any variant
 
+        # Only one SQL query (manufacturers only, no models)
+        mock_conn.execute.assert_called_once()
+
     @pytest.mark.asyncio()
     async def test_deduplication(self) -> None:
         mock_engine = AsyncMock()
         mock_conn = AsyncMock()
 
-        # Same name in both manufacturers and models
-        manufacturer_rows = [("Test",)]
-        model_rows = [("Test",)]
+        # Duplicate manufacturer names
+        manufacturer_rows = [("Test",), ("Test",)]
 
-        call_count = 0
+        mock_result = MagicMock()
+        mock_result.__iter__ = MagicMock(return_value=iter(manufacturer_rows))
+        mock_conn.execute = AsyncMock(return_value=mock_result)
 
-        async def _execute(query):
-            nonlocal call_count
-            call_count += 1
-            mock_result = MagicMock()
-            if call_count == 1:
-                mock_result.__iter__ = MagicMock(return_value=iter(manufacturer_rows))
-            else:
-                mock_result.__iter__ = MagicMock(return_value=iter(model_rows))
-            return mock_result
-
-        mock_conn.execute = _execute
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
         mock_ctx.__aexit__ = AsyncMock(return_value=False)

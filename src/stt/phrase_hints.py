@@ -2,7 +2,7 @@
 
 Three-level system:
   1. Base dictionary — hardcoded brand pronunciations + tire terms (Ukrainian)
-  2. Auto-extracted — DISTINCT manufacturer/model names from tire catalog (DB) + transliteration
+  2. Auto-extracted — DISTINCT manufacturer names from tire catalog (DB) + transliteration
   3. Custom — user-managed list via Admin UI
 
 All levels are merged and stored in Redis as a single JSON structure.
@@ -217,9 +217,10 @@ def transliterate_to_cyrillic(text: str) -> str | None:
 
 
 async def extract_catalog_phrases(db_engine: Any) -> list[str]:
-    """Extract DISTINCT manufacturer + model names from tire catalog.
+    """Extract DISTINCT manufacturer names from tire catalog.
 
     For each name: add original + transliterated Cyrillic variant.
+    Model names excluded — too numerous (5000+) and mostly noise (codes like '005 RST').
     """
     from sqlalchemy import text
 
@@ -227,21 +228,8 @@ async def extract_catalog_phrases(db_engine: Any) -> list[str]:
 
     try:
         async with db_engine.begin() as conn:
-            # Manufacturers
             result = await conn.execute(
                 text("SELECT DISTINCT manufacturer FROM tire_models WHERE manufacturer IS NOT NULL")
-            )
-            for row in result:
-                name = row[0].strip()
-                if name:
-                    phrases.add(name)
-                    cyr = transliterate_to_cyrillic(name)
-                    if cyr:
-                        phrases.add(cyr)
-
-            # Model names
-            result = await conn.execute(
-                text("SELECT DISTINCT name FROM tire_models WHERE name IS NOT NULL")
             )
             for row in result:
                 name = row[0].strip()
