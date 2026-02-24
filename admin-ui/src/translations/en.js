@@ -534,6 +534,8 @@ export default {
     'sttHints.customHint': 'Max 1000 phrases, up to 200 chars each. Cyrillic variants of Latin words are most effective.',
     'sttHints.saveBase': 'Save base',
     'sttHints.resetBase': 'Reset to defaults',
+    'sttHints.devBannerTitle': 'In Development',
+    'sttHints.devBannerText': 'STT phrase hints are temporarily inactive. Google STT model "latest_long" does not support speech adaptation. Waiting for a model update from Google. Hint management is available, but hints will not be sent to STT until support is added.',
     'sttHints.resetBaseConfirm': 'Reset base phrases to defaults?',
     'sttHints.saveCustom': 'Save',
     'sttHints.refreshCatalog': 'Refresh from catalog',

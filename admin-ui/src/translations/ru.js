@@ -534,6 +534,8 @@ export default {
     'sttHints.customHint': 'Максимум 1000 фраз, до 200 символов каждая. Кириллические варианты латинских слов наиболее эффективны.',
     'sttHints.saveBase': 'Сохранить базовые',
     'sttHints.resetBase': 'Сброс к умолчаниям',
+    'sttHints.devBannerTitle': 'В разработке',
+    'sttHints.devBannerText': 'Подсказки STT временно не применяются. Модель Google STT «latest_long» не поддерживает speech adaptation. Ожидаем обновление модели от Google. Управление подсказками доступно, но они не будут отправлены в STT до появления поддержки.',
     'sttHints.resetBaseConfirm': 'Сбросить базовые фразы к значениям по умолчанию?',
     'sttHints.saveCustom': 'Сохранить',
     'sttHints.refreshCatalog': 'Обновить из каталога',

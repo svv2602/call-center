@@ -13,8 +13,8 @@
             }
         })();
     </script>
-  <script type="module" crossorigin src="/assets/index-D8tYvWpe.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-DJOFq6xu.css">
+  <script type="module" crossorigin src="/assets/index-bbivtkR7.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index--7-aOSFH.css">
 </head>
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-50 font-sans antialiased">
     <!-- Toast container -->
@@ -705,6 +705,15 @@
                 <div class="flex items-center gap-2 mb-4">
                     <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="nav.sttHints">Подсказки STT</h1>
                     <button onclick="window._app.openHelp('stt-hints')" class="w-6 h-6 rounded-full border border-neutral-300 dark:border-neutral-600 text-neutral-400 hover:text-blue-600 hover:border-blue-400 dark:hover:text-blue-400 dark:hover:border-blue-400 text-xs font-bold transition-colors flex items-center justify-center" title="Help">?</button>
+                </div>
+                <div class="bg-amber-50 dark:bg-amber-900/30 border border-amber-300 dark:border-amber-700 rounded-lg p-4 mb-4">
+                    <div class="flex items-start gap-2">
+                        <span class="text-amber-600 dark:text-amber-400 text-lg leading-none">&#9888;</span>
+                        <div>
+                            <div class="font-semibold text-amber-800 dark:text-amber-300 text-sm" data-i18n="sttHints.devBannerTitle">В разработке</div>
+                            <div class="text-amber-700 dark:text-amber-400 text-xs mt-1" data-i18n="sttHints.devBannerText">Подсказки STT временно не применяются. Модель Google STT «latest_long» не поддерживает speech adaptation. Ожидаем обновление модели от Google. Управление подсказками доступно, но они не будут отправлены в STT до появления поддержки.</div>
+                        </div>
+                    </div>
                 </div>
                 <div id="sttHintsContent"></div>
             </div>
