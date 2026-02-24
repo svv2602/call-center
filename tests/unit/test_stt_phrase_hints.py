@@ -15,7 +15,9 @@ from src.stt.phrase_hints import (
     get_phrase_hints,
     invalidate_cache,
     refresh_phrase_hints,
+    reset_base_to_defaults,
     transliterate_to_cyrillic,
+    update_base_phrases,
     update_custom_phrases,
 )
 
@@ -350,3 +352,158 @@ class TestGetPhraseHints:
         assert result["auto_count"] == 0
         assert result["custom_count"] == 0
         assert result["updated_at"] is None
+
+    @pytest.mark.asyncio()
+    async def test_returns_base_customized_flag(self) -> None:
+        data = json.dumps({
+            "base": ["a"],
+            "auto": [],
+            "custom": [],
+            "base_customized": True,
+        })
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=data.encode())
+
+        result = await get_phrase_hints(mock_redis)
+        assert result["base_customized"] is True
+
+    @pytest.mark.asyncio()
+    async def test_base_customized_defaults_to_false(self) -> None:
+        data = json.dumps({"base": ["a"], "auto": [], "custom": []})
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=data.encode())
+
+        result = await get_phrase_hints(mock_redis)
+        assert result["base_customized"] is False
+
+
+class TestUpdateBasePhrases:
+    """Tests for update_base_phrases()."""
+
+    @pytest.mark.asyncio()
+    async def test_updates_base_and_sets_customized(self) -> None:
+        existing = json.dumps({"base": ["old"], "auto": ["auto1"], "custom": ["cust1"]})
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=existing.encode())
+        mock_redis.set = AsyncMock()
+
+        invalidate_cache()
+        stats = await update_base_phrases(mock_redis, ["new1", "new2"])
+
+        assert stats["base_count"] == 2
+        assert stats["base_customized"] is True
+        # auto and custom preserved
+        assert stats["auto_count"] == 1
+        assert stats["custom_count"] == 1
+
+        saved_data = json.loads(mock_redis.set.call_args[0][1])
+        assert saved_data["base"] == ["new1", "new2"]
+        assert saved_data["auto"] == ["auto1"]
+        assert saved_data["custom"] == ["cust1"]
+        assert saved_data["base_customized"] is True
+
+    @pytest.mark.asyncio()
+    async def test_works_on_empty_redis(self) -> None:
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+        mock_redis.set = AsyncMock()
+
+        invalidate_cache()
+        stats = await update_base_phrases(mock_redis, ["phrase1"])
+
+        assert stats["base_count"] == 1
+        assert stats["base_customized"] is True
+
+
+class TestResetBaseToDefaults:
+    """Tests for reset_base_to_defaults()."""
+
+    @pytest.mark.asyncio()
+    async def test_resets_to_hardcoded_defaults(self) -> None:
+        existing = json.dumps({
+            "base": ["custom1"],
+            "auto": ["auto1"],
+            "custom": ["cust1"],
+            "base_customized": True,
+        })
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=existing.encode())
+        mock_redis.set = AsyncMock()
+
+        invalidate_cache()
+        stats = await reset_base_to_defaults(mock_redis)
+
+        assert stats["base_customized"] is False
+        assert stats["base_count"] == len(get_base_phrases())
+        # auto and custom preserved
+        assert stats["auto_count"] == 1
+        assert stats["custom_count"] == 1
+
+        saved_data = json.loads(mock_redis.set.call_args[0][1])
+        assert saved_data["base"] == get_base_phrases()
+        assert saved_data["base_customized"] is False
+
+
+class TestRefreshPreservesCustomBase:
+    """Tests that refresh preserves customized base."""
+
+    @pytest.mark.asyncio()
+    async def test_preserves_custom_base_on_refresh(self) -> None:
+        custom_base = ["MyCustomBrand", "MyCustomTerm"]
+        existing = json.dumps({
+            "base": custom_base,
+            "auto": ["old_auto"],
+            "custom": ["my phrase"],
+            "base_customized": True,
+        })
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=existing.encode())
+        mock_redis.set = AsyncMock()
+
+        mock_engine = AsyncMock()
+        mock_conn = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.__iter__ = MagicMock(return_value=iter([]))
+        mock_conn.execute = AsyncMock(return_value=mock_result)
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_engine.begin = MagicMock(return_value=mock_ctx)
+
+        invalidate_cache()
+        stats = await refresh_phrase_hints(mock_engine, mock_redis)
+
+        # Custom base should be preserved
+        saved_data = json.loads(mock_redis.set.call_args[0][1])
+        assert saved_data["base"] == custom_base
+        assert saved_data["base_customized"] is True
+        assert stats["custom_count"] == 1
+
+    @pytest.mark.asyncio()
+    async def test_uses_default_base_when_not_customized(self) -> None:
+        existing = json.dumps({
+            "base": ["old_base"],
+            "auto": [],
+            "custom": [],
+            "base_customized": False,
+        })
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=existing.encode())
+        mock_redis.set = AsyncMock()
+
+        mock_engine = AsyncMock()
+        mock_conn = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.__iter__ = MagicMock(return_value=iter([]))
+        mock_conn.execute = AsyncMock(return_value=mock_result)
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_conn)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_engine.begin = MagicMock(return_value=mock_ctx)
+
+        invalidate_cache()
+        await refresh_phrase_hints(mock_engine, mock_redis)
+
+        saved_data = json.loads(mock_redis.set.call_args[0][1])
+        assert saved_data["base"] == get_base_phrases()
+        assert saved_data["base_customized"] is False

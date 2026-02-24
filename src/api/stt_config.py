@@ -62,9 +62,23 @@ class CustomPhrasesRequest(BaseModel):
         return [p.strip() for p in v if p.strip()]
 
 
+class BasePhraseRequest(BaseModel):
+    phrases: list[str]
+
+    @field_validator("phrases")
+    @classmethod
+    def validate_phrases(cls, v: list[str]) -> list[str]:
+        if len(v) > 2000:
+            raise ValueError("Maximum 2000 base phrases allowed")
+        for i, phrase in enumerate(v):
+            if len(phrase) > 200:
+                raise ValueError(f"Phrase #{i + 1} exceeds 200 character limit")
+        return [p.strip() for p in v if p.strip()]
+
+
 @router.get("/phrase-hints")
 async def get_stt_phrase_hints(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
-    """Get phrase hints stats and custom phrases list."""
+    """Get phrase hints stats and all phrase lists."""
     from src.stt.phrase_hints import get_phrase_hints
 
     redis = await _get_redis()
@@ -77,7 +91,10 @@ async def get_stt_phrase_hints(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
             "total": data["total"],
             "google_limit": data["google_limit"],
             "updated_at": data.get("updated_at"),
+            "base_customized": data.get("base_customized", False),
         },
+        "base_phrases": data["base"],
+        "auto_phrases": data["auto"],
         "custom_phrases": data["custom"],
     }
 
@@ -114,6 +131,30 @@ async def refresh_stt_phrase_hints(_: dict[str, Any] = _perm_w) -> dict[str, Any
         raise HTTPException(status_code=500, detail="Phrase hints refresh failed") from None
 
     return {"message": "Phrase hints refreshed", **stats}
+
+
+@router.patch("/phrase-hints/base")
+async def update_stt_base_phrases(
+    request: BasePhraseRequest, _: dict[str, Any] = _perm_w
+) -> dict[str, Any]:
+    """Update base phrase list (marks as customized)."""
+    from src.stt.phrase_hints import update_base_phrases
+
+    redis = await _get_redis()
+    stats = await update_base_phrases(redis, request.phrases)
+    logger.info("STT base phrases updated: %d phrases", stats["base_count"])
+    return {"message": "Base phrases updated", **stats}
+
+
+@router.post("/phrase-hints/base/reset")
+async def reset_stt_base_phrases(_: dict[str, Any] = _perm_w) -> dict[str, Any]:
+    """Reset base phrases to hardcoded defaults."""
+    from src.stt.phrase_hints import reset_base_to_defaults
+
+    redis = await _get_redis()
+    stats = await reset_base_to_defaults(redis)
+    logger.info("STT base phrases reset to defaults: %d phrases", stats["base_count"])
+    return {"message": "Base phrases reset to defaults", **stats}
 
 
 @router.post("/phrase-hints/reset")

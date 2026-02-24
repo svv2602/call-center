@@ -54,6 +54,7 @@ const PAGE_PERMISSIONS = {
     audit: 'audit:read',
     vehicles: 'vehicles:read',
     'onec-data': 'onec_data:read',
+    'stt-hints': 'configuration:read',
 };
 
 export function applyRoleVisibility() {

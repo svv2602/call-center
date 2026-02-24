@@ -253,27 +253,33 @@ async def extract_catalog_phrases(db_engine: Any) -> list[str]:
 async def refresh_phrase_hints(db_engine: Any, redis: Redis) -> dict[str, Any]:
     """Rebuild phrase hints: base + auto (from catalog) + custom (preserved).
 
+    If base_customized=True, preserves the user-modified base list.
     Returns stats dict.
     """
     global _cache, _cache_ts
 
-    base = get_base_phrases()
     auto = await extract_catalog_phrases(db_engine)
 
-    # Preserve existing custom phrases
+    # Preserve existing custom phrases and check base_customized flag
     custom: list[str] = []
+    base_customized = False
+    base = get_base_phrases()
     try:
         raw = await redis.get(REDIS_KEY)
         if raw:
             data = json.loads(raw if isinstance(raw, str) else raw.decode())
             custom = data.get("custom", [])
+            base_customized = data.get("base_customized", False)
+            if base_customized:
+                base = data.get("base", base)
     except Exception:
-        logger.debug("Failed to read existing custom phrases", exc_info=True)
+        logger.debug("Failed to read existing phrase hints", exc_info=True)
 
     payload = {
         "base": base,
         "auto": auto,
         "custom": custom,
+        "base_customized": base_customized,
         "updated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     await redis.set(REDIS_KEY, json.dumps(payload, ensure_ascii=False))
@@ -319,6 +325,7 @@ async def get_phrase_hints(redis: Redis) -> dict[str, Any]:
                 "total": len(base) + len(auto) + len(custom),
                 "google_limit": _GOOGLE_PHRASE_LIMIT,
                 "updated_at": data.get("updated_at"),
+                "base_customized": data.get("base_customized", False),
             }
     except Exception:
         logger.debug("Failed to read phrase hints from Redis", exc_info=True)
@@ -335,6 +342,7 @@ async def get_phrase_hints(redis: Redis) -> dict[str, Any]:
         "total": len(base),
         "google_limit": _GOOGLE_PHRASE_LIMIT,
         "updated_at": None,
+        "base_customized": False,
     }
 
 
@@ -389,6 +397,70 @@ async def update_custom_phrases(redis: Redis, phrases: list[str]) -> dict[str, A
         "custom_count": len(phrases),
         "total": len(data.get("base", [])) + len(data.get("auto", [])) + len(phrases),
         "google_limit": _GOOGLE_PHRASE_LIMIT,
+    }
+
+
+async def update_base_phrases(redis: Redis, phrases: list[str]) -> dict[str, Any]:
+    """Replace base phrase list in Redis and mark as customized."""
+    global _cache, _cache_ts
+
+    try:
+        raw = await redis.get(REDIS_KEY)
+        if raw:
+            data = json.loads(raw if isinstance(raw, str) else raw.decode())
+        else:
+            data = {"base": get_base_phrases(), "auto": [], "custom": []}
+    except Exception:
+        data = {"base": get_base_phrases(), "auto": [], "custom": []}
+
+    data["base"] = phrases
+    data["base_customized"] = True
+    data["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    await redis.set(REDIS_KEY, json.dumps(data, ensure_ascii=False))
+
+    _cache = ()
+    _cache_ts = 0.0
+
+    return {
+        "base_count": len(phrases),
+        "auto_count": len(data.get("auto", [])),
+        "custom_count": len(data.get("custom", [])),
+        "total": len(phrases) + len(data.get("auto", [])) + len(data.get("custom", [])),
+        "google_limit": _GOOGLE_PHRASE_LIMIT,
+        "base_customized": True,
+    }
+
+
+async def reset_base_to_defaults(redis: Redis) -> dict[str, Any]:
+    """Reset base phrases to hardcoded defaults and clear customized flag."""
+    global _cache, _cache_ts
+
+    base = get_base_phrases()
+
+    try:
+        raw = await redis.get(REDIS_KEY)
+        if raw:
+            data = json.loads(raw if isinstance(raw, str) else raw.decode())
+        else:
+            data = {"base": base, "auto": [], "custom": []}
+    except Exception:
+        data = {"base": base, "auto": [], "custom": []}
+
+    data["base"] = base
+    data["base_customized"] = False
+    data["updated_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    await redis.set(REDIS_KEY, json.dumps(data, ensure_ascii=False))
+
+    _cache = ()
+    _cache_ts = 0.0
+
+    return {
+        "base_count": len(base),
+        "auto_count": len(data.get("auto", [])),
+        "custom_count": len(data.get("custom", [])),
+        "total": len(base) + len(data.get("auto", [])) + len(data.get("custom", [])),
+        "google_limit": _GOOGLE_PHRASE_LIMIT,
+        "base_customized": False,
     }
 
 

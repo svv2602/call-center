@@ -13,8 +13,8 @@
             }
         })();
     </script>
-  <script type="module" crossorigin src="/assets/index-s5YAN_65.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-CcJz-IhP.css">
+  <script type="module" crossorigin src="/assets/index-nRPKuZVe.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-HAmlZf2-.css">
 </head>
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-50 font-sans antialiased">
     <!-- Toast container -->
@@ -116,6 +116,10 @@
                         <a href="#" class="nav-flyout-link" data-page="configuration" onclick="window._app.showPage('configuration')">
                             <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75"/></svg>
                             <span data-i18n="nav.configuration">Конфигурация</span>
+                        </a>
+                        <a href="#" class="nav-flyout-link" data-page="stt-hints" onclick="window._app.showPage('stt-hints')">
+                            <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/></svg>
+                            <span data-i18n="nav.sttHints">Подсказки STT</span>
                         </a>
                         <a href="#" class="nav-flyout-link" data-page="tenants" onclick="window._app.showPage('tenants')">
                             <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21"/></svg>
@@ -681,18 +685,16 @@
                         <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.configuration.loadTTSConfig()" data-i18n="settings.ttsLoadConfig">Загрузить настройки TTS</button>
                     </div>
                 </div>
-                <!-- STT Phrase Hints (collapsed) -->
-                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg mb-4 admin-only acc-section" data-open="false">
-                    <button type="button" onclick="window._app.toggleAccordion(this)" class="w-full flex items-center justify-between px-5 py-3.5 text-left cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50 rounded-lg transition-colors">
-                        <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="settings.sttHintsTitle">Подсказки STT (Phrase Hints)</h3>
-                        <svg class="w-4 h-4 text-neutral-400 transition-transform acc-chevron rotate-[-90deg]" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
-                    </button>
-                    <div class="acc-body px-5 pb-5" style="display:none">
-                        <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="settings.sttHintsDesc">Подсказки для распознавания речи: бренды шин, модели из каталога, пользовательские термины. Улучшают точность Google STT.</p>
-                        <div id="sttHintsContainer"><div class="text-center py-4 text-neutral-400 dark:text-neutral-500 text-sm" data-i18n="settings.clickToLoad">Нажмите для загрузки</div></div>
-                        <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.configuration.loadSTTHints()" data-i18n="settings.sttHintsLoadConfig">Загрузить подсказки STT</button>
-                    </div>
+            </div>
+
+            <!-- STT Hints -->
+            <div id="page-stt-hints" style="display:none">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.sttHints">Подсказки STT</span></div>
+                <div class="flex items-center gap-2 mb-4">
+                    <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="nav.sttHints">Подсказки STT</h1>
+                    <button onclick="window._app.openHelp('stt-hints')" class="w-6 h-6 rounded-full border border-neutral-300 dark:border-neutral-600 text-neutral-400 hover:text-blue-600 hover:border-blue-400 dark:hover:text-blue-400 dark:hover:border-blue-400 text-xs font-bold transition-colors flex items-center justify-center" title="Help">?</button>
                 </div>
+                <div id="sttHintsContent"></div>
             </div>
 
             <!-- Notifications -->

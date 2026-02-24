@@ -8,7 +8,6 @@ import * as tw from '../tw.js';
 // ─── State ───────────────────────────────────────────────────
 let _llmConfig = null;
 let _ttsConfig = null;
-let _sttHints = null;
 
 // ═══════════════════════════════════════════════════════════
 //  Hot-reload конфиг
@@ -594,107 +593,6 @@ async function resetTTSConfig() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════
-//  STT Phrase Hints
-// ═══════════════════════════════════════════════════════════
-async function loadSTTHints() {
-    const container = document.getElementById('sttHintsContainer');
-    if (!container) return;
-    container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
-    try {
-        const data = await api('/admin/stt/phrase-hints');
-        _sttHints = data;
-        renderSTTHints(data);
-    } catch (e) {
-        container.innerHTML = `<div class="${tw.emptyState}">${t('settings.sttHintsLoadFailed', {error: escapeHtml(e.message)})}</div>`;
-    }
-}
-
-function renderSTTHints(data) {
-    const container = document.getElementById('sttHintsContainer');
-    if (!container) return;
-
-    const stats = data.stats || {};
-    const customPhrases = (data.custom_phrases || []).join('\n');
-    const pct = stats.google_limit ? Math.round((stats.total / stats.google_limit) * 100) : 0;
-    const updatedAt = stats.updated_at
-        ? new Date(stats.updated_at).toLocaleString()
-        : t('settings.sttHintsNeverSynced');
-
-    container.innerHTML = `
-        <div class="space-y-4">
-            <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                <div class="bg-neutral-50 dark:bg-neutral-800 rounded-lg p-3 text-center">
-                    <div class="text-lg font-bold text-neutral-900 dark:text-neutral-100">${stats.base_count || 0}</div>
-                    <div class="text-xs text-neutral-500 dark:text-neutral-400">${t('settings.sttHintsBase')}</div>
-                </div>
-                <div class="bg-neutral-50 dark:bg-neutral-800 rounded-lg p-3 text-center">
-                    <div class="text-lg font-bold text-neutral-900 dark:text-neutral-100">${stats.auto_count || 0}</div>
-                    <div class="text-xs text-neutral-500 dark:text-neutral-400">${t('settings.sttHintsAuto')}</div>
-                </div>
-                <div class="bg-neutral-50 dark:bg-neutral-800 rounded-lg p-3 text-center">
-                    <div class="text-lg font-bold text-neutral-900 dark:text-neutral-100">${stats.custom_count || 0}</div>
-                    <div class="text-xs text-neutral-500 dark:text-neutral-400">${t('settings.sttHintsCustom')}</div>
-                </div>
-                <div class="bg-neutral-50 dark:bg-neutral-800 rounded-lg p-3 text-center">
-                    <div class="text-lg font-bold ${pct > 90 ? 'text-red-600' : 'text-neutral-900 dark:text-neutral-100'}">${stats.total || 0} / ${stats.google_limit || 5000}</div>
-                    <div class="text-xs text-neutral-500 dark:text-neutral-400">${t('settings.sttHintsTotal')} (${pct}%)</div>
-                </div>
-            </div>
-            <div class="text-xs text-neutral-500 dark:text-neutral-400">
-                ${t('settings.sttHintsLastSync')}: ${escapeHtml(updatedAt)}
-            </div>
-            <div>
-                <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.sttHintsCustomLabel')}</label>
-                <textarea id="sttCustomPhrases" rows="6" class="w-full text-sm font-mono bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-300 dark:border-neutral-600 rounded-lg p-2 focus:outline-none focus:border-blue-500" placeholder="${t('settings.sttHintsCustomPlaceholder')}">${escapeHtml(customPhrases)}</textarea>
-                <div class="text-[11px] text-neutral-400 dark:text-neutral-500 mt-1">${t('settings.sttHintsCustomHint')}</div>
-            </div>
-            <div class="flex flex-wrap items-center gap-2 pt-1">
-                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.configuration.saveSTTHints()">${t('common.save')}</button>
-                <button class="${tw.btnSm} border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800" onclick="window._pages.configuration.refreshSTTHints()">${t('settings.sttHintsRefresh')}</button>
-                <button class="${tw.btnSm} text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20" onclick="window._pages.configuration.resetSTTHints()">${t('settings.sttHintsReset')}</button>
-            </div>
-        </div>`;
-}
-
-async function saveSTTHints() {
-    const textarea = document.getElementById('sttCustomPhrases');
-    if (!textarea) return;
-    const phrases = textarea.value.split('\n').map(s => s.trim()).filter(Boolean);
-    try {
-        await api('/admin/stt/phrase-hints/custom', {
-            method: 'PATCH',
-            body: JSON.stringify({ phrases }),
-        });
-        showToast(t('settings.sttHintsSaved', {count: phrases.length}), 'success');
-        loadSTTHints();
-    } catch (e) {
-        showToast(t('settings.sttHintsSaveFailed', {error: e.message}), 'error');
-    }
-}
-
-async function refreshSTTHints() {
-    showToast(t('settings.sttHintsRefreshing'), 'info');
-    try {
-        await api('/admin/stt/phrase-hints/refresh', { method: 'POST' });
-        showToast(t('settings.sttHintsRefreshed'), 'success');
-        loadSTTHints();
-    } catch (e) {
-        showToast(t('settings.sttHintsRefreshFailed', {error: e.message}), 'error');
-    }
-}
-
-async function resetSTTHints() {
-    if (!confirm(t('settings.sttHintsResetConfirm'))) return;
-    try {
-        await api('/admin/stt/phrase-hints/reset', { method: 'POST' });
-        showToast(t('settings.sttHintsResetDone'), 'success');
-        loadSTTHints();
-    } catch (e) {
-        showToast(t('settings.sttHintsSaveFailed', {error: e.message}), 'error');
-    }
-}
-
 export function init() {
     registerPageLoader('configuration', () => {
         loadLLMConfig();
@@ -709,5 +607,4 @@ window._pages.configuration = {
     updateTaskRoute, addFallback, removeFallback, moveFallback, testLLMProvider,
     saveSandboxDefaults,
     loadTTSConfig, saveTTSConfig, testTTS, resetTTSConfig,
-    loadSTTHints, saveSTTHints, refreshSTTHints, resetSTTHints,
 };

@@ -126,11 +126,20 @@ export const HELP_PAGES = {
             { titleKey: 'help.configuration.tasks.title', contentKey: 'help.configuration.tasks.content' },
             { titleKey: 'help.configuration.tts.title', contentKey: 'help.configuration.tts.content' },
             { titleKey: 'help.configuration.ttsBreaks.title', contentKey: 'help.configuration.ttsBreaks.content' },
-            { titleKey: 'help.configuration.sttHints.title', contentKey: 'help.configuration.sttHints.content' },
-            { titleKey: 'help.configuration.sttHints.steps', contentKey: 'help.configuration.sttHints.stepsContent' },
             { titleKey: 'help.configuration.affects.title', contentKey: 'help.configuration.affects.content' },
         ],
         tipsKey: 'help.configuration.tips',
+    },
+    'stt-hints': {
+        titleKey: 'help.sttHints.title',
+        overviewKey: 'help.sttHints.overview',
+        sections: [
+            { titleKey: 'help.sttHints.levels.title', contentKey: 'help.sttHints.levels.content' },
+            { titleKey: 'help.sttHints.base.title', contentKey: 'help.sttHints.base.content' },
+            { titleKey: 'help.sttHints.catalog.title', contentKey: 'help.sttHints.catalog.content' },
+            { titleKey: 'help.sttHints.custom.title', contentKey: 'help.sttHints.custom.content' },
+        ],
+        tipsKey: 'help.sttHints.tips',
     },
     notifications: {
         titleKey: 'help.notifications.title',

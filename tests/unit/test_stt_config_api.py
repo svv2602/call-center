@@ -254,3 +254,103 @@ class TestPostReset:
         assert data["custom_count"] == 0
         assert data["base_count"] > 0
         mock_redis.delete.assert_called_once_with("stt:phrase_hints")
+
+
+class TestGetPhraseHintsExtended:
+    """Test extended GET /admin/stt/phrase-hints response."""
+
+    @pytest.mark.asyncio()
+    async def test_returns_all_phrase_arrays(
+        self, app: Any, mock_redis: AsyncMock
+    ) -> None:
+        redis_data = json.dumps({
+            "base": ["brand1", "brand2"],
+            "auto": ["auto1"],
+            "custom": ["custom1"],
+            "base_customized": True,
+            "updated_at": "2024-01-01T00:00:00Z",
+        })
+        mock_redis._store["stt:phrase_hints"] = redis_data.encode()
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_perm),
+            patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.api.stt_config.get_settings", _settings_patch()),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.get("/admin/stt/phrase-hints")
+
+        data = response.json()
+        assert data["base_phrases"] == ["brand1", "brand2"]
+        assert data["auto_phrases"] == ["auto1"]
+        assert data["custom_phrases"] == ["custom1"]
+        assert data["stats"]["base_customized"] is True
+
+
+class TestPatchBasePhrases:
+    """Test PATCH /admin/stt/phrase-hints/base."""
+
+    @pytest.mark.asyncio()
+    async def test_updates_base_phrases(self, app: Any, mock_redis: AsyncMock) -> None:
+        existing = json.dumps({"base": ["a"], "auto": ["b"], "custom": ["c"]})
+        mock_redis._store["stt:phrase_hints"] = existing.encode()
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_perm),
+            patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.api.stt_config.get_settings", _settings_patch()),
+            patch("src.stt.phrase_hints.invalidate_cache"),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.patch(
+                    "/admin/stt/phrase-hints/base",
+                    json={"phrases": ["new1", "new2"]},
+                )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["base_count"] == 2
+        assert data["base_customized"] is True
+
+    @pytest.mark.asyncio()
+    async def test_validation_too_many_phrases(self, app: Any, mock_redis: AsyncMock) -> None:
+        with (
+            patch("src.api.auth.require_admin", _fake_require_perm),
+            patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.api.stt_config.get_settings", _settings_patch()),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.patch(
+                    "/admin/stt/phrase-hints/base",
+                    json={"phrases": ["x"] * 2001},
+                )
+
+        assert response.status_code == 422
+
+
+class TestPostBaseReset:
+    """Test POST /admin/stt/phrase-hints/base/reset."""
+
+    @pytest.mark.asyncio()
+    async def test_resets_base_to_defaults(self, app: Any, mock_redis: AsyncMock) -> None:
+        existing = json.dumps({
+            "base": ["custom1"],
+            "auto": ["auto1"],
+            "custom": ["cust1"],
+            "base_customized": True,
+        })
+        mock_redis._store["stt:phrase_hints"] = existing.encode()
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_perm),
+            patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.api.stt_config.get_settings", _settings_patch()),
+            patch("src.stt.phrase_hints.invalidate_cache"),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.post("/admin/stt/phrase-hints/base/reset")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["base_customized"] is False
+        assert data["base_count"] > 0
