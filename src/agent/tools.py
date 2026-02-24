@@ -276,14 +276,15 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
         "name": "get_fitting_slots",
         "description": (
             "Отримати доступні слоти для запису на шиномонтаж. "
-            "Використовуй після вибору точки шиномонтажу."
+            "Використовуй після вибору точки шиномонтажу. "
+            "station_id ОБОВ'ЯЗКОВО бери з поля 'id' результату get_fitting_stations."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "station_id": {
                     "type": "string",
-                    "description": "ID точки шиномонтажу",
+                    "description": "ID точки з результату get_fitting_stations (наприклад '000000003'). НЕ вигадуй — копіюй точне значення поля 'id'.",
                 },
                 "date_from": {
                     "type": "string",
@@ -305,14 +306,15 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
     {
         "name": "book_fitting",
         "description": (
-            "Записати клієнта на шиномонтаж. Використовуй після вибору точки, дати та часу."
+            "Записати клієнта на шиномонтаж. Використовуй після вибору точки, дати та часу. "
+            "station_id бери з поля 'id' результату get_fitting_stations."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "station_id": {
                     "type": "string",
-                    "description": "ID точки шиномонтажу",
+                    "description": "ID точки з результату get_fitting_stations (наприклад '000000003'). Копіюй точне значення поля 'id'.",
                 },
                 "date": {
                     "type": "string",
@@ -403,7 +405,7 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
                 },
                 "station_id": {
                     "type": "string",
-                    "description": "ID точки шиномонтажу (для конкретних цін)",
+                    "description": "ID точки з get_fitting_stations (для конкретних цін)",
                 },
                 "service_type": {
                     "type": "string",
@@ -429,7 +431,7 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
                 },
                 "station_id": {
                     "type": "string",
-                    "description": "ID станції (опціонально)",
+                    "description": "ID станції з get_fitting_stations (опціонально)",
                 },
             },
             "required": ["phone"],
