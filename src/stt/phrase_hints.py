@@ -126,6 +126,11 @@ _TRIGRAPHS: dict[str, str] = {
     "igh": "ай",  # High → "Хай"
 }
 
+# Trigraphs that only match at position 0 (word start).
+_TRIGRAPHS_START: dict[str, str] = {
+    "all": "ол",  # All Weather, All Season, All Terrain → "Ол..."
+}
+
 _DIGRAPHS: dict[str, str] = {
     "sh": "ш",
     "ch": "ч",
@@ -134,6 +139,7 @@ _DIGRAPHS: dict[str, str] = {
     "ck": "к",
     "ee": "і",
     "oo": "у",
+    "ll": "л",  # double-l → single л: Rally→Ралі, Metallic→Металік
     "ce": "се",  # soft C: Ice→handled by trigraph, Pace→Пасе, Race→Расе
     "ci": "сі",  # soft C: Cinturato→Сінтурато, CityRover→Сітіровер
 }
@@ -188,11 +194,11 @@ def _transliterate_word(word: str) -> str:
     lower = word.lower()
     i = 0
     while i < len(lower):
-        # 1. Try trigraphs (3 chars)
+        # 1. Try trigraphs (3 chars) — position-independent and start-only
         if i + 2 < len(lower):
             tri = lower[i : i + 3]
-            if tri in _TRIGRAPHS:
-                cyr = _TRIGRAPHS[tri]
+            if tri in _TRIGRAPHS or (i == 0 and tri in _TRIGRAPHS_START):
+                cyr = _TRIGRAPHS.get(tri) or _TRIGRAPHS_START[tri]
                 if i == 0 and word[0].isupper():
                     cyr = cyr[0].upper() + cyr[1:]
                 result.append(cyr)
