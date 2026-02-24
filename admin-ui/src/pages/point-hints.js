@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { showToast } from '../notifications.js';
-import { escapeHtml } from '../utils.js';
+import { escapeHtml, closeModal } from '../utils.js';
 import { registerPageLoader } from '../router.js';
 import { t } from '../i18n.js';
 import * as tw from '../tw.js';
@@ -11,6 +11,72 @@ let _stationHints = {};
 let _stationsList = [];
 let _pickupHints = {};
 let _pickupPointsList = [];
+
+// ═══════════════════════════════════════════════════════════
+//  Modal helpers
+// ═══════════════════════════════════════════════════════════
+function openHintModal(type, id, label, hint) {
+    document.getElementById('pointHintEditType').value = type;
+    document.getElementById('pointHintEditId').value = id;
+    document.getElementById('pointHintModalTitle').textContent = t('pointHints.editHint');
+    document.getElementById('pointHintModalSubtitle').textContent = label;
+    document.getElementById('pointHintDistrict').value = hint.district || '';
+    document.getElementById('pointHintLandmarks').value = hint.landmarks || '';
+    document.getElementById('pointHintDescription').value = hint.description || '';
+    document.getElementById('pointHintModal').classList.add('show');
+    // Focus first field
+    document.getElementById('pointHintDistrict').focus();
+}
+
+async function saveHintFromModal() {
+    const type = document.getElementById('pointHintEditType').value;
+    const id = document.getElementById('pointHintEditId').value;
+    const district = document.getElementById('pointHintDistrict').value.trim();
+    const landmarks = document.getElementById('pointHintLandmarks').value.trim();
+    const description = document.getElementById('pointHintDescription').value.trim();
+
+    if (type === 'fitting') {
+        if (!district && !landmarks && !description) {
+            if (_stationHints[id]) {
+                await deleteStationHint(id);
+            }
+            closeModal('pointHintModal');
+            return;
+        }
+        try {
+            await api(`/admin/fitting/station-hints/${encodeURIComponent(id)}`, {
+                method: 'PUT',
+                body: JSON.stringify({ district, landmarks, description }),
+            });
+            _stationHints[id] = { district, landmarks, description };
+            renderStationHints();
+            showToast(t('pointHints.saved'), 'success');
+            closeModal('pointHintModal');
+        } catch (e) {
+            showToast(t('pointHints.saveFailed', { error: e.message }), 'error');
+        }
+    } else {
+        if (!district && !landmarks && !description) {
+            if (_pickupHints[id]) {
+                await deletePickupHint(id);
+            }
+            closeModal('pointHintModal');
+            return;
+        }
+        try {
+            await api(`/admin/fitting/pickup-hints/${encodeURIComponent(id)}`, {
+                method: 'PUT',
+                body: JSON.stringify({ district, landmarks, description }),
+            });
+            _pickupHints[id] = { district, landmarks, description };
+            renderPickupHints();
+            showToast(t('pointHints.saved'), 'success');
+            closeModal('pointHintModal');
+        } catch (e) {
+            showToast(t('pointHints.saveFailed', { error: e.message }), 'error');
+        }
+    }
+}
 
 // ═══════════════════════════════════════════════════════════
 //  Tab switching
@@ -48,6 +114,13 @@ async function loadStationHints() {
     }
 }
 
+function _hintPreview(text, maxLen) {
+    if (!text) return `<span class="text-neutral-400 dark:text-neutral-600">—</span>`;
+    const escaped = escapeHtml(text);
+    if (text.length <= maxLen) return escaped;
+    return `<span title="${escaped}">${escapeHtml(text.slice(0, maxLen))}…</span>`;
+}
+
 function renderStationHints() {
     const container = document.getElementById('pointHintsContent-fitting');
     if (!container) return;
@@ -81,16 +154,17 @@ function renderStationHints() {
         const description = hint.description || '';
         const name = station.name || '';
         const address = station.address || '';
+        const hasHint = !!(district || landmarks || description);
 
         html += `<tr class="${tw.trHover}">
             <td class="${tw.td}" data-label="${t('pointHints.name')}"><strong>${escapeHtml(name)}</strong><div class="text-[10px] text-neutral-400 font-mono">${escapeHtml(sid)}</div></td>
             <td class="${tw.td}" data-label="${t('pointHints.address')}">${escapeHtml(address)}</td>
-            <td class="${tw.td}" data-label="${t('pointHints.district')}"><input type="text" id="sh-district-${escapeHtml(sid)}" value="${escapeHtml(district)}" placeholder="${t('pointHints.districtPh')}" class="text-xs bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-1.5 py-0.5 w-32 focus:outline-none focus:border-blue-500"></td>
-            <td class="${tw.td}" data-label="${t('pointHints.landmarks')}"><input type="text" id="sh-landmarks-${escapeHtml(sid)}" value="${escapeHtml(landmarks)}" placeholder="${t('pointHints.landmarksPh')}" class="text-xs bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-1.5 py-0.5 w-40 focus:outline-none focus:border-blue-500"></td>
-            <td class="${tw.td}" data-label="${t('pointHints.description')}"><input type="text" id="sh-desc-${escapeHtml(sid)}" value="${escapeHtml(description)}" placeholder="${t('pointHints.descPh')}" class="text-xs bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-1.5 py-0.5 w-40 focus:outline-none focus:border-blue-500"></td>
+            <td class="${tw.td}" data-label="${t('pointHints.district')}">${_hintPreview(district, 30)}</td>
+            <td class="${tw.td}" data-label="${t('pointHints.landmarks')}">${_hintPreview(landmarks, 40)}</td>
+            <td class="${tw.td}" data-label="${t('pointHints.description')}">${_hintPreview(description, 40)}</td>
             <td class="${tw.tdActions}" data-label="${t('pointHints.actions')}">
-                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.pointHints.saveStationHint('${escapeHtml(sid)}')">${t('common.save')}</button>
-                ${(district || landmarks || description) ? `<button class="${tw.btnSm} text-red-600 dark:text-red-400 ml-1" onclick="window._pages.pointHints.deleteStationHint('${escapeHtml(sid)}')">${t('common.delete')}</button>` : ''}
+                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.pointHints.editStationHint('${escapeHtml(sid)}')">${t('common.edit')}</button>
+                ${hasHint ? `<button class="${tw.btnSm} text-red-600 dark:text-red-400 ml-1" onclick="window._pages.pointHints.deleteStationHint('${escapeHtml(sid)}')">${t('common.delete')}</button>` : ''}
             </td>
         </tr>`;
     }
@@ -98,29 +172,11 @@ function renderStationHints() {
     container.innerHTML = html;
 }
 
-async function saveStationHint(stationId) {
-    const district = document.getElementById(`sh-district-${stationId}`)?.value || '';
-    const landmarks = document.getElementById(`sh-landmarks-${stationId}`)?.value || '';
-    const description = document.getElementById(`sh-desc-${stationId}`)?.value || '';
-
-    if (!district && !landmarks && !description) {
-        if (_stationHints[stationId]) {
-            await deleteStationHint(stationId);
-        }
-        return;
-    }
-
-    try {
-        await api(`/admin/fitting/station-hints/${encodeURIComponent(stationId)}`, {
-            method: 'PUT',
-            body: JSON.stringify({ district, landmarks, description }),
-        });
-        _stationHints[stationId] = { district, landmarks, description };
-        renderStationHints();
-        showToast(t('pointHints.saved'), 'success');
-    } catch (e) {
-        showToast(t('pointHints.saveFailed', {error: e.message}), 'error');
-    }
+function editStationHint(stationId) {
+    const station = _stationsList.find(s => (s.station_id || s.id) === stationId);
+    const label = station ? `${station.name || ''} — ${station.address || ''}` : stationId;
+    const hint = _stationHints[stationId] || {};
+    openHintModal('fitting', stationId, label, hint);
 }
 
 async function deleteStationHint(stationId) {
@@ -189,16 +245,17 @@ function renderPickupHints() {
         const description = hint.description || '';
         const address = point.address || '';
         const city = point.city || '';
+        const hasHint = !!(district || landmarks || description);
 
         html += `<tr class="${tw.trHover}">
             <td class="${tw.td}" data-label="${t('pointHints.address')}"><strong>${escapeHtml(address)}</strong><div class="text-[10px] text-neutral-400 font-mono">${escapeHtml(pid)}</div></td>
             <td class="${tw.td}" data-label="${t('pointHints.city')}">${escapeHtml(city)}</td>
-            <td class="${tw.td}" data-label="${t('pointHints.district')}"><input type="text" id="ph-district-${escapeHtml(pid)}" value="${escapeHtml(district)}" placeholder="${t('pointHints.districtPh')}" class="text-xs bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-1.5 py-0.5 w-32 focus:outline-none focus:border-blue-500"></td>
-            <td class="${tw.td}" data-label="${t('pointHints.landmarks')}"><input type="text" id="ph-landmarks-${escapeHtml(pid)}" value="${escapeHtml(landmarks)}" placeholder="${t('pointHints.landmarksPh')}" class="text-xs bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-1.5 py-0.5 w-40 focus:outline-none focus:border-blue-500"></td>
-            <td class="${tw.td}" data-label="${t('pointHints.description')}"><input type="text" id="ph-desc-${escapeHtml(pid)}" value="${escapeHtml(description)}" placeholder="${t('pointHints.descPh')}" class="text-xs bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-1.5 py-0.5 w-40 focus:outline-none focus:border-blue-500"></td>
+            <td class="${tw.td}" data-label="${t('pointHints.district')}">${_hintPreview(district, 30)}</td>
+            <td class="${tw.td}" data-label="${t('pointHints.landmarks')}">${_hintPreview(landmarks, 40)}</td>
+            <td class="${tw.td}" data-label="${t('pointHints.description')}">${_hintPreview(description, 40)}</td>
             <td class="${tw.tdActions}" data-label="${t('pointHints.actions')}">
-                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.pointHints.savePickupHint('${escapeHtml(pid)}')">${t('common.save')}</button>
-                ${(district || landmarks || description) ? `<button class="${tw.btnSm} text-red-600 dark:text-red-400 ml-1" onclick="window._pages.pointHints.deletePickupHint('${escapeHtml(pid)}')">${t('common.delete')}</button>` : ''}
+                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.pointHints.editPickupHint('${escapeHtml(pid)}')">${t('common.edit')}</button>
+                ${hasHint ? `<button class="${tw.btnSm} text-red-600 dark:text-red-400 ml-1" onclick="window._pages.pointHints.deletePickupHint('${escapeHtml(pid)}')">${t('common.delete')}</button>` : ''}
             </td>
         </tr>`;
     }
@@ -206,29 +263,11 @@ function renderPickupHints() {
     container.innerHTML = html;
 }
 
-async function savePickupHint(pointId) {
-    const district = document.getElementById(`ph-district-${pointId}`)?.value || '';
-    const landmarks = document.getElementById(`ph-landmarks-${pointId}`)?.value || '';
-    const description = document.getElementById(`ph-desc-${pointId}`)?.value || '';
-
-    if (!district && !landmarks && !description) {
-        if (_pickupHints[pointId]) {
-            await deletePickupHint(pointId);
-        }
-        return;
-    }
-
-    try {
-        await api(`/admin/fitting/pickup-hints/${encodeURIComponent(pointId)}`, {
-            method: 'PUT',
-            body: JSON.stringify({ district, landmarks, description }),
-        });
-        _pickupHints[pointId] = { district, landmarks, description };
-        renderPickupHints();
-        showToast(t('pointHints.saved'), 'success');
-    } catch (e) {
-        showToast(t('pointHints.saveFailed', {error: e.message}), 'error');
-    }
+function editPickupHint(pointId) {
+    const point = _pickupPointsList.find(p => p.id === pointId);
+    const label = point ? `${point.address || ''} (${point.city || ''})` : pointId;
+    const hint = _pickupHints[pointId] || {};
+    openHintModal('pickup', pointId, label, hint);
 }
 
 async function deletePickupHint(pointId) {
@@ -296,6 +335,7 @@ export function init() {
 window._pages = window._pages || {};
 window._pages.pointHints = {
     switchTab,
-    loadStationHints, saveStationHint, deleteStationHint, refreshStations,
-    loadPickupHints, savePickupHint, deletePickupHint, refreshPickupPoints,
+    loadStationHints, editStationHint, deleteStationHint, refreshStations,
+    loadPickupHints, editPickupHint, deletePickupHint, refreshPickupPoints,
+    saveHintFromModal,
 };

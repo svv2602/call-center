@@ -530,6 +530,7 @@ export default {
     'pointHints.districtPh': 'Right bank',
     'pointHints.landmarksPh': 'near Pit Line',
     'pointHints.descPh': 'Additional info',
+    'pointHints.editHint': 'Edit Hint',
     'pointHints.saved': 'Hint saved',
     'pointHints.deleted': 'Hint deleted',
     'pointHints.saveFailed': 'Save failed: {error}',
@@ -1539,7 +1540,7 @@ export default {
     'help.pointHints.steps': 'Step-by-step',
     'help.pointHints.stepsContent': '<ol><li>Open the desired tab (Fitting or Pickup Points)</li><li>The point list loads automatically from Redis cache</li><li>Fill in fields for the desired point: district, landmarks, description</li><li>Click "Save" next to the point</li><li>Hints apply to new tool requests immediately</li></ol>',
     'help.pointHints.affects.title': 'System Impact',
-    'help.pointHints.affects.content': '<p>Hints are stored in Redis and merged into <code>get_fitting_stations</code> and <code>get_pickup_points</code> tool responses. Changes take effect immediately without restart.</p>',
+    'help.pointHints.affects.content': '<p>Hints are stored in PostgreSQL (primary) and Redis (cache) and merged into <code>get_fitting_stations</code> and <code>get_pickup_points</code> tool responses. Changes take effect immediately without restart.</p>',
     'help.pointHints.tips': 'Use Ukrainian-language descriptions — the agent communicates with customers in Ukrainian.',
 
     // STT Hints help (standalone page)

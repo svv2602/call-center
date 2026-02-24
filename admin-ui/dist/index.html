@@ -13,7 +13,7 @@
             }
         })();
     </script>
-  <script type="module" crossorigin src="/assets/index-bbivtkR7.js"></script>
+  <script type="module" crossorigin src="/assets/index--B_IoGiV.js"></script>
   <link rel="stylesheet" crossorigin href="/assets/index--7-aOSFH.css">
 </head>
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-50 font-sans antialiased">
@@ -120,6 +120,10 @@
                         <a href="#" class="nav-flyout-link" data-page="stt-hints" onclick="window._app.showPage('stt-hints')">
                             <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/></svg>
                             <span data-i18n="nav.sttHints">Подсказки STT</span>
+                        </a>
+                        <a href="#" class="nav-flyout-link" data-page="point-hints" onclick="window._app.showPage('point-hints')">
+                            <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z"/></svg>
+                            <span data-i18n="nav.pointHints">Подсказки для точек</span>
                         </a>
                         <a href="#" class="nav-flyout-link" data-page="tenants" onclick="window._app.showPage('tenants')">
                             <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 21h16.5M4.5 3h15M5.25 3v18m13.5-18v18M9 6.75h1.5m-1.5 3h1.5m-1.5 3h1.5m3-6H15m-1.5 3H15m-1.5 3H15M9 21v-3.375c0-.621.504-1.125 1.125-1.125h3.75c.621 0 1.125.504 1.125 1.125V21"/></svg>
@@ -697,6 +701,7 @@
                         <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.configuration.loadTaskSchedules()" data-i18n="settings.taskLoadSchedules">Загрузить расписания</button>
                     </div>
                 </div>
+
             </div>
 
             <!-- STT Hints -->
@@ -716,6 +721,49 @@
                     </div>
                 </div>
                 <div id="sttHintsContent"></div>
+            </div>
+
+            <!-- Point Hints -->
+            <div id="page-point-hints" style="display:none">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.pointHints">Подсказки для точек</span></div>
+                <div class="flex items-center gap-2 mb-4">
+                    <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="pointHints.title">Подсказки для точек</h1>
+                    <button onclick="window._app.openHelp('point-hints')" class="w-6 h-6 rounded-full border border-neutral-300 dark:border-neutral-600 text-neutral-400 hover:text-blue-600 hover:border-blue-400 dark:hover:text-blue-400 dark:hover:border-blue-400 text-xs font-bold transition-colors flex items-center justify-center" title="Help">?</button>
+                </div>
+                <div id="pointHintsTabs" class="flex border-b border-neutral-200 dark:border-neutral-700 mb-4">
+                    <button class="tab-btn px-4 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400 font-semibold" data-tab="fitting" onclick="window._pages.pointHints.switchTab('fitting')" data-i18n="pointHints.tabFitting">Шиномонтаж</button>
+                    <button class="tab-btn px-4 py-2 text-sm font-medium border-b-2 transition-colors cursor-pointer border-transparent text-neutral-500 dark:text-neutral-400" data-tab="pickup" onclick="window._pages.pointHints.switchTab('pickup')" data-i18n="pointHints.tabPickup">Точки выдачи</button>
+                </div>
+                <div id="pointHintsContent-fitting"></div>
+                <div id="pointHintsContent-pickup" style="display:none"></div>
+            </div>
+
+            <!-- Point Hint Edit Modal -->
+            <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="pointHintModal">
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl shadow-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+                    <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-1" id="pointHintModalTitle">Редактировать подсказку</h2>
+                    <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-4" id="pointHintModalSubtitle"></p>
+                    <input type="hidden" id="pointHintEditId">
+                    <input type="hidden" id="pointHintEditType">
+                    <div class="space-y-3">
+                        <div>
+                            <label class="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1" data-i18n="pointHints.district">Район</label>
+                            <input id="pointHintDistrict" type="text" placeholder="Правий берег" class="w-full text-sm bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-300 dark:border-neutral-600 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1" data-i18n="pointHints.landmarks">Ориентиры</label>
+                            <textarea id="pointHintLandmarks" rows="3" placeholder="рядом Пит Лайн, за ТЦ Караван" class="w-full text-sm bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-300 dark:border-neutral-600 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"></textarea>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1" data-i18n="pointHints.description">Описание</label>
+                            <textarea id="pointHintDescription" rows="4" placeholder="Додаткова інформація для агента" class="w-full text-sm bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-300 dark:border-neutral-600 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"></textarea>
+                        </div>
+                    </div>
+                    <div class="flex justify-end gap-2 mt-4">
+                        <button onclick="window._app.closeModal('pointHintModal')" class="px-3 py-1.5 text-sm border border-neutral-300 dark:border-neutral-600 rounded-md text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer" data-i18n="common.cancel">Отмена</button>
+                        <button onclick="window._pages.pointHints.saveHintFromModal()" class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 cursor-pointer" data-i18n="common.save">Сохранить</button>
+                    </div>
+                </div>
             </div>
 
             <!-- Notifications -->

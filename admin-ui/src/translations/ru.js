@@ -530,6 +530,7 @@ export default {
     'pointHints.districtPh': 'Правый берег',
     'pointHints.landmarksPh': 'рядом Пит Лайн',
     'pointHints.descPh': 'Доп. информация',
+    'pointHints.editHint': 'Редактировать подсказку',
     'pointHints.saved': 'Подсказка сохранена',
     'pointHints.deleted': 'Подсказка удалена',
     'pointHints.saveFailed': 'Ошибка сохранения: {error}',
@@ -1539,7 +1540,7 @@ export default {
     'help.pointHints.steps': 'Пошаговая инструкция',
     'help.pointHints.stepsContent': '<ol><li>Откройте нужную вкладку (Шиномонтаж или Точки выдачи)</li><li>Список точек загрузится автоматически из кэша Redis</li><li>Для нужной точки заполните поля: район, ориентиры, описание</li><li>Нажмите «Сохранить» рядом с точкой</li><li>Подсказки применяются к новым запросам инструментов немедленно</li></ol>',
     'help.pointHints.affects.title': 'Влияние на систему',
-    'help.pointHints.affects.content': '<p>Подсказки хранятся в Redis и подмешиваются в ответы инструментов <code>get_fitting_stations</code> и <code>get_pickup_points</code>. Изменения применяются мгновенно без перезапуска.</p>',
+    'help.pointHints.affects.content': '<p>Подсказки хранятся в PostgreSQL (основное) и Redis (кэш) и подмешиваются в ответы инструментов <code>get_fitting_stations</code> и <code>get_pickup_points</code>. Изменения применяются мгновенно без перезапуска.</p>',
     'help.pointHints.tips': 'Используйте украиноязычные описания — агент общается с клиентами на украинском.',
 
     // STT Hints help (standalone page)
