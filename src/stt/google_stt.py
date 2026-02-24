@@ -24,8 +24,6 @@ _SESSION_RESTART_SECONDS = 290  # restart slightly before 5 min limit
 # Google STT v2 inline PhraseSet limit
 _MAX_PHRASE_HINTS = 1200
 
-# Model that supports phrase adaptation (latest_long does NOT)
-_ADAPTATION_MODEL = "latest_short"
 
 
 def _build_adaptation(
@@ -144,17 +142,15 @@ class GoogleSTTEngine:
     ) -> cloud_speech.RecognitionConfig:
         """Build RecognitionConfig, optionally including phrase adaptation.
 
-        When adaptation is requested and phrase hints are present, switches to
-        ``_ADAPTATION_MODEL`` (latest_short) since latest_long does not support
-        speech adaptation. Falls back to the configured model without adaptation.
+        When adaptation is requested and phrase hints are present, the adaptation
+        is attached to the configured model (typically ``latest_long``).  If the
+        model does not support adaptation the streaming call will raise an error
+        which is caught by ``_recognition_loop`` and retried without hints.
         """
         assert self._config is not None
         adaptation = None
-        model = self._config.model
         if with_adaptation and self._config.phrase_hints:
             adaptation = _build_adaptation(self._config.phrase_hints)
-            if adaptation is not None:
-                model = _ADAPTATION_MODEL
         return cloud_speech.RecognitionConfig(
             explicit_decoding_config=cloud_speech.ExplicitDecodingConfig(
                 encoding=cloud_speech.ExplicitDecodingConfig.AudioEncoding.LINEAR16,
@@ -162,7 +158,7 @@ class GoogleSTTEngine:
                 audio_channel_count=1,
             ),
             language_codes=[self._config.language_code, *self._config.alternative_languages],
-            model=model,
+            model=self._config.model,
             adaptation=adaptation,
         )
 
