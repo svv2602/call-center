@@ -3,7 +3,7 @@
 Manages the lifecycle of a single phone call through states:
   Connected → Greeting → Listening → Processing → Speaking → Listening (cycle)
                                                  → Transferring → Ended
-  Listening → Timeout (10s) → prompt → Timeout (10s) → Ended
+  Listening → Timeout (15s) → prompt → Timeout (15s) → Ended
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # Session constants
 SESSION_KEY_PREFIX = "call_session"
 SESSION_TTL = 1800  # 30 minutes
-SILENCE_TIMEOUT_SEC = 10
+SILENCE_TIMEOUT_SEC = 15
 MAX_TIMEOUTS_BEFORE_HANGUP = 2
 
 

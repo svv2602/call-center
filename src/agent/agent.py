@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -312,6 +313,21 @@ class LLMAgent:
             if not tool_uses:
                 break
 
+            # Deduplicate tool calls (same name + same args → skip)
+            seen_keys: set[str] = set()
+            unique_tool_uses: list[dict[str, Any]] = []
+            for tu in tool_uses:
+                dedup_key = tu["name"] + ":" + json.dumps(tu["input"], sort_keys=True)
+                if dedup_key in seen_keys:
+                    logger.warning(
+                        "Skipping duplicate tool call: %s(%s)",
+                        tu["name"],
+                        json.dumps(tu["input"], ensure_ascii=False)[:200],
+                    )
+                    continue
+                seen_keys.add(dedup_key)
+                unique_tool_uses.append(tu)
+
             # Execute tool calls in parallel (with per-tool timeout)
             async def _execute_one(tu: dict[str, Any]) -> dict[str, Any]:
                 args = tu["input"]
@@ -332,7 +348,7 @@ class LLMAgent:
                     content = self._pii_vault.mask(content)
                 return {"type": "tool_result", "tool_use_id": tu["id"], "content": content}
 
-            tool_results = list(await asyncio.gather(*[_execute_one(tu) for tu in tool_uses]))
+            tool_results = list(await asyncio.gather(*[_execute_one(tu) for tu in unique_tool_uses]))
             tool_call_count += len(tool_results)
 
             conversation_history.append({"role": "user", "content": tool_results})

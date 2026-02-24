@@ -220,6 +220,25 @@ class StreamingAgentLoop:
             if not result.tool_calls:
                 break
 
+            # Deduplicate tool calls (same name + same args → skip)
+            seen_keys: set[str] = set()
+            unique_tool_calls: list[Any] = []
+            for tc in result.tool_calls:
+                try:
+                    args_parsed = json.loads(tc.arguments_json) if tc.arguments_json else {}
+                except json.JSONDecodeError:
+                    args_parsed = {}
+                dedup_key = tc.name + ":" + json.dumps(args_parsed, sort_keys=True)
+                if dedup_key in seen_keys:
+                    logger.warning(
+                        "Skipping duplicate tool call: %s(%s)",
+                        tc.name,
+                        json.dumps(args_parsed, ensure_ascii=False)[:200],
+                    )
+                    continue
+                seen_keys.add(dedup_key)
+                unique_tool_calls.append(tc)
+
             # Execute tool calls in parallel (with per-tool timeout)
             async def _execute_one_tool(tc: Any) -> dict[str, Any]:
                 try:
@@ -244,7 +263,7 @@ class StreamingAgentLoop:
                 return {"type": "tool_result", "tool_use_id": tc.id, "content": content}
 
             tool_results = list(
-                await asyncio.gather(*[_execute_one_tool(tc) for tc in result.tool_calls])
+                await asyncio.gather(*[_execute_one_tool(tc) for tc in unique_tool_calls])
             )
             tool_calls_made += len(tool_results)
 
