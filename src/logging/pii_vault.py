@@ -7,12 +7,21 @@ instance is per-call — counters and mappings are scoped to a single session.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Any
+import re
+from typing import Any
 
 from src.logging.pii_sanitizer import _NAME_RE, _PHONE_RE
 
-if TYPE_CHECKING:
-    import re
+# Address context markers — if a name match is preceded by any of these,
+# it's a street name (public data), not a person's name (PII).
+_ADDRESS_CONTEXT_RE = re.compile(
+    r"(?:вулиц[яіь]|вул\.|провулок|пров\.|проспект|просп\.|бульвар|бульв\."
+    r"|площ[аі]|пл\.|набережна|наб\.|шосе|алея|узвіз|тупик"
+    r"|улица|ул\.|переулок|пер\.|проезд"
+    r"|Маршала|Генерала|Академіка|Героїв|Гетьмана|імені|ім\.)"
+    r"\s*$",
+    re.IGNORECASE,
+)
 
 
 class PIIVault:
@@ -58,6 +67,10 @@ class PIIVault:
 
     def _mask_name(self, match: re.Match[str]) -> str:
         raw = match.group(0)
+        # Skip names that appear in address context (street names are not PII)
+        prefix = match.string[: match.start()]
+        if _ADDRESS_CONTEXT_RE.search(prefix):
+            return raw
         if raw in self._to_placeholder:
             return self._to_placeholder[raw]
         self._name_counter += 1

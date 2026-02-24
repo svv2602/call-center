@@ -90,6 +90,54 @@ class TestRestoreInArgs:
         assert restored["phones"] == ["+380501234567", "other"]
 
 
+class TestAddressContextNotMasked:
+    """Street names in addresses must NOT be masked — they are public data."""
+
+    def test_vulytsia_name_not_masked(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("вулиця Бориса Кротова, 24а")
+        assert "Бориса Кротова" in result
+
+    def test_vul_abbreviated_not_masked(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("вул. Маршала Тимошенка, 7")
+        assert "Маршала Тимошенка" in result
+
+    def test_prospekt_not_masked(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("проспект Дмитра Яворницького, 100")
+        assert "Дмитра Яворницького" in result
+
+    def test_shose_not_masked(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("шосе Запорізьке Кротова, 55К")
+        # Single word after шосе — no name match anyway
+        assert "Запорізьке" in result
+
+    def test_json_tool_result_address_not_masked(self) -> None:
+        vault = PIIVault()
+        text = '{"address":"вулиця Бориса Кротова, 24а","customer":"Іван Петренко"}'
+        result = vault.mask(text)
+        assert "Бориса Кротова" in result  # address preserved
+        assert "[NAME_" in result  # customer name masked
+
+    def test_person_name_still_masked(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("Клієнт Бориса Кротова замовив шини")
+        assert "Бориса Кротова" not in result
+        assert "[NAME_1]" in result
+
+    def test_vul_marshala_not_masked(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("вул. Маршала Тимошенка — це адреса")
+        assert "Маршала Тимошенка" in result  # preceded by "вул."
+
+    def test_provulok_not_masked(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("провулок Добровольців Перший, 3")
+        assert "Добровольців Перший" in result
+
+
 class TestMixedPII:
     def test_mixed_pii(self) -> None:
         vault = PIIVault()
