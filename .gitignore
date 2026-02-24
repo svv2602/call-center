@@ -29,6 +29,7 @@ htmlcov/
 # OS
 .DS_Store
 Thumbs.db
+*.xlsx
 
 # Docker volumes
 pgdata/
