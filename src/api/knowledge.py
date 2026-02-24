@@ -15,11 +15,13 @@ from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path pa
 from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
 from pydantic import BaseModel, Field
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.api.auth import require_permission
 from src.config import get_settings
 from src.knowledge.categories import CATEGORIES, is_valid_category
+from src.knowledge.dedup import check_semantic_duplicate, check_title_exists
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/knowledge", tags=["knowledge"])
@@ -196,22 +198,38 @@ async def import_articles(
                 errors.append({"filename": filename, "error": "Empty content after parsing"})
                 continue
 
+            # Check for existing article with the same title
+            existing = await check_title_exists(engine, title)
+            if existing:
+                errors.append({
+                    "filename": filename,
+                    "error": f"Article with title '{title}' already exists (id={existing['id']})",
+                })
+                continue
+
             file_category = category or detect_category_from_filename(filename)
 
-            async with engine.begin() as conn:
-                result = await conn.execute(
-                    text("""
-                        INSERT INTO knowledge_articles (title, category, content, embedding_status)
-                        VALUES (:title, :category, :content, 'pending')
-                        RETURNING id, title, category, active, embedding_status, created_at
-                    """),
-                    {"title": title, "category": file_category, "content": body},
-                )
-                row = result.first()
-                if row is None:
-                    msg = "Expected row from INSERT RETURNING"
-                    raise RuntimeError(msg)
-                article = dict(row._mapping)
+            try:
+                async with engine.begin() as conn:
+                    result = await conn.execute(
+                        text("""
+                            INSERT INTO knowledge_articles (title, category, content, embedding_status)
+                            VALUES (:title, :category, :content, 'pending')
+                            RETURNING id, title, category, active, embedding_status, created_at
+                        """),
+                        {"title": title, "category": file_category, "content": body},
+                    )
+                    row = result.first()
+                    if row is None:
+                        msg = "Expected row from INSERT RETURNING"
+                        raise RuntimeError(msg)
+                    article = dict(row._mapping)
+            except IntegrityError:
+                errors.append({
+                    "filename": filename,
+                    "error": f"Article with title '{title}' already exists",
+                })
+                continue
 
             _dispatch_embedding(str(article["id"]))
             imported.append(article)
@@ -290,7 +308,9 @@ async def get_article(article_id: UUID, _: dict[str, Any] = _perm_r) -> dict[str
 
 @router.post("/articles")
 async def create_article(
-    request: ArticleCreateRequest, _: dict[str, Any] = _perm_w
+    request: ArticleCreateRequest,
+    force: bool = Query(False, description="Skip semantic duplicate check"),
+    _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Create a new knowledge article."""
     if not is_valid_category(request.category):
@@ -298,36 +318,84 @@ async def create_article(
 
     engine = await _get_engine()
 
-    async with engine.begin() as conn:
-        result = await conn.execute(
-            text("""
-                INSERT INTO knowledge_articles
-                    (title, category, content, embedding_status, tenant_id, expires_at)
-                VALUES (:title, :category, :content, 'pending', CAST(:tenant_id AS uuid),
-                        CAST(:expires_at AS timestamptz))
-                RETURNING id, title, category, active, embedding_status, tenant_id,
-                          expires_at, created_at
-            """),
-            {
-                "title": request.title,
-                "category": request.category,
-                "content": request.content,
-                "tenant_id": request.tenant_id,
-                "expires_at": request.expires_at,
+    # Check #1: exact title match (always, even with force)
+    existing = await check_title_exists(engine, request.title)
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "duplicate_title",
+                "existing_id": existing["id"],
+                "message": f"Article with title '{existing['title']}' already exists",
             },
         )
-        row = result.first()
-        if row is None:
-            msg = "Expected row from INSERT RETURNING"
-            raise RuntimeError(msg)
-        article = dict(row._mapping)
+
+    # Check #2: semantic similarity (skippable with force=true)
+    warning = None
+    if not force:
+        dedup = await check_semantic_duplicate(engine, request.content)
+        if dedup["status"] == "duplicate":
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "error": "semantic_duplicate",
+                    "similar_title": dedup.get("similar_title"),
+                    "similarity": dedup.get("similarity"),
+                    "message": "Content is too similar to an existing article",
+                },
+            )
+        if dedup["status"] == "suspect":
+            warning = {
+                "type": "semantic_suspect",
+                "similar_title": dedup.get("similar_title"),
+                "similarity": dedup.get("similarity"),
+            }
+
+    try:
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                text("""
+                    INSERT INTO knowledge_articles
+                        (title, category, content, embedding_status, tenant_id, expires_at)
+                    VALUES (:title, :category, :content, 'pending', CAST(:tenant_id AS uuid),
+                            CAST(:expires_at AS timestamptz))
+                    RETURNING id, title, category, active, embedding_status, tenant_id,
+                              expires_at, created_at
+                """),
+                {
+                    "title": request.title,
+                    "category": request.category,
+                    "content": request.content,
+                    "tenant_id": request.tenant_id,
+                    "expires_at": request.expires_at,
+                },
+            )
+            row = result.first()
+            if row is None:
+                msg = "Expected row from INSERT RETURNING"
+                raise RuntimeError(msg)
+            article = dict(row._mapping)
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "duplicate_title",
+                "message": f"Article with title '{request.title}' already exists",
+            },
+        ) from exc
 
     _dispatch_embedding(str(article["id"]))
     _dispatch_promo_summary(str(article["id"]), request.category)
     if request.category == "promotions":
         _invalidate_promos_cache()
     logger.info("Knowledge article created: %s (%s)", article["title"], article["id"])
-    return {"article": article, "message": "Article created. Embedding generation queued."}
+    response: dict[str, Any] = {
+        "article": article,
+        "message": "Article created. Embedding generation queued.",
+    }
+    if warning:
+        response["warning"] = warning
+    return response
 
 
 @router.patch("/articles/{article_id}")
@@ -375,19 +443,28 @@ async def update_article(
     updates.append("updated_at = now()")
     set_clause = ", ".join(updates)
 
-    async with engine.begin() as conn:
-        result = await conn.execute(
-            text(f"""
-                UPDATE knowledge_articles
-                SET {set_clause}
-                WHERE id = :id
-                RETURNING id, title, category, active, embedding_status, updated_at
-            """),
-            params,
-        )
-        row = result.first()
-        if not row:
-            raise HTTPException(status_code=404, detail="Article not found")
+    try:
+        async with engine.begin() as conn:
+            result = await conn.execute(
+                text(f"""
+                    UPDATE knowledge_articles
+                    SET {set_clause}
+                    WHERE id = :id
+                    RETURNING id, title, category, active, embedding_status, updated_at
+                """),
+                params,
+            )
+            row = result.first()
+            if not row:
+                raise HTTPException(status_code=404, detail="Article not found")
+    except IntegrityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "error": "duplicate_title",
+                "message": f"Article with title '{request.title}' already exists",
+            },
+        ) from exc
 
     article = dict(row._mapping)
 

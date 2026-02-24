@@ -12,6 +12,7 @@ import logging
 from typing import Any
 
 from sqlalchemy import text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.config import get_settings
@@ -200,12 +201,9 @@ async def _run_scraper_async(task: Any, *, triggered_by: str = "manual") -> dict
                     continue
 
                 # Semantic dedup check
-                dedup_result = await _check_duplicate(
-                    engine,
-                    processed.content,
-                    settings,
-                    dedup_llm_check=config.get("dedup_llm_check", False),
-                )
+                from src.knowledge.dedup import check_semantic_duplicate
+
+                dedup_result = await check_semantic_duplicate(engine, processed.content)
                 if dedup_result["status"] == "duplicate":
                     await _update_source_status(
                         engine,
@@ -237,24 +235,33 @@ async def _run_scraper_async(task: Any, *, triggered_by: str = "manual") -> dict
                 active = config["auto_approve"]
                 embedding_status = "pending" if active else "none"
 
-                async with engine.begin() as conn:
-                    result = await conn.execute(
-                        text("""
-                            INSERT INTO knowledge_articles
-                                (title, category, content, active, embedding_status)
-                            VALUES (:title, :category, :content, :active, :embedding_status)
-                            RETURNING id
-                        """),
-                        {
-                            "title": processed.title,
-                            "category": processed.category,
-                            "content": processed.content,
-                            "active": active,
-                            "embedding_status": embedding_status,
-                        },
+                try:
+                    async with engine.begin() as conn:
+                        result = await conn.execute(
+                            text("""
+                                INSERT INTO knowledge_articles
+                                    (title, category, content, active, embedding_status)
+                                VALUES (:title, :category, :content, :active, :embedding_status)
+                                RETURNING id
+                            """),
+                            {
+                                "title": processed.title,
+                                "category": processed.category,
+                                "content": processed.content,
+                                "active": active,
+                                "embedding_status": embedding_status,
+                            },
+                        )
+                        article_row = result.first()
+                        article_id = str(article_row.id) if article_row else None
+                except IntegrityError:
+                    await _update_source_status(
+                        engine, url, "duplicate",
+                        skip_reason=f"Duplicate title: {processed.title}",
                     )
-                    article_row = result.first()
-                    article_id = str(article_row.id) if article_row else None
+                    stats["skipped"] += 1
+                    logger.info("Duplicate title on insert: %s", url)
+                    continue
 
                 # Link source → article
                 async with engine.begin() as conn:
@@ -427,81 +434,6 @@ async def _update_source_status(
             """),
             {"url": url, "status": status, "skip_reason": skip_reason},
         )
-
-
-async def _check_duplicate(
-    engine: Any,
-    content: str,
-    settings: Any,
-    *,
-    dedup_llm_check: bool = False,
-) -> dict[str, Any]:
-    """Check if content is a semantic duplicate of existing articles.
-
-    Uses pgvector cosine similarity on article embeddings.
-
-    Returns:
-        {"status": "new"} — not a duplicate
-        {"status": "duplicate", "similar_title": ..., "similarity": ...} — auto-skip
-        {"status": "suspect", "similar_title": ..., "similarity": ...} — needs review
-    """
-    try:
-        from src.knowledge.embeddings import EmbeddingGenerator
-
-        api_key = settings.openai.api_key
-        if not api_key:
-            return {"status": "new"}
-
-        model = settings.openai.embedding_model
-        dimensions = settings.openai.embedding_dimensions
-
-        generator = EmbeddingGenerator(api_key=api_key, model=model, dimensions=dimensions)
-        await generator.open()
-        try:
-            vectors = await generator.generate([content[:2000]])  # First 2000 chars
-            if not vectors or not vectors[0]:
-                return {"status": "new"}
-            embedding = vectors[0]
-        finally:
-            await generator.close()
-
-        # Query pgvector for most similar article
-        vec_str = "[" + ",".join(str(v) for v in embedding) + "]"
-
-        async with engine.begin() as conn:
-            result = await conn.execute(
-                text("""
-                    SELECT ka.title, 1 - (ke.embedding <=> CAST(:vec AS vector)) AS similarity
-                    FROM knowledge_embeddings ke
-                    JOIN knowledge_articles ka ON ka.id = ke.article_id
-                    WHERE ka.active = true
-                    ORDER BY ke.embedding <=> CAST(:vec AS vector)
-                    LIMIT 1
-                """),
-                {"vec": vec_str},
-            )
-            row = result.first()
-
-        if not row:
-            return {"status": "new"}
-
-        sim = float(row.similarity)
-        similar_title = row.title
-
-        if sim > 0.90:
-            return {"status": "duplicate", "similar_title": similar_title, "similarity": sim}
-        if sim >= 0.80:
-            if dedup_llm_check:
-                # Could invoke LLM for borderline cases, but for now mark as suspect
-                # LLM check can be added later if needed
-                logger.info("Borderline sim=%.2f for '%s', marking as suspect", sim, similar_title)
-            return {"status": "suspect", "similar_title": similar_title, "similarity": sim}
-
-        return {"status": "new"}
-
-    except Exception:
-        logger.warning("Dedup check failed, treating as new article", exc_info=True)
-        return {"status": "new"}
 
 
 def _dispatch_embedding(article_id: str) -> None:
@@ -1249,7 +1181,9 @@ async def _run_source_async(
                     continue
 
                 # Semantic dedup check
-                dedup_result = await _check_duplicate(engine, processed.content, settings)
+                from src.knowledge.dedup import check_semantic_duplicate
+
+                dedup_result = await check_semantic_duplicate(engine, processed.content)
                 if dedup_result["status"] == "duplicate":
                     await _update_source_status(
                         engine,
@@ -1275,24 +1209,33 @@ async def _run_source_async(
                 active = config["auto_approve"]
                 embedding_status = "pending" if active else "none"
 
-                async with engine.begin() as conn:
-                    result = await conn.execute(
-                        text("""
-                            INSERT INTO knowledge_articles
-                                (title, category, content, active, embedding_status)
-                            VALUES (:title, :category, :content, :active, :embedding_status)
-                            RETURNING id
-                        """),
-                        {
-                            "title": processed.title,
-                            "category": processed.category,
-                            "content": processed.content,
-                            "active": active,
-                            "embedding_status": embedding_status,
-                        },
+                try:
+                    async with engine.begin() as conn:
+                        result = await conn.execute(
+                            text("""
+                                INSERT INTO knowledge_articles
+                                    (title, category, content, active, embedding_status)
+                                VALUES (:title, :category, :content, :active, :embedding_status)
+                                RETURNING id
+                            """),
+                            {
+                                "title": processed.title,
+                                "category": processed.category,
+                                "content": processed.content,
+                                "active": active,
+                                "embedding_status": embedding_status,
+                            },
+                        )
+                        article_row = result.first()
+                        article_id = str(article_row.id) if article_row else None
+                except IntegrityError:
+                    await _update_source_status(
+                        engine, url, "duplicate",
+                        skip_reason=f"Duplicate title: {processed.title}",
                     )
-                    article_row = result.first()
-                    article_id = str(article_row.id) if article_row else None
+                    stats["skipped"] += 1
+                    logger.info("Duplicate title on insert: %s", url)
+                    continue
 
                 # Link source → article
                 async with engine.begin() as conn:

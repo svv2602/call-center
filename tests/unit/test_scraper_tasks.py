@@ -30,23 +30,29 @@ def _make_engine_mock(query_result: MagicMock) -> MagicMock:
     return mock_engine
 
 
-# ─── _check_duplicate ────────────────────────────────────────
+# ─── check_semantic_duplicate (moved to src.knowledge.dedup) ───
 
 
 class TestCheckDuplicate:
     """Test semantic dedup with mocked embeddings."""
 
     @pytest.mark.asyncio
-    async def test_duplicate_above_090(self) -> None:
+    @patch("src.knowledge.dedup.get_settings")
+    @patch("src.knowledge.dedup.EmbeddingGenerator")
+    async def test_duplicate_above_090(
+        self, mock_gen_cls: MagicMock, mock_settings: MagicMock
+    ) -> None:
         """sim > 0.90 → 'duplicate' (auto-skip)."""
-        from src.tasks.scraper_tasks import _check_duplicate
+        from src.knowledge.dedup import check_semantic_duplicate
 
-        mock_settings = MagicMock()
-        mock_settings.openai.api_key = "test-key"
-        mock_settings.openai.embedding_model = "text-embedding-3-small"
-        mock_settings.openai.embedding_dimensions = 1536
+        mock_settings.return_value.openai.api_key = "test-key"
+        mock_settings.return_value.openai.embedding_model = "text-embedding-3-small"
+        mock_settings.return_value.openai.embedding_dimensions = 1536
 
         mock_embedding = [0.1] * 1536
+        gen_instance = AsyncMock()
+        gen_instance.generate = AsyncMock(return_value=[mock_embedding])
+        mock_gen_cls.return_value = gen_instance
 
         mock_row = MagicMock()
         mock_row.title = "Existing similar article"
@@ -57,28 +63,29 @@ class TestCheckDuplicate:
 
         mock_engine = _make_engine_mock(mock_result)
 
-        with patch("src.knowledge.embeddings.EmbeddingGenerator") as MockGen:
-            gen_instance = AsyncMock()
-            gen_instance.generate = AsyncMock(return_value=[mock_embedding])
-            MockGen.return_value = gen_instance
-
-            result = await _check_duplicate(mock_engine, "Some content", mock_settings)
+        result = await check_semantic_duplicate(mock_engine, "Some content")
 
         assert result["status"] == "duplicate"
         assert result["similarity"] == 0.95
         assert result["similar_title"] == "Existing similar article"
 
     @pytest.mark.asyncio
-    async def test_suspect_080_to_090(self) -> None:
+    @patch("src.knowledge.dedup.get_settings")
+    @patch("src.knowledge.dedup.EmbeddingGenerator")
+    async def test_suspect_080_to_090(
+        self, mock_gen_cls: MagicMock, mock_settings: MagicMock
+    ) -> None:
         """sim 0.80–0.90 → 'suspect'."""
-        from src.tasks.scraper_tasks import _check_duplicate
+        from src.knowledge.dedup import check_semantic_duplicate
 
-        mock_settings = MagicMock()
-        mock_settings.openai.api_key = "test-key"
-        mock_settings.openai.embedding_model = "text-embedding-3-small"
-        mock_settings.openai.embedding_dimensions = 1536
+        mock_settings.return_value.openai.api_key = "test-key"
+        mock_settings.return_value.openai.embedding_model = "text-embedding-3-small"
+        mock_settings.return_value.openai.embedding_dimensions = 1536
 
         mock_embedding = [0.1] * 1536
+        gen_instance = AsyncMock()
+        gen_instance.generate = AsyncMock(return_value=[mock_embedding])
+        mock_gen_cls.return_value = gen_instance
 
         mock_row = MagicMock()
         mock_row.title = "Similar article"
@@ -89,27 +96,28 @@ class TestCheckDuplicate:
 
         mock_engine = _make_engine_mock(mock_result)
 
-        with patch("src.knowledge.embeddings.EmbeddingGenerator") as MockGen:
-            gen_instance = AsyncMock()
-            gen_instance.generate = AsyncMock(return_value=[mock_embedding])
-            MockGen.return_value = gen_instance
-
-            result = await _check_duplicate(mock_engine, "Some content", mock_settings)
+        result = await check_semantic_duplicate(mock_engine, "Some content")
 
         assert result["status"] == "suspect"
         assert result["similarity"] == 0.85
 
     @pytest.mark.asyncio
-    async def test_new_below_080(self) -> None:
+    @patch("src.knowledge.dedup.get_settings")
+    @patch("src.knowledge.dedup.EmbeddingGenerator")
+    async def test_new_below_080(
+        self, mock_gen_cls: MagicMock, mock_settings: MagicMock
+    ) -> None:
         """sim < 0.80 → 'new'."""
-        from src.tasks.scraper_tasks import _check_duplicate
+        from src.knowledge.dedup import check_semantic_duplicate
 
-        mock_settings = MagicMock()
-        mock_settings.openai.api_key = "test-key"
-        mock_settings.openai.embedding_model = "text-embedding-3-small"
-        mock_settings.openai.embedding_dimensions = 1536
+        mock_settings.return_value.openai.api_key = "test-key"
+        mock_settings.return_value.openai.embedding_model = "text-embedding-3-small"
+        mock_settings.return_value.openai.embedding_dimensions = 1536
 
         mock_embedding = [0.1] * 1536
+        gen_instance = AsyncMock()
+        gen_instance.generate = AsyncMock(return_value=[mock_embedding])
+        mock_gen_cls.return_value = gen_instance
 
         mock_row = MagicMock()
         mock_row.title = "Different article"
@@ -120,82 +128,86 @@ class TestCheckDuplicate:
 
         mock_engine = _make_engine_mock(mock_result)
 
-        with patch("src.knowledge.embeddings.EmbeddingGenerator") as MockGen:
-            gen_instance = AsyncMock()
-            gen_instance.generate = AsyncMock(return_value=[mock_embedding])
-            MockGen.return_value = gen_instance
-
-            result = await _check_duplicate(mock_engine, "Some content", mock_settings)
+        result = await check_semantic_duplicate(mock_engine, "Some content")
 
         assert result["status"] == "new"
 
     @pytest.mark.asyncio
-    async def test_no_embeddings_returns_new(self) -> None:
+    @patch("src.knowledge.dedup.get_settings")
+    @patch("src.knowledge.dedup.EmbeddingGenerator")
+    async def test_no_embeddings_returns_new(
+        self, mock_gen_cls: MagicMock, mock_settings: MagicMock
+    ) -> None:
         """When no existing embeddings in DB → 'new'."""
-        from src.tasks.scraper_tasks import _check_duplicate
+        from src.knowledge.dedup import check_semantic_duplicate
 
-        mock_settings = MagicMock()
-        mock_settings.openai.api_key = "test-key"
-        mock_settings.openai.embedding_model = "text-embedding-3-small"
-        mock_settings.openai.embedding_dimensions = 1536
+        mock_settings.return_value.openai.api_key = "test-key"
+        mock_settings.return_value.openai.embedding_model = "text-embedding-3-small"
+        mock_settings.return_value.openai.embedding_dimensions = 1536
 
         mock_embedding = [0.1] * 1536
+        gen_instance = AsyncMock()
+        gen_instance.generate = AsyncMock(return_value=[mock_embedding])
+        mock_gen_cls.return_value = gen_instance
 
         mock_result = MagicMock()
         mock_result.first.return_value = None  # no rows
 
         mock_engine = _make_engine_mock(mock_result)
 
-        with patch("src.knowledge.embeddings.EmbeddingGenerator") as MockGen:
-            gen_instance = AsyncMock()
-            gen_instance.generate = AsyncMock(return_value=[mock_embedding])
-            MockGen.return_value = gen_instance
-
-            result = await _check_duplicate(mock_engine, "Some content", mock_settings)
+        result = await check_semantic_duplicate(mock_engine, "Some content")
 
         assert result["status"] == "new"
 
     @pytest.mark.asyncio
-    async def test_no_api_key_returns_new(self) -> None:
+    @patch("src.knowledge.dedup.get_settings")
+    async def test_no_api_key_returns_new(self, mock_settings: MagicMock) -> None:
         """When no OpenAI API key is set → skip dedup, return 'new'."""
-        from src.tasks.scraper_tasks import _check_duplicate
+        from src.knowledge.dedup import check_semantic_duplicate
 
+        mock_settings.return_value.openai.api_key = ""
         mock_engine = MagicMock()
-        mock_settings = MagicMock()
-        mock_settings.openai.api_key = ""
 
-        result = await _check_duplicate(mock_engine, "Some content", mock_settings)
+        result = await check_semantic_duplicate(mock_engine, "Some content")
         assert result["status"] == "new"
 
     @pytest.mark.asyncio
-    async def test_exception_returns_new(self) -> None:
+    @patch("src.knowledge.dedup.get_settings")
+    @patch("src.knowledge.dedup.EmbeddingGenerator")
+    async def test_exception_returns_new(
+        self, mock_gen_cls: MagicMock, mock_settings: MagicMock
+    ) -> None:
         """On any exception → treat as 'new' (fail-open)."""
-        from src.tasks.scraper_tasks import _check_duplicate
+        from src.knowledge.dedup import check_semantic_duplicate
 
+        mock_settings.return_value.openai.api_key = "test-key"
+        mock_settings.return_value.openai.embedding_model = "text-embedding-3-small"
+        mock_settings.return_value.openai.embedding_dimensions = 1536
+
+        mock_gen_cls.side_effect = Exception("Connection error")
         mock_engine = MagicMock()
-        mock_settings = MagicMock()
-        mock_settings.openai.api_key = "test-key"
-        mock_settings.openai.embedding_model = "text-embedding-3-small"
-        mock_settings.openai.embedding_dimensions = 1536
 
-        with patch("src.knowledge.embeddings.EmbeddingGenerator") as MockGen:
-            MockGen.side_effect = Exception("Connection error")
-
-            result = await _check_duplicate(mock_engine, "Some content", mock_settings)
+        result = await check_semantic_duplicate(mock_engine, "Some content")
 
         assert result["status"] == "new"
 
     @pytest.mark.asyncio
-    async def test_boundary_exactly_090_is_suspect(self) -> None:
+    @patch("src.knowledge.dedup.get_settings")
+    @patch("src.knowledge.dedup.EmbeddingGenerator")
+    async def test_boundary_exactly_090_is_suspect(
+        self, mock_gen_cls: MagicMock, mock_settings: MagicMock
+    ) -> None:
         """sim == 0.90 exactly → 'suspect' (boundary)."""
-        from src.tasks.scraper_tasks import _check_duplicate
+        from src.knowledge.dedup import check_semantic_duplicate
 
-        mock_settings = MagicMock()
-        mock_settings.openai.api_key = "test-key"
-        mock_settings.openai.embedding_model = "text-embedding-3-small"
-        mock_settings.openai.embedding_dimensions = 1536
+        mock_settings.return_value.openai.api_key = "test-key"
+        mock_settings.return_value.openai.embedding_model = "text-embedding-3-small"
+        mock_settings.return_value.openai.embedding_dimensions = 1536
 
         mock_embedding = [0.1] * 1536
+        gen_instance = AsyncMock()
+        gen_instance.generate = AsyncMock(return_value=[mock_embedding])
+        mock_gen_cls.return_value = gen_instance
 
         mock_row = MagicMock()
         mock_row.title = "Boundary article"
@@ -206,26 +218,27 @@ class TestCheckDuplicate:
 
         mock_engine = _make_engine_mock(mock_result)
 
-        with patch("src.knowledge.embeddings.EmbeddingGenerator") as MockGen:
-            gen_instance = AsyncMock()
-            gen_instance.generate = AsyncMock(return_value=[mock_embedding])
-            MockGen.return_value = gen_instance
-
-            result = await _check_duplicate(mock_engine, "Some content", mock_settings)
+        result = await check_semantic_duplicate(mock_engine, "Some content")
 
         assert result["status"] == "suspect"
 
     @pytest.mark.asyncio
-    async def test_boundary_exactly_080_is_suspect(self) -> None:
+    @patch("src.knowledge.dedup.get_settings")
+    @patch("src.knowledge.dedup.EmbeddingGenerator")
+    async def test_boundary_exactly_080_is_suspect(
+        self, mock_gen_cls: MagicMock, mock_settings: MagicMock
+    ) -> None:
         """sim == 0.80 exactly → 'suspect'."""
-        from src.tasks.scraper_tasks import _check_duplicate
+        from src.knowledge.dedup import check_semantic_duplicate
 
-        mock_settings = MagicMock()
-        mock_settings.openai.api_key = "test-key"
-        mock_settings.openai.embedding_model = "text-embedding-3-small"
-        mock_settings.openai.embedding_dimensions = 1536
+        mock_settings.return_value.openai.api_key = "test-key"
+        mock_settings.return_value.openai.embedding_model = "text-embedding-3-small"
+        mock_settings.return_value.openai.embedding_dimensions = 1536
 
         mock_embedding = [0.1] * 1536
+        gen_instance = AsyncMock()
+        gen_instance.generate = AsyncMock(return_value=[mock_embedding])
+        mock_gen_cls.return_value = gen_instance
 
         mock_row = MagicMock()
         mock_row.title = "Boundary article"
@@ -236,12 +249,7 @@ class TestCheckDuplicate:
 
         mock_engine = _make_engine_mock(mock_result)
 
-        with patch("src.knowledge.embeddings.EmbeddingGenerator") as MockGen:
-            gen_instance = AsyncMock()
-            gen_instance.generate = AsyncMock(return_value=[mock_embedding])
-            MockGen.return_value = gen_instance
-
-            result = await _check_duplicate(mock_engine, "Some content", mock_settings)
+        result = await check_semantic_duplicate(mock_engine, "Some content")
 
         assert result["status"] == "suspect"
 

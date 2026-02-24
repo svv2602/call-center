@@ -10,6 +10,7 @@ import os
 import re
 import sys
 
+from sqlalchemy.exc import IntegrityError
 
 CATEGORY_PATTERNS = [
     "faq",
@@ -93,6 +94,7 @@ async def main() -> None:
                 continue
 
             try:
+                nested = await conn.begin_nested()
                 await conn.execute(
                     text("""
                         INSERT INTO knowledge_articles (title, category, content, embedding_status)
@@ -100,8 +102,12 @@ async def main() -> None:
                     """),
                     {"title": title, "category": category, "content": content},
                 )
+                await nested.commit()
                 ok += 1
                 existing.add(title)
+            except IntegrityError:
+                await nested.rollback()
+                skipped += 1
             except Exception as exc:
                 errors += 1
                 print(f"  ERR {filepath}: {exc}")
