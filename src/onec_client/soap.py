@@ -143,6 +143,7 @@ class OneCSOAPClient:
         time: str,
         vehicle_info: str = "",
         auto_number: str = "",
+        storage_contract: str = "",
         tire_diameter: int = 0,
         service_type: str = "tire_change",
     ) -> dict[str, Any]:
@@ -187,7 +188,7 @@ class OneCSOAPClient:
             params += f"<ns:Comment>{escape(comment)}</ns:Comment>"
         else:
             params += "<ns:Comment></ns:Comment>"
-        params += "<ns:NumberContract></ns:NumberContract>"
+        params += f"<ns:NumberContract>{escape(storage_contract)}</ns:NumberContract>"
         params += "<ns:IdTelegram></ns:IdTelegram>"
         params += "<ns:IdViber></ns:IdViber>"
 

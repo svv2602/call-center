@@ -347,6 +347,10 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
                     "type": "integer",
                     "description": "Діаметр шин у дюймах (наприклад, 16, 17)",
                 },
+                "storage_contract": {
+                    "type": "string",
+                    "description": "Номер договору зберігання шин (якщо клієнт має шини на зберіганні)",
+                },
                 "linked_order_id": {
                     "type": "string",
                     "description": "ID пов'язаного замовлення (якщо клієнт замовив шини)",
