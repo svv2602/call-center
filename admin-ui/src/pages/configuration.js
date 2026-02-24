@@ -8,6 +8,7 @@ import * as tw from '../tw.js';
 // ─── State ───────────────────────────────────────────────────
 let _llmConfig = null;
 let _ttsConfig = null;
+let _taskSchedules = null;
 
 // ═══════════════════════════════════════════════════════════
 //  Hot-reload конфиг
@@ -593,10 +594,151 @@ async function resetTTSConfig() {
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  Task Schedules
+// ═══════════════════════════════════════════════════════════
+const _DAY_KEYS = ['settings.taskDayMon', 'settings.taskDayTue', 'settings.taskDayWed', 'settings.taskDayThu', 'settings.taskDayFri', 'settings.taskDaySat', 'settings.taskDaySun'];
+
+async function loadTaskSchedules() {
+    const container = document.getElementById('taskSchedulesContainer');
+    if (!container) return;
+    container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+    try {
+        const data = await api('/admin/task-schedules');
+        _taskSchedules = data.schedules;
+        renderTaskSchedules(data.schedules);
+    } catch (e) {
+        container.innerHTML = `<div class="${tw.emptyState}">${t('settings.taskLoadFailed', {error: escapeHtml(e.message)})}</div>`;
+    }
+}
+
+function renderTaskSchedules(schedules) {
+    const container = document.getElementById('taskSchedulesContainer');
+    if (!container) return;
+
+    let html = '<div class="space-y-4">';
+    for (const [key, sched] of Object.entries(schedules)) {
+        const labelKey = `settings.taskLabel_${key}`;
+        const label = t(labelKey) !== labelKey ? t(labelKey) : (sched.label || key);
+        const enabled = sched.enabled !== false;
+        const freq = sched.frequency || 'daily';
+        const hour = sched.hour ?? 0;
+        const dow = sched.day_of_week ?? 0;
+
+        const enabledBadge = enabled
+            ? `<span class="${tw.badgeGreen}">${t('settings.taskEnabled')}</span>`
+            : `<span class="${tw.badgeRed}">${t('settings.taskDisabled')}</span>`;
+
+        let hourOptions = '';
+        for (let h = 0; h <= 23; h++) {
+            const sel = h === hour ? ' selected' : '';
+            hourOptions += `<option value="${h}"${sel}>${String(h).padStart(2, '0')}:00</option>`;
+        }
+
+        let dayOptions = '';
+        for (let d = 0; d <= 6; d++) {
+            const sel = d === dow ? ' selected' : '';
+            dayOptions += `<option value="${d}"${sel}>${t(_DAY_KEYS[d])}</option>`;
+        }
+
+        html += `
+        <div class="p-4 border border-neutral-200 dark:border-neutral-700 rounded-lg">
+            <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-2">
+                    <strong class="text-sm text-neutral-900 dark:text-neutral-50">${escapeHtml(label)}</strong>
+                    ${enabledBadge}
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-xs text-neutral-500 dark:text-neutral-400 flex items-center gap-1">
+                        <input type="checkbox" id="taskEnabled_${key}" ${enabled ? 'checked' : ''}>
+                        ${t('settings.taskEnabled')}
+                    </label>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-3">
+                <div>
+                    <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.taskFrequency')}</label>
+                    <select id="taskFreq_${key}" class="${tw.selectSm} w-full" onchange="window._pages.configuration.onFreqChange('${key}')">
+                        <option value="daily" ${freq === 'daily' ? 'selected' : ''}>${t('settings.taskFreqDaily')}</option>
+                        <option value="weekly" ${freq === 'weekly' ? 'selected' : ''}>${t('settings.taskFreqWeekly')}</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.taskHour')}</label>
+                    <select id="taskHour_${key}" class="${tw.selectSm} w-full">${hourOptions}</select>
+                </div>
+                <div id="taskDowWrap_${key}" style="${freq === 'weekly' ? '' : 'display:none'}">
+                    <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.taskDayOfWeek')}</label>
+                    <select id="taskDow_${key}" class="${tw.selectSm} w-full">${dayOptions}</select>
+                </div>
+            </div>
+            <div class="flex flex-wrap items-center gap-2">
+                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.configuration.saveSchedule('${key}')">${t('common.save')}</button>
+                <button class="${tw.btnSm} border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800" onclick="window._pages.configuration.runTask('${key}')">${t('settings.taskRunNow')}</button>
+            </div>
+        </div>`;
+    }
+
+    html += `<div class="pt-2">
+        <button class="${tw.btnSm} text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20" onclick="window._pages.configuration.resetSchedules()">${t('settings.taskResetAll')}</button>
+    </div></div>`;
+    container.innerHTML = html;
+}
+
+function onFreqChange(taskKey) {
+    const freq = document.getElementById(`taskFreq_${taskKey}`)?.value;
+    const wrap = document.getElementById(`taskDowWrap_${taskKey}`);
+    if (wrap) wrap.style.display = freq === 'weekly' ? '' : 'none';
+}
+
+async function saveSchedule(taskKey) {
+    const enabled = document.getElementById(`taskEnabled_${taskKey}`)?.checked ?? true;
+    const frequency = document.getElementById(`taskFreq_${taskKey}`)?.value || 'daily';
+    const hour = parseInt(document.getElementById(`taskHour_${taskKey}`)?.value || '0', 10);
+    const day_of_week = parseInt(document.getElementById(`taskDow_${taskKey}`)?.value || '0', 10);
+
+    const patch = { enabled, frequency, hour };
+    if (frequency === 'weekly') patch.day_of_week = day_of_week;
+
+    try {
+        const data = await api('/admin/task-schedules', {
+            method: 'PATCH',
+            body: JSON.stringify({ [taskKey]: patch }),
+        });
+        _taskSchedules = data.schedules;
+        renderTaskSchedules(data.schedules);
+        showToast(t('settings.taskSaved'), 'success');
+    } catch (e) {
+        showToast(t('settings.taskSaveFailed', {error: e.message}), 'error');
+    }
+}
+
+async function runTask(taskKey) {
+    try {
+        const data = await api(`/admin/task-schedules/${encodeURIComponent(taskKey)}/run`, { method: 'POST' });
+        showToast(t('settings.taskRunQueued', {task: taskKey, id: data.task_id}), 'success');
+    } catch (e) {
+        showToast(t('settings.taskRunFailed', {error: e.message}), 'error');
+    }
+}
+
+async function resetSchedules() {
+    if (!confirm(t('settings.taskResetConfirm'))) return;
+    try {
+        const data = await api('/admin/task-schedules/reset', { method: 'POST' });
+        _taskSchedules = data.schedules;
+        renderTaskSchedules(data.schedules);
+        showToast(t('settings.taskResetDone'), 'success');
+    } catch (e) {
+        showToast(t('settings.taskSaveFailed', {error: e.message}), 'error');
+    }
+}
+
 export function init() {
     registerPageLoader('configuration', () => {
         loadLLMConfig();
         loadTTSConfig();
+        loadTaskSchedules();
     });
 }
 
@@ -607,4 +749,5 @@ window._pages.configuration = {
     updateTaskRoute, addFallback, removeFallback, moveFallback, testLLMProvider,
     saveSandboxDefaults,
     loadTTSConfig, saveTTSConfig, testTTS, resetTTSConfig,
+    loadTaskSchedules, saveSchedule, runTask, resetSchedules, onFreqChange,
 };

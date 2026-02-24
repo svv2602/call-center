@@ -51,6 +51,7 @@ from src.api.pronunciation import router as pronunciation_router
 from src.api.sandbox import router as sandbox_router
 from src.api.scraper import router as scraper_router
 from src.api.system import router as system_router
+from src.api.task_schedules import router as task_schedules_router
 from src.api.tenants import router as tenants_router
 from src.api.training_dialogues import router as training_dialogues_router
 from src.api.training_safety import router as training_safety_router
@@ -108,6 +109,7 @@ app.include_router(sandbox_router)
 app.include_router(scraper_router)
 app.include_router(stt_config_router)
 app.include_router(system_router)
+app.include_router(task_schedules_router)
 app.include_router(tenants_router)
 app.include_router(tts_config_router)
 app.include_router(training_dialogues_router)

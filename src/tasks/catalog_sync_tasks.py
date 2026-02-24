@@ -2,7 +2,7 @@
 
 Replaces the in-process sync that previously ran at call-processor startup.
 Two tasks:
-  - catalog_full_sync: daily full catalog upload (05:00 Kyiv time)
+  - catalog_full_sync: daily full catalog upload (configurable via Admin UI, default 08:00 Kyiv)
   - catalog_incremental_sync: incremental wares + stock + Nova Poshta (every 5 min)
 """
 
@@ -24,15 +24,16 @@ logger = logging.getLogger(__name__)
     time_limit=1800,
     soft_time_limit=1500,
 )  # type: ignore[untyped-decorator]
-def catalog_full_sync(self: Any) -> dict[str, Any]:
+def catalog_full_sync(self: Any, triggered_by: str = "manual") -> dict[str, Any]:
     """Full catalog sync from 1C (all wares + stock + Nova Poshta).
 
-    Scheduled daily at 05:00 Kyiv time via Celery Beat.
-    Uses a separate extended timeout for the large get_wares/?UploadingAll call.
+    Scheduled via Celery Beat (hourly poll); actual execution time
+    is controlled by configurable schedule in Redis.
+    When triggered_by="manual", runs immediately.
     """
     import asyncio
 
-    return asyncio.run(_catalog_full_sync_async(self))
+    return asyncio.run(_catalog_full_sync_async(self, triggered_by))
 
 
 _LOCK_KEY = "catalog_sync:lock"
@@ -40,7 +41,7 @@ _LOCK_TTL_FULL = 1800  # 30 min for full sync
 _LOCK_TTL_INCR = 300  # 5 min for incremental sync
 
 
-async def _catalog_full_sync_async(task: Any) -> dict[str, Any]:
+async def _catalog_full_sync_async(task: Any, triggered_by: str) -> dict[str, Any]:
     """Async implementation of full catalog sync."""
     from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import create_async_engine
@@ -49,6 +50,23 @@ async def _catalog_full_sync_async(task: Any) -> dict[str, Any]:
     from src.onec_client.sync import CatalogSyncService
 
     settings = get_settings()
+
+    # Schedule check for beat-triggered runs
+    if triggered_by == "beat":
+        try:
+            redis_check = Redis.from_url(settings.redis.url, decode_responses=True)
+            try:
+                from src.tasks.schedule_utils import load_schedules, should_run_now
+
+                schedules = await load_schedules(redis_check)
+                schedule = schedules.get("catalog-full-sync", {})
+                if not should_run_now(schedule):
+                    logger.debug("catalog-full-sync: not scheduled to run now, skipping")
+                    return {"status": "skipped", "reason": "not_scheduled"}
+            finally:
+                await redis_check.aclose()
+        except Exception:
+            logger.warning("Failed to check schedule, running anyway", exc_info=True)
 
     if not settings.onec.username:
         logger.info("1C not configured (ONEC_USERNAME empty), skipping full sync")
@@ -94,17 +112,6 @@ async def _catalog_full_sync_async(task: Any) -> dict[str, Any]:
 
         await sync_service.full_sync()
         logger.info("Full catalog sync completed successfully")
-
-        # Refresh STT phrase hints (auto-extract catalog terms)
-        if redis is not None:
-            try:
-                from src.stt.phrase_hints import refresh_phrase_hints
-
-                await refresh_phrase_hints(engine, redis)
-                logger.info("STT phrase hints refreshed after full catalog sync")
-            except Exception:
-                logger.warning("STT phrase hints refresh failed (non-critical)", exc_info=True)
-
         return {"status": "ok"}
 
     except Exception as exc:

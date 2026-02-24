@@ -69,7 +69,7 @@ class TestCatalogFullSync:
 
         with patch(_PATCH_SETTINGS) as mock_get_settings:
             mock_get_settings.return_value = _mock_settings(username="")
-            result = await _catalog_full_sync_async(mock_task)
+            result = await _catalog_full_sync_async(mock_task, "manual")
 
         assert result["status"] == "skipped"
         assert result["reason"] == "onec_not_configured"
@@ -94,7 +94,7 @@ class TestCatalogFullSync:
             mock_get_settings.return_value = _mock_settings(timeout=120, full_sync_timeout=600)
             mock_redis_cls.from_url.return_value = _mock_redis()
 
-            result = await _catalog_full_sync_async(mock_task)
+            result = await _catalog_full_sync_async(mock_task, "manual")
 
         assert result["status"] == "ok"
         # Verify OneCClient was created with full_sync_timeout (600), not regular timeout (120)
@@ -128,7 +128,7 @@ class TestCatalogFullSync:
             mock_get_settings.return_value = _mock_settings()
             mock_redis_cls.from_url.return_value = redis
 
-            await _catalog_full_sync_async(mock_task)
+            await _catalog_full_sync_async(mock_task, "manual")
 
         # Verify all resources were cleaned up
         onec.close.assert_awaited_once()
@@ -160,7 +160,7 @@ class TestCatalogFullSync:
             mock_redis_cls.from_url.return_value = redis
 
             with pytest.raises(Exception, match="retry"):
-                await _catalog_full_sync_async(mock_task)
+                await _catalog_full_sync_async(mock_task, "manual")
 
         # Resources must still be cleaned up
         onec.close.assert_awaited_once()

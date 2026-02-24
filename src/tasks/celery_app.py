@@ -29,6 +29,7 @@ app = Celery(
         "src.tasks.embedding_tasks",
         "src.tasks.scraper_tasks",
         "src.tasks.catalog_sync_tasks",
+        "src.tasks.stt_hints_tasks",
         "src.tasks.prompt_optimizer",
         "src.tasks.promo_summary_tasks",
     ],
@@ -55,6 +56,7 @@ app.conf.update(
         "src.tasks.embedding_tasks.*": {"queue": "embeddings"},
         "src.tasks.scraper_tasks.*": {"queue": "scraper"},
         "src.tasks.catalog_sync_tasks.*": {"queue": "catalog"},
+        "src.tasks.stt_hints_tasks.*": {"queue": "catalog"},
         "src.tasks.prompt_optimizer.*": {"queue": "quality"},
         "src.tasks.promo_summary_tasks.*": {"queue": "embeddings"},
     },
@@ -108,7 +110,13 @@ app.conf.beat_schedule = {
     },
     "catalog-full-sync": {
         "task": "src.tasks.catalog_sync_tasks.catalog_full_sync",
-        "schedule": crontab(hour=5, minute=0),  # Daily at 05:00 Kyiv time
+        "schedule": crontab(minute=0),  # Every hour at :00; actual time via Redis schedule
+        "kwargs": {"triggered_by": "beat"},
+    },
+    "refresh-stt-hints": {
+        "task": "src.tasks.stt_hints_tasks.refresh_stt_hints",
+        "schedule": crontab(hour=0, minute=10),  # Daily at 00:10; actual day/time via Redis schedule
+        "kwargs": {"triggered_by": "beat"},
     },
     "catalog-incremental-sync": {
         "task": "src.tasks.catalog_sync_tasks.catalog_incremental_sync",
