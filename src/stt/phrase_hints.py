@@ -221,7 +221,8 @@ def transliterate_to_cyrillic(text: str) -> str | None:
 async def extract_catalog_phrases(db_engine: Any) -> list[str]:
     """Extract DISTINCT manufacturer names from tire catalog.
 
-    For each name: add original + transliterated Cyrillic variant.
+    For each Latin name: add only the Cyrillic transliteration (STT outputs Cyrillic).
+    For Cyrillic names: add as-is.
     Model names excluded — too numerous (5000+) and mostly noise (codes like '005 RST').
     """
     from sqlalchemy import text
@@ -235,11 +236,15 @@ async def extract_catalog_phrases(db_engine: Any) -> list[str]:
             )
             for row in result:
                 name = row[0].strip()
-                if name:
+                if not name:
+                    continue
+                cyr = transliterate_to_cyrillic(name)
+                if cyr:
+                    # Latin name → add only Cyrillic transliteration
+                    phrases.add(cyr)
+                else:
+                    # Already Cyrillic → add as-is
                     phrases.add(name)
-                    cyr = transliterate_to_cyrillic(name)
-                    if cyr:
-                        phrases.add(cyr)
 
     except Exception:
         logger.exception("Failed to extract catalog phrases")

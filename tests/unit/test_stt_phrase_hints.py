@@ -134,15 +134,15 @@ class TestExtractCatalogPhrases:
 
         phrases = await extract_catalog_phrases(mock_engine)
 
-        # Should contain originals
-        assert "Michelin" in phrases
-        assert "Nokian" in phrases
+        # Latin originals should NOT be in output (STT outputs Cyrillic)
+        assert "Michelin" not in phrases
+        assert "Nokian" not in phrases
+
+        # Cyrillic originals should be kept as-is
         assert "Росава" in phrases
 
-        # Should contain transliterated variants
-        transliterated = [p for p in phrases if p.startswith("М") and "ішлен" in p.lower()]
-        # Michelin → Мішелін (auto-transliterated)
-        assert len(transliterated) >= 1 or "Мічелін" in phrases  # accept any variant
+        # Should contain transliterated Cyrillic variants
+        assert "Мічелін" in phrases  # Michelin → Мічелін
 
         # Only one SQL query (manufacturers only, no models)
         mock_conn.execute.assert_called_once()
@@ -152,8 +152,8 @@ class TestExtractCatalogPhrases:
         mock_engine = AsyncMock()
         mock_conn = AsyncMock()
 
-        # Duplicate manufacturer names
-        manufacturer_rows = [("Test",), ("Test",)]
+        # Duplicate manufacturer names (Cyrillic — kept as-is)
+        manufacturer_rows = [("Тест",), ("Тест",)]
 
         mock_result = MagicMock()
         mock_result.__iter__ = MagicMock(return_value=iter(manufacturer_rows))
@@ -165,8 +165,8 @@ class TestExtractCatalogPhrases:
         mock_engine.begin = MagicMock(return_value=mock_ctx)
 
         phrases = await extract_catalog_phrases(mock_engine)
-        # "Test" should appear only once
-        assert phrases.count("Test") == 1
+        # "Тест" should appear only once
+        assert phrases.count("Тест") == 1
 
     @pytest.mark.asyncio()
     async def test_handles_db_error(self) -> None:
