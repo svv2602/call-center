@@ -484,14 +484,13 @@ async def update_article(
 
 @router.delete("/articles/{article_id}")
 async def delete_article(article_id: UUID, _: dict[str, Any] = _perm_d) -> dict[str, Any]:
-    """Delete (deactivate) a knowledge article."""
+    """Permanently delete a knowledge article."""
     engine = await _get_engine()
 
     async with engine.begin() as conn:
         result = await conn.execute(
             text("""
-                UPDATE knowledge_articles
-                SET active = false, updated_at = now()
+                DELETE FROM knowledge_articles
                 WHERE id = :id
                 RETURNING id, title, category
             """),
@@ -503,7 +502,7 @@ async def delete_article(article_id: UUID, _: dict[str, Any] = _perm_d) -> dict[
 
     if row.category == "promotions":
         _invalidate_promos_cache()
-    return {"message": f"Article '{row.title}' deactivated"}
+    return {"message": f"Article '{row.title}' deleted"}
 
 
 @router.get("/categories")
