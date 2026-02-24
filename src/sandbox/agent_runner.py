@@ -130,7 +130,32 @@ def _register_live_tools(
         router.register("create_order_draft", store_client.create_order)
         router.register("update_order_delivery", store_client.update_delivery)
         router.register("confirm_order", store_client.confirm_order)
-        router.register("get_fitting_stations", store_client.get_fitting_stations)
+
+        async def _get_fitting_stations_live(city: str = "", **_kw: Any) -> dict[str, Any]:
+            result = await store_client.get_fitting_stations(city)
+            # Merge station hints from Redis
+            if redis_client is not None:
+                try:
+                    hints_raw = await redis_client.get("fitting:station_hints")
+                    if hints_raw:
+                        hints = json.loads(
+                            hints_raw if isinstance(hints_raw, str) else hints_raw.decode()
+                        )
+                        for s in result.get("stations", []):
+                            sid = s.get("id", "")
+                            if sid and sid in hints:
+                                h = hints[sid]
+                                if h.get("district"):
+                                    s["district"] = h["district"]
+                                if h.get("landmarks"):
+                                    s["landmarks"] = h["landmarks"]
+                                if h.get("description"):
+                                    s["description"] = h["description"]
+                except Exception:
+                    pass
+            return result
+
+        router.register("get_fitting_stations", _get_fitting_stations_live)
         router.register("get_fitting_slots", store_client.get_fitting_slots)
         router.register("book_fitting", store_client.book_fitting)
 

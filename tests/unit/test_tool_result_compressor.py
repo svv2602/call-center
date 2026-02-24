@@ -104,7 +104,8 @@ class TestCompressToolResult:
         result = compress_tool_result("get_fitting_stations", data)
         assert "СТО Центр" in result
         assert "+380441234567" not in result
-        assert "district" not in result
+        assert "Шевченківський" in result  # district is preserved for LLM
+        assert "services" not in result
 
     def test_pickup_points_strips_type(self) -> None:
         data = {

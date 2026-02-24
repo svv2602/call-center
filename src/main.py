@@ -38,6 +38,7 @@ from src.api.admin_users import router as admin_users_router
 from src.api.analytics import router as analytics_router
 from src.api.auth import router as auth_router
 from src.api.export import router as export_router
+from src.api.fitting_hints import router as fitting_hints_router
 from src.api.knowledge import router as knowledge_router
 from src.api.llm_config import router as llm_config_router
 from src.api.middleware.audit import AuditMiddleware
@@ -98,6 +99,7 @@ app.include_router(admin_users_router)
 app.include_router(analytics_router)
 app.include_router(auth_router)
 app.include_router(export_router)
+app.include_router(fitting_hints_router)
 app.include_router(knowledge_router)
 app.include_router(llm_config_router)
 app.include_router(notifications_router)
@@ -1294,20 +1296,42 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         if all_stations is not None:
             filtered = all_stations
             if city:
-                filtered = [
-                    s for s in filtered if city.lower() in s.get("city", "").lower()
-                ]
+                filtered = [s for s in filtered if city.lower() in s.get("city", "").lower()]
+
+            # Merge station hints from Redis
+            hints: dict[str, Any] = {}
+            if _redis:
+                try:
+                    hints_raw = await _redis.get("fitting:station_hints")
+                    if hints_raw:
+                        hints = json.loads(
+                            hints_raw if isinstance(hints_raw, str) else hints_raw.decode()
+                        )
+                except Exception:
+                    pass
+
+            stations_out = []
+            for s in filtered[:20]:
+                entry = {
+                    "id": s.get("station_id", s.get("id", "")),
+                    "name": s.get("name", ""),
+                    "city": s.get("city", ""),
+                    "address": s.get("address", ""),
+                }
+                sid = entry["id"]
+                if sid and sid in hints:
+                    h = hints[sid]
+                    if h.get("district"):
+                        entry["district"] = h["district"]
+                    if h.get("landmarks"):
+                        entry["landmarks"] = h["landmarks"]
+                    if h.get("description"):
+                        entry["description"] = h["description"]
+                stations_out.append(entry)
+
             return {
                 "total": len(filtered),
-                "stations": [
-                    {
-                        "id": s.get("station_id", s.get("id", "")),
-                        "name": s.get("name", ""),
-                        "city": s.get("city", ""),
-                        "address": s.get("address", ""),
-                    }
-                    for s in filtered[:20]
-                ],
+                "stations": stations_out,
             }
 
         # 4. Fallback to Store API
@@ -1385,9 +1409,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 data = await _onec_client.get_fitting_prices()
                 all_prices = data.get("data", [])
                 if _redis and all_prices is not None:
-                    await _redis.setex(
-                        cache_key, 3600, json.dumps(all_prices, ensure_ascii=False)
-                    )
+                    await _redis.setex(cache_key, 3600, json.dumps(all_prices, ensure_ascii=False))
             except Exception:
                 logger.warning(
                     "1C get_fitting_prices failed for call %s, falling back",

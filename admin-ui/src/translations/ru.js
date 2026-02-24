@@ -515,6 +515,25 @@ export default {
     'settings.taskDaySun': 'Воскресенье',
     'settings.taskLabel_catalog-full-sync': 'Полная синхронизация каталога 1С',
     'settings.taskLabel_refresh-stt-hints': 'Обновление STT подсказок из каталога',
+    // Station Hints
+    'settings.stationHintsTitle': 'Подсказки для станций шиномонтажа',
+    'settings.stationHintsDesc': 'Описания районов и ориентиров для станций шиномонтажа. AI-агент использует их, чтобы подобрать станцию по запросу клиента (например, «правый берег»).',
+    'settings.stationHintsLoad': 'Загрузить подсказки',
+    'settings.stationHintsLoadFailed': 'Ошибка загрузки подсказок: {error}',
+    'settings.stationHintsNoStations': 'Нет закешированных станций. Дождитесь звонка с запросом станций или проверьте соединение с 1С.',
+    'settings.stationHintsName': 'Название',
+    'settings.stationHintsAddress': 'Адрес',
+    'settings.stationHintsDistrict': 'Район',
+    'settings.stationHintsLandmarks': 'Ориентиры',
+    'settings.stationHintsDescription': 'Описание',
+    'settings.stationHintsActions': 'Действия',
+    'settings.stationHintsDistrictPh': 'Правый берег',
+    'settings.stationHintsLandmarksPh': 'рядом Пит Лайн',
+    'settings.stationHintsDescPh': 'Доп. информация',
+    'settings.stationHintsSaved': 'Подсказка сохранена',
+    'settings.stationHintsSaveFailed': 'Ошибка сохранения: {error}',
+    'settings.stationHintsDeleted': 'Подсказка удалена',
+    'settings.stationHintsDeleteFailed': 'Ошибка удаления: {error}',
     // STT Phrase Hints (standalone page)
     'nav.sttHints': 'Подсказки STT',
     'sttHints.base': 'Базовые',
@@ -1503,6 +1522,11 @@ export default {
     'help.configuration.ttsBreaks.title': 'Паузы на знаках препинания',
     'help.configuration.ttsBreaks.content': '<p>Настройка длительности SSML-пауз (<code>&lt;break&gt;</code>) после знаков препинания. Влияет на ритм и естественность речи:</p><ul><li><strong>Запятая</strong> — пауза между частями предложения (по умолчанию 100мс)</li><li><strong>Точка</strong> — пауза между предложениями (200мс)</li><li><strong>Вопрос/Восклицание</strong> — эмоциональная пауза (250мс)</li><li><strong>Двоеточие</strong> — пауза перед пояснением (200мс)</li><li><strong>Точка с запятой</strong> — пауза между связанными предложениями (150мс)</li><li><strong>Тире</strong> — пауза при контрасте/уточнении (150мс)</li></ul><p>Значение 0 мс отключает паузу для данного знака. Допустимый диапазон: 0–1000 мс.</p>',
 
+    'help.configuration.stationHints.title': 'Подсказки станций шиномонтажа',
+    'help.configuration.stationHints.content': '<p>Позволяют контент-менеджерам добавлять описания районов и ориентиров для каждой станции шиномонтажа:</p><ul><li><strong>Район</strong> — «Правий берег», «Лівий берег», «Центр»</li><li><strong>Ориентиры</strong> — «біля Піт Лайн», «за ТЦ Караван»</li><li><strong>Описание</strong> — дополнительная информация для агента</li></ul><p>AI-агент автоматически использует эти подсказки при подборе станции по запросу клиента.</p>',
+    'help.configuration.stationHints.steps': 'Пошаговая инструкция: Настройка подсказок',
+    'help.configuration.stationHints.stepsContent': '<ol><li>Раскройте секцию «Подсказки для станций шиномонтажа»</li><li>Нажмите «Загрузить подсказки» — отобразится список станций из кэша</li><li>Для нужной станции заполните поля: район, ориентиры, описание</li><li>Нажмите «Сохранить» рядом со станцией</li><li>Подсказки применяются к новым запросам get_fitting_stations немедленно</li></ol>',
+
     // STT Hints help (standalone page)
     'help.sttHints.title': 'Подсказки STT (Phrase Hints)',
     'help.sttHints.overview': 'Управление подсказками для улучшения распознавания речи Google Cloud STT. Три уровня фраз: базовые (бренды, термины), из каталога (автоизвлечение), пользовательские.',
@@ -1519,7 +1543,7 @@ export default {
     'help.sttHints.tips': '<ul><li>Кириллические варианты наиболее эффективны (STT uk-UA выводит кириллицу)</li><li>Общий лимит 5000 фраз — следите за процентом заполнения</li><li>Подсказки применяются к новым звонкам автоматически</li></ul>',
 
     'help.configuration.affects.title': 'На что влияют изменения',
-    'help.configuration.affects.content': '<div class="help-affects"><p><strong>Отключение провайдера</strong> — если он единственный для задачи и нет фоллбэков, задача перестанет работать.</p><p><strong>Смена модели</strong> — мгновенно влияет на все новые запросы. Более мощная модель = лучше качество, но дороже и медленнее.</p><p><strong>Маршрутизация задач</strong> — позволяет использовать дешёвые модели для некритичных задач (качество, скрапинг) и мощные — для диалогов с клиентами.</p><p><strong>Настройки TTS</strong> — новый голос/скорость/тональность применяются к новым звонкам; текущие звонки продолжают со старым голосом.</p></div>',
+    'help.configuration.affects.content': '<div class="help-affects"><p><strong>Отключение провайдера</strong> — если он единственный для задачи и нет фоллбэков, задача перестанет работать.</p><p><strong>Смена модели</strong> — мгновенно влияет на все новые запросы. Более мощная модель = лучше качество, но дороже и медленнее.</p><p><strong>Маршрутизация задач</strong> — позволяет использовать дешёвые модели для некритичных задач (качество, скрапинг) и мощные — для диалогов с клиентами.</p><p><strong>Настройки TTS</strong> — новый голос/скорость/тональность применяются к новым звонкам; текущие звонки продолжают со старым голосом.</p><p><strong>Подсказки станций</strong> — район/ориентиры применяются к следующему вызову get_fitting_stations немедленно.</p></div>',
 
     'help.configuration.tips': '<ul><li>Используйте <strong>фоллбэки</strong> для критичных задач (agent) — это защитит от сбоя одного провайдера</li><li>Для задач <strong>quality_scoring</strong> и <strong>article_processing</strong> можно использовать более дешёвые модели</li><li>После изменения провайдера нажмите <strong>«Тест»</strong>, чтобы убедиться в работоспособности</li><li><strong>Перезагрузка конфига</strong> не прерывает текущие звонки — изменения применяются к новым запросам</li></ul>',
 

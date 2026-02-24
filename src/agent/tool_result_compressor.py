@@ -65,7 +65,11 @@ def _compress_fitting_stations(result: dict[str, Any]) -> str:
     if "stations" not in result:
         return _compact(result)
     stations = [
-        {k: v for k, v in s.items() if k in ("id", "name", "address", "working_hours")}
+        {
+            k: v
+            for k, v in s.items()
+            if k in ("id", "name", "address", "working_hours", "district", "landmarks")
+        }
         for s in result["stations"]
     ]
     out = {k: v for k, v in result.items() if k != "stations"}

@@ -515,6 +515,25 @@ export default {
     'settings.taskDaySun': 'Sunday',
     'settings.taskLabel_catalog-full-sync': 'Full 1C Catalog Sync',
     'settings.taskLabel_refresh-stt-hints': 'STT Hints Refresh from Catalog',
+    // Station Hints
+    'settings.stationHintsTitle': 'Fitting Station Hints',
+    'settings.stationHintsDesc': 'District and landmark descriptions for fitting stations. The AI agent uses them to match customer requests (e.g., "right bank") to the right station.',
+    'settings.stationHintsLoad': 'Load Hints',
+    'settings.stationHintsLoadFailed': 'Failed to load hints: {error}',
+    'settings.stationHintsNoStations': 'No cached stations found. Wait for a call requesting stations or check the 1C connection.',
+    'settings.stationHintsName': 'Name',
+    'settings.stationHintsAddress': 'Address',
+    'settings.stationHintsDistrict': 'District',
+    'settings.stationHintsLandmarks': 'Landmarks',
+    'settings.stationHintsDescription': 'Description',
+    'settings.stationHintsActions': 'Actions',
+    'settings.stationHintsDistrictPh': 'Right bank',
+    'settings.stationHintsLandmarksPh': 'near Pit Line',
+    'settings.stationHintsDescPh': 'Additional info',
+    'settings.stationHintsSaved': 'Hint saved',
+    'settings.stationHintsSaveFailed': 'Save failed: {error}',
+    'settings.stationHintsDeleted': 'Hint deleted',
+    'settings.stationHintsDeleteFailed': 'Delete failed: {error}',
     // STT Phrase Hints (standalone page)
     'nav.sttHints': 'STT Hints',
     'sttHints.base': 'Base',
@@ -1503,6 +1522,11 @@ export default {
     'help.configuration.ttsBreaks.title': 'Punctuation Break Durations',
     'help.configuration.ttsBreaks.content': '<p>Configure SSML break (<code>&lt;break&gt;</code>) durations after punctuation marks. Affects speech rhythm and naturalness:</p><ul><li><strong>Comma</strong> — pause between clauses (default 100ms)</li><li><strong>Period</strong> — pause between sentences (200ms)</li><li><strong>Question/Exclamation</strong> — emotional pause (250ms)</li><li><strong>Colon</strong> — pause before explanation (200ms)</li><li><strong>Semicolon</strong> — pause between related clauses (150ms)</li><li><strong>Em Dash</strong> — contrast/clarification pause (150ms)</li></ul><p>A value of 0ms disables the break for that punctuation mark. Valid range: 0–1000ms.</p>',
 
+    'help.configuration.stationHints.title': 'Fitting Station Hints',
+    'help.configuration.stationHints.content': '<p>Allows content managers to add district and landmark descriptions for each fitting station:</p><ul><li><strong>District</strong> — "Right bank", "Left bank", "Center"</li><li><strong>Landmarks</strong> — "near Pit Line", "behind Karavan mall"</li><li><strong>Description</strong> — additional info for the agent</li></ul><p>The AI agent automatically uses these hints when matching customer requests to stations.</p>',
+    'help.configuration.stationHints.steps': 'Step-by-step: Setting up hints',
+    'help.configuration.stationHints.stepsContent': '<ol><li>Expand the "Fitting Station Hints" section</li><li>Click "Load Hints" — station list from cache is displayed</li><li>Fill in fields for the desired station: district, landmarks, description</li><li>Click "Save" next to the station</li><li>Hints apply to new get_fitting_stations requests immediately</li></ol>',
+
     // STT Hints help (standalone page)
     'help.sttHints.title': 'STT Phrase Hints',
     'help.sttHints.overview': 'Manage phrase hints to improve Google Cloud STT speech recognition. Three levels: base (brands, terms), from catalog (auto-extracted), custom.',
@@ -1519,7 +1543,7 @@ export default {
     'help.sttHints.tips': '<ul><li>Cyrillic variants are most effective (STT uk-UA outputs Cyrillic)</li><li>Total limit is 5000 phrases — watch the fill percentage</li><li>Hints are applied to new calls automatically</li></ul>',
 
     'help.configuration.affects.title': 'What changes affect',
-    'help.configuration.affects.content': '<div class="help-affects"><p><strong>Disabling a provider</strong> — if it\'s the only one for a task with no fallbacks, that task will stop working.</p><p><strong>Changing model</strong> — instantly affects all new requests. A more powerful model = better quality, but more expensive and slower.</p><p><strong>Task routing</strong> — lets you use cheaper models for non-critical tasks (quality, scraping) and powerful ones for customer dialogues.</p><p><strong>TTS settings</strong> — new voice/rate/pitch apply to new calls; current calls continue with the old voice.</p></div>',
+    'help.configuration.affects.content': '<div class="help-affects"><p><strong>Disabling a provider</strong> — if it\'s the only one for a task with no fallbacks, that task will stop working.</p><p><strong>Changing model</strong> — instantly affects all new requests. A more powerful model = better quality, but more expensive and slower.</p><p><strong>Task routing</strong> — lets you use cheaper models for non-critical tasks (quality, scraping) and powerful ones for customer dialogues.</p><p><strong>TTS settings</strong> — new voice/rate/pitch apply to new calls; current calls continue with the old voice.</p><p><strong>Station hints</strong> — district/landmarks apply to the next get_fitting_stations call immediately.</p></div>',
 
     'help.configuration.tips': '<ul><li>Use <strong>fallbacks</strong> for critical tasks (agent) — this protects against a single provider failure</li><li>For <strong>quality_scoring</strong> and <strong>article_processing</strong> tasks, cheaper models work fine</li><li>After changing a provider, click <strong>"Test"</strong> to verify it works</li><li><strong>Config reload</strong> doesn\'t interrupt current calls — changes apply to new requests</li></ul>',
 
