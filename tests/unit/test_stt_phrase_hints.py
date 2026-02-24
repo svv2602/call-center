@@ -112,6 +112,25 @@ class TestTransliterate:
         assert result is not None
         assert "-" in result
 
+    def test_trigraph_ice(self) -> None:
+        assert transliterate_to_cyrillic("Ice Zero") == "Айс Зеро"
+        assert transliterate_to_cyrillic("ICE BLAZER") == "Айс Блазер"
+        assert transliterate_to_cyrillic("IceMaster") == "Айсмастер"
+
+    def test_soft_c_before_e_and_i(self) -> None:
+        # ce → се, ci → сі (soft C rule)
+        assert transliterate_to_cyrillic("Cinturato") == "Сінтурато"
+
+    def test_standalone_i_before_hyphen(self) -> None:
+        result = transliterate_to_cyrillic("I-Power Winter")
+        assert result is not None
+        assert result.startswith("Ай-")
+
+    def test_trigraph_igh(self) -> None:
+        result = transliterate_to_cyrillic("High Performance")
+        assert result is not None
+        assert result.startswith("Хай")
+
 
 class TestExtractCatalogPhrases:
     """Tests for extract_catalog_phrases()."""

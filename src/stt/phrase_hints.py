@@ -120,6 +120,12 @@ def get_base_phrases() -> list[str]:
 #  2. Transliteration Latin → Cyrillic
 # ═══════════════════════════════════════════════════════════
 
+# Trigraphs (3 chars) are checked before digraphs (2 chars).
+_TRIGRAPHS: dict[str, str] = {
+    "ice": "айс",  # Ice, IceZero, IceMaster → "Айс..."
+    "igh": "ай",  # High → "Хай"
+}
+
 _DIGRAPHS: dict[str, str] = {
     "sh": "ш",
     "ch": "ч",
@@ -128,6 +134,8 @@ _DIGRAPHS: dict[str, str] = {
     "ck": "к",
     "ee": "і",
     "oo": "у",
+    "ce": "се",  # soft C: Ice→handled by trigraph, Pace→Пасе, Race→Расе
+    "ci": "сі",  # soft C: Cinturato→Сінтурато, CityRover→Сітіровер
 }
 
 _LATIN_TO_CYRILLIC: dict[str, str] = {
@@ -168,7 +176,11 @@ _WORD_4PLUS_LETTERS = re.compile(r"[a-zA-Zа-яА-ЯіїєґІЇЄҐ]{4,}")
 
 
 def _transliterate_word(word: str) -> str:
-    """Transliterate a single Latin word to Cyrillic."""
+    """Transliterate a single Latin word to Cyrillic.
+
+    Handles trigraphs (ice→айс), digraphs (sh→ш, ce→се), soft C rule,
+    and standalone I before hyphen (I-Power → Ай-Повер).
+    """
     if not _HAS_LATIN.search(word):
         return word
 
@@ -176,19 +188,39 @@ def _transliterate_word(word: str) -> str:
     lower = word.lower()
     i = 0
     while i < len(lower):
-        # Try digraphs first
+        # 1. Try trigraphs (3 chars)
+        if i + 2 < len(lower):
+            tri = lower[i : i + 3]
+            if tri in _TRIGRAPHS:
+                cyr = _TRIGRAPHS[tri]
+                if i == 0 and word[0].isupper():
+                    cyr = cyr[0].upper() + cyr[1:]
+                result.append(cyr)
+                i += 3
+                continue
+
+        # 2. Try digraphs (2 chars)
         if i + 1 < len(lower):
             pair = lower[i : i + 2]
             if pair in _DIGRAPHS:
                 cyr = _DIGRAPHS[pair]
-                # Capitalize if first char of original is upper
                 if i == 0 and word[0].isupper():
                     cyr = cyr[0].upper() + cyr[1:]
                 result.append(cyr)
                 i += 2
                 continue
 
+        # 3. Standalone I before hyphen or at end → "ай" (I-Power, iON)
         ch = lower[i]
+        if ch == "i" and i == 0 and (i + 1 >= len(lower) or lower[i + 1] == "-"):
+            cyr = "ай"
+            if word[0].isupper():
+                cyr = "Ай"
+            result.append(cyr)
+            i += 1
+            continue
+
+        # 4. Single character
         if ch in _LATIN_TO_CYRILLIC:
             cyr = _LATIN_TO_CYRILLIC[ch]
             if i == 0 and word[0].isupper():
