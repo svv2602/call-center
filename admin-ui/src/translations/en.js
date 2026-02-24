@@ -594,6 +594,7 @@ export default {
     'users.permGroup.onec_data': '1C Data',
     'users.permGroup.vehicles': 'Vehicles',
     'users.permGroup.pronunciation': 'Pronunciation',
+    'users.permGroup.stt_hints': 'STT Hints',
     // Permission group hints (pages controlled)
     'users.permGroupHint.sandbox': 'Sandbox',
     'users.permGroupHint.knowledge': 'Knowledge Base',
@@ -612,6 +613,7 @@ export default {
     'users.permGroupHint.onec_data': '1C Data Viewer',
     'users.permGroupHint.vehicles': 'Vehicle Database',
     'users.permGroupHint.pronunciation': 'Pronunciation Dictionary',
+    'users.permGroupHint.stt_hints': 'Speech Recognition Hints',
 
     // Training (unified agent training page)
     'training.breadcrumb': 'Agent Training',

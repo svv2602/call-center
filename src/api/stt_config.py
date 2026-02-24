@@ -23,8 +23,8 @@ router = APIRouter(prefix="/admin/stt", tags=["stt-config"])
 _redis: Redis | None = None
 _engine: Any = None
 
-_perm_r = Depends(require_permission("configuration:read"))
-_perm_w = Depends(require_permission("configuration:write"))
+_perm_r = Depends(require_permission("stt_hints:read"))
+_perm_w = Depends(require_permission("stt_hints:write"))
 
 
 async def _get_redis() -> Redis:

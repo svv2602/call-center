@@ -52,6 +52,8 @@ SYSTEM_PERMISSIONS = [
     "vehicles:write",
     "pronunciation:read",
     "pronunciation:write",
+    "stt_hints:read",
+    "stt_hints:write",
 ]
 
 ALL_PERMISSIONS: list[str] = sorted({*CONTENT_PERMISSIONS, *SYSTEM_PERMISSIONS})
@@ -95,4 +97,5 @@ PERMISSION_GROUPS: dict[str, list[str]] = {
     "onec_data": ["onec_data:read"],
     "vehicles": ["vehicles:read", "vehicles:write"],
     "pronunciation": ["pronunciation:read", "pronunciation:write"],
+    "stt_hints": ["stt_hints:read", "stt_hints:write"],
 }

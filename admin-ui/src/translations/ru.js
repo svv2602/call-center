@@ -594,6 +594,7 @@ export default {
     'users.permGroup.onec_data': 'Данные 1С',
     'users.permGroup.vehicles': 'Автомобили',
     'users.permGroup.pronunciation': 'Произношение',
+    'users.permGroup.stt_hints': 'Подсказки STT',
     // Permission group hints (pages controlled)
     'users.permGroupHint.sandbox': 'Песочница',
     'users.permGroupHint.knowledge': 'База знаний',
@@ -612,6 +613,7 @@ export default {
     'users.permGroupHint.onec_data': 'Просмотр данных 1С',
     'users.permGroupHint.vehicles': 'База автомобилей',
     'users.permGroupHint.pronunciation': 'Словарь произношений',
+    'users.permGroupHint.stt_hints': 'Подсказки распознавания речи',
 
     // Training (unified agent training page)
     'training.breadcrumb': 'Обучение агента',

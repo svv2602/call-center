@@ -385,3 +385,8 @@ class TestAllPermissionsConsistency:
         ]
         assert PERMISSION_GROUPS["monitoring"] == ["monitoring:read"]
         assert PERMISSION_GROUPS["onec_data"] == ["onec_data:read"]
+        assert "stt_hints" in PERMISSION_GROUPS
+        assert PERMISSION_GROUPS["stt_hints"] == [
+            "stt_hints:read",
+            "stt_hints:write",
+        ]
