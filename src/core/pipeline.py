@@ -206,17 +206,20 @@ class CallPipeline:
     async def run(self) -> None:
         """Run the full call pipeline until hangup or transfer."""
         try:
-            # Play greeting first (STT not needed yet)
-            await self._play_greeting()
-
-            # Start STT stream after greeting, right before listening
+            # Start STT and audio reader BEFORE greeting so that incoming
+            # caller audio is fed to STT in real-time.  Without this, audio
+            # accumulates in the TCP buffer during the ~8 s greeting and is
+            # then flushed in a burst — which breaks latest_short model.
             await self._stt.start_stream(self._stt_config)
+            audio_task = asyncio.create_task(self._audio_reader_loop())
+
+            # Play greeting while STT is already consuming audio
+            await self._play_greeting()
 
             # Main loop
             self._session.transition_to(CallState.LISTENING)
 
-            # Run audio reader, transcript reader (fan-out), and processor concurrently
-            audio_task = asyncio.create_task(self._audio_reader_loop())
+            # Start transcript reader and processor (audio reader already running)
             transcript_reader_task = asyncio.create_task(self._transcript_reader_loop())
             transcript_task = asyncio.create_task(self._transcript_processor_loop())
 
