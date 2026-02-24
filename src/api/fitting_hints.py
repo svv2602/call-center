@@ -102,6 +102,42 @@ async def list_fitting_stations(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
     return {"stations": []}
 
 
+@router.post("/stations/refresh")
+async def refresh_fitting_stations(_: dict[str, Any] = _perm_w) -> dict[str, Any]:
+    """Fetch fitting stations from 1C SOAP and cache in Redis.
+
+    Creates a short-lived SOAP client, calls GetStation, stores in Redis.
+    """
+    from src.onec_client.soap import OneCSOAPClient
+
+    settings = get_settings()
+    if not settings.onec.username:
+        raise HTTPException(status_code=503, detail="1C credentials not configured")
+
+    client = OneCSOAPClient(
+        base_url=settings.onec.url,
+        username=settings.onec.username,
+        password=settings.onec.password,
+        wsdl_path=settings.onec.soap_wsdl_path,
+        timeout=settings.onec.soap_timeout,
+    )
+    try:
+        await client.open()
+        stations = await client.get_stations()
+    except Exception as exc:
+        logger.warning("Failed to fetch stations from 1C SOAP: %s", exc)
+        raise HTTPException(status_code=502, detail=f"1C SOAP error: {exc}") from exc
+    finally:
+        await client.close()
+
+    redis = await _get_redis()
+    await redis.setex(
+        "onec:fitting_stations", 3600, json.dumps(stations, ensure_ascii=False)
+    )
+    logger.info("Fitting stations refreshed from 1C: %d stations", len(stations))
+    return {"stations": stations, "total": len(stations)}
+
+
 # ── Pickup Point Hints ────────────────────────────────────────
 
 
@@ -161,3 +197,68 @@ async def list_pickup_points(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
         if raw:
             all_points.extend(json.loads(raw))
     return {"points": all_points}
+
+
+_NETWORKS = ("ProKoleso", "Tshina")
+
+
+@router.post("/pickup-points/refresh")
+async def refresh_pickup_points(_: dict[str, Any] = _perm_w) -> dict[str, Any]:
+    """Fetch pickup points from 1C REST for all networks and cache in Redis."""
+    from src.onec_client.client import OneCClient
+
+    settings = get_settings()
+    if not settings.onec.username:
+        raise HTTPException(status_code=503, detail="1C credentials not configured")
+
+    client = OneCClient(
+        base_url=settings.onec.url,
+        username=settings.onec.username,
+        password=settings.onec.password,
+        timeout=settings.onec.timeout,
+    )
+    redis = await _get_redis()
+    total = 0
+
+    try:
+        await client.open()
+        for network in _NETWORKS:
+            try:
+                data = await client.get_pickup_points(network)
+                raw_points = data.get("data", [])
+                points = [
+                    {
+                        "id": p.get("id", ""),
+                        "address": p.get("point", ""),
+                        "type": p.get("point_type", ""),
+                        "city": p.get("City", ""),
+                    }
+                    for p in raw_points
+                ]
+                await redis.setex(
+                    f"onec:points:{network}",
+                    3600,
+                    json.dumps(points, ensure_ascii=False),
+                )
+                total += len(points)
+                logger.info(
+                    "Pickup points refreshed for %s: %d points", network, len(points)
+                )
+            except Exception:
+                logger.warning(
+                    "Failed to fetch pickup points for %s", network, exc_info=True
+                )
+    except Exception as exc:
+        logger.warning("Failed to connect to 1C REST: %s", exc)
+        raise HTTPException(status_code=502, detail=f"1C REST error: {exc}") from exc
+    finally:
+        await client.close()
+
+    # Re-read combined points from cache
+    all_points: list[dict[str, Any]] = []
+    for network in _NETWORKS:
+        raw = await redis.get(f"onec:points:{network}")
+        if raw:
+            all_points.extend(json.loads(raw))
+
+    return {"points": all_points, "total": total}

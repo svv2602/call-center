@@ -53,11 +53,17 @@ function renderStationHints() {
     if (!container) return;
 
     if (_stationsList.length === 0) {
-        container.innerHTML = `<div class="${tw.emptyState}">${t('pointHints.noStations')}</div>`;
+        container.innerHTML = `<div class="${tw.emptyState}">
+            <p>${t('pointHints.noStations')}</p>
+            <button class="${tw.btnPrimary} ${tw.btnSm} mt-3" onclick="window._pages.pointHints.refreshStations()">${t('pointHints.refreshFromOnec')}</button>
+        </div>`;
         return;
     }
 
-    let html = `<div class="overflow-x-auto"><table class="${tw.table}">
+    let html = `<div class="flex items-center justify-end mb-3">
+        <button class="${tw.btnSm} border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800" onclick="window._pages.pointHints.refreshStations()">${t('pointHints.refreshFromOnec')}</button>
+    </div>`;
+    html += `<div class="overflow-x-auto"><table class="${tw.table}">
         <thead><tr>
             <th class="${tw.th}">${t('pointHints.name')}</th>
             <th class="${tw.th}">${t('pointHints.address')}</th>
@@ -155,11 +161,17 @@ function renderPickupHints() {
     if (!container) return;
 
     if (_pickupPointsList.length === 0) {
-        container.innerHTML = `<div class="${tw.emptyState}">${t('pointHints.noPoints')}</div>`;
+        container.innerHTML = `<div class="${tw.emptyState}">
+            <p>${t('pointHints.noPoints')}</p>
+            <button class="${tw.btnPrimary} ${tw.btnSm} mt-3" onclick="window._pages.pointHints.refreshPickupPoints()">${t('pointHints.refreshFromOnec')}</button>
+        </div>`;
         return;
     }
 
-    let html = `<div class="overflow-x-auto"><table class="${tw.table}">
+    let html = `<div class="flex items-center justify-end mb-3">
+        <button class="${tw.btnSm} border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800" onclick="window._pages.pointHints.refreshPickupPoints()">${t('pointHints.refreshFromOnec')}</button>
+    </div>`;
+    html += `<div class="overflow-x-auto"><table class="${tw.table}">
         <thead><tr>
             <th class="${tw.th}">${t('pointHints.address')}</th>
             <th class="${tw.th}">${t('pointHints.city')}</th>
@@ -233,6 +245,43 @@ async function deletePickupHint(pointId) {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  Refresh from 1C
+// ═══════════════════════════════════════════════════════════
+async function refreshStations() {
+    showToast(t('pointHints.refreshing'), 'info');
+    try {
+        const data = await api('/admin/fitting/stations/refresh', { method: 'POST' });
+        _stationsList = data.stations || [];
+        showToast(t('pointHints.refreshed', { count: data.total || 0 }), 'success');
+        // Reload hints too
+        try {
+            const hintsData = await api('/admin/fitting/station-hints');
+            _stationHints = hintsData.hints || {};
+        } catch { /* hints load optional */ }
+        renderStationHints();
+    } catch (e) {
+        showToast(t('pointHints.refreshFailed', { error: e.message }), 'error');
+    }
+}
+
+async function refreshPickupPoints() {
+    showToast(t('pointHints.refreshing'), 'info');
+    try {
+        const data = await api('/admin/fitting/pickup-points/refresh', { method: 'POST' });
+        _pickupPointsList = data.points || [];
+        showToast(t('pointHints.refreshed', { count: data.total || 0 }), 'success');
+        // Reload hints too
+        try {
+            const hintsData = await api('/admin/fitting/pickup-hints');
+            _pickupHints = hintsData.hints || {};
+        } catch { /* hints load optional */ }
+        renderPickupHints();
+    } catch (e) {
+        showToast(t('pointHints.refreshFailed', { error: e.message }), 'error');
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  Init
 // ═══════════════════════════════════════════════════════════
 export function init() {
@@ -247,6 +296,6 @@ export function init() {
 window._pages = window._pages || {};
 window._pages.pointHints = {
     switchTab,
-    loadStationHints, saveStationHint, deleteStationHint,
-    loadPickupHints, savePickupHint, deletePickupHint,
+    loadStationHints, saveStationHint, deleteStationHint, refreshStations,
+    loadPickupHints, savePickupHint, deletePickupHint, refreshPickupPoints,
 };

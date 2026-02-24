@@ -34,11 +34,15 @@ def mock_redis() -> AsyncMock:
     async def _set(key: str, value: str) -> None:
         store[key] = value
 
+    async def _setex(key: str, _ttl: int, value: str) -> None:
+        store[key] = value
+
     async def _delete(key: str) -> None:
         store.pop(key, None)
 
     r.get = AsyncMock(side_effect=_get)
     r.set = AsyncMock(side_effect=_set)
+    r.setex = AsyncMock(side_effect=_setex)
     r.delete = AsyncMock(side_effect=_delete)
     r._store = store
     return r
@@ -533,3 +537,184 @@ class TestCompressorKeepsHintFields:
         assert data["points"][0]["landmarks"] == "біля метро"
         assert "type" not in data["points"][0]
         assert "district" not in data["points"][1]
+
+
+class TestRefreshFittingStations:
+    """Test POST /admin/fitting/stations/refresh."""
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    def test_refresh_stations_success(
+        self,
+        mock_get_redis: MagicMock,
+        mock_hints_settings: MagicMock,
+        mock_auth_settings: MagicMock,
+        client: TestClient,
+        mock_redis: AsyncMock,
+    ) -> None:
+        mock_auth_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_hints_settings.return_value.onec.username = "user"
+        mock_hints_settings.return_value.onec.url = "http://1c"
+        mock_hints_settings.return_value.onec.password = "pass"
+        mock_hints_settings.return_value.onec.soap_wsdl_path = "/wsdl"
+        mock_hints_settings.return_value.onec.soap_timeout = 30
+        mock_get_redis.return_value = mock_redis
+
+        stations = [
+            {"station_id": "st-1", "name": "Station 1", "city": "Дніпро", "address": "вул. 1"},
+            {"station_id": "st-2", "name": "Station 2", "city": "Київ", "address": "вул. 2"},
+        ]
+        mock_client = AsyncMock()
+        mock_client.get_stations.return_value = stations
+
+        with patch("src.onec_client.soap.OneCSOAPClient", return_value=mock_client):
+            resp = client.post("/admin/fitting/stations/refresh", headers=_auth())
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+        assert len(data["stations"]) == 2
+        assert data["stations"][0]["name"] == "Station 1"
+        # Verify cached in Redis
+        assert "onec:fitting_stations" in mock_redis._store
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    def test_refresh_stations_no_credentials(
+        self,
+        mock_get_redis: MagicMock,
+        mock_hints_settings: MagicMock,
+        mock_auth_settings: MagicMock,
+        client: TestClient,
+        mock_redis: AsyncMock,
+    ) -> None:
+        mock_auth_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_hints_settings.return_value.onec.username = ""
+        mock_get_redis.return_value = mock_redis
+
+        resp = client.post("/admin/fitting/stations/refresh", headers=_auth())
+        assert resp.status_code == 503
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    def test_refresh_stations_soap_error(
+        self,
+        mock_get_redis: MagicMock,
+        mock_hints_settings: MagicMock,
+        mock_auth_settings: MagicMock,
+        client: TestClient,
+        mock_redis: AsyncMock,
+    ) -> None:
+        mock_auth_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_hints_settings.return_value.onec.username = "user"
+        mock_hints_settings.return_value.onec.url = "http://1c"
+        mock_hints_settings.return_value.onec.password = "pass"
+        mock_hints_settings.return_value.onec.soap_wsdl_path = "/wsdl"
+        mock_hints_settings.return_value.onec.soap_timeout = 30
+        mock_get_redis.return_value = mock_redis
+
+        mock_client = AsyncMock()
+        mock_client.get_stations.side_effect = ConnectionError("SOAP timeout")
+
+        with patch("src.onec_client.soap.OneCSOAPClient", return_value=mock_client):
+            resp = client.post("/admin/fitting/stations/refresh", headers=_auth())
+
+        assert resp.status_code == 502
+        assert "SOAP" in resp.json()["detail"]
+
+
+class TestRefreshPickupPoints:
+    """Test POST /admin/fitting/pickup-points/refresh."""
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    def test_refresh_pickup_points_success(
+        self,
+        mock_get_redis: MagicMock,
+        mock_hints_settings: MagicMock,
+        mock_auth_settings: MagicMock,
+        client: TestClient,
+        mock_redis: AsyncMock,
+    ) -> None:
+        mock_auth_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_hints_settings.return_value.onec.username = "user"
+        mock_hints_settings.return_value.onec.url = "http://1c"
+        mock_hints_settings.return_value.onec.password = "pass"
+        mock_hints_settings.return_value.onec.timeout = 30
+        mock_get_redis.return_value = mock_redis
+
+        pk_data = {"data": [
+            {"id": "pk-1", "point": "вул. А 1", "point_type": "pickup", "City": "Дніпро"},
+        ]}
+        ts_data = {"data": [
+            {"id": "ts-1", "point": "вул. Б 2", "point_type": "pickup", "City": "Київ"},
+            {"id": "ts-2", "point": "вул. В 3", "point_type": "pickup", "City": "Київ"},
+        ]}
+        mock_client = AsyncMock()
+        mock_client.get_pickup_points.side_effect = [pk_data, ts_data]
+
+        with patch("src.onec_client.client.OneCClient", return_value=mock_client):
+            resp = client.post("/admin/fitting/pickup-points/refresh", headers=_auth())
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 3
+        assert len(data["points"]) == 3
+        # Verify cached in Redis
+        assert "onec:points:ProKoleso" in mock_redis._store
+        assert "onec:points:Tshina" in mock_redis._store
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    def test_refresh_pickup_points_no_credentials(
+        self,
+        mock_get_redis: MagicMock,
+        mock_hints_settings: MagicMock,
+        mock_auth_settings: MagicMock,
+        client: TestClient,
+        mock_redis: AsyncMock,
+    ) -> None:
+        mock_auth_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_hints_settings.return_value.onec.username = ""
+        mock_get_redis.return_value = mock_redis
+
+        resp = client.post("/admin/fitting/pickup-points/refresh", headers=_auth())
+        assert resp.status_code == 503
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    def test_refresh_pickup_points_partial_failure(
+        self,
+        mock_get_redis: MagicMock,
+        mock_hints_settings: MagicMock,
+        mock_auth_settings: MagicMock,
+        client: TestClient,
+        mock_redis: AsyncMock,
+    ) -> None:
+        """One network fails but the other succeeds — still returns partial data."""
+        mock_auth_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_hints_settings.return_value.onec.username = "user"
+        mock_hints_settings.return_value.onec.url = "http://1c"
+        mock_hints_settings.return_value.onec.password = "pass"
+        mock_hints_settings.return_value.onec.timeout = 30
+        mock_get_redis.return_value = mock_redis
+
+        pk_data = {"data": [
+            {"id": "pk-1", "point": "вул. А 1", "point_type": "pickup", "City": "Дніпро"},
+        ]}
+        mock_client = AsyncMock()
+        mock_client.get_pickup_points.side_effect = [pk_data, ConnectionError("Tshina down")]
+
+        with patch("src.onec_client.client.OneCClient", return_value=mock_client):
+            resp = client.post("/admin/fitting/pickup-points/refresh", headers=_auth())
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1  # only ProKoleso succeeded
+        assert len(data["points"]) == 1
