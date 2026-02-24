@@ -21,8 +21,11 @@ logger = logging.getLogger(__name__)
 # Google STT streaming session limit (~5 min)
 _SESSION_RESTART_SECONDS = 290  # restart slightly before 5 min limit
 
-# Google STT v2 inline PhraseSet limit (latest_short model)
+# Google STT v2 inline PhraseSet limit
 _MAX_PHRASE_HINTS = 1200
+
+# Model that supports phrase adaptation (latest_long does NOT)
+_ADAPTATION_MODEL = "latest_short"
 
 
 def _build_adaptation(
@@ -139,11 +142,19 @@ class GoogleSTTEngine:
     def _build_recognition_config(
         self, *, with_adaptation: bool = True
     ) -> cloud_speech.RecognitionConfig:
-        """Build RecognitionConfig, optionally including phrase adaptation."""
+        """Build RecognitionConfig, optionally including phrase adaptation.
+
+        When adaptation is requested and phrase hints are present, switches to
+        ``_ADAPTATION_MODEL`` (latest_short) since latest_long does not support
+        speech adaptation. Falls back to the configured model without adaptation.
+        """
         assert self._config is not None
         adaptation = None
-        if with_adaptation:
+        model = self._config.model
+        if with_adaptation and self._config.phrase_hints:
             adaptation = _build_adaptation(self._config.phrase_hints)
+            if adaptation is not None:
+                model = _ADAPTATION_MODEL
         return cloud_speech.RecognitionConfig(
             explicit_decoding_config=cloud_speech.ExplicitDecodingConfig(
                 encoding=cloud_speech.ExplicitDecodingConfig.AudioEncoding.LINEAR16,
@@ -151,7 +162,7 @@ class GoogleSTTEngine:
                 audio_channel_count=1,
             ),
             language_codes=[self._config.language_code, *self._config.alternative_languages],
-            model=self._config.model,
+            model=model,
             adaptation=adaptation,
         )
 
@@ -176,6 +187,19 @@ class GoogleSTTEngine:
                 ),
             )
 
+            model = recognition_config.model
+            hints_count = (
+                len(self._config.phrase_hints[:_MAX_PHRASE_HINTS])
+                if use_adaptation and self._config.phrase_hints
+                else 0
+            )
+            logger.info(
+                "STT attempt %d: model=%s, hints=%d",
+                attempt + 1,
+                model,
+                hints_count,
+            )
+
             try:
                 await self._run_streaming(recognizer, streaming_config)
                 return  # normal exit
@@ -184,7 +208,10 @@ class GoogleSTTEngine:
             except Exception:
                 if attempt == 0 and self._config.phrase_hints:
                     logger.warning(
-                        "STT recognition failed with adaptation, retrying without phrase hints"
+                        "STT recognition failed with adaptation (%s), "
+                        "retrying with %s without phrase hints",
+                        model,
+                        self._config.model,
                     )
                     continue
                 logger.exception("STT recognition error")
