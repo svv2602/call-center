@@ -1235,7 +1235,59 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         return await client.get_pickup_points(city)
 
     router.register("get_pickup_points", _get_pickup_points)
-    router.register("get_fitting_stations", client.get_fitting_stations)
+
+    async def _get_fitting_stations(city: str = "", **_kwargs: Any) -> dict[str, Any]:
+        cache_key = "onec:fitting_stations"
+
+        # 1. Redis cache
+        all_stations: list[dict[str, Any]] | None = None
+        if _redis:
+            try:
+                raw = await _redis.get(cache_key)
+                if raw:
+                    all_stations = json.loads(raw if isinstance(raw, str) else raw.decode())
+            except Exception:
+                pass
+
+        # 2. 1C SOAP API
+        if all_stations is None and _soap_client is not None:
+            try:
+                all_stations = await _soap_client.get_stations()
+                if _redis and all_stations is not None:
+                    await _redis.setex(
+                        cache_key, 3600, json.dumps(all_stations, ensure_ascii=False)
+                    )
+            except Exception:
+                logger.warning(
+                    "SOAP get_stations failed for call %s, falling back",
+                    session.channel_uuid,
+                    exc_info=True,
+                )
+
+        # 3. Return from cache/1C with city filter
+        if all_stations is not None:
+            filtered = all_stations
+            if city:
+                filtered = [
+                    s for s in filtered if city.lower() in s.get("city", "").lower()
+                ]
+            return {
+                "total": len(filtered),
+                "stations": [
+                    {
+                        "id": s.get("station_id", s.get("id", "")),
+                        "name": s.get("name", ""),
+                        "city": s.get("city", ""),
+                        "address": s.get("address", ""),
+                    }
+                    for s in filtered[:20]
+                ],
+            }
+
+        # 4. Fallback to Store API
+        return await client.get_fitting_stations(city)
+
+    router.register("get_fitting_stations", _get_fitting_stations)
 
     async def _get_fitting_slots(**kwargs: Any) -> Any:
         """Get fitting slots: try SOAP, fallback to Store API."""
@@ -1281,7 +1333,63 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         return await client.cancel_fitting(**kwargs)
 
     router.register("cancel_fitting", _cancel_fitting)
-    router.register("get_fitting_price", client.get_fitting_price)
+
+    async def _get_fitting_price(
+        tire_diameter: int = 0,
+        station_id: str = "",
+        service_type: str = "",
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        cache_key = "onec:fitting_prices"
+
+        # 1. Redis cache
+        all_prices: list[dict[str, Any]] | None = None
+        if _redis:
+            try:
+                raw = await _redis.get(cache_key)
+                if raw:
+                    all_prices = json.loads(raw if isinstance(raw, str) else raw.decode())
+            except Exception:
+                pass
+
+        # 2. 1C REST API
+        if all_prices is None and _onec_client is not None:
+            try:
+                data = await _onec_client.get_fitting_prices()
+                all_prices = data.get("data", [])
+                if _redis and all_prices is not None:
+                    await _redis.setex(
+                        cache_key, 3600, json.dumps(all_prices, ensure_ascii=False)
+                    )
+            except Exception:
+                logger.warning(
+                    "1C get_fitting_prices failed for call %s, falling back",
+                    session.channel_uuid,
+                    exc_info=True,
+                )
+
+        # 3. Return from cache/1C with filters
+        if all_prices is not None:
+            filtered = all_prices
+            if station_id:
+                filtered = [p for p in filtered if p.get("point_id") == station_id]
+            if tire_diameter:
+                diameter_str = f"R{tire_diameter}"
+                filtered = [
+                    p
+                    for p in filtered
+                    if diameter_str in p.get("artikul", "") or diameter_str in p.get("service", "")
+                ]
+            return {"prices": filtered}
+
+        # 4. Fallback to Store API
+        return await client.get_fitting_price(
+            tire_diameter=tire_diameter,
+            station_id=station_id,
+            service_type=service_type,
+        )
+
+    router.register("get_fitting_price", _get_fitting_price)
 
     async def _get_customer_bookings(**kwargs: Any) -> dict[str, Any]:
         """Get customer bookings from SOAP service."""

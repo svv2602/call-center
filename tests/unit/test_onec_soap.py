@@ -13,6 +13,7 @@ from src.onec_client.soap import (
     _ENVELOPE_TEMPLATE,
     _SOAP_NS,
     _build_comment,
+    _inner_text,
     _text,
 )
 
@@ -472,3 +473,130 @@ class TestEncoding:
         # Should not raise — falls back to windows-1251
         root = await soap_client._do_request("<ns:Test/>")
         assert root is not None
+
+
+# --- GetStation (stations list) ---
+
+
+class TestParseStations:
+    def test_parse_stations_cdata(self) -> None:
+        """Parse GetStation response with CDATA inner XML."""
+        cdata_xml = (
+            "<data>"
+            "<line>"
+            "<StationID>ST-001</StationID>"
+            "<StationName>Центральний ШМ</StationName>"
+            "<StationCity>Київ</StationCity>"
+            "<StationCityID>city-001</StationCityID>"
+            "<StationAdress>вул. Хрещатик, 1</StationAdress>"
+            "</line>"
+            "<line>"
+            "<StationID>ST-002</StationID>"
+            "<StationName>Лівобережна ШМ</StationName>"
+            "<StationCity>Київ</StationCity>"
+            "<StationCityID>city-001</StationCityID>"
+            "<StationAdress>вул. Бориспільська, 10</StationAdress>"
+            "</line>"
+            "</data>"
+        )
+        # 1C wraps CDATA inside <m:return> (namespace-qualified)
+        body = (
+            f'<m:GetStationResponse xmlns:m="{_SOAP_NS}">'
+            f"<m:return><![CDATA[{cdata_xml}]]></m:return>"
+            f"</m:GetStationResponse>"
+        )
+        root = _make_soap_response(body)
+        stations = OneCSOAPClient._parse_stations(root)
+        assert len(stations) == 2
+        assert stations[0]["station_id"] == "ST-001"
+        assert stations[0]["name"] == "Центральний ШМ"
+        assert stations[0]["city"] == "Київ"
+        assert stations[0]["city_id"] == "city-001"
+        assert stations[0]["address"] == "вул. Хрещатик, 1"
+        assert stations[1]["station_id"] == "ST-002"
+        assert stations[1]["name"] == "Лівобережна ШМ"
+
+    def test_parse_stations_empty(self) -> None:
+        """Empty GetStation response returns empty list."""
+        root = _make_soap_response(f"<ns:GetStationResponse/>")
+        stations = OneCSOAPClient._parse_stations(root)
+        assert stations == []
+
+    def test_parse_stations_empty_cdata(self) -> None:
+        """CDATA with no <line> elements returns empty list."""
+        body = (
+            f'<m:GetStationResponse xmlns:m="{_SOAP_NS}">'
+            f"<m:return><![CDATA[<data></data>]]></m:return>"
+            f"</m:GetStationResponse>"
+        )
+        root = _make_soap_response(body)
+        stations = OneCSOAPClient._parse_stations(root)
+        assert stations == []
+
+    def test_parse_stations_namespace_fallback(self) -> None:
+        """Fallback parsing with namespace-aware Station elements."""
+        body = (
+            f"<ns:GetStationResponse>"
+            f"<ns:Station>"
+            f"<ns:StationID>ST-010</ns:StationID>"
+            f"<ns:StationName>Одеська ШМ</ns:StationName>"
+            f"<ns:StationCity>Одеса</ns:StationCity>"
+            f"<ns:StationCityID>city-010</ns:StationCityID>"
+            f"<ns:StationAdress>вул. Дерибасівська, 5</ns:StationAdress>"
+            f"</ns:Station>"
+            f"</ns:GetStationResponse>"
+        )
+        root = _make_soap_response(body)
+        stations = OneCSOAPClient._parse_stations(root)
+        assert len(stations) == 1
+        assert stations[0]["station_id"] == "ST-010"
+        assert stations[0]["city"] == "Одеса"
+
+
+class TestGetStationsMethod:
+    @pytest.mark.asyncio
+    async def test_get_stations(self, soap_client: OneCSOAPClient) -> None:
+        cdata_xml = (
+            "<data>"
+            "<line>"
+            "<StationID>ST-001</StationID>"
+            "<StationName>Центральний</StationName>"
+            "<StationCity>Київ</StationCity>"
+            "<StationCityID>city-001</StationCityID>"
+            "<StationAdress>вул. Хрещатик, 1</StationAdress>"
+            "</line>"
+            "</data>"
+        )
+        body = (
+            f'<m:GetStationResponse xmlns:m="{_SOAP_NS}">'
+            f"<m:return><![CDATA[{cdata_xml}]]></m:return>"
+            f"</m:GetStationResponse>"
+        )
+        resp_xml = _make_soap_response(body)
+
+        with patch.object(
+            soap_client, "_soap_request", new_callable=AsyncMock, return_value=resp_xml
+        ) as mock_req:
+            stations = await soap_client.get_stations()
+            mock_req.assert_called_once()
+            # Verify body contains GetStation
+            call_body = mock_req.call_args[0][0]
+            assert "GetStation" in call_body
+
+        assert len(stations) == 1
+        assert stations[0]["station_id"] == "ST-001"
+        assert stations[0]["name"] == "Центральний"
+
+
+class TestInnerTextHelper:
+    def test_inner_text_found(self) -> None:
+        root = ET.fromstring("<root><Name>value</Name></root>")
+        assert _inner_text(root, "Name") == "value"
+
+    def test_inner_text_missing(self) -> None:
+        root = ET.fromstring("<root/>")
+        assert _inner_text(root, "Name") == ""
+
+    def test_inner_text_default(self) -> None:
+        root = ET.fromstring("<root/>")
+        assert _inner_text(root, "Name", "fallback") == "fallback"

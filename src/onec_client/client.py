@@ -129,6 +129,15 @@ class OneCClient:
             params={"TradingNetwork": network},
         )
 
+    # --- Fitting service prices ---
+
+    async def get_fitting_prices(self) -> dict[str, Any]:
+        """Get fitting service prices for all stations.
+
+        GET /Trade/hs/site/price_service
+        """
+        return await self._get("/Trade/hs/site/price_service")
+
     # --- Nova Poshta reference data ---
 
     async def get_novapost_cities(self) -> dict[str, Any]:

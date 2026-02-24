@@ -171,6 +171,41 @@ class TestOneCClientRequests:
             )
 
 
+class TestOneCClientFittingPrices:
+    @pytest.mark.asyncio
+    async def test_get_fitting_prices(self, onec_client: OneCClient) -> None:
+        mock_response = {
+            "success": True,
+            "data": [
+                {
+                    "service": "Шиномонтаж R14",
+                    "artikul": "SM-R14",
+                    "price": "350",
+                    "point_id": "ST-001",
+                    "city": "Київ",
+                    "city_id": "city-001",
+                },
+                {
+                    "service": "Шиномонтаж R16",
+                    "artikul": "SM-R16",
+                    "price": "450",
+                    "point_id": "ST-002",
+                    "city": "Одеса",
+                    "city_id": "city-002",
+                },
+            ],
+        }
+        with patch.object(
+            onec_client, "_get", new_callable=AsyncMock, return_value=mock_response
+        ) as mock_get:
+            result = await onec_client.get_fitting_prices()
+            mock_get.assert_called_once_with("/Trade/hs/site/price_service")
+            assert result["success"] is True
+            assert len(result["data"]) == 2
+            assert result["data"][0]["point_id"] == "ST-001"
+            assert result["data"][1]["price"] == "450"
+
+
 class TestOneCAPIError:
     def test_error_message(self) -> None:
         err = OneCAPIError(401, "Unauthorized")

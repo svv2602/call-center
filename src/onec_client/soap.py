@@ -90,6 +90,18 @@ class OneCSOAPClient:
 
     # --- Public SOAP methods ---
 
+    async def get_stations(self) -> list[dict[str, Any]]:
+        """Get all fitting stations.
+
+        SOAP operation: GetStation (no parameters).
+
+        Returns:
+            List of station dicts with keys: station_id, name, city, city_id, address.
+        """
+        body = "<ns:GetStation/>"
+        root = await self._soap_request(body)
+        return self._parse_stations(root)
+
     async def get_station_schedule(
         self,
         date_from: str,
@@ -293,6 +305,45 @@ class OneCSOAPClient:
     # --- Response parsers ---
 
     @staticmethod
+    def _parse_stations(root: ET.Element) -> list[dict[str, Any]]:
+        """Parse GetStation response — CDATA with inner XML inside <m:return>."""
+        stations: list[dict[str, Any]] = []
+
+        # 1C wraps response in CDATA inside <m:return> (or just <return>).
+        # Find the return element and parse its CDATA text as inner XML.
+        for _tag in ("return", "m:return"):
+            for elem in root.iter():
+                local = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+                if local == "return" and elem.text and elem.text.strip():
+                    try:
+                        inner = ET.fromstring(elem.text.strip())
+                    except ET.ParseError:
+                        continue
+                    for line in inner.iter("line"):
+                        station: dict[str, Any] = {
+                            "station_id": _inner_text(line, "StationID"),
+                            "name": _inner_text(line, "StationName"),
+                            "city": _inner_text(line, "StationCity"),
+                            "city_id": _inner_text(line, "StationCityID"),
+                            "address": _inner_text(line, "StationAdress"),
+                        }
+                        stations.append(station)
+                    return stations
+
+        # Fallback: try namespace-aware iteration (in case 1C returns without CDATA)
+        for entry in root.iter(f"{{{_SOAP_NS}}}Station"):
+            station = {
+                "station_id": _text(entry, "StationID"),
+                "name": _text(entry, "StationName"),
+                "city": _text(entry, "StationCity"),
+                "city_id": _text(entry, "StationCityID"),
+                "address": _text(entry, "StationAdress"),
+            }
+            stations.append(station)
+
+        return stations
+
+    @staticmethod
     def _parse_schedule(root: ET.Element) -> list[dict[str, Any]]:
         """Parse GetStationSchedule response into slot list."""
         slots: list[dict[str, Any]] = []
@@ -377,6 +428,14 @@ class OneCSOAPClient:
 
 
 # --- Helpers ---
+
+
+def _inner_text(element: ET.Element, tag: str, default: str = "") -> str:
+    """Extract text from a child element (no-namespace, for CDATA inner XML)."""
+    child = element.find(tag)
+    if child is not None and child.text:
+        return child.text
+    return default
 
 
 def _text(element: ET.Element, tag: str, default: str = "") -> str:
