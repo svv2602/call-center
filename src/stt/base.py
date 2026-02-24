@@ -36,7 +36,7 @@ class STTConfig:
     alternative_languages: list[str] = field(default_factory=lambda: ["ru-RU"])
     sample_rate_hertz: int = 8000
     interim_results: bool = True
-    model: str = "latest_long"
+    model: str = "latest_short"
     enable_punctuation: bool = True
     phrase_hints: tuple[str, ...] = ()
 

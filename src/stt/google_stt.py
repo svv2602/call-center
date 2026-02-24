@@ -21,8 +21,8 @@ logger = logging.getLogger(__name__)
 # Google STT streaming session limit (~5 min)
 _SESSION_RESTART_SECONDS = 290  # restart slightly before 5 min limit
 
-# Google API limit for phrase hints
-_MAX_PHRASE_HINTS = 5000
+# Google STT v2 inline PhraseSet limit (latest_short model)
+_MAX_PHRASE_HINTS = 1200
 
 
 def _build_adaptation(
