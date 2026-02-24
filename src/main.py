@@ -7,7 +7,7 @@ import logging
 import os
 import signal
 import sys
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -50,6 +50,7 @@ from src.api.prompts import router as prompts_router
 from src.api.pronunciation import router as pronunciation_router
 from src.api.sandbox import router as sandbox_router
 from src.api.scraper import router as scraper_router
+from src.api.stt_config import router as stt_config_router
 from src.api.system import router as system_router
 from src.api.task_schedules import router as task_schedules_router
 from src.api.tenants import router as tenants_router
@@ -57,7 +58,6 @@ from src.api.training_dialogues import router as training_dialogues_router
 from src.api.training_safety import router as training_safety_router
 from src.api.training_templates import router as training_templates_router
 from src.api.training_tools import router as training_tools_router
-from src.api.stt_config import router as stt_config_router
 from src.api.tts_config import router as tts_config_router
 from src.api.vehicles import router as vehicles_router
 from src.api.websocket import router as websocket_router
@@ -1055,6 +1055,27 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     )
 
 
+def _resolve_date(value: str) -> str:
+    """Resolve 'today'/'tomorrow'/relative strings to YYYY-MM-DD.
+
+    The LLM may pass literal 'today', 'tomorrow', 'послезавтра', or a
+    proper YYYY-MM-DD date. We normalise everything to YYYY-MM-DD so the
+    SOAP layer receives a valid date.
+    """
+    if not value:
+        return ""
+    low = value.strip().lower()
+    today = datetime.now(tz=UTC).date()
+    if low in {"today", "сьогодні", "сегодня"}:
+        return today.isoformat()
+    if low in {"tomorrow", "завтра"}:
+        return (today + timedelta(days=1)).isoformat()
+    if low in {"послезавтра", "afterTomorrow", "після завтра", "післязавтра"}:
+        return (today + timedelta(days=2)).isoformat()
+    # Already a date string — return as-is
+    return value.strip()
+
+
 def _build_tool_router(session: CallSession, store_client: StoreClient | None = None) -> ToolRouter:
     """Build a ToolRouter with all canonical tools registered."""
     router = ToolRouter()
@@ -1296,8 +1317,9 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         if _soap_client is not None:
             try:
                 station_id = kwargs.get("station_id", "")
-                date_from = kwargs.get("date_from", "")
-                date_to = kwargs.get("date_to", date_from)
+                today = datetime.now(tz=UTC).date().isoformat()
+                date_from = _resolve_date(kwargs.get("date_from", "")) or today
+                date_to = _resolve_date(kwargs.get("date_to", "")) or date_from
                 slots = await _soap_client.get_station_schedule(
                     date_from=date_from,
                     date_to=date_to,

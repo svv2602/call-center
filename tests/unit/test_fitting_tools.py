@@ -203,3 +203,48 @@ class TestSearchKnowledgeBaseSchema:
 
     def test_description_mentions_knowledge(self, tool: dict) -> None:
         assert "знань" in tool["description"].lower() or "знан" in tool["description"].lower()
+
+
+class TestResolveDateHelper:
+    """Test _resolve_date helper from main.py."""
+
+    def test_empty_returns_empty(self) -> None:
+        from src.main import _resolve_date
+
+        assert _resolve_date("") == ""
+
+    def test_today_returns_iso_date(self) -> None:
+        from datetime import UTC, datetime
+
+        from src.main import _resolve_date
+
+        result = _resolve_date("today")
+        assert result == datetime.now(tz=UTC).date().isoformat()
+
+    def test_tomorrow_returns_next_day(self) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        from src.main import _resolve_date
+
+        result = _resolve_date("tomorrow")
+        expected = (datetime.now(tz=UTC).date() + timedelta(days=1)).isoformat()
+        assert result == expected
+
+    def test_zavtra_returns_next_day(self) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        from src.main import _resolve_date
+
+        result = _resolve_date("завтра")
+        expected = (datetime.now(tz=UTC).date() + timedelta(days=1)).isoformat()
+        assert result == expected
+
+    def test_iso_date_passthrough(self) -> None:
+        from src.main import _resolve_date
+
+        assert _resolve_date("2026-02-25") == "2026-02-25"
+
+    def test_strips_whitespace(self) -> None:
+        from src.main import _resolve_date
+
+        assert _resolve_date("  2026-03-01  ") == "2026-03-01"

@@ -15,6 +15,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from src.agent.agent import LLMAgent
@@ -69,6 +70,21 @@ class SandboxTurnResult:
     model: str
     tool_calls: list[ToolCallRecord] = field(default_factory=list)
     error: str | None = None
+
+
+def _resolve_date(value: str) -> str:
+    """Resolve 'today'/'tomorrow' to YYYY-MM-DD."""
+    if not value:
+        return ""
+    low = value.strip().lower()
+    today = datetime.now(tz=UTC).date()
+    if low in {"today", "сьогодні", "сегодня"}:
+        return today.isoformat()
+    if low in {"tomorrow", "завтра"}:
+        return (today + timedelta(days=1)).isoformat()
+    if low in {"послезавтра", "після завтра", "післязавтра"}:
+        return (today + timedelta(days=2)).isoformat()
+    return value.strip()
 
 
 def _register_live_tools(
@@ -182,8 +198,9 @@ def _register_live_tools(
 
         async def _get_fitting_slots_soap(**kwargs: Any) -> dict[str, Any]:
             station_id = kwargs.get("station_id", "")
-            date_from = kwargs.get("date_from", "")
-            date_to = kwargs.get("date_to", date_from)
+            today = datetime.now(tz=UTC).date().isoformat()
+            date_from = _resolve_date(kwargs.get("date_from", "")) or today
+            date_to = _resolve_date(kwargs.get("date_to", "")) or date_from
             slots = await soap_client.get_station_schedule(
                 date_from=date_from, date_to=date_to, station_id=station_id
             )

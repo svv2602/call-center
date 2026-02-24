@@ -287,11 +287,11 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
                 },
                 "date_from": {
                     "type": "string",
-                    "description": "Початкова дата (YYYY-MM-DD або 'today')",
+                    "description": "Початкова дата у форматі YYYY-MM-DD",
                 },
                 "date_to": {
                     "type": "string",
-                    "description": "Кінцева дата (YYYY-MM-DD)",
+                    "description": "Кінцева дата у форматі YYYY-MM-DD (за замовчуванням = date_from)",
                 },
                 "service_type": {
                     "type": "string",
