@@ -111,19 +111,24 @@ class OneCSOAPClient:
         """Get fitting station schedule (available slots).
 
         SOAP operation: GetStationSchedule
+        1C params: StationID (opt), DataBig (dateTime), DataEnd (dateTime).
 
         Args:
-            date_from: Start date (YYYY-MM-DD).
-            date_to: End date (YYYY-MM-DD).
+            date_from: Start date (YYYY-MM-DD or YYYY-MM-DDT...).
+            date_to: End date (YYYY-MM-DD or YYYY-MM-DDT...).
             station_id: Optional station ID to filter by.
 
         Returns:
-            List of slot dicts with keys: station_id, date, time, available.
+            List of slot dicts with keys: station_id, date, time, quantity.
         """
-        params = f"<ns:DateStart>{escape(date_from)}</ns:DateStart>"
-        params += f"<ns:DateEnd>{escape(date_to)}</ns:DateEnd>"
+        dt_from = _to_datetime(date_from)
+        dt_to = _to_datetime(date_to)
         if station_id:
-            params += f"<ns:StationID>{escape(station_id)}</ns:StationID>"
+            params = f"<ns:StationID>{escape(station_id)}</ns:StationID>"
+        else:
+            params = ""
+        params += f"<ns:DataBig>{escape(dt_from)}</ns:DataBig>"
+        params += f"<ns:DataEnd>{escape(dt_to)}</ns:DataEnd>"
 
         body = f"<ns:GetStationSchedule>{params}</ns:GetStationSchedule>"
         root = await self._soap_request(body)
@@ -143,13 +148,15 @@ class OneCSOAPClient:
         """Book a tire fitting appointment.
 
         SOAP operation: GetTireRecording (Status=Записан)
+        1C params: Person, PhoneNumber, StationID, Date (dateTime), Time (special),
+                   Status, CheckBalance, CallBack, ClientMode, Comment, AutoType, AutoNumber, etc.
 
         Args:
             person: Customer name.
             phone: Customer phone (0XXXXXXXXX).
             station_id: Fitting station ID.
             date: Appointment date (YYYY-MM-DD).
-            time: Appointment time (HH:MM).
+            time: Appointment time (HH:MM or HH:MM:SS).
             vehicle_info: Vehicle description (optional).
             tire_diameter: Tire diameter in inches (optional).
             service_type: Service type (tire_change, balancing, full_service).
@@ -158,18 +165,28 @@ class OneCSOAPClient:
             Dict with booking_id, status, etc.
         """
         comment = _build_comment(vehicle_info, tire_diameter, service_type)
+        dt_date = _to_datetime(date)
+        dt_time = _to_time(time)
 
         params = f"<ns:Person>{escape(person)}</ns:Person>"
-        params += f"<ns:Phone>{escape(phone)}</ns:Phone>"
+        params += f"<ns:PhoneNumber>{escape(phone)}</ns:PhoneNumber>"
+        params += f"<ns:AutoType></ns:AutoType>"
+        params += f"<ns:AutoNumber></ns:AutoNumber>"
+        params += "<ns:StoreTires>false</ns:StoreTires>"
         params += f"<ns:StationID>{escape(station_id)}</ns:StationID>"
-        params += f"<ns:Date>{escape(date)}</ns:Date>"
-        params += f"<ns:Time>{escape(time)}</ns:Time>"
+        params += f"<ns:Date>{escape(dt_date)}</ns:Date>"
+        params += f"<ns:Time>{escape(dt_time)}</ns:Time>"
         params += "<ns:Status>Записан</ns:Status>"
         params += "<ns:CheckBalance>true</ns:CheckBalance>"
         params += "<ns:CallBack>false</ns:CallBack>"
         params += "<ns:ClientMode>1</ns:ClientMode>"
         if comment:
             params += f"<ns:Comment>{escape(comment)}</ns:Comment>"
+        else:
+            params += "<ns:Comment></ns:Comment>"
+        params += "<ns:NumberContract></ns:NumberContract>"
+        params += "<ns:IdTelegram></ns:IdTelegram>"
+        params += "<ns:IdViber></ns:IdViber>"
 
         body = f"<ns:GetTireRecording>{params}</ns:GetTireRecording>"
         root = await self._soap_request(body)
@@ -191,9 +208,10 @@ class OneCSOAPClient:
         Returns:
             List of booking dicts.
         """
-        params = f"<ns:Phone>{escape(phone)}</ns:Phone>"
-        if station_id:
-            params += f"<ns:StationID>{escape(station_id)}</ns:StationID>"
+        params = f"<ns:PhoneNumber>{escape(phone)}</ns:PhoneNumber>"
+        params += f"<ns:StationID>{escape(station_id)}</ns:StationID>"
+        params += "<ns:Date></ns:Date>"
+        params += "<ns:Time></ns:Time>"
 
         body = f"<ns:GetListOfEntries>{params}</ns:GetListOfEntries>"
         root = await self._soap_request(body)
@@ -202,7 +220,7 @@ class OneCSOAPClient:
     async def cancel_booking(self, guid: str) -> dict[str, Any]:
         """Cancel a fitting booking.
 
-        SOAP operation: GetCancelRecords (UPP=true — not from ERP)
+        SOAP operation: GetCancelRecords (UPP=false — not from ERP)
 
         Args:
             guid: Booking GUID to cancel.
@@ -211,7 +229,7 @@ class OneCSOAPClient:
             Dict with status info.
         """
         params = f"<ns:GUID>{escape(guid)}</ns:GUID>"
-        params += "<ns:UPP>true</ns:UPP>"
+        params += "<ns:UPP>false</ns:UPP>"
 
         body = f"<ns:GetCancelRecords>{params}</ns:GetCancelRecords>"
         root = await self._soap_request(body)
@@ -310,25 +328,18 @@ class OneCSOAPClient:
         stations: list[dict[str, Any]] = []
 
         # 1C wraps response in CDATA inside <m:return> (or just <return>).
-        # Find the return element and parse its CDATA text as inner XML.
-        for _tag in ("return", "m:return"):
-            for elem in root.iter():
-                local = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
-                if local == "return" and elem.text and elem.text.strip():
-                    try:
-                        inner = ET.fromstring(elem.text.strip())
-                    except ET.ParseError:
-                        continue
-                    for line in inner.iter("line"):
-                        station: dict[str, Any] = {
-                            "station_id": _inner_text(line, "StationID"),
-                            "name": _inner_text(line, "StationName"),
-                            "city": _inner_text(line, "StationCity"),
-                            "city_id": _inner_text(line, "StationCityID"),
-                            "address": _inner_text(line, "StationAdress"),
-                        }
-                        stations.append(station)
-                    return stations
+        lines = _parse_cdata_lines(root)
+        for line in lines:
+            station: dict[str, Any] = {
+                "station_id": _text(line, "StationID"),
+                "name": _text(line, "StationName"),
+                "city": _text(line, "StationCity"),
+                "city_id": _text(line, "StationCityID"),
+                "address": _text(line, "StationAdress"),
+            }
+            stations.append(station)
+        if stations:
+            return stations
 
         # Fallback: try namespace-aware iteration (in case 1C returns without CDATA)
         for entry in root.iter(f"{{{_SOAP_NS}}}Station"):
@@ -345,10 +356,34 @@ class OneCSOAPClient:
 
     @staticmethod
     def _parse_schedule(root: ET.Element) -> list[dict[str, Any]]:
-        """Parse GetStationSchedule response into slot list."""
+        """Parse GetStationSchedule response into slot list.
+
+        1C returns CDATA with <line> elements containing:
+        StationID, Data (date), Time, Period (datetime), Quantity (int).
+        Quantity > 0 means the slot is available.
+        """
         slots: list[dict[str, Any]] = []
-        for entry in root.iter(f"{{{_SOAP_NS}}}ScheduleEntry"):
+
+        # Primary: CDATA <line> elements (real 1C format)
+        lines = _parse_cdata_lines(root)
+        for line in lines:
+            quantity = _text(line, "Quantity", "0")
             slot: dict[str, Any] = {
+                "station_id": _text(line, "StationID"),
+                "date": _text(line, "Data"),
+                "time": _text(line, "Time"),
+                "available": int(quantity) > 0 if quantity.isdigit() else False,
+            }
+            period = _text(line, "Period")
+            if period:
+                slot["period"] = period
+            slots.append(slot)
+        if slots:
+            return slots
+
+        # Fallback: namespace-aware ScheduleEntry (legacy test format)
+        for entry in root.iter(f"{{{_SOAP_NS}}}ScheduleEntry"):
+            slot = {
                 "station_id": _text(entry, "StationID"),
                 "date": _text(entry, "Date"),
                 "time": _text(entry, "Time"),
@@ -362,8 +397,26 @@ class OneCSOAPClient:
 
     @staticmethod
     def _parse_booking(root: ET.Element) -> dict[str, Any]:
-        """Parse GetTireRecording response into booking dict."""
+        """Parse GetTireRecording response into booking dict.
+
+        1C returns CDATA with <Result>true/false</Result> and <GUID>...</GUID>.
+        """
         result: dict[str, Any] = {"status": "error"}
+
+        # Primary: CDATA inner XML (real 1C format)
+        inner = _parse_cdata_root(root)
+        if inner is not None:
+            ok = _text(inner, "Result", "false").lower() == "true"
+            guid = _text(inner, "GUID")
+            if guid or ok:
+                result = {
+                    "booking_id": guid,
+                    "status": "confirmed" if ok else "error",
+                    "message": _text(inner, "Message"),
+                }
+                return result
+
+        # Fallback: namespace-aware elements
         for resp in root.iter(f"{{{_SOAP_NS}}}RecordingResult"):
             result = {
                 "booking_id": _text(resp, "GUID"),
@@ -387,10 +440,33 @@ class OneCSOAPClient:
 
     @staticmethod
     def _parse_bookings_list(root: ET.Element) -> list[dict[str, Any]]:
-        """Parse GetListOfEntries response into list of bookings."""
+        """Parse GetListOfEntries response into list of bookings.
+
+        1C returns CDATA with <line> elements containing:
+        StationID, Data, Time, Period, Customer, AutoType, AutoNumber, GUID, etc.
+        """
         bookings: list[dict[str, Any]] = []
-        for entry in root.iter(f"{{{_SOAP_NS}}}Entry"):
+
+        # Primary: CDATA <line> elements (real 1C format)
+        lines = _parse_cdata_lines(root)
+        for line in lines:
             booking: dict[str, Any] = {
+                "booking_id": _text(line, "GUID"),
+                "station_id": _text(line, "StationID"),
+                "date": _text(line, "Data"),
+                "time": _text(line, "Time"),
+                "person": _text(line, "Customer"),
+            }
+            period = _text(line, "Period")
+            if period:
+                booking["period"] = period
+            bookings.append(booking)
+        if bookings:
+            return bookings
+
+        # Fallback: namespace-aware Entry elements (legacy test format)
+        for entry in root.iter(f"{{{_SOAP_NS}}}Entry"):
+            booking = {
                 "booking_id": _text(entry, "GUID"),
                 "station_id": _text(entry, "StationID"),
                 "station_name": _text(entry, "StationName"),
@@ -405,8 +481,22 @@ class OneCSOAPClient:
 
     @staticmethod
     def _parse_cancel(root: ET.Element) -> dict[str, Any]:
-        """Parse GetCancelRecords response."""
+        """Parse GetCancelRecords response.
+
+        1C returns CDATA with <Result>true/false</Result>.
+        """
         result: dict[str, Any] = {"status": "error"}
+
+        # Primary: CDATA inner XML (real 1C format)
+        inner = _parse_cdata_root(root)
+        if inner is not None:
+            ok = _text(inner, "Result", "false").lower() == "true"
+            return {
+                "status": "cancelled" if ok else "error",
+                "message": _text(inner, "Message"),
+            }
+
+        # Fallback: namespace-aware elements
         for resp in root.iter(f"{{{_SOAP_NS}}}CancelResult"):
             result = {
                 "status": _text(resp, "Status", "unknown"),
@@ -449,6 +539,63 @@ def _text(element: ET.Element, tag: str, default: str = "") -> str:
     if child is not None and child.text:
         return child.text
     return default
+
+
+def _to_datetime(value: str) -> str:
+    """Convert YYYY-MM-DD to YYYY-MM-DDT00:00:00 (1C dateTime format).
+
+    If already contains 'T', return as-is.
+    """
+    if "T" in value:
+        return value
+    return f"{value}T00:00:00"
+
+
+def _to_time(value: str) -> str:
+    """Convert HH:MM or HH:MM:SS to 0001-01-01THH:MM:SS (1C time format).
+
+    If already contains 'T', return as-is.
+    """
+    if "T" in value:
+        return value
+    # Ensure HH:MM:SS
+    parts = value.split(":")
+    if len(parts) == 2:
+        value = f"{value}:00"
+    return f"0001-01-01T{value}"
+
+
+def _parse_cdata_lines(root: ET.Element) -> list[ET.Element]:
+    """Extract <line> elements from CDATA inner XML inside <return>.
+
+    1C wraps responses in <m:return><![CDATA[<...><line>...</line></...>]]></m:return>.
+    The inner XML may or may not have a namespace.
+    """
+    for elem in root.iter():
+        local = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+        if local == "return" and elem.text and elem.text.strip():
+            try:
+                inner = ET.fromstring(elem.text.strip())
+            except ET.ParseError:
+                continue
+            # Inner XML may have namespace — try both
+            lines = list(inner.iter(f"{{{_SOAP_NS}}}line"))
+            if not lines:
+                lines = list(inner.iter("line"))
+            return lines
+    return []
+
+
+def _parse_cdata_root(root: ET.Element) -> ET.Element | None:
+    """Extract parsed inner XML root from CDATA inside <return>."""
+    for elem in root.iter():
+        local = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+        if local == "return" and elem.text and elem.text.strip():
+            try:
+                return ET.fromstring(elem.text.strip())
+            except ET.ParseError:
+                continue
+    return None
 
 
 def _build_comment(vehicle_info: str, tire_diameter: int, service_type: str) -> str:

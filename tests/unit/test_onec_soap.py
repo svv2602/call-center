@@ -15,6 +15,8 @@ from src.onec_client.soap import (
     _build_comment,
     _inner_text,
     _text,
+    _to_datetime,
+    _to_time,
 )
 
 
@@ -333,8 +335,16 @@ class TestSOAPMethods:
 
         with patch.object(
             soap_client, "_soap_request", new_callable=AsyncMock, return_value=schedule_xml
-        ):
+        ) as mock_req:
             slots = await soap_client.get_station_schedule("2026-02-20", "2026-02-21", "ST-001")
+            call_body = mock_req.call_args[0][0]
+            # Verify correct 1C parameter names
+            assert "DataBig" in call_body
+            assert "DataEnd" in call_body
+            assert "DateStart" not in call_body
+            # Verify dateTime format
+            assert "2026-02-20T00:00:00" in call_body
+            assert "2026-02-21T00:00:00" in call_body
 
         assert len(slots) == 1
         assert slots[0]["station_id"] == "ST-001"
@@ -353,7 +363,7 @@ class TestSOAPMethods:
 
         with patch.object(
             soap_client, "_soap_request", new_callable=AsyncMock, return_value=booking_xml
-        ):
+        ) as mock_req:
             result = await soap_client.book_fitting(
                 person="Іван",
                 phone="0501234567",
@@ -361,6 +371,13 @@ class TestSOAPMethods:
                 date="2026-02-20",
                 time="09:00",
             )
+            call_body = mock_req.call_args[0][0]
+            # Verify correct 1C parameter names
+            assert "PhoneNumber" in call_body
+            assert "<ns:Phone>" not in call_body
+            # Verify dateTime/time formats
+            assert "2026-02-20T00:00:00" in call_body
+            assert "0001-01-01T09:00:00" in call_body
 
         assert result["booking_id"] == "new-guid"
         assert result["status"] == "Записан"
@@ -383,8 +400,11 @@ class TestSOAPMethods:
 
         with patch.object(
             soap_client, "_soap_request", new_callable=AsyncMock, return_value=bookings_xml
-        ):
+        ) as mock_req:
             bookings = await soap_client.get_customer_bookings("0501234567")
+            call_body = mock_req.call_args[0][0]
+            assert "PhoneNumber" in call_body
+            assert "<ns:Phone>" not in call_body
 
         assert len(bookings) == 1
         assert bookings[0]["booking_id"] == "guid-1"
@@ -402,8 +422,10 @@ class TestSOAPMethods:
 
         with patch.object(
             soap_client, "_soap_request", new_callable=AsyncMock, return_value=cancel_xml
-        ):
+        ) as mock_req:
             result = await soap_client.cancel_booking("guid-1")
+            call_body = mock_req.call_args[0][0]
+            assert "UPP>false<" in call_body
 
         assert result["status"] == "Скасовано"
 
@@ -552,6 +574,43 @@ class TestParseStations:
         assert stations[0]["station_id"] == "ST-010"
         assert stations[0]["city"] == "Одеса"
 
+    def test_parse_stations_cdata_with_namespace(self) -> None:
+        """Parse GetStation response where inner CDATA XML has xmlns (real 1C format)."""
+        cdata_xml = (
+            f'<GetStationResponse xmlns="{_SOAP_NS}" '
+            'xmlns:xs="http://www.w3.org/2001/XMLSchema" '
+            'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+            'xsi:type="GetStationResponse">'
+            "<line>"
+            "<StationID>000000003</StationID>"
+            "<StationName>1Д (Днепр, пер. Добровольцев, 1Д)</StationName>"
+            "<StationCity>Дніпро</StationCity>"
+            "<StationCityID>db5c88f0-391c-11dd-90d9-001a92567626</StationCityID>"
+            "<StationAdress>м. Дніпро, пров. Добровольців, 1д</StationAdress>"
+            "</line>"
+            "<line>"
+            "<StationID>000000006</StationID>"
+            "<StationName>4К (Киев, ул. М. Тимошенко, 7)</StationName>"
+            "<StationCity>Київ</StationCity>"
+            "<StationCityID>8d5a980d-391c-11dd-90d9-001a92567626</StationCityID>"
+            "<StationAdress>м. Київ, вул. Маршала Тимошенка, 7</StationAdress>"
+            "</line>"
+            "</GetStationResponse>"
+        )
+        body = (
+            f'<m:GetStationResponse xmlns:m="{_SOAP_NS}">'
+            f"<m:return><![CDATA[{cdata_xml}]]></m:return>"
+            f"</m:GetStationResponse>"
+        )
+        root = _make_soap_response(body)
+        stations = OneCSOAPClient._parse_stations(root)
+        assert len(stations) == 2
+        assert stations[0]["station_id"] == "000000003"
+        assert stations[0]["name"] == "1Д (Днепр, пер. Добровольцев, 1Д)"
+        assert stations[0]["city"] == "Дніпро"
+        assert stations[1]["station_id"] == "000000006"
+        assert stations[1]["city"] == "Київ"
+
 
 class TestGetStationsMethod:
     @pytest.mark.asyncio
@@ -600,3 +659,162 @@ class TestInnerTextHelper:
     def test_inner_text_default(self) -> None:
         root = ET.fromstring("<root/>")
         assert _inner_text(root, "Name", "fallback") == "fallback"
+
+
+class TestDateTimeHelpers:
+    """Test _to_datetime and _to_time conversion helpers."""
+
+    def test_to_datetime_date_only(self) -> None:
+        assert _to_datetime("2026-02-24") == "2026-02-24T00:00:00"
+
+    def test_to_datetime_already_datetime(self) -> None:
+        assert _to_datetime("2026-02-24T10:30:00") == "2026-02-24T10:30:00"
+
+    def test_to_time_hhmm(self) -> None:
+        assert _to_time("09:00") == "0001-01-01T09:00:00"
+
+    def test_to_time_hhmmss(self) -> None:
+        assert _to_time("14:30:00") == "0001-01-01T14:30:00"
+
+    def test_to_time_already_full(self) -> None:
+        assert _to_time("0001-01-01T09:00:00") == "0001-01-01T09:00:00"
+
+
+class TestParseScheduleCDATA:
+    """Test _parse_schedule with real 1C CDATA format."""
+
+    def test_parse_schedule_cdata_with_namespace(self) -> None:
+        cdata_xml = (
+            f'<GetStationScheduleResponse xmlns="{_SOAP_NS}" '
+            'xmlns:xs="http://www.w3.org/2001/XMLSchema" '
+            'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+            'xsi:type="GetStationScheduleResponse">'
+            "<line>"
+            "<StationID>000000003</StationID>"
+            "<Data>2026-02-24</Data>"
+            "<Time>09:00:00</Time>"
+            "<Period>2026-02-24T09:00:00</Period>"
+            "<Quantity>2</Quantity>"
+            "</line>"
+            "<line>"
+            "<StationID>000000003</StationID>"
+            "<Data>2026-02-24</Data>"
+            "<Time>09:40:00</Time>"
+            "<Period>2026-02-24T09:40:00</Period>"
+            "<Quantity>0</Quantity>"
+            "</line>"
+            "</GetStationScheduleResponse>"
+        )
+        body = (
+            f'<m:GetStationScheduleResponse xmlns:m="{_SOAP_NS}">'
+            f"<m:return><![CDATA[{cdata_xml}]]></m:return>"
+            f"</m:GetStationScheduleResponse>"
+        )
+        root = _make_soap_response(body)
+        slots = OneCSOAPClient._parse_schedule(root)
+        assert len(slots) == 2
+        assert slots[0]["station_id"] == "000000003"
+        assert slots[0]["date"] == "2026-02-24"
+        assert slots[0]["time"] == "09:00:00"
+        assert slots[0]["available"] is True
+        assert slots[0]["period"] == "2026-02-24T09:00:00"
+        assert slots[1]["available"] is False  # Quantity=0
+
+
+class TestParseBookingCDATA:
+    """Test _parse_booking with real 1C CDATA format."""
+
+    def test_parse_booking_cdata_success(self) -> None:
+        cdata_xml = (
+            f'<GetTireRecordingResponse xmlns="{_SOAP_NS}" '
+            'xmlns:xs="http://www.w3.org/2001/XMLSchema" '
+            'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+            'xsi:type="GetTireRecordingResponse">'
+            "<Result>true</Result>"
+            "<GUID>a9236876-107a-11f1-a154-000c29c2a50f</GUID>"
+            "</GetTireRecordingResponse>"
+        )
+        body = (
+            f'<m:GetTireRecordingResponse xmlns:m="{_SOAP_NS}">'
+            f"<m:return><![CDATA[{cdata_xml}]]></m:return>"
+            f"</m:GetTireRecordingResponse>"
+        )
+        root = _make_soap_response(body)
+        result = OneCSOAPClient._parse_booking(root)
+        assert result["booking_id"] == "a9236876-107a-11f1-a154-000c29c2a50f"
+        assert result["status"] == "confirmed"
+
+    def test_parse_booking_cdata_failure(self) -> None:
+        cdata_xml = (
+            f'<GetTireRecordingResponse xmlns="{_SOAP_NS}">'
+            "<Result>false</Result>"
+            "<GUID></GUID>"
+            "</GetTireRecordingResponse>"
+        )
+        body = (
+            f'<m:GetTireRecordingResponse xmlns:m="{_SOAP_NS}">'
+            f"<m:return><![CDATA[{cdata_xml}]]></m:return>"
+            f"</m:GetTireRecordingResponse>"
+        )
+        root = _make_soap_response(body)
+        result = OneCSOAPClient._parse_booking(root)
+        assert result["status"] == "error"
+
+
+class TestParseBookingsListCDATA:
+    """Test _parse_bookings_list with real 1C CDATA format."""
+
+    def test_parse_bookings_list_cdata(self) -> None:
+        cdata_xml = (
+            f'<GetListOfEntriesResponse xmlns="{_SOAP_NS}" '
+            'xmlns:xs="http://www.w3.org/2001/XMLSchema" '
+            'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+            'xsi:type="GetListOfEntriesResponse">'
+            "<line>"
+            "<StationID>000000003</StationID>"
+            "<Data>2026-02-28</Data>"
+            "<Time>09:00:00</Time>"
+            "<Period>2026-02-28T09:00:00</Period>"
+            "<Customer>Погорельцев Ігорь</Customer>"
+            "<AutoType>111111111</AutoType>"
+            "<AutoNumber>1111111111 111111111</AutoNumber>"
+            "<NumberContract/>"
+            "<GUID>249a424f-109a-11f1-a154-000c29c2a50f</GUID>"
+            "</line>"
+            "</GetListOfEntriesResponse>"
+        )
+        body = (
+            f'<m:GetListOfEntriesResponse xmlns:m="{_SOAP_NS}">'
+            f"<m:return><![CDATA[{cdata_xml}]]></m:return>"
+            f"</m:GetListOfEntriesResponse>"
+        )
+        root = _make_soap_response(body)
+        bookings = OneCSOAPClient._parse_bookings_list(root)
+        assert len(bookings) == 1
+        assert bookings[0]["booking_id"] == "249a424f-109a-11f1-a154-000c29c2a50f"
+        assert bookings[0]["station_id"] == "000000003"
+        assert bookings[0]["date"] == "2026-02-28"
+        assert bookings[0]["time"] == "09:00:00"
+        assert bookings[0]["person"] == "Погорельцев Ігорь"
+
+
+class TestParseCancelCDATA:
+    """Test _parse_cancel with real 1C CDATA format."""
+
+    def test_parse_cancel_cdata_success(self) -> None:
+        cdata_xml = (
+            f'<GetCancelRecordsResponse xmlns="{_SOAP_NS}" '
+            'xmlns:xs="http://www.w3.org/2001/XMLSchema" '
+            'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+            'xsi:type="GetCancelRecordsResponse">'
+            "<Result>true</Result>"
+            "</GetCancelRecordsResponse>"
+        )
+        body = (
+            f'<m:GetCancelRecordsResponse xmlns:m="{_SOAP_NS}">'
+            f"<m:return><![CDATA[{cdata_xml}]]></m:return>"
+            f"</m:GetCancelRecordsResponse>"
+        )
+        root = _make_soap_response(body)
+        result = OneCSOAPClient._parse_cancel(root)
+        assert result["status"] == "cancelled"

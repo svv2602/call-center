@@ -60,8 +60,8 @@ class TestGetFittingStationsSchema:
     def tool(self) -> dict:
         return next(t for t in FITTING_TOOLS if t["name"] == "get_fitting_stations")
 
-    def test_city_required(self, tool: dict) -> None:
-        assert tool["input_schema"]["required"] == ["city"]
+    def test_city_optional(self, tool: dict) -> None:
+        assert "city" not in tool["input_schema"]["required"]
 
     def test_city_is_string(self, tool: dict) -> None:
         props = tool["input_schema"]["properties"]
