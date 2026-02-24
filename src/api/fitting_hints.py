@@ -2,8 +2,8 @@
 
 Content managers can add per-station and per-pickup-point hints (district, landmarks,
 description) so the LLM agent can match customer requests ("правий берег") to the
-right location.  Hints are stored in Redis and merged into get_fitting_stations /
-get_pickup_points tool results at runtime.
+right location.  Hints are stored in PostgreSQL (primary) with Redis as write-through
+cache for fast reads during calls.
 """
 
 from __future__ import annotations
@@ -15,6 +15,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from redis.asyncio import Redis
+from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.api.auth import require_permission
 from src.config import get_settings
@@ -26,6 +28,7 @@ REDIS_KEY = "fitting:station_hints"
 PICKUP_HINTS_KEY = "pickup:point_hints"
 
 _redis: Redis | None = None
+_engine: AsyncEngine | None = None
 
 _perm_r = Depends(require_permission("configuration:read"))
 _perm_w = Depends(require_permission("configuration:write"))
@@ -39,18 +42,65 @@ async def _get_redis() -> Redis:
     return _redis
 
 
+async def _get_engine() -> AsyncEngine:
+    global _engine
+    if _engine is None:
+        settings = get_settings()
+        _engine = create_async_engine(settings.database.url, pool_pre_ping=True)
+    return _engine
+
+
+async def _load_hints_from_pg(
+    conn: Any, point_type: str
+) -> dict[str, dict[str, str]]:
+    """Load all hints for a point_type from PostgreSQL, return as dict."""
+    result = await conn.execute(
+        text(
+            "SELECT point_id, district, landmarks, description "
+            "FROM point_hints WHERE point_type = :point_type"
+        ),
+        {"point_type": point_type},
+    )
+    hints: dict[str, dict[str, str]] = {}
+    for row in result.mappings():
+        hints[row["point_id"]] = {
+            "district": row["district"],
+            "landmarks": row["landmarks"],
+            "description": row["description"],
+        }
+    return hints
+
+
+async def _sync_hints_to_redis(redis_key: str, hints: dict[str, Any]) -> None:
+    """Best-effort sync of full hints dict to Redis cache."""
+    try:
+        redis = await _get_redis()
+        await redis.set(redis_key, json.dumps(hints, ensure_ascii=False))
+    except Exception:
+        logger.warning("Redis sync failed for %s", redis_key, exc_info=True)
+
+
+def _redis_key_for_type(point_type: str) -> str:
+    return REDIS_KEY if point_type == "fitting_station" else PICKUP_HINTS_KEY
+
+
 class StationHint(BaseModel):
     district: str = ""
     landmarks: str = ""
     description: str = ""
 
 
+# ── Station Hints ─────────────────────────────────────────
+
+
 @router.get("/station-hints")
 async def get_station_hints(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Return all station hints {station_id: {district, landmarks, description}}."""
-    redis = await _get_redis()
-    raw = await redis.get(REDIS_KEY)
-    hints = json.loads(raw) if raw else {}
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        hints = await _load_hints_from_pg(conn, "fitting_station")
+    # Warm Redis cache
+    await _sync_hints_to_redis(REDIS_KEY, hints)
     return {"hints": hints}
 
 
@@ -61,13 +111,29 @@ async def upsert_station_hint(
     _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Create or update hints for a single station."""
-    redis = await _get_redis()
-    raw = await redis.get(REDIS_KEY)
-    hints = json.loads(raw) if raw else {}
-    hints[station_id] = hint.model_dump()
-    await redis.set(REDIS_KEY, json.dumps(hints, ensure_ascii=False))
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO point_hints (point_type, point_id, district, landmarks, description) "
+                "VALUES (:point_type, :point_id, :district, :landmarks, :description) "
+                "ON CONFLICT (point_type, point_id) DO UPDATE SET "
+                "district = EXCLUDED.district, landmarks = EXCLUDED.landmarks, "
+                "description = EXCLUDED.description, updated_at = now()"
+            ),
+            {
+                "point_type": "fitting_station",
+                "point_id": station_id,
+                "district": hint.district,
+                "landmarks": hint.landmarks,
+                "description": hint.description,
+            },
+        )
+        hints = await _load_hints_from_pg(conn, "fitting_station")
+    # PG committed — sync Redis best-effort
+    await _sync_hints_to_redis(REDIS_KEY, hints)
     logger.info("Station hint upserted: %s", station_id)
-    return {"station_id": station_id, "hint": hints[station_id]}
+    return {"station_id": station_id, "hint": hint.model_dump()}
 
 
 @router.delete("/station-hints/{station_id}")
@@ -76,13 +142,20 @@ async def delete_station_hint(
     _: dict[str, Any] = _perm_w,
 ) -> dict[str, str]:
     """Remove hints for a single station."""
-    redis = await _get_redis()
-    raw = await redis.get(REDIS_KEY)
-    hints = json.loads(raw) if raw else {}
-    if station_id not in hints:
-        raise HTTPException(status_code=404, detail="Station hint not found")
-    del hints[station_id]
-    await redis.set(REDIS_KEY, json.dumps(hints, ensure_ascii=False))
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(
+                "DELETE FROM point_hints "
+                "WHERE point_type = 'fitting_station' AND point_id = :point_id"
+            ),
+            {"point_id": station_id},
+        )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Station hint not found")
+        hints = await _load_hints_from_pg(conn, "fitting_station")
+    # PG committed — sync Redis best-effort
+    await _sync_hints_to_redis(REDIS_KEY, hints)
     logger.info("Station hint deleted: %s", station_id)
     return {"status": "deleted", "station_id": station_id}
 
@@ -144,9 +217,11 @@ async def refresh_fitting_stations(_: dict[str, Any] = _perm_w) -> dict[str, Any
 @router.get("/pickup-hints")
 async def get_pickup_hints(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Return all pickup point hints {point_id: {district, landmarks, description}}."""
-    redis = await _get_redis()
-    raw = await redis.get(PICKUP_HINTS_KEY)
-    hints = json.loads(raw) if raw else {}
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        hints = await _load_hints_from_pg(conn, "pickup_point")
+    # Warm Redis cache
+    await _sync_hints_to_redis(PICKUP_HINTS_KEY, hints)
     return {"hints": hints}
 
 
@@ -157,13 +232,29 @@ async def upsert_pickup_hint(
     _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Create or update hints for a single pickup point."""
-    redis = await _get_redis()
-    raw = await redis.get(PICKUP_HINTS_KEY)
-    hints = json.loads(raw) if raw else {}
-    hints[point_id] = hint.model_dump()
-    await redis.set(PICKUP_HINTS_KEY, json.dumps(hints, ensure_ascii=False))
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO point_hints (point_type, point_id, district, landmarks, description) "
+                "VALUES (:point_type, :point_id, :district, :landmarks, :description) "
+                "ON CONFLICT (point_type, point_id) DO UPDATE SET "
+                "district = EXCLUDED.district, landmarks = EXCLUDED.landmarks, "
+                "description = EXCLUDED.description, updated_at = now()"
+            ),
+            {
+                "point_type": "pickup_point",
+                "point_id": point_id,
+                "district": hint.district,
+                "landmarks": hint.landmarks,
+                "description": hint.description,
+            },
+        )
+        hints = await _load_hints_from_pg(conn, "pickup_point")
+    # PG committed — sync Redis best-effort
+    await _sync_hints_to_redis(PICKUP_HINTS_KEY, hints)
     logger.info("Pickup point hint upserted: %s", point_id)
-    return {"point_id": point_id, "hint": hints[point_id]}
+    return {"point_id": point_id, "hint": hint.model_dump()}
 
 
 @router.delete("/pickup-hints/{point_id}")
@@ -172,13 +263,20 @@ async def delete_pickup_hint(
     _: dict[str, Any] = _perm_w,
 ) -> dict[str, str]:
     """Remove hints for a single pickup point."""
-    redis = await _get_redis()
-    raw = await redis.get(PICKUP_HINTS_KEY)
-    hints = json.loads(raw) if raw else {}
-    if point_id not in hints:
-        raise HTTPException(status_code=404, detail="Pickup point hint not found")
-    del hints[point_id]
-    await redis.set(PICKUP_HINTS_KEY, json.dumps(hints, ensure_ascii=False))
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(
+                "DELETE FROM point_hints "
+                "WHERE point_type = 'pickup_point' AND point_id = :point_id"
+            ),
+            {"point_id": point_id},
+        )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="Pickup point hint not found")
+        hints = await _load_hints_from_pg(conn, "pickup_point")
+    # PG committed — sync Redis best-effort
+    await _sync_hints_to_redis(PICKUP_HINTS_KEY, hints)
     logger.info("Pickup point hint deleted: %s", point_id)
     return {"status": "deleted", "point_id": point_id}
 

@@ -1,4 +1,7 @@
-"""Unit tests for point hints admin API (src/api/fitting_hints.py)."""
+"""Unit tests for point hints admin API (src/api/fitting_hints.py).
+
+Tests cover PG write-through with Redis cache sync.
+"""
 
 from __future__ import annotations
 
@@ -21,6 +24,89 @@ def _admin_token() -> str:
 
 def _auth() -> dict[str, str]:
     return {"Authorization": f"Bearer {_admin_token()}"}
+
+
+# ── In-memory PG mock ─────────────────────────────────────
+
+
+class _FakeResult:
+    """Mimics SQLAlchemy CursorResult for simple queries."""
+
+    def __init__(self, rows: list[dict[str, str]], rowcount: int = 0) -> None:
+        self._rows = rows
+        self.rowcount = rowcount
+
+    def mappings(self) -> list[dict[str, str]]:
+        return self._rows
+
+
+class _FakeConn:
+    """In-memory connection that stores point_hints rows."""
+
+    def __init__(self, store: dict[tuple[str, str], dict[str, str]]) -> None:
+        self._store = store
+
+    async def execute(self, stmt: object, params: dict[str, str] | None = None) -> _FakeResult:
+        sql = str(stmt)
+        params = params or {}
+
+        if "INSERT INTO point_hints" in sql:
+            key = (params["point_type"], params["point_id"])
+            self._store[key] = {
+                "district": params.get("district", ""),
+                "landmarks": params.get("landmarks", ""),
+                "description": params.get("description", ""),
+            }
+            return _FakeResult([], rowcount=1)
+
+        if "DELETE FROM point_hints" in sql:
+            point_id = params["point_id"]
+            # Determine point_type from SQL
+            if "fitting_station" in sql:
+                key = ("fitting_station", point_id)
+            else:
+                key = ("pickup_point", point_id)
+            if key in self._store:
+                del self._store[key]
+                return _FakeResult([], rowcount=1)
+            return _FakeResult([], rowcount=0)
+
+        if "SELECT" in sql and "point_hints" in sql:
+            point_type = params.get("point_type", "")
+            rows = []
+            for (pt, pid), hint in self._store.items():
+                if pt == point_type:
+                    rows.append({"point_id": pid, **hint})
+            return _FakeResult(rows)
+
+        return _FakeResult([])
+
+
+class _FakeEngine:
+    """Mimics AsyncEngine with context-managed connection."""
+
+    def __init__(self, store: dict[tuple[str, str], dict[str, str]]) -> None:
+        self._store = store
+
+    def begin(self) -> _FakeEngine:
+        self._conn = _FakeConn(self._store)
+        return self
+
+    async def __aenter__(self) -> _FakeConn:
+        return self._conn
+
+    async def __aexit__(self, *args: object) -> None:
+        pass
+
+
+@pytest.fixture()
+def pg_store() -> dict[tuple[str, str], dict[str, str]]:
+    return {}
+
+
+@pytest.fixture()
+def mock_engine(pg_store: dict[tuple[str, str], dict[str, str]]) -> _FakeEngine:
+    return _FakeEngine(pg_store)
 
 
 @pytest.fixture()
@@ -55,19 +141,26 @@ def client() -> TestClient:
     return TestClient(app)
 
 
+# ── Station Hints: GET ────────────────────────────────────
+
+
 class TestGetStationHints:
     """Test GET /admin/fitting/station-hints."""
 
     @patch("src.api.auth.get_settings")
     @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
     def test_returns_empty_when_no_hints(
         self,
+        mock_get_engine: MagicMock,
         mock_get_redis: MagicMock,
         mock_settings: MagicMock,
         client: TestClient,
+        mock_engine: _FakeEngine,
         mock_redis: AsyncMock,
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
         mock_get_redis.return_value = mock_redis
         resp = client.get("/admin/fitting/station-hints", headers=_auth())
         assert resp.status_code == 200
@@ -75,28 +168,61 @@ class TestGetStationHints:
 
     @patch("src.api.auth.get_settings")
     @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
     def test_returns_existing_hints(
         self,
+        mock_get_engine: MagicMock,
         mock_get_redis: MagicMock,
         mock_settings: MagicMock,
         client: TestClient,
+        mock_engine: _FakeEngine,
         mock_redis: AsyncMock,
+        pg_store: dict,
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
         mock_get_redis.return_value = mock_redis
-        hints = {
-            "station-1": {
-                "district": "Правий берег",
-                "landmarks": "біля Піт Лайн",
-                "description": "",
-            }
+        pg_store[("fitting_station", "station-1")] = {
+            "district": "Правий берег",
+            "landmarks": "біля Піт Лайн",
+            "description": "",
         }
-        mock_redis._store["fitting:station_hints"] = json.dumps(hints)
         resp = client.get("/admin/fitting/station-hints", headers=_auth())
         assert resp.status_code == 200
         data = resp.json()
         assert data["hints"]["station-1"]["district"] == "Правий берег"
         assert data["hints"]["station-1"]["landmarks"] == "біля Піт Лайн"
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
+    def test_get_warms_redis_cache(
+        self,
+        mock_get_engine: MagicMock,
+        mock_get_redis: MagicMock,
+        mock_settings: MagicMock,
+        client: TestClient,
+        mock_engine: _FakeEngine,
+        mock_redis: AsyncMock,
+        pg_store: dict,
+    ) -> None:
+        """GET station-hints should sync PG data into Redis cache."""
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
+        mock_get_redis.return_value = mock_redis
+        pg_store[("fitting_station", "st-1")] = {
+            "district": "Центр",
+            "landmarks": "",
+            "description": "",
+        }
+        client.get("/admin/fitting/station-hints", headers=_auth())
+        # Redis should be warmed with PG data
+        assert "fitting:station_hints" in mock_redis._store
+        cached = json.loads(mock_redis._store["fitting:station_hints"])
+        assert cached["st-1"]["district"] == "Центр"
+
+
+# ── Station Hints: PUT ────────────────────────────────────
 
 
 class TestUpsertStationHint:
@@ -104,14 +230,19 @@ class TestUpsertStationHint:
 
     @patch("src.api.auth.get_settings")
     @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
     def test_creates_new_hint(
         self,
+        mock_get_engine: MagicMock,
         mock_get_redis: MagicMock,
         mock_settings: MagicMock,
         client: TestClient,
+        mock_engine: _FakeEngine,
         mock_redis: AsyncMock,
+        pg_store: dict,
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
         mock_get_redis.return_value = mock_redis
         resp = client.put(
             "/admin/fitting/station-hints/st-123",
@@ -122,42 +253,57 @@ class TestUpsertStationHint:
         data = resp.json()
         assert data["station_id"] == "st-123"
         assert data["hint"]["district"] == "Лівий берег"
-        stored = json.loads(mock_redis._store["fitting:station_hints"])
-        assert "st-123" in stored
-        assert stored["st-123"]["landmarks"] == "Мост"
+        # Verify persisted in PG store
+        assert ("fitting_station", "st-123") in pg_store
+        assert pg_store[("fitting_station", "st-123")]["landmarks"] == "Мост"
+        # Verify synced to Redis
+        cached = json.loads(mock_redis._store["fitting:station_hints"])
+        assert "st-123" in cached
 
     @patch("src.api.auth.get_settings")
     @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
     def test_updates_existing_hint(
         self,
+        mock_get_engine: MagicMock,
         mock_get_redis: MagicMock,
         mock_settings: MagicMock,
         client: TestClient,
+        mock_engine: _FakeEngine,
         mock_redis: AsyncMock,
+        pg_store: dict,
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
         mock_get_redis.return_value = mock_redis
-        initial = {"st-123": {"district": "old", "landmarks": "", "description": ""}}
-        mock_redis._store["fitting:station_hints"] = json.dumps(initial)
+        pg_store[("fitting_station", "st-123")] = {
+            "district": "old",
+            "landmarks": "",
+            "description": "",
+        }
         resp = client.put(
             "/admin/fitting/station-hints/st-123",
             json={"district": "new district", "landmarks": "new lm", "description": "desc"},
             headers=_auth(),
         )
         assert resp.status_code == 200
-        stored = json.loads(mock_redis._store["fitting:station_hints"])
-        assert stored["st-123"]["district"] == "new district"
+        assert pg_store[("fitting_station", "st-123")]["district"] == "new district"
 
     @patch("src.api.auth.get_settings")
     @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
     def test_defaults_to_empty_strings(
         self,
+        mock_get_engine: MagicMock,
         mock_get_redis: MagicMock,
         mock_settings: MagicMock,
         client: TestClient,
+        mock_engine: _FakeEngine,
         mock_redis: AsyncMock,
+        pg_store: dict,
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
         mock_get_redis.return_value = mock_redis
         resp = client.put(
             "/admin/fitting/station-hints/st-456",
@@ -165,8 +311,14 @@ class TestUpsertStationHint:
             headers=_auth(),
         )
         assert resp.status_code == 200
-        stored = json.loads(mock_redis._store["fitting:station_hints"])
-        assert stored["st-456"] == {"district": "", "landmarks": "", "description": ""}
+        assert pg_store[("fitting_station", "st-456")] == {
+            "district": "",
+            "landmarks": "",
+            "description": "",
+        }
+
+
+# ── Station Hints: DELETE ─────────────────────────────────
 
 
 class TestDeleteStationHint:
@@ -174,36 +326,82 @@ class TestDeleteStationHint:
 
     @patch("src.api.auth.get_settings")
     @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
     def test_deletes_existing_hint(
         self,
+        mock_get_engine: MagicMock,
         mock_get_redis: MagicMock,
         mock_settings: MagicMock,
         client: TestClient,
+        mock_engine: _FakeEngine,
         mock_redis: AsyncMock,
+        pg_store: dict,
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
         mock_get_redis.return_value = mock_redis
-        initial = {"st-1": {"district": "d", "landmarks": "l", "description": ""}}
-        mock_redis._store["fitting:station_hints"] = json.dumps(initial)
+        pg_store[("fitting_station", "st-1")] = {
+            "district": "d",
+            "landmarks": "l",
+            "description": "",
+        }
         resp = client.delete("/admin/fitting/station-hints/st-1", headers=_auth())
         assert resp.status_code == 200
         assert resp.json()["status"] == "deleted"
-        stored = json.loads(mock_redis._store["fitting:station_hints"])
-        assert "st-1" not in stored
+        assert ("fitting_station", "st-1") not in pg_store
 
     @patch("src.api.auth.get_settings")
     @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
     def test_404_when_not_found(
         self,
+        mock_get_engine: MagicMock,
         mock_get_redis: MagicMock,
         mock_settings: MagicMock,
         client: TestClient,
+        mock_engine: _FakeEngine,
         mock_redis: AsyncMock,
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
         mock_get_redis.return_value = mock_redis
         resp = client.delete("/admin/fitting/station-hints/nonexistent", headers=_auth())
         assert resp.status_code == 404
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
+    def test_delete_syncs_redis(
+        self,
+        mock_get_engine: MagicMock,
+        mock_get_redis: MagicMock,
+        mock_settings: MagicMock,
+        client: TestClient,
+        mock_engine: _FakeEngine,
+        mock_redis: AsyncMock,
+        pg_store: dict,
+    ) -> None:
+        """After delete, Redis cache should reflect remaining hints."""
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
+        mock_get_redis.return_value = mock_redis
+        pg_store[("fitting_station", "st-1")] = {
+            "district": "d1",
+            "landmarks": "",
+            "description": "",
+        }
+        pg_store[("fitting_station", "st-2")] = {
+            "district": "d2",
+            "landmarks": "",
+            "description": "",
+        }
+        client.delete("/admin/fitting/station-hints/st-1", headers=_auth())
+        cached = json.loads(mock_redis._store["fitting:station_hints"])
+        assert "st-1" not in cached
+        assert "st-2" in cached
+
+
+# ── List Stations (Redis proxy) ───────────────────────────
 
 
 class TestListStations:
@@ -247,6 +445,9 @@ class TestListStations:
         assert data["stations"][0]["name"] == "Station 1"
 
 
+# ── Hint Merge Logic ──────────────────────────────────────
+
+
 class TestHintMergeLogic:
     """Test that hints are correctly merged into station data."""
 
@@ -282,19 +483,26 @@ class TestHintMergeLogic:
         assert "district" not in stations[2]  # no hint for st-3
 
 
+# ── Pickup Point Hints ────────────────────────────────────
+
+
 class TestGetPickupHints:
     """Test GET /admin/fitting/pickup-hints."""
 
     @patch("src.api.auth.get_settings")
     @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
     def test_returns_empty_when_no_hints(
         self,
+        mock_get_engine: MagicMock,
         mock_get_redis: MagicMock,
         mock_settings: MagicMock,
         client: TestClient,
+        mock_engine: _FakeEngine,
         mock_redis: AsyncMock,
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
         mock_get_redis.return_value = mock_redis
         resp = client.get("/admin/fitting/pickup-hints", headers=_auth())
         assert resp.status_code == 200
@@ -302,27 +510,56 @@ class TestGetPickupHints:
 
     @patch("src.api.auth.get_settings")
     @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
     def test_returns_existing_hints(
         self,
+        mock_get_engine: MagicMock,
         mock_get_redis: MagicMock,
         mock_settings: MagicMock,
         client: TestClient,
+        mock_engine: _FakeEngine,
         mock_redis: AsyncMock,
+        pg_store: dict,
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
         mock_get_redis.return_value = mock_redis
-        hints = {
-            "pp-1": {
-                "district": "Центр",
-                "landmarks": "біля метро Університет",
-                "description": "",
-            }
+        pg_store[("pickup_point", "pp-1")] = {
+            "district": "Центр",
+            "landmarks": "біля метро Університет",
+            "description": "",
         }
-        mock_redis._store["pickup:point_hints"] = json.dumps(hints)
         resp = client.get("/admin/fitting/pickup-hints", headers=_auth())
         assert resp.status_code == 200
         data = resp.json()
         assert data["hints"]["pp-1"]["district"] == "Центр"
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
+    def test_get_warms_redis_cache(
+        self,
+        mock_get_engine: MagicMock,
+        mock_get_redis: MagicMock,
+        mock_settings: MagicMock,
+        client: TestClient,
+        mock_engine: _FakeEngine,
+        mock_redis: AsyncMock,
+        pg_store: dict,
+    ) -> None:
+        """GET pickup-hints should sync PG data into Redis cache."""
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
+        mock_get_redis.return_value = mock_redis
+        pg_store[("pickup_point", "pp-1")] = {
+            "district": "Оболонь",
+            "landmarks": "",
+            "description": "",
+        }
+        client.get("/admin/fitting/pickup-hints", headers=_auth())
+        assert "pickup:point_hints" in mock_redis._store
+        cached = json.loads(mock_redis._store["pickup:point_hints"])
+        assert cached["pp-1"]["district"] == "Оболонь"
 
 
 class TestUpsertPickupHint:
@@ -330,14 +567,19 @@ class TestUpsertPickupHint:
 
     @patch("src.api.auth.get_settings")
     @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
     def test_creates_new_hint(
         self,
+        mock_get_engine: MagicMock,
         mock_get_redis: MagicMock,
         mock_settings: MagicMock,
         client: TestClient,
+        mock_engine: _FakeEngine,
         mock_redis: AsyncMock,
+        pg_store: dict,
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
         mock_get_redis.return_value = mock_redis
         resp = client.put(
             "/admin/fitting/pickup-hints/pp-100",
@@ -348,31 +590,41 @@ class TestUpsertPickupHint:
         data = resp.json()
         assert data["point_id"] == "pp-100"
         assert data["hint"]["district"] == "Оболонь"
-        stored = json.loads(mock_redis._store["pickup:point_hints"])
-        assert "pp-100" in stored
-        assert stored["pp-100"]["landmarks"] == "ТЦ Блокбастер"
+        # Verify PG persistence
+        assert ("pickup_point", "pp-100") in pg_store
+        assert pg_store[("pickup_point", "pp-100")]["landmarks"] == "ТЦ Блокбастер"
+        # Verify Redis sync
+        cached = json.loads(mock_redis._store["pickup:point_hints"])
+        assert "pp-100" in cached
 
     @patch("src.api.auth.get_settings")
     @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
     def test_updates_existing_hint(
         self,
+        mock_get_engine: MagicMock,
         mock_get_redis: MagicMock,
         mock_settings: MagicMock,
         client: TestClient,
+        mock_engine: _FakeEngine,
         mock_redis: AsyncMock,
+        pg_store: dict,
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
         mock_get_redis.return_value = mock_redis
-        initial = {"pp-100": {"district": "old", "landmarks": "", "description": ""}}
-        mock_redis._store["pickup:point_hints"] = json.dumps(initial)
+        pg_store[("pickup_point", "pp-100")] = {
+            "district": "old",
+            "landmarks": "",
+            "description": "",
+        }
         resp = client.put(
             "/admin/fitting/pickup-hints/pp-100",
             json={"district": "new", "landmarks": "new lm", "description": "desc"},
             headers=_auth(),
         )
         assert resp.status_code == 200
-        stored = json.loads(mock_redis._store["pickup:point_hints"])
-        assert stored["pp-100"]["district"] == "new"
+        assert pg_store[("pickup_point", "pp-100")]["district"] == "new"
 
 
 class TestDeletePickupHint:
@@ -380,36 +632,50 @@ class TestDeletePickupHint:
 
     @patch("src.api.auth.get_settings")
     @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
     def test_deletes_existing_hint(
         self,
+        mock_get_engine: MagicMock,
         mock_get_redis: MagicMock,
         mock_settings: MagicMock,
         client: TestClient,
+        mock_engine: _FakeEngine,
         mock_redis: AsyncMock,
+        pg_store: dict,
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
         mock_get_redis.return_value = mock_redis
-        initial = {"pp-1": {"district": "d", "landmarks": "l", "description": ""}}
-        mock_redis._store["pickup:point_hints"] = json.dumps(initial)
+        pg_store[("pickup_point", "pp-1")] = {
+            "district": "d",
+            "landmarks": "l",
+            "description": "",
+        }
         resp = client.delete("/admin/fitting/pickup-hints/pp-1", headers=_auth())
         assert resp.status_code == 200
         assert resp.json()["status"] == "deleted"
-        stored = json.loads(mock_redis._store["pickup:point_hints"])
-        assert "pp-1" not in stored
+        assert ("pickup_point", "pp-1") not in pg_store
 
     @patch("src.api.auth.get_settings")
     @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
     def test_404_when_not_found(
         self,
+        mock_get_engine: MagicMock,
         mock_get_redis: MagicMock,
         mock_settings: MagicMock,
         client: TestClient,
+        mock_engine: _FakeEngine,
         mock_redis: AsyncMock,
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
         mock_get_redis.return_value = mock_redis
         resp = client.delete("/admin/fitting/pickup-hints/nonexistent", headers=_auth())
         assert resp.status_code == 404
+
+
+# ── List Pickup Points (Redis proxy) ──────────────────────
 
 
 class TestListPickupPoints:
@@ -486,6 +752,9 @@ class TestPickupPointHintMergeLogic:
         assert "district" not in points[2]  # no hint for pp-3
 
 
+# ── Tool Result Compressor ────────────────────────────────
+
+
 class TestCompressorKeepsHintFields:
     """Test that tool_result_compressor preserves district/landmarks."""
 
@@ -537,6 +806,9 @@ class TestCompressorKeepsHintFields:
         assert data["points"][0]["landmarks"] == "біля метро"
         assert "type" not in data["points"][0]
         assert "district" not in data["points"][1]
+
+
+# ── Refresh Endpoints (unchanged, Redis-only) ─────────────
 
 
 class TestRefreshFittingStations:
@@ -718,3 +990,67 @@ class TestRefreshPickupPoints:
         data = resp.json()
         assert data["total"] == 1  # only ProKoleso succeeded
         assert len(data["points"]) == 1
+
+
+# ── Redis Sync Failure Resilience ─────────────────────────
+
+
+class TestRedisSyncResilience:
+    """Verify that PG write succeeds even when Redis sync fails."""
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
+    def test_upsert_succeeds_when_redis_fails(
+        self,
+        mock_get_engine: MagicMock,
+        mock_get_redis: MagicMock,
+        mock_settings: MagicMock,
+        client: TestClient,
+        mock_engine: _FakeEngine,
+        pg_store: dict,
+    ) -> None:
+        """PUT should succeed even if Redis is down — PG is primary."""
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
+        # Redis that raises on set
+        broken_redis = AsyncMock()
+        broken_redis.set = AsyncMock(side_effect=ConnectionError("Redis down"))
+        mock_get_redis.return_value = broken_redis
+
+        resp = client.put(
+            "/admin/fitting/station-hints/st-99",
+            json={"district": "Тест", "landmarks": "", "description": ""},
+            headers=_auth(),
+        )
+        assert resp.status_code == 200
+        assert ("fitting_station", "st-99") in pg_store
+        assert pg_store[("fitting_station", "st-99")]["district"] == "Тест"
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    @patch("src.api.fitting_hints._get_engine")
+    def test_delete_succeeds_when_redis_fails(
+        self,
+        mock_get_engine: MagicMock,
+        mock_get_redis: MagicMock,
+        mock_settings: MagicMock,
+        client: TestClient,
+        mock_engine: _FakeEngine,
+        pg_store: dict,
+    ) -> None:
+        """DELETE should succeed even if Redis is down — PG is primary."""
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_engine.return_value = mock_engine
+        broken_redis = AsyncMock()
+        broken_redis.set = AsyncMock(side_effect=ConnectionError("Redis down"))
+        mock_get_redis.return_value = broken_redis
+
+        pg_store[("fitting_station", "st-99")] = {
+            "district": "d",
+            "landmarks": "",
+            "description": "",
+        }
+        resp = client.delete("/admin/fitting/station-hints/st-99", headers=_auth())
+        assert resp.status_code == 200
+        assert ("fitting_station", "st-99") not in pg_store
