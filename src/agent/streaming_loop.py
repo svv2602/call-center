@@ -15,6 +15,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from src.agent.agent import MAX_HISTORY_MESSAGES, MAX_TOOL_CALLS_PER_TURN
+
+# Per-tool execution timeout (seconds). Prevents a single slow 1C/API call
+# from blocking the entire agent turn. On timeout, tool returns an error
+# message so the LLM can respond gracefully.
+_TOOL_TIMEOUT_SEC = 15
 from src.agent.history_compressor import compress_history
 from src.agent.prompts import SYSTEM_PROMPT, build_system_prompt_with_context
 from src.agent.tool_result_compressor import compress_tool_result
@@ -212,7 +217,7 @@ class StreamingAgentLoop:
             if not result.tool_calls:
                 break
 
-            # Execute tool calls in parallel
+            # Execute tool calls in parallel (with per-tool timeout)
             async def _execute_one_tool(tc: Any) -> dict[str, Any]:
                 try:
                     args = json.loads(tc.arguments_json) if tc.arguments_json else {}
@@ -220,7 +225,16 @@ class StreamingAgentLoop:
                     args = {}
                 if self._pii_vault is not None:
                     args = self._pii_vault.restore_in_args(args)
-                raw = await self._tool_router.execute(tc.name, args)
+                try:
+                    raw = await asyncio.wait_for(
+                        self._tool_router.execute(tc.name, args),
+                        timeout=_TOOL_TIMEOUT_SEC,
+                    )
+                except TimeoutError:
+                    logger.error(
+                        "Tool %s timed out after %ds", tc.name, _TOOL_TIMEOUT_SEC
+                    )
+                    raw = {"error": "Сервіс тимчасово не відповідає, спробуйте ще раз"}
                 content = compress_tool_result(tc.name, raw)
                 if self._pii_vault is not None:
                     content = self._pii_vault.mask(content)

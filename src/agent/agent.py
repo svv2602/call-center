@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 # Limits
 MAX_TOOL_CALLS_PER_TURN = 5
 MAX_HISTORY_MESSAGES = 40
+_TOOL_TIMEOUT_SEC = 15  # Per-tool execution timeout
 
 
 class ToolRouter:
@@ -308,12 +309,21 @@ class LLMAgent:
             if not tool_uses:
                 break
 
-            # Execute tool calls in parallel and add results
+            # Execute tool calls in parallel (with per-tool timeout)
             async def _execute_one(tu: dict[str, Any]) -> dict[str, Any]:
                 args = tu["input"]
                 if self._pii_vault is not None:
                     args = self._pii_vault.restore_in_args(args)
-                raw = await self._tool_router.execute(tu["name"], args)
+                try:
+                    raw = await asyncio.wait_for(
+                        self._tool_router.execute(tu["name"], args),
+                        timeout=_TOOL_TIMEOUT_SEC,
+                    )
+                except TimeoutError:
+                    logger.error(
+                        "Tool %s timed out after %ds", tu["name"], _TOOL_TIMEOUT_SEC
+                    )
+                    raw = {"error": "Сервіс тимчасово не відповідає, спробуйте ще раз"}
                 content = compress_tool_result(tu["name"], raw)
                 if self._pii_vault is not None:
                     content = self._pii_vault.mask(content)

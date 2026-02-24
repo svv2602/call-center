@@ -59,6 +59,13 @@ _TTS_SUBSTITUTIONS: list[tuple[re.Pattern[str], str]] = [
     (re.compile(r"\bгрн\.?(?=\s|$)"), "гривень"),
     # Phone format normalization: +380... → read as digits with pauses
     (re.compile(r"\+380(\d{2})(\d{3})(\d{2})(\d{2})"), r"+380, \1, \2, \3, \4"),
+    # Station codes: "1Д" → "1 де", "55К" → "55 ка" (prevent reading as units)
+    (re.compile(r"(\d+)\s*Д\b"), r"\1 де"),
+    (re.compile(r"(\d+)\s*К\b"), r"\1 ка"),
+    (re.compile(r"(\d+)\s*Х\b"), r"\1 ха"),
+    (re.compile(r"(\d+)\s*З\b"), r"\1 зе"),
+    (re.compile(r"(\d+)\s*Ч\b"), r"\1 че"),
+    (re.compile(r"(\d+)\s*А\b"), r"\1 а"),
 ]
 
 
