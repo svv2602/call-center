@@ -107,7 +107,7 @@ class TestCompressToolResult:
         assert "Шевченківський" in result  # district is preserved for LLM
         assert "services" not in result
 
-    def test_pickup_points_strips_type(self) -> None:
+    def test_pickup_points_strips_type_keeps_hints(self) -> None:
         data = {
             "points": [
                 {
@@ -115,11 +115,15 @@ class TestCompressToolResult:
                     "address": "вул. Велика Васильківська 100",
                     "city": "Київ",
                     "type": "pickup",
+                    "district": "Шевченківський",
+                    "landmarks": "біля метро",
                 },
             ]
         }
         result = compress_tool_result("get_pickup_points", data)
         assert "Київ" in result
+        assert "Шевченківський" in result  # district preserved
+        assert "біля метро" in result  # landmarks preserved
         assert "'type'" not in result
 
     def test_knowledge_truncates_long_content(self) -> None:

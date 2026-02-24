@@ -178,6 +178,7 @@ def _register_live_tools(
 
         async def _get_pickup_points(city: str = "") -> dict[str, Any]:
             cache_key = f"onec:points:{network}"
+            result: dict[str, Any] | None = None
 
             # 1. Redis cache
             if redis_client:
@@ -189,30 +190,56 @@ def _register_live_tools(
                             all_points = [
                                 p for p in all_points if city.lower() in p.get("city", "").lower()
                             ]
-                        return {"total": len(all_points), "points": all_points[:15]}
+                        result = {"total": len(all_points), "points": all_points[:15]}
                 except Exception:
                     pass
 
             # 2. 1C API
-            data = await onec_client.get_pickup_points(network)
-            raw_points = data.get("data", [])
-            all_points = [
-                {
-                    "id": p.get("id", ""),
-                    "address": p.get("point", ""),
-                    "type": p.get("point_type", ""),
-                    "city": p.get("City", ""),
-                }
-                for p in raw_points
-            ]
-            if redis_client:
-                with contextlib.suppress(Exception):
-                    await redis_client.setex(
-                        cache_key, 3600, json.dumps(all_points, ensure_ascii=False)
-                    )
-            if city:
-                all_points = [p for p in all_points if city.lower() in p.get("city", "").lower()]
-            return {"total": len(all_points), "points": all_points[:15]}
+            if result is None:
+                data = await onec_client.get_pickup_points(network)
+                raw_points = data.get("data", [])
+                all_points = [
+                    {
+                        "id": p.get("id", ""),
+                        "address": p.get("point", ""),
+                        "type": p.get("point_type", ""),
+                        "city": p.get("City", ""),
+                    }
+                    for p in raw_points
+                ]
+                if redis_client:
+                    with contextlib.suppress(Exception):
+                        await redis_client.setex(
+                            cache_key, 3600, json.dumps(all_points, ensure_ascii=False)
+                        )
+                if city:
+                    all_points = [
+                        p for p in all_points if city.lower() in p.get("city", "").lower()
+                    ]
+                result = {"total": len(all_points), "points": all_points[:15]}
+
+            # Merge pickup point hints from Redis
+            if redis_client is not None:
+                try:
+                    hints_raw = await redis_client.get("pickup:point_hints")
+                    if hints_raw:
+                        hints = json.loads(
+                            hints_raw if isinstance(hints_raw, str) else hints_raw.decode()
+                        )
+                        for p in result.get("points", []):
+                            pid = p.get("id", "")
+                            if pid and pid in hints:
+                                h = hints[pid]
+                                if h.get("district"):
+                                    p["district"] = h["district"]
+                                if h.get("landmarks"):
+                                    p["landmarks"] = h["landmarks"]
+                                if h.get("description"):
+                                    p["description"] = h["description"]
+                except Exception:
+                    pass
+
+            return result
 
         router.register("get_pickup_points", _get_pickup_points)
         logger.info("Live tool registered: get_pickup_points (network=%s)", network)

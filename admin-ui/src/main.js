@@ -29,6 +29,7 @@ import { init as initVehicles } from './pages/vehicles.js';
 import { init as initSandbox } from './pages/sandbox.js';
 import { init as initOnecData } from './pages/onec-data.js';
 import { init as initSttHints } from './pages/stt-hints.js';
+import { init as initPointHints } from './pages/point-hints.js';
 
 // Initialize language, theme, and hash router
 initLang();
@@ -55,6 +56,7 @@ initVehicles();
 initSandbox();
 initOnecData();
 initSttHints();
+initPointHints();
 
 // WebSocket event handler — dispatches real-time updates to active page
 setWsEventHandler((msg) => {

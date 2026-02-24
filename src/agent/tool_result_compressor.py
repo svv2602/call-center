@@ -78,11 +78,12 @@ def _compress_fitting_stations(result: dict[str, Any]) -> str:
 
 
 def _compress_pickup_points(result: dict[str, Any]) -> str:
-    """Keep id, address, city per point."""
+    """Keep id, address, city, district, landmarks per point."""
     if "points" not in result:
         return _compact(result)
     points = [
-        {k: v for k, v in p.items() if k in ("id", "address", "city")} for p in result["points"]
+        {k: v for k, v in p.items() if k in ("id", "address", "city", "district", "landmarks")}
+        for p in result["points"]
     ]
     out = {k: v for k, v in result.items() if k != "points"}
     out["points"] = points

@@ -1221,6 +1221,8 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         network = session.network_id or "ProKoleso"
         cache_key = f"onec:points:{network}"
 
+        result: dict[str, Any] | None = None
+
         # 1. Redis cache
         if _redis:
             try:
@@ -1231,12 +1233,12 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                         all_points = [
                             p for p in all_points if city.lower() in p.get("city", "").lower()
                         ]
-                    return {"total": len(all_points), "points": all_points[:15]}
+                    result = {"total": len(all_points), "points": all_points[:15]}
             except Exception:
                 pass
 
         # 2. 1C API
-        if _onec_client is not None:
+        if result is None and _onec_client is not None:
             try:
                 data = await _onec_client.get_pickup_points(network)
                 raw_points = data.get("data", [])
@@ -1255,12 +1257,36 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     all_points = [
                         p for p in all_points if city.lower() in p.get("city", "").lower()
                     ]
-                return {"total": len(all_points), "points": all_points[:15]}
+                result = {"total": len(all_points), "points": all_points[:15]}
             except Exception:
                 logger.warning("1C pickup points unavailable for %s", network, exc_info=True)
 
         # 3. Fallback to Store API
-        return await client.get_pickup_points(city)
+        if result is None:
+            result = await client.get_pickup_points(city)
+
+        # Merge pickup point hints from Redis
+        if _redis:
+            try:
+                hints_raw = await _redis.get("pickup:point_hints")
+                if hints_raw:
+                    hints = json.loads(
+                        hints_raw if isinstance(hints_raw, str) else hints_raw.decode()
+                    )
+                    for p in result.get("points", []):
+                        pid = p.get("id", "")
+                        if pid and pid in hints:
+                            h = hints[pid]
+                            if h.get("district"):
+                                p["district"] = h["district"]
+                            if h.get("landmarks"):
+                                p["landmarks"] = h["landmarks"]
+                            if h.get("description"):
+                                p["description"] = h["description"]
+            except Exception:
+                pass
+
+        return result
 
     router.register("get_pickup_points", _get_pickup_points)
 

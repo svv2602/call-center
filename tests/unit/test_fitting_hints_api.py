@@ -1,4 +1,4 @@
-"""Unit tests for fitting station hints admin API (src/api/fitting_hints.py)."""
+"""Unit tests for point hints admin API (src/api/fitting_hints.py)."""
 
 from __future__ import annotations
 
@@ -278,6 +278,210 @@ class TestHintMergeLogic:
         assert "district" not in stations[2]  # no hint for st-3
 
 
+class TestGetPickupHints:
+    """Test GET /admin/fitting/pickup-hints."""
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    def test_returns_empty_when_no_hints(
+        self,
+        mock_get_redis: MagicMock,
+        mock_settings: MagicMock,
+        client: TestClient,
+        mock_redis: AsyncMock,
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_redis.return_value = mock_redis
+        resp = client.get("/admin/fitting/pickup-hints", headers=_auth())
+        assert resp.status_code == 200
+        assert resp.json() == {"hints": {}}
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    def test_returns_existing_hints(
+        self,
+        mock_get_redis: MagicMock,
+        mock_settings: MagicMock,
+        client: TestClient,
+        mock_redis: AsyncMock,
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_redis.return_value = mock_redis
+        hints = {
+            "pp-1": {
+                "district": "Центр",
+                "landmarks": "біля метро Університет",
+                "description": "",
+            }
+        }
+        mock_redis._store["pickup:point_hints"] = json.dumps(hints)
+        resp = client.get("/admin/fitting/pickup-hints", headers=_auth())
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["hints"]["pp-1"]["district"] == "Центр"
+
+
+class TestUpsertPickupHint:
+    """Test PUT /admin/fitting/pickup-hints/{point_id}."""
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    def test_creates_new_hint(
+        self,
+        mock_get_redis: MagicMock,
+        mock_settings: MagicMock,
+        client: TestClient,
+        mock_redis: AsyncMock,
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_redis.return_value = mock_redis
+        resp = client.put(
+            "/admin/fitting/pickup-hints/pp-100",
+            json={"district": "Оболонь", "landmarks": "ТЦ Блокбастер", "description": "test"},
+            headers=_auth(),
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["point_id"] == "pp-100"
+        assert data["hint"]["district"] == "Оболонь"
+        stored = json.loads(mock_redis._store["pickup:point_hints"])
+        assert "pp-100" in stored
+        assert stored["pp-100"]["landmarks"] == "ТЦ Блокбастер"
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    def test_updates_existing_hint(
+        self,
+        mock_get_redis: MagicMock,
+        mock_settings: MagicMock,
+        client: TestClient,
+        mock_redis: AsyncMock,
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_redis.return_value = mock_redis
+        initial = {"pp-100": {"district": "old", "landmarks": "", "description": ""}}
+        mock_redis._store["pickup:point_hints"] = json.dumps(initial)
+        resp = client.put(
+            "/admin/fitting/pickup-hints/pp-100",
+            json={"district": "new", "landmarks": "new lm", "description": "desc"},
+            headers=_auth(),
+        )
+        assert resp.status_code == 200
+        stored = json.loads(mock_redis._store["pickup:point_hints"])
+        assert stored["pp-100"]["district"] == "new"
+
+
+class TestDeletePickupHint:
+    """Test DELETE /admin/fitting/pickup-hints/{point_id}."""
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    def test_deletes_existing_hint(
+        self,
+        mock_get_redis: MagicMock,
+        mock_settings: MagicMock,
+        client: TestClient,
+        mock_redis: AsyncMock,
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_redis.return_value = mock_redis
+        initial = {"pp-1": {"district": "d", "landmarks": "l", "description": ""}}
+        mock_redis._store["pickup:point_hints"] = json.dumps(initial)
+        resp = client.delete("/admin/fitting/pickup-hints/pp-1", headers=_auth())
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "deleted"
+        stored = json.loads(mock_redis._store["pickup:point_hints"])
+        assert "pp-1" not in stored
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    def test_404_when_not_found(
+        self,
+        mock_get_redis: MagicMock,
+        mock_settings: MagicMock,
+        client: TestClient,
+        mock_redis: AsyncMock,
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_redis.return_value = mock_redis
+        resp = client.delete("/admin/fitting/pickup-hints/nonexistent", headers=_auth())
+        assert resp.status_code == 404
+
+
+class TestListPickupPoints:
+    """Test GET /admin/fitting/pickup-points."""
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    def test_returns_empty_when_no_cache(
+        self,
+        mock_get_redis: MagicMock,
+        mock_settings: MagicMock,
+        client: TestClient,
+        mock_redis: AsyncMock,
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_redis.return_value = mock_redis
+        resp = client.get("/admin/fitting/pickup-points", headers=_auth())
+        assert resp.status_code == 200
+        assert resp.json() == {"points": []}
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints._get_redis")
+    def test_returns_cached_points_from_multiple_networks(
+        self,
+        mock_get_redis: MagicMock,
+        mock_settings: MagicMock,
+        client: TestClient,
+        mock_redis: AsyncMock,
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_get_redis.return_value = mock_redis
+        pk_points = [{"id": "pp-1", "address": "вул. Тест 1", "city": "Дніпро"}]
+        ts_points = [{"id": "pp-2", "address": "вул. Тест 2", "city": "Київ"}]
+        mock_redis._store["onec:points:ProKoleso"] = json.dumps(pk_points)
+        mock_redis._store["onec:points:Tshina"] = json.dumps(ts_points)
+        resp = client.get("/admin/fitting/pickup-points", headers=_auth())
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["points"]) == 2
+
+
+class TestPickupPointHintMergeLogic:
+    """Test that hints are correctly merged into pickup point data."""
+
+    def test_merge_hints_into_points(self) -> None:
+        """Simulate the merge logic from main.py _get_pickup_points."""
+        points = [
+            {"id": "pp-1", "address": "вул. Тест 1", "city": "Дніпро"},
+            {"id": "pp-2", "address": "вул. Тест 2", "city": "Дніпро"},
+            {"id": "pp-3", "address": "вул. Тест 3", "city": "Київ"},
+        ]
+        hints = {
+            "pp-1": {"district": "Центр", "landmarks": "біля метро", "description": ""},
+            "pp-2": {"district": "Лівий берег", "landmarks": "", "description": "Новий пункт"},
+        }
+
+        for p in points:
+            pid = p.get("id", "")
+            if pid in hints:
+                h = hints[pid]
+                if h.get("district"):
+                    p["district"] = h["district"]
+                if h.get("landmarks"):
+                    p["landmarks"] = h["landmarks"]
+                if h.get("description"):
+                    p["description"] = h["description"]
+
+        assert points[0]["district"] == "Центр"
+        assert points[0]["landmarks"] == "біля метро"
+        assert "description" not in points[0]  # empty string → not added
+        assert points[1]["district"] == "Лівий берег"
+        assert "landmarks" not in points[1]  # empty string → not added
+        assert points[1]["description"] == "Новий пункт"
+        assert "district" not in points[2]  # no hint for pp-3
+
+
 class TestCompressorKeepsHintFields:
     """Test that tool_result_compressor preserves district/landmarks."""
 
@@ -305,3 +509,27 @@ class TestCompressorKeepsHintFields:
         assert data["stations"][0]["landmarks"] == "біля Піт Лайн"
         assert "extra_field" not in data["stations"][0]
         assert "district" not in data["stations"][1]
+
+    def test_pickup_points_compressor_keeps_hints(self) -> None:
+        from src.agent.tool_result_compressor import compress_tool_result
+
+        result = {
+            "total": 2,
+            "points": [
+                {
+                    "id": "pp-1",
+                    "address": "вул. Тест 1",
+                    "city": "Дніпро",
+                    "type": "pickup",
+                    "district": "Центр",
+                    "landmarks": "біля метро",
+                },
+                {"id": "pp-2", "address": "вул. Тест 2", "city": "Київ"},
+            ],
+        }
+        compressed = compress_tool_result("get_pickup_points", result)
+        data = json.loads(compressed)
+        assert data["points"][0]["district"] == "Центр"
+        assert data["points"][0]["landmarks"] == "біля метро"
+        assert "type" not in data["points"][0]
+        assert "district" not in data["points"][1]

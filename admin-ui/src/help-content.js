@@ -127,8 +127,6 @@ export const HELP_PAGES = {
             { titleKey: 'help.configuration.schedules.title', contentKey: 'help.configuration.schedules.content' },
             { titleKey: 'help.configuration.tts.title', contentKey: 'help.configuration.tts.content' },
             { titleKey: 'help.configuration.ttsBreaks.title', contentKey: 'help.configuration.ttsBreaks.content' },
-            { titleKey: 'help.configuration.stationHints.title', contentKey: 'help.configuration.stationHints.content' },
-            { titleKey: 'help.configuration.stationHints.steps', contentKey: 'help.configuration.stationHints.stepsContent' },
             { titleKey: 'help.configuration.affects.title', contentKey: 'help.configuration.affects.content' },
         ],
         tipsKey: 'help.configuration.tips',
@@ -144,6 +142,17 @@ export const HELP_PAGES = {
             { titleKey: 'help.sttHints.overrides.title', contentKey: 'help.sttHints.overrides.content' },
         ],
         tipsKey: 'help.sttHints.tips',
+    },
+    'point-hints': {
+        titleKey: 'help.pointHints.title',
+        overviewKey: 'help.pointHints.overview',
+        sections: [
+            { titleKey: 'help.pointHints.fitting.title', contentKey: 'help.pointHints.fitting.content' },
+            { titleKey: 'help.pointHints.pickup.title', contentKey: 'help.pointHints.pickup.content' },
+            { titleKey: 'help.pointHints.steps', contentKey: 'help.pointHints.stepsContent' },
+            { titleKey: 'help.pointHints.affects.title', contentKey: 'help.pointHints.affects.content' },
+        ],
+        tipsKey: 'help.pointHints.tips',
     },
     notifications: {
         titleKey: 'help.notifications.title',

@@ -9,8 +9,6 @@ import * as tw from '../tw.js';
 let _llmConfig = null;
 let _ttsConfig = null;
 let _taskSchedules = null;
-let _stationHints = {};
-let _stationsList = [];
 
 // ═══════════════════════════════════════════════════════════
 //  Hot-reload конфиг
@@ -736,109 +734,6 @@ async function resetSchedules() {
     }
 }
 
-// ═══════════════════════════════════════════════════════════
-//  Station Hints
-// ═══════════════════════════════════════════════════════════
-async function loadStationHints() {
-    const container = document.getElementById('stationHintsContainer');
-    if (!container) return;
-    container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
-    try {
-        const [hintsData, stationsData] = await Promise.all([
-            api('/admin/fitting/station-hints'),
-            api('/admin/fitting/stations'),
-        ]);
-        _stationHints = hintsData.hints || {};
-        _stationsList = stationsData.stations || [];
-        renderStationHints();
-    } catch (e) {
-        container.innerHTML = `<div class="${tw.emptyState}">${t('settings.stationHintsLoadFailed', {error: escapeHtml(e.message)})}</div>`;
-    }
-}
-
-function renderStationHints() {
-    const container = document.getElementById('stationHintsContainer');
-    if (!container) return;
-
-    if (_stationsList.length === 0) {
-        container.innerHTML = `<div class="${tw.emptyState}">${t('settings.stationHintsNoStations')}</div>`;
-        return;
-    }
-
-    let html = `<div class="overflow-x-auto"><table class="${tw.table}">
-        <thead><tr>
-            <th class="${tw.th}">${t('settings.stationHintsName')}</th>
-            <th class="${tw.th}">${t('settings.stationHintsAddress')}</th>
-            <th class="${tw.th}">${t('settings.stationHintsDistrict')}</th>
-            <th class="${tw.th}">${t('settings.stationHintsLandmarks')}</th>
-            <th class="${tw.th}">${t('settings.stationHintsDescription')}</th>
-            <th class="${tw.th}">${t('settings.stationHintsActions')}</th>
-        </tr></thead><tbody>`;
-
-    for (const station of _stationsList) {
-        const sid = station.station_id || station.id || '';
-        const hint = _stationHints[sid] || {};
-        const district = hint.district || '';
-        const landmarks = hint.landmarks || '';
-        const description = hint.description || '';
-        const name = station.name || '';
-        const address = station.address || '';
-
-        html += `<tr class="${tw.trHover}">
-            <td class="${tw.td}" data-label="${t('settings.stationHintsName')}"><strong>${escapeHtml(name)}</strong><div class="text-[10px] text-neutral-400 font-mono">${escapeHtml(sid)}</div></td>
-            <td class="${tw.td}" data-label="${t('settings.stationHintsAddress')}">${escapeHtml(address)}</td>
-            <td class="${tw.td}" data-label="${t('settings.stationHintsDistrict')}"><input type="text" id="hint-district-${escapeHtml(sid)}" value="${escapeHtml(district)}" placeholder="${t('settings.stationHintsDistrictPh')}" class="text-xs bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-1.5 py-0.5 w-32 focus:outline-none focus:border-blue-500"></td>
-            <td class="${tw.td}" data-label="${t('settings.stationHintsLandmarks')}"><input type="text" id="hint-landmarks-${escapeHtml(sid)}" value="${escapeHtml(landmarks)}" placeholder="${t('settings.stationHintsLandmarksPh')}" class="text-xs bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-1.5 py-0.5 w-40 focus:outline-none focus:border-blue-500"></td>
-            <td class="${tw.td}" data-label="${t('settings.stationHintsDescription')}"><input type="text" id="hint-desc-${escapeHtml(sid)}" value="${escapeHtml(description)}" placeholder="${t('settings.stationHintsDescPh')}" class="text-xs bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-1.5 py-0.5 w-40 focus:outline-none focus:border-blue-500"></td>
-            <td class="${tw.tdActions}" data-label="${t('settings.stationHintsActions')}">
-                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.configuration.saveStationHint('${escapeHtml(sid)}')">${t('common.save')}</button>
-                ${(district || landmarks || description) ? `<button class="${tw.btnSm} text-red-600 dark:text-red-400 ml-1" onclick="window._pages.configuration.deleteStationHint('${escapeHtml(sid)}')">${t('common.delete')}</button>` : ''}
-            </td>
-        </tr>`;
-    }
-    html += '</tbody></table></div>';
-    container.innerHTML = html;
-}
-
-async function saveStationHint(stationId) {
-    const district = document.getElementById(`hint-district-${stationId}`)?.value || '';
-    const landmarks = document.getElementById(`hint-landmarks-${stationId}`)?.value || '';
-    const description = document.getElementById(`hint-desc-${stationId}`)?.value || '';
-
-    if (!district && !landmarks && !description) {
-        // All empty — delete if exists
-        if (_stationHints[stationId]) {
-            await deleteStationHint(stationId);
-        }
-        return;
-    }
-
-    try {
-        await api(`/admin/fitting/station-hints/${encodeURIComponent(stationId)}`, {
-            method: 'PUT',
-            body: JSON.stringify({ district, landmarks, description }),
-        });
-        _stationHints[stationId] = { district, landmarks, description };
-        renderStationHints();
-        showToast(t('settings.stationHintsSaved'), 'success');
-    } catch (e) {
-        showToast(t('settings.stationHintsSaveFailed', {error: e.message}), 'error');
-    }
-}
-
-async function deleteStationHint(stationId) {
-    try {
-        await api(`/admin/fitting/station-hints/${encodeURIComponent(stationId)}`, {
-            method: 'DELETE',
-        });
-        delete _stationHints[stationId];
-        renderStationHints();
-        showToast(t('settings.stationHintsDeleted'), 'success');
-    } catch (e) {
-        showToast(t('settings.stationHintsDeleteFailed', {error: e.message}), 'error');
-    }
-}
-
 export function init() {
     registerPageLoader('configuration', () => {
         loadLLMConfig();
@@ -855,5 +750,4 @@ window._pages.configuration = {
     saveSandboxDefaults,
     loadTTSConfig, saveTTSConfig, testTTS, resetTTSConfig,
     loadTaskSchedules, saveSchedule, runTask, resetSchedules, onFreqChange,
-    loadStationHints, saveStationHint, deleteStationHint,
 };
