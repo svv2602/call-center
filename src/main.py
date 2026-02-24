@@ -912,6 +912,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             router.set_execute_hook(_on_tool_execute)
 
         vault = PIIVault()
+        tenant_agent_name = tenant.get("agent_name") if tenant else None
         agent = LLMAgent(
             api_key=settings.anthropic.api_key,
             model=settings.anthropic.model,
@@ -925,6 +926,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             safety_context=safety_context,
             promotions_context=promotions_context,
             is_modular=is_modular,
+            agent_name=tenant_agent_name,
         )
 
         # Initialize pattern search (if asyncpg pool available)
@@ -961,6 +963,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 few_shot_context=few_shot_context,
                 safety_context=safety_context,
                 is_modular=is_modular,
+                agent_name=tenant_agent_name,
             )
 
         # Run the pipeline (greeting → listen → STT → LLM → TTS loop)
@@ -976,7 +979,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             pattern_search=pattern_search,
             streaming_loop=streaming_loop,
             barge_in_event=barge_in_event,
-            agent_name=tenant.get("agent_name") if tenant else None,
+            agent_name=tenant_agent_name,
             call_logger=_call_logger,
             cost_breakdown=cost,
         )

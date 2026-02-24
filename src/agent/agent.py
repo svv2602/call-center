@@ -106,6 +106,7 @@ class LLMAgent:
         safety_context: str | None = None,
         promotions_context: str | None = None,
         is_modular: bool = False,
+        agent_name: str | None = None,
     ) -> None:
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._model = model
@@ -120,6 +121,7 @@ class LLMAgent:
         self._safety_context = safety_context
         self._promotions_context = promotions_context
         self._is_modular = is_modular
+        self._agent_name = agent_name
         # Accumulated usage from last process_message call (all LLM rounds)
         self.last_input_tokens: int = 0
         self.last_output_tokens: int = 0
@@ -192,6 +194,7 @@ class LLMAgent:
             caller_phone=masked_phone,
             order_id=order_id,
             pattern_context=pattern_context,
+            agent_name=self._agent_name,
         )
 
         response_text = ""

@@ -175,7 +175,10 @@ _MOD_FITTING = """\
 ### Крок 1: Вибір точки
 ☐ З'ясуй місто клієнта
 ⚡ Тільки коли місто відоме → виклич get_fitting_stations(city=...)
-- Якщо в місті кілька точок — перелічи адреси, нехай клієнт обере
+- Якщо 1-2 точки — назви адреси, нехай клієнт обере
+- Якщо 3+ точок — запитай район або вулицю: "У Дніпрі є п'ять точок. В якому районі вам зручніше?"
+  Якщо клієнт назвав район/вулицю — назви найближчу адресу
+  Якщо не знає — перелічи коротко тільки вулиці (без номерів будинків), нехай обере
 
 ### Крок 2: Зберігання шин
 - Запитай: "Чи є у вас шини на зберіганні у нас?"
@@ -480,6 +483,7 @@ def build_system_prompt_with_context(
     caller_phone: str | None = None,
     order_id: str | None = None,
     pattern_context: str | None = None,
+    agent_name: str | None = None,
 ) -> str:
     """Build the final system prompt with all dynamic context injected.
 
@@ -497,10 +501,16 @@ def build_system_prompt_with_context(
         caller_phone: CallerID phone number (masked if PII vault active).
         order_id: Current order draft ID.
         pattern_context: Pattern injection text from conversation patterns.
+        agent_name: Tenant-specific agent name (overrides default "Олена").
 
     Returns:
         Final system prompt string ready to send to LLM.
     """
+    # Replace default agent name with tenant-specific name
+    if agent_name and agent_name != "Олена":
+        base_prompt = base_prompt.replace("Тебе звати Олена", f"Тебе звати {agent_name}")
+        base_prompt = base_prompt.replace("ти Олена", f"ти {agent_name}")
+
     parts = [base_prompt]
 
     # Stage-aware injection (modular prompts only)

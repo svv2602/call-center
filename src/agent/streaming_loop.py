@@ -74,6 +74,7 @@ class StreamingAgentLoop:
         few_shot_context: str | None = None,
         safety_context: str | None = None,
         is_modular: bool = False,
+        agent_name: str | None = None,
     ) -> None:
         self._llm_router = llm_router
         self._tool_router = tool_router
@@ -88,6 +89,7 @@ class StreamingAgentLoop:
         self._few_shot_context = few_shot_context
         self._safety_context = safety_context
         self._is_modular = is_modular
+        self._agent_name = agent_name
 
     async def run_turn(
         self,
@@ -132,6 +134,7 @@ class StreamingAgentLoop:
             caller_phone=masked_phone,
             order_id=order_id,
             pattern_context=pattern_context,
+            agent_name=self._agent_name,
         )
 
         spoken_parts: list[str] = []
