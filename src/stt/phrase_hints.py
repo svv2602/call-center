@@ -173,6 +173,17 @@ _LATIN_TO_CYRILLIC: dict[str, str] = {
     "z": "з",
 }
 
+# Whole-word overrides for common English words in tire names.
+# Phonetic rules for ea/th/etc. are too context-dependent;
+# explicit overrides produce correct Ukrainian pronunciation.
+_WORD_OVERRIDES: dict[str, str] = {
+    "weather": "везер",
+    "season": "сізон",
+    "terrain": "терейн",
+    "performance": "перформанс",
+    "summer": "самер",
+}
+
 _HAS_LATIN = re.compile(r"[a-zA-Z]")
 _HAS_CYRILLIC = re.compile(r"[а-яА-ЯіїєґІЇЄҐ]")
 # Model name must contain a "real word" (4+ consecutive letters) to be a hint.
@@ -184,14 +195,23 @@ _WORD_4PLUS_LETTERS = re.compile(r"[a-zA-Zа-яА-ЯіїєґІЇЄҐ]{4,}")
 def _transliterate_word(word: str) -> str:
     """Transliterate a single Latin word to Cyrillic.
 
-    Handles trigraphs (ice→айс), digraphs (sh→ш, ce→се), soft C rule,
+    Checks whole-word overrides first (weather→везер, season→сізон),
+    then trigraphs (ice→айс), digraphs (sh→ш, ce→се), soft C rule,
     and standalone I before hyphen (I-Power → Ай-Повер).
     """
     if not _HAS_LATIN.search(word):
         return word
 
-    result: list[str] = []
     lower = word.lower()
+
+    # 0. Whole-word override (exact match)
+    if lower in _WORD_OVERRIDES:
+        cyr = _WORD_OVERRIDES[lower]
+        if word[0].isupper():
+            cyr = cyr[0].upper() + cyr[1:]
+        return cyr
+
+    result: list[str] = []
     i = 0
     while i < len(lower):
         # 1. Try trigraphs (3 chars) — position-independent and start-only
