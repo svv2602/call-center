@@ -322,13 +322,21 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
                     "type": "string",
                     "description": "Час запису (HH:MM)",
                 },
+                "customer_name": {
+                    "type": "string",
+                    "description": "Ім'я клієнта (як назвався)",
+                },
                 "customer_phone": {
                     "type": "string",
-                    "description": "Телефон клієнта (+380XXXXXXXXX)",
+                    "description": "Телефон клієнта (0XXXXXXXXX — 10 цифр без +38)",
+                },
+                "auto_number": {
+                    "type": "string",
+                    "description": "Державний номер автомобіля (якщо клієнт назвав)",
                 },
                 "vehicle_info": {
                     "type": "string",
-                    "description": "Інформація про автомобіль (марка, модель, рік)",
+                    "description": "Марка/модель автомобіля (якщо клієнт назвав)",
                 },
                 "service_type": {
                     "type": "string",
@@ -344,7 +352,7 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
                     "description": "ID пов'язаного замовлення (якщо клієнт замовив шини)",
                 },
             },
-            "required": ["station_id", "date", "time", "customer_phone"],
+            "required": ["station_id", "date", "time", "customer_name", "customer_phone"],
         },
     },
     {

@@ -100,7 +100,7 @@ class TestBookFittingSchema:
 
     def test_required_fields(self, tool: dict) -> None:
         required = set(tool["input_schema"]["required"])
-        assert required == {"station_id", "date", "time", "customer_phone"}
+        assert required == {"station_id", "date", "time", "customer_name", "customer_phone"}
 
     def test_has_optional_fields(self, tool: dict) -> None:
         props = tool["input_schema"]["properties"]

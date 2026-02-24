@@ -1167,6 +1167,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     date=kwargs.get("date", ""),
                     time=kwargs.get("time", ""),
                     vehicle_info=kwargs.get("vehicle_info", ""),
+                    auto_number=kwargs.get("auto_number", ""),
                     tire_diameter=kwargs.get("tire_diameter", 0),
                     service_type=kwargs.get("service_type", "tire_change"),
                 )

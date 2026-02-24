@@ -142,6 +142,7 @@ class OneCSOAPClient:
         date: str,
         time: str,
         vehicle_info: str = "",
+        auto_number: str = "",
         tire_diameter: int = 0,
         service_type: str = "tire_change",
     ) -> dict[str, Any]:
@@ -158,6 +159,7 @@ class OneCSOAPClient:
             date: Appointment date (YYYY-MM-DD).
             time: Appointment time (HH:MM or HH:MM:SS).
             vehicle_info: Vehicle description (optional).
+            auto_number: Vehicle license plate (optional).
             tire_diameter: Tire diameter in inches (optional).
             service_type: Service type (tire_change, balancing, full_service).
 
@@ -167,11 +169,12 @@ class OneCSOAPClient:
         comment = _build_comment(vehicle_info, tire_diameter, service_type)
         dt_date = _to_datetime(date)
         dt_time = _to_time(time)
+        norm_phone = _normalize_phone(phone)
 
         params = f"<ns:Person>{escape(person)}</ns:Person>"
-        params += f"<ns:PhoneNumber>{escape(phone)}</ns:PhoneNumber>"
-        params += f"<ns:AutoType></ns:AutoType>"
-        params += f"<ns:AutoNumber></ns:AutoNumber>"
+        params += f"<ns:PhoneNumber>{escape(norm_phone)}</ns:PhoneNumber>"
+        params += f"<ns:AutoType>{escape(vehicle_info)}</ns:AutoType>"
+        params += f"<ns:AutoNumber>{escape(auto_number)}</ns:AutoNumber>"
         params += "<ns:StoreTires>false</ns:StoreTires>"
         params += f"<ns:StationID>{escape(station_id)}</ns:StationID>"
         params += f"<ns:Date>{escape(dt_date)}</ns:Date>"
@@ -539,6 +542,21 @@ def _text(element: ET.Element, tag: str, default: str = "") -> str:
     if child is not None and child.text:
         return child.text
     return default
+
+
+def _normalize_phone(phone: str) -> str:
+    """Normalize phone to 1C format: 0XXXXXXXXX (10 digits).
+
+    Handles: +380XXXXXXXXX, 380XXXXXXXXX, 80XXXXXXXXX, 0XXXXXXXXX.
+    """
+    digits = "".join(c for c in phone if c.isdigit())
+    if digits.startswith("380") and len(digits) == 12:
+        return "0" + digits[3:]
+    if digits.startswith("80") and len(digits) == 11:
+        return "0" + digits[2:]
+    if digits.startswith("0") and len(digits) == 10:
+        return digits
+    return digits  # return as-is if unknown format
 
 
 def _to_datetime(value: str) -> str:
