@@ -94,6 +94,17 @@ async def _catalog_full_sync_async(task: Any) -> dict[str, Any]:
 
         await sync_service.full_sync()
         logger.info("Full catalog sync completed successfully")
+
+        # Refresh STT phrase hints (auto-extract catalog terms)
+        if redis is not None:
+            try:
+                from src.stt.phrase_hints import refresh_phrase_hints
+
+                await refresh_phrase_hints(engine, redis)
+                logger.info("STT phrase hints refreshed after full catalog sync")
+            except Exception:
+                logger.warning("STT phrase hints refresh failed (non-critical)", exc_info=True)
+
         return {"status": "ok"}
 
     except Exception as exc:

@@ -38,6 +38,7 @@ class STTConfig:
     interim_results: bool = True
     model: str = "latest_long"
     enable_punctuation: bool = True
+    phrase_hints: tuple[str, ...] = ()
 
 
 @runtime_checkable

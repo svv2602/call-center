@@ -56,6 +56,7 @@ from src.api.training_dialogues import router as training_dialogues_router
 from src.api.training_safety import router as training_safety_router
 from src.api.training_templates import router as training_templates_router
 from src.api.training_tools import router as training_tools_router
+from src.api.stt_config import router as stt_config_router
 from src.api.tts_config import router as tts_config_router
 from src.api.vehicles import router as vehicles_router
 from src.api.websocket import router as websocket_router
@@ -105,6 +106,7 @@ app.include_router(pronunciation_router)
 app.include_router(prompts_router)
 app.include_router(sandbox_router)
 app.include_router(scraper_router)
+app.include_router(stt_config_router)
 app.include_router(system_router)
 app.include_router(tenants_router)
 app.include_router(tts_config_router)
@@ -718,9 +720,18 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     try:
         # Per-call STT engine (each call gets its own streaming session)
         stt = GoogleSTTEngine(project_id=settings.google_stt.project_id)
+        phrase_hints: tuple[str, ...] = ()
+        if _redis is not None:
+            try:
+                from src.stt.phrase_hints import get_all_phrases_flat
+
+                phrase_hints = await get_all_phrases_flat(_redis)
+            except Exception:
+                logger.debug("Failed to load STT phrase hints", exc_info=True)
         stt_config = STTConfig(
             language_code=settings.google_stt.language_code,
             alternative_languages=settings.google_stt.alternative_language_list,
+            phrase_hints=phrase_hints,
         )
 
         # Load DB templates, tool overrides, and active prompt in parallel

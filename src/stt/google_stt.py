@@ -21,6 +21,25 @@ logger = logging.getLogger(__name__)
 # Google STT streaming session limit (~5 min)
 _SESSION_RESTART_SECONDS = 290  # restart slightly before 5 min limit
 
+# Google API limit for phrase hints
+_MAX_PHRASE_HINTS = 5000
+
+
+def _build_adaptation(
+    phrase_hints: tuple[str, ...],
+) -> cloud_speech.SpeechAdaptation | None:
+    """Build SpeechAdaptation with inline PhraseSet from phrase hints."""
+    if not phrase_hints:
+        return None
+
+    phrases = phrase_hints[:_MAX_PHRASE_HINTS]
+    phrase_set = cloud_speech.SpeechAdaptation.AdaptationPhraseSet(
+        inline_phrase_set=cloud_speech.PhraseSet(
+            phrases=[cloud_speech.PhraseSet.Phrase(value=p, boost=10.0) for p in phrases],
+        ),
+    )
+    return cloud_speech.SpeechAdaptation(phrase_sets=[phrase_set])
+
 
 class GoogleSTTEngine:
     """Google Cloud Speech-to-Text v2 streaming engine.
@@ -130,6 +149,7 @@ class GoogleSTTEngine:
             ),
             language_codes=[self._config.language_code, *self._config.alternative_languages],
             model=self._config.model,
+            adaptation=_build_adaptation(self._config.phrase_hints),
         )
 
         streaming_config = cloud_speech.StreamingRecognitionConfig(
