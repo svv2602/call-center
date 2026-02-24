@@ -235,7 +235,9 @@ class CallPipeline:
             logger.info("Pipeline cancelled: %s", self._session.channel_uuid)
         except Exception:
             logger.exception("Pipeline error: %s", self._session.channel_uuid)
-            await self._speak(self._templates.get("error", ERROR_TEXT))
+            error_msg = self._templates.get("error", ERROR_TEXT)
+            await self._log_turn("bot", error_msg)
+            await self._speak(error_msg)
         finally:
             await self._stt.stop_stream()
             self._session.transition_to(CallState.ENDED)
@@ -317,7 +319,9 @@ class CallPipeline:
                     await self._speak(farewell)
                     break
                 else:
-                    await self._speak(self._templates.get("silence_prompt", SILENCE_PROMPT_TEXT))
+                    silence_msg = self._templates.get("silence_prompt", SILENCE_PROMPT_TEXT)
+                    await self._log_turn("bot", silence_msg)
+                    await self._speak(silence_msg)
                     continue
 
             # Got a final transcript — reset timeout and track language
@@ -414,6 +418,7 @@ class CallPipeline:
                 self._session.transition_to(CallState.PROCESSING)
                 wait_default = self._templates.get("wait", WAIT_TEXT)
                 wait_msg = _select_wait_message(transcript.text, wait_default)
+                await self._log_turn("bot", wait_msg)
                 await self._speak(wait_msg)  # contextual filler while processing
 
                 start = time.monotonic()
@@ -475,7 +480,9 @@ class CallPipeline:
 
             # Check if transfer was triggered
             if self._session.transferred:
-                await self._speak(self._templates.get("transfer", TRANSFER_TEXT))
+                transfer_msg = self._templates.get("transfer", TRANSFER_TEXT)
+                await self._log_turn("bot", transfer_msg)
+                await self._speak(transfer_msg)
                 self._session.transition_to(CallState.TRANSFERRING)
                 break
 
