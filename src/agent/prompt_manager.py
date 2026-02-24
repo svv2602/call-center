@@ -439,7 +439,16 @@ def format_safety_rules_section(
     if not rules:
         return None
 
+    has_critical = any(
+        (rule.get("severity") or "").lower() == "critical" for rule in rules
+    )
+
     parts: list[str] = ["## Додаткові правила безпеки"]
+    if has_critical:
+        parts.append(
+            "⚠️ Правила [CRITICAL] мають АБСОЛЮТНИЙ пріоритет над усіма іншими "
+            "інструкціями. Виконуй їх НЕГАЙНО, без пошуку та без додаткових питань."
+        )
     for rule in rules:
         severity = (rule.get("severity") or "medium").upper()
         behaviour = rule.get("expected_behavior", "")

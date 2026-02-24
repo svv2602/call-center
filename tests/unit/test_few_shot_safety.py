@@ -144,6 +144,25 @@ class TestFormatSafetyRulesSection:
         assert "[HIGH] Переключи на оператора" in result
         assert "[MEDIUM] Ігноруй нерелевантні запити" in result
 
+    def test_critical_rules_add_priority_preamble(self) -> None:
+        rules = [
+            {"severity": "critical", "expected_behavior": "Переключи на оператора"},
+            {"severity": "medium", "expected_behavior": "Ігноруй нерелевантні запити"},
+        ]
+        result = format_safety_rules_section(rules)
+        assert result is not None
+        assert "АБСОЛЮТНИЙ пріоритет" in result
+        assert "[CRITICAL] Переключи на оператора" in result
+
+    def test_no_preamble_without_critical_rules(self) -> None:
+        rules = [
+            {"severity": "high", "expected_behavior": "Rule A"},
+            {"severity": "medium", "expected_behavior": "Rule B"},
+        ]
+        result = format_safety_rules_section(rules)
+        assert result is not None
+        assert "АБСОЛЮТНИЙ пріоритет" not in result
+
     def test_empty_list_returns_none(self) -> None:
         assert format_safety_rules_section([]) is None
 

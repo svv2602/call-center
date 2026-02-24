@@ -13,8 +13,8 @@
             }
         })();
     </script>
-  <script type="module" crossorigin src="/assets/index-B9IZnniX.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-BaWR7rZ5.css">
+  <script type="module" crossorigin src="/assets/index-DFIkOlZC.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-BeJjh4Ry.css">
 </head>
 <body class="bg-neutral-50 dark:bg-neutral-950 text-neutral-900 dark:text-neutral-50 font-sans antialiased">
     <!-- Toast container -->
@@ -669,6 +669,18 @@
                         <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.configuration.loadLLMConfig()" data-i18n="settings.llmLoadConfig">Загрузить конфигурацию</button>
                     </div>
                 </div>
+                <!-- TTS Voice Settings (collapsed) -->
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg mb-4 admin-only acc-section" data-open="false">
+                    <button type="button" onclick="window._app.toggleAccordion(this)" class="w-full flex items-center justify-between px-5 py-3.5 text-left cursor-pointer hover:bg-neutral-50 dark:hover:bg-neutral-800/50 rounded-lg transition-colors">
+                        <h3 class="text-sm font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="settings.ttsTitle">Голосовые настройки TTS</h3>
+                        <svg class="w-4 h-4 text-neutral-400 transition-transform acc-chevron rotate-[-90deg]" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.168l3.71-3.938a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clip-rule="evenodd"/></svg>
+                    </button>
+                    <div class="acc-body px-5 pb-5" style="display:none">
+                        <p class="text-sm text-neutral-500 dark:text-neutral-400 mb-3" data-i18n="settings.ttsDesc">Настройки голоса Google Cloud TTS: выбор голоса, скорость речи и тональность. Изменения применяются к новым звонкам без перезапуска.</p>
+                        <div id="ttsConfigContainer"><div class="text-center py-4 text-neutral-400 dark:text-neutral-500 text-sm" data-i18n="settings.clickToLoad">Нажмите для загрузки</div></div>
+                        <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 mt-3" onclick="window._pages.configuration.loadTTSConfig()" data-i18n="settings.ttsLoadConfig">Загрузить настройки TTS</button>
+                    </div>
+                </div>
             </div>
 
             <!-- Notifications -->
@@ -722,6 +734,7 @@
                     </button>
                     <div class="acc-body px-5 pb-5">
                         <div id="onecStatusContainer"><div class="flex justify-center py-4"><div class="spinner"></div></div></div>
+                        <div id="onecSoapStatusContainer" class="mt-4"></div>
                     </div>
                 </div>
 
@@ -1057,6 +1070,16 @@
             </div>
             <input type="hidden" id="sandboxReplayConvId">
             <button onclick="window._pages.sandbox.submitReplay()" class="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="sandbox.submitReplay">Запустить</button>
+        </div>
+    </div>
+
+    <!-- Batch Replay Modal -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxBatchReplayModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-lg w-[90%] max-h-[80vh] overflow-y-auto">
+            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxBatchReplayModal')">&times;</span>
+            <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.batchReplay">Пакетная регрессия</h3>
+            <div id="sandboxBatchReplayBody"></div>
+            <button onclick="window._pages.sandbox.submitBatchReplay()" class="w-full py-2 mt-3 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="sandbox.runBatchReplay">Запустить пакетную регрессию</button>
         </div>
     </div>
 

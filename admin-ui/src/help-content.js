@@ -38,6 +38,7 @@ export const HELP_PAGES = {
             { titleKey: 'help.scenarios.dialogues.title', contentKey: 'help.scenarios.dialogues.content' },
             { titleKey: 'help.scenarios.dialogues.steps', contentKey: 'help.scenarios.dialogues.stepsContent' },
             { titleKey: 'help.scenarios.safety.title', contentKey: 'help.scenarios.safety.content' },
+            { titleKey: 'help.scenarios.safety.severity.title', contentKey: 'help.scenarios.safety.severity.content' },
             { titleKey: 'help.scenarios.safety.steps', contentKey: 'help.scenarios.safety.stepsContent' },
             { titleKey: 'help.scenarios.affects.title', contentKey: 'help.scenarios.affects.content' },
         ],
