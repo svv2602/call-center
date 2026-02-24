@@ -663,6 +663,7 @@ export default {
     'users.permGroup.vehicles': 'Автомобили',
     'users.permGroup.pronunciation': 'Произношение',
     'users.permGroup.stt_hints': 'Подсказки STT',
+    'users.permGroup.point_hints': 'Подсказки для точек',
     // Permission group hints (pages controlled)
     'users.permGroupHint.sandbox': 'Песочница',
     'users.permGroupHint.knowledge': 'База знаний',
@@ -682,6 +683,7 @@ export default {
     'users.permGroupHint.vehicles': 'База автомобилей',
     'users.permGroupHint.pronunciation': 'Словарь произношений',
     'users.permGroupHint.stt_hints': 'Подсказки распознавания речи',
+    'users.permGroupHint.point_hints': 'Районы и ориентиры для станций/точек выдачи',
 
     // Training (unified agent training page)
     'training.breadcrumb': 'Обучение агента',

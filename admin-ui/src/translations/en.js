@@ -663,6 +663,7 @@ export default {
     'users.permGroup.vehicles': 'Vehicles',
     'users.permGroup.pronunciation': 'Pronunciation',
     'users.permGroup.stt_hints': 'STT Hints',
+    'users.permGroup.point_hints': 'Point Hints',
     // Permission group hints (pages controlled)
     'users.permGroupHint.sandbox': 'Sandbox',
     'users.permGroupHint.knowledge': 'Knowledge Base',
@@ -682,6 +683,7 @@ export default {
     'users.permGroupHint.vehicles': 'Vehicle Database',
     'users.permGroupHint.pronunciation': 'Pronunciation Dictionary',
     'users.permGroupHint.stt_hints': 'Speech Recognition Hints',
+    'users.permGroupHint.point_hints': 'District & landmarks for stations/pickup points',
 
     // Training (unified agent training page)
     'training.breadcrumb': 'Agent Training',

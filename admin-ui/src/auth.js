@@ -55,7 +55,7 @@ const PAGE_PERMISSIONS = {
     vehicles: 'vehicles:read',
     'onec-data': 'onec_data:read',
     'stt-hints': 'stt_hints:read',
-    'point-hints': 'configuration:read',
+    'point-hints': 'point_hints:read',
 };
 
 export function applyRoleVisibility() {

@@ -30,8 +30,8 @@ PICKUP_HINTS_KEY = "pickup:point_hints"
 _redis: Redis | None = None
 _engine: AsyncEngine | None = None
 
-_perm_r = Depends(require_permission("configuration:read"))
-_perm_w = Depends(require_permission("configuration:write"))
+_perm_r = Depends(require_permission("point_hints:read"))
+_perm_w = Depends(require_permission("point_hints:write"))
 
 
 async def _get_redis() -> Redis:

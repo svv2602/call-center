@@ -28,6 +28,8 @@ const PERMISSION_GROUPS = {
     onec_data: ['onec_data:read'],
     vehicles: ['vehicles:read', 'vehicles:write'],
     pronunciation: ['pronunciation:read', 'pronunciation:write'],
+    stt_hints: ['stt_hints:read', 'stt_hints:write'],
+    point_hints: ['point_hints:read', 'point_hints:write'],
 };
 
 const ROLE_DEFAULTS = {
