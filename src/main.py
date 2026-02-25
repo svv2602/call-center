@@ -1596,6 +1596,33 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
 
     router.register("transfer_to_operator", transfer_to_operator)
 
+    # --- Auto-inject CallerID into tool calls that need phone ---
+    # Tools use different param names: "customer_phone" or "phone".
+    _PHONE_FIELDS: dict[str, str] = {
+        "book_fitting": "customer_phone",
+        "create_order_draft": "customer_phone",
+        "get_order_status": "phone",
+        "get_customer_bookings": "phone",
+    }
+    _original_execute = router.execute
+
+    async def _execute_with_caller_id(name: str, args: dict[str, Any]) -> Any:
+        phone_field = _PHONE_FIELDS.get(name)
+        if phone_field and session.caller_phone:
+            current = args.get(phone_field, "")
+            if not current or current.strip() in ("", "unknown"):
+                args[phone_field] = session.caller_phone
+                logger.info(
+                    "Auto-injected CallerID %s into %s.%s for call %s",
+                    session.caller_phone,
+                    name,
+                    phone_field,
+                    session.channel_uuid,
+                )
+        return await _original_execute(name, args)
+
+    router.execute = _execute_with_caller_id  # type: ignore[assignment]
+
     return router
 
 
