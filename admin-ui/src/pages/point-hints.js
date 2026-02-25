@@ -90,8 +90,8 @@ function switchTab(tab) {
     document.getElementById('pointHintsContent-fitting').style.display = tab === 'fitting' ? '' : 'none';
     document.getElementById('pointHintsContent-pickup').style.display = tab === 'pickup' ? '' : 'none';
 
-    if (tab === 'fitting' && _stationsList.length === 0) loadStationHints();
-    if (tab === 'pickup' && _pickupPointsList.length === 0) loadPickupHints();
+    if (tab === 'fitting' && _stationsList.length === 0 && Object.keys(_stationHints).length === 0) loadStationHints();
+    if (tab === 'pickup' && _pickupPointsList.length === 0 && Object.keys(_pickupHints).length === 0) loadPickupHints();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -218,12 +218,10 @@ async function loadPickupHints() {
     if (!container) return;
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
     try {
-        const [hintsData, pointsData] = await Promise.all([
-            api('/admin/fitting/pickup-hints'),
-            api('/admin/fitting/pickup-points'),
-        ]);
+        // pickup-hints API returns both hints (from PG) and points (from cache)
+        const hintsData = await api('/admin/fitting/pickup-hints');
         _pickupHints = hintsData.hints || {};
-        _pickupPointsList = pointsData.points || [];
+        _pickupPointsList = hintsData.points || [];
         renderPickupHints();
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('pointHints.loadFailed', {error: escapeHtml(e.message)})}</div>`;
@@ -234,7 +232,20 @@ function renderPickupHints() {
     const container = document.getElementById('pointHintsContent-pickup');
     if (!container) return;
 
-    if (_pickupPointsList.length === 0) {
+    // Build unified list: all points from cache + hints-only entries (for points not in cache)
+    const pointsById = {};
+    for (const point of _pickupPointsList) {
+        const pid = point.id || '';
+        if (pid) pointsById[pid] = point;
+    }
+
+    // Collect all IDs: points from cache + points that have hints in DB
+    const allIds = new Set(Object.keys(pointsById));
+    for (const hintId of Object.keys(_pickupHints)) {
+        allIds.add(hintId);
+    }
+
+    if (allIds.size === 0) {
         container.innerHTML = `<div class="${tw.emptyState}">
             <p>${t('pointHints.noPoints')}</p>
             <button class="${tw.btnPrimary} ${tw.btnSm} mt-3" onclick="window._pages.pointHints.refreshPickupPoints()">${t('pointHints.refreshFromOnec')}</button>
@@ -255,8 +266,15 @@ function renderPickupHints() {
             <th class="${tw.th}">${t('pointHints.actions')}</th>
         </tr></thead><tbody>`;
 
-    for (const point of _pickupPointsList) {
-        const pid = point.id || '';
+    // Show points with hints first, then without
+    const sortedIds = [...allIds].sort((a, b) => {
+        const aHas = _pickupHints[a] ? 1 : 0;
+        const bHas = _pickupHints[b] ? 1 : 0;
+        return bHas - aHas; // hints first
+    });
+
+    for (const pid of sortedIds) {
+        const point = pointsById[pid] || {};
         const hint = _pickupHints[pid] || {};
         const district = hint.district || '';
         const landmarks = hint.landmarks || '';
@@ -266,7 +284,7 @@ function renderPickupHints() {
         const hasHint = !!(district || landmarks || description);
 
         html += `<tr class="${tw.trHover}">
-            <td class="${tw.td}" data-label="${t('pointHints.address')}"><strong>${escapeHtml(address)}</strong><div class="text-[10px] text-neutral-400 font-mono">${escapeHtml(pid)}</div></td>
+            <td class="${tw.td}" data-label="${t('pointHints.address')}"><strong>${escapeHtml(address || pid)}</strong><div class="text-[10px] text-neutral-400 font-mono">${escapeHtml(pid)}</div></td>
             <td class="${tw.td}" data-label="${t('pointHints.city')}">${escapeHtml(city)}</td>
             <td class="${tw.td}" data-label="${t('pointHints.district')}">${_hintPreview(district, 30)}</td>
             <td class="${tw.td}" data-label="${t('pointHints.landmarks')}">${_hintPreview(landmarks, 40)}</td>
@@ -310,10 +328,11 @@ async function refreshStations() {
         const data = await api('/admin/fitting/stations/refresh', { method: 'POST' });
         _stationsList = data.stations || [];
         showToast(t('pointHints.refreshed', { count: data.total || 0 }), 'success');
-        // Reload hints too
+        // Reload hints too (single call returns both hints + stations)
         try {
             const hintsData = await api('/admin/fitting/station-hints');
             _stationHints = hintsData.hints || {};
+            _stationsList = hintsData.stations || _stationsList;
         } catch { /* hints load optional */ }
         renderStationHints();
     } catch (e) {
@@ -327,10 +346,11 @@ async function refreshPickupPoints() {
         const data = await api('/admin/fitting/pickup-points/refresh', { method: 'POST' });
         _pickupPointsList = data.points || [];
         showToast(t('pointHints.refreshed', { count: data.total || 0 }), 'success');
-        // Reload hints too
+        // Reload hints too (single call returns both hints + points)
         try {
             const hintsData = await api('/admin/fitting/pickup-hints');
             _pickupHints = hintsData.hints || {};
+            _pickupPointsList = hintsData.points || _pickupPointsList;
         } catch { /* hints load optional */ }
         renderPickupHints();
     } catch (e) {

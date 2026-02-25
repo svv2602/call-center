@@ -260,13 +260,29 @@ async def refresh_fitting_stations(_: dict[str, Any] = _perm_w) -> dict[str, Any
 
 @router.get("/pickup-hints")
 async def get_pickup_hints(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
-    """Return all pickup point hints {point_id: {district, landmarks, description}}."""
+    """Return all pickup point hints merged with points info.
+
+    Returns {hints: {point_id: {district, landmarks, description}},
+             points: [...]} where points list is from Redis cache.
+    Hints are always from PostgreSQL (source of truth).
+    """
     engine = await _get_engine()
     async with engine.begin() as conn:
         hints = await _load_hints_from_pg(conn, "pickup_point")
     # Warm Redis cache
     await _sync_hints_to_redis(PICKUP_HINTS_KEY, hints)
-    return {"hints": hints}
+
+    # Also return points list for UI convenience
+    all_points: list[dict[str, Any]] = []
+    try:
+        redis = await _get_redis()
+        for network in ("ProKoleso", "Tshina"):
+            raw = await redis.get(f"onec:points:{network}")
+            if raw:
+                all_points.extend(json.loads(raw))
+    except Exception:
+        pass
+    return {"hints": hints, "points": all_points}
 
 
 @router.put("/pickup-hints/{point_id}")
