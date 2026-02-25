@@ -48,6 +48,14 @@ class OpenAICompatProvider(AbstractProvider):
         self._base_url = base_url.rstrip("/")
         self._provider_key = provider_key
         self._session: aiohttp.ClientSession | None = None
+        # Newer OpenAI models (gpt-5, o1, o3) require max_completion_tokens
+        # instead of the deprecated max_tokens parameter.
+        self._use_max_completion_tokens = "api.openai.com" in self._base_url
+
+    def _max_tokens_param(self, value: int) -> dict[str, int]:
+        """Return the correct max tokens parameter for the API."""
+        key = "max_completion_tokens" if self._use_max_completion_tokens else "max_tokens"
+        return {key: value}
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -70,8 +78,8 @@ class OpenAICompatProvider(AbstractProvider):
 
         body: dict[str, Any] = {
             "model": self._model,
-            "max_tokens": max_tokens,
             "messages": openai_messages,
+            **self._max_tokens_param(max_tokens),
         }
 
         data = await self._post_chat(body)
@@ -89,9 +97,9 @@ class OpenAICompatProvider(AbstractProvider):
 
         body: dict[str, Any] = {
             "model": self._model,
-            "max_tokens": max_tokens,
             "messages": openai_messages,
             "tools": openai_tools,
+            **self._max_tokens_param(max_tokens),
         }
 
         data = await self._post_chat(body)
@@ -109,11 +117,11 @@ class OpenAICompatProvider(AbstractProvider):
 
         body: dict[str, Any] = {
             "model": self._model,
-            "max_tokens": max_tokens,
             "messages": openai_messages,
             "tools": openai_tools,
             "stream": True,
             "stream_options": {"include_usage": True},
+            **self._max_tokens_param(max_tokens),
         }
 
         session = await self._get_session()
@@ -142,8 +150,8 @@ class OpenAICompatProvider(AbstractProvider):
             # Simple completion with minimal tokens as health check
             body = {
                 "model": self._model,
-                "max_tokens": 1,
                 "messages": [{"role": "user", "content": "hi"}],
+                **self._max_tokens_param(1),
             }
             async with session.post(
                 f"{self._base_url}/chat/completions",
