@@ -61,14 +61,14 @@ def _compress_order_draft(result: dict[str, Any]) -> str:
 
 
 def _compress_fitting_stations(result: dict[str, Any]) -> str:
-    """Keep id, name, address, working_hours per station."""
+    """Keep id, name, address, working_hours, district, landmarks, description per station."""
     if "stations" not in result:
         return _compact(result)
     stations = [
         {
             k: v
             for k, v in s.items()
-            if k in ("id", "name", "address", "working_hours", "district", "landmarks")
+            if k in ("id", "name", "address", "working_hours", "district", "landmarks", "description")
         }
         for s in result["stations"]
     ]
