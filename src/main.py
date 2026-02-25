@@ -1376,12 +1376,13 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
 
     async def _get_fitting_slots(**kwargs: Any) -> Any:
         """Get fitting slots: try SOAP, fallback to Store API."""
+        station_id = kwargs.get("station_id", "")
+        today = datetime.now(tz=UTC).date().isoformat()
+        date_from = _resolve_date(kwargs.get("date_from", "")) or today
+        date_to = _resolve_date(kwargs.get("date_to", "")) or date_from
+
         if _soap_client is not None:
             try:
-                station_id = kwargs.get("station_id", "")
-                today = datetime.now(tz=UTC).date().isoformat()
-                date_from = _resolve_date(kwargs.get("date_from", "")) or today
-                date_to = _resolve_date(kwargs.get("date_to", "")) or date_from
                 slots = await _soap_client.get_station_schedule(
                     date_from=date_from,
                     date_to=date_to,
@@ -1394,7 +1395,19 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     session.channel_uuid,
                     exc_info=True,
                 )
-        return await client.get_fitting_slots(**kwargs)
+        try:
+            return await client.get_fitting_slots(**kwargs)
+        except Exception:
+            logger.warning(
+                "Store API get_fitting_slots also failed for call %s",
+                session.channel_uuid,
+                exc_info=True,
+            )
+            return {
+                "station_id": station_id,
+                "error": "Сервіс тимчасово недоступний. Спробуйте через хвилину.",
+                "slots": [],
+            }
 
     router.register("get_fitting_slots", _get_fitting_slots)
     router.register("book_fitting", _book_fitting_with_metric)
