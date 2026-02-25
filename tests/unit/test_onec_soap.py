@@ -119,6 +119,7 @@ class TestParseSchedule:
         assert slots == []
 
     def test_parse_schedule_entries(self) -> None:
+        """Fallback path: Available=true → quantity=0, Available=false → quantity=1."""
         root = _make_soap_response(f"""
             <ns:GetStationScheduleResponse>
                 <ns:ScheduleEntry>
@@ -141,9 +142,9 @@ class TestParseSchedule:
         assert slots[0]["station_id"] == "ST-001"
         assert slots[0]["date"] == "2026-02-20"
         assert slots[0]["time"] == "09:00"
-        assert slots[0]["available"] is True
+        assert slots[0]["quantity"] == 0  # Available=true → no bookings
         assert slots[0]["station_name"] == "Центральний"
-        assert slots[1]["available"] is False
+        assert slots[1]["quantity"] == 1  # Available=false → 1 booking
 
 
 class TestParseBooking:
@@ -716,9 +717,9 @@ class TestParseScheduleCDATA:
         assert slots[0]["station_id"] == "000000003"
         assert slots[0]["date"] == "2026-02-24"
         assert slots[0]["time"] == "09:00:00"
-        assert slots[0]["available"] is True
+        assert slots[0]["quantity"] == 2  # 2 bookings
         assert slots[0]["period"] == "2026-02-24T09:00:00"
-        assert slots[1]["available"] is False  # Quantity=0
+        assert slots[1]["quantity"] == 0  # no bookings
 
 
 class TestParseBookingCDATA:
@@ -796,6 +797,85 @@ class TestParseBookingsListCDATA:
         assert bookings[0]["date"] == "2026-02-28"
         assert bookings[0]["time"] == "09:00:00"
         assert bookings[0]["person"] == "Погорельцев Ігорь"
+
+
+class TestSlotAvailabilityCalculation:
+    """Test that quantity + count_posts → available calculation works correctly.
+
+    The SOAP parser returns 'quantity' (number of bookings).
+    The handler must compute: available = count_posts - quantity > 0.
+    These tests verify the formula directly (no Redis, no handler — pure logic).
+    """
+
+    @staticmethod
+    def _compute_available(count_posts: int | None, quantity: int) -> bool:
+        """Replicate the availability formula from main.py handler."""
+        posts = count_posts if count_posts else 1  # fallback
+        return posts - quantity > 0
+
+    def test_count_posts_2_quantity_1_available(self) -> None:
+        assert self._compute_available(2, 1) is True
+
+    def test_count_posts_2_quantity_2_not_available(self) -> None:
+        assert self._compute_available(2, 2) is False
+
+    def test_count_posts_2_quantity_0_available(self) -> None:
+        assert self._compute_available(2, 0) is True
+
+    def test_count_posts_none_quantity_0_fallback_available(self) -> None:
+        """Unknown count_posts (None) → fallback=1, quantity=0 → available."""
+        assert self._compute_available(None, 0) is True
+
+    def test_count_posts_none_quantity_1_fallback_not_available(self) -> None:
+        """Unknown count_posts (None) → fallback=1, quantity=1 → not available."""
+        assert self._compute_available(None, 1) is False
+
+    def test_count_posts_3_quantity_2_available(self) -> None:
+        assert self._compute_available(3, 2) is True
+
+    def test_count_posts_3_quantity_3_not_available(self) -> None:
+        assert self._compute_available(3, 3) is False
+
+    def test_count_posts_1_quantity_0_available(self) -> None:
+        assert self._compute_available(1, 0) is True
+
+    def test_cdata_slots_have_quantity_field(self) -> None:
+        """Verify CDATA-parsed slots contain quantity (not available)."""
+        cdata_xml = (
+            f'<GetStationScheduleResponse xmlns="{_SOAP_NS}">'
+            "<line><StationID>ST-1</StationID>"
+            "<Data>2026-03-01</Data><Time>10:00:00</Time>"
+            "<Quantity>3</Quantity></line>"
+            "</GetStationScheduleResponse>"
+        )
+        body = (
+            f'<m:GetStationScheduleResponse xmlns:m="{_SOAP_NS}">'
+            f"<m:return><![CDATA[{cdata_xml}]]></m:return>"
+            f"</m:GetStationScheduleResponse>"
+        )
+        root = _make_soap_response(body)
+        slots = OneCSOAPClient._parse_schedule(root)
+        assert len(slots) == 1
+        assert "quantity" in slots[0]
+        assert "available" not in slots[0]
+        assert slots[0]["quantity"] == 3
+
+    def test_fallback_slots_have_quantity_field(self) -> None:
+        """Verify fallback-parsed slots contain quantity (not available)."""
+        root = _make_soap_response(f"""
+            <ns:GetStationScheduleResponse>
+                <ns:ScheduleEntry>
+                    <ns:StationID>ST-001</ns:StationID>
+                    <ns:Date>2026-03-01</ns:Date>
+                    <ns:Time>09:00</ns:Time>
+                    <ns:Available>true</ns:Available>
+                </ns:ScheduleEntry>
+            </ns:GetStationScheduleResponse>
+        """)
+        slots = OneCSOAPClient._parse_schedule(root)
+        assert len(slots) == 1
+        assert "quantity" in slots[0]
+        assert "available" not in slots[0]
 
 
 class TestParseCancelCDATA:

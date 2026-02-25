@@ -1360,13 +1360,14 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                                 "StationAdress",
                                 s.get("StationAddress", s.get("address", "")),
                             ),
+                            "count_posts": int(s.get("StationCountPosts", 0)) or None,
                         }
                         for s in raw_list
                     ]
                     if _redis and all_stations:
                         await _redis.setex(
                             cache_key,
-                            3600,
+                            86400,
                             json.dumps(all_stations, ensure_ascii=False),
                         )
             except Exception:
@@ -1382,7 +1383,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 all_stations = await _soap_client.get_stations()
                 if _redis and all_stations is not None:
                     await _redis.setex(
-                        cache_key, 3600, json.dumps(all_stations, ensure_ascii=False)
+                        cache_key, 86400, json.dumps(all_stations, ensure_ascii=False)
                     )
             except Exception:
                 logger.warning(
@@ -1444,6 +1445,25 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
 
     router.register("get_fitting_stations", _get_fitting_stations)
 
+    async def _get_station_count_posts(station_id: str) -> int:
+        """Look up count_posts for a station from the cached stations list.
+
+        Returns the station's post count or 1 as a conservative fallback.
+        """
+        if not _redis or not station_id:
+            return 1
+        try:
+            raw = await _redis.get("onec:fitting_stations")
+            if raw:
+                stations = json.loads(raw if isinstance(raw, str) else raw.decode())
+                for s in stations:
+                    sid = s.get("station_id", s.get("id", ""))
+                    if sid == station_id:
+                        return s.get("count_posts") or 1
+        except Exception:
+            pass
+        return 1
+
     async def _get_fitting_slots(**kwargs: Any) -> Any:
         """Get fitting slots: try SOAP, fallback to Store API."""
         station_id = kwargs.get("station_id", "")
@@ -1458,6 +1478,10 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     date_to=date_to,
                     station_id=station_id,
                 )
+                count_posts = await _get_station_count_posts(station_id)
+                for slot in slots:
+                    qty = slot.pop("quantity", 0)
+                    slot["available"] = count_posts - qty > 0
                 return {"station_id": station_id, "slots": slots}
             except Exception:
                 logger.warning(

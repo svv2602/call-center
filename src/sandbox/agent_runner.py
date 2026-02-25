@@ -266,6 +266,22 @@ def _register_live_tools(
 
     if soap_client is not None:
 
+        async def _get_station_count_posts(station_id: str) -> int:
+            """Look up count_posts from cached stations list (fallback=1)."""
+            if not redis_client or not station_id:
+                return 1
+            try:
+                raw = await redis_client.get("onec:fitting_stations")
+                if raw:
+                    stations = json.loads(raw if isinstance(raw, str) else raw.decode())
+                    for s in stations:
+                        sid = s.get("station_id", s.get("id", ""))
+                        if sid == station_id:
+                            return s.get("count_posts") or 1
+            except Exception:
+                pass
+            return 1
+
         async def _get_fitting_slots_soap(**kwargs: Any) -> dict[str, Any]:
             station_id = kwargs.get("station_id", "")
             today = datetime.now(tz=UTC).date().isoformat()
@@ -274,6 +290,10 @@ def _register_live_tools(
             slots = await soap_client.get_station_schedule(
                 date_from=date_from, date_to=date_to, station_id=station_id
             )
+            count_posts = await _get_station_count_posts(station_id)
+            for slot in slots:
+                qty = slot.pop("quantity", 0)
+                slot["available"] = count_posts - qty > 0
             return {"station_id": station_id, "slots": slots}
 
         async def _book_fitting_soap(**kwargs: Any) -> dict[str, Any]:

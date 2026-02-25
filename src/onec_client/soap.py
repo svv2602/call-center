@@ -119,7 +119,7 @@ class OneCSOAPClient:
             station_id: Optional station ID to filter by.
 
         Returns:
-            List of slot dicts with keys: station_id, date, time, quantity.
+            List of slot dicts with keys: station_id, date, time, quantity (bookings count).
         """
         dt_from = _to_datetime(date_from)
         dt_to = _to_datetime(date_to)
@@ -364,19 +364,22 @@ class OneCSOAPClient:
 
         1C returns CDATA with <line> elements containing:
         StationID, Data (date), Time, Period (datetime), Quantity (int).
-        Quantity > 0 means the slot is available.
+
+        Quantity is the number of **bookings** (not free posts).
+        The caller must combine it with ``count_posts`` to compute availability:
+        ``available = count_posts - quantity > 0``.
         """
         slots: list[dict[str, Any]] = []
 
         # Primary: CDATA <line> elements (real 1C format)
         lines = _parse_cdata_lines(root)
         for line in lines:
-            quantity = _text(line, "Quantity", "0")
+            raw_qty = _text(line, "Quantity", "0")
             slot: dict[str, Any] = {
                 "station_id": _text(line, "StationID"),
                 "date": _text(line, "Data"),
                 "time": _text(line, "Time"),
-                "available": int(quantity) > 0 if quantity.isdigit() else False,
+                "quantity": int(raw_qty) if raw_qty.isdigit() else 0,
             }
             period = _text(line, "Period")
             if period:
@@ -386,12 +389,15 @@ class OneCSOAPClient:
             return slots
 
         # Fallback: namespace-aware ScheduleEntry (legacy test format)
+        # Available="true" means no bookings (quantity=0),
+        # Available="false" means at least 1 booking (quantity=1).
         for entry in root.iter(f"{{{_SOAP_NS}}}ScheduleEntry"):
+            available_str = _text(entry, "Available", "true").lower()
             slot = {
                 "station_id": _text(entry, "StationID"),
                 "date": _text(entry, "Date"),
                 "time": _text(entry, "Time"),
-                "available": _text(entry, "Available", "true").lower() == "true",
+                "quantity": 0 if available_str == "true" else 1,
             }
             station_name = _text(entry, "StationName")
             if station_name:
