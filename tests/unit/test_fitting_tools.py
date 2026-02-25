@@ -19,12 +19,13 @@ class TestFittingToolsList:
             "cancel_fitting",
             "get_fitting_price",
             "get_customer_bookings",
+            "find_storage",
             "search_knowledge_base",
         }
 
     def test_all_tools_is_combined(self) -> None:
         assert ALL_TOOLS == MVP_TOOLS + ORDER_TOOLS + FITTING_TOOLS
-        assert len(ALL_TOOLS) == 16
+        assert len(ALL_TOOLS) == 17
 
     def test_canonical_tool_names(self) -> None:
         """Tool names must match canonical list from 00-overview.md."""
@@ -48,6 +49,7 @@ class TestFittingToolsList:
             "cancel_fitting",
             "get_fitting_price",
             "get_customer_bookings",
+            "find_storage",
             "search_knowledge_base",
         }
         assert all_names == expected
@@ -203,6 +205,31 @@ class TestSearchKnowledgeBaseSchema:
 
     def test_description_mentions_knowledge(self, tool: dict) -> None:
         assert "знань" in tool["description"].lower() or "знан" in tool["description"].lower()
+
+
+class TestFindStorageSchema:
+    """Test find_storage tool schema."""
+
+    @pytest.fixture
+    def tool(self) -> dict:
+        return next(t for t in FITTING_TOOLS if t["name"] == "find_storage")
+
+    def test_phone_optional(self, tool: dict) -> None:
+        assert "phone" not in tool["input_schema"]["required"]
+
+    def test_storage_number_optional(self, tool: dict) -> None:
+        assert "storage_number" not in tool["input_schema"]["required"]
+
+    def test_phone_is_string(self, tool: dict) -> None:
+        props = tool["input_schema"]["properties"]
+        assert props["phone"]["type"] == "string"
+
+    def test_storage_number_is_string(self, tool: dict) -> None:
+        props = tool["input_schema"]["properties"]
+        assert props["storage_number"]["type"] == "string"
+
+    def test_description_mentions_storage(self, tool: dict) -> None:
+        assert "зберігання" in tool["description"].lower()
 
 
 class TestResolveDateHelper:

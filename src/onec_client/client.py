@@ -138,6 +138,27 @@ class OneCClient:
         """
         return await self._get("/Trade/hs/site/price_service")
 
+    # --- Fitting service (REST) ---
+
+    async def get_fitting_stations_rest(self) -> dict[str, Any]:
+        """Get fitting stations via REST API.
+
+        GET /Trade/hs/site/TireService/station
+        """
+        return await self._get("/Trade/hs/site/TireService/station")
+
+    async def find_storage(self, storage_number: str = "", phone: str = "") -> dict[str, Any]:
+        """Find tire storage contracts by phone or contract number.
+
+        GET /Trade/hs/site/TireService/findStorage
+        """
+        params: dict[str, Any] = {}
+        if storage_number:
+            params["StorageNumber"] = storage_number
+        if phone:
+            params["phone"] = phone
+        return await self._get("/Trade/hs/site/TireService/findStorage", params=params)
+
     # --- Nova Poshta reference data ---
 
     async def get_novapost_cities(self) -> dict[str, Any]:

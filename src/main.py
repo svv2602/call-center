@@ -413,6 +413,7 @@ _SCENARIO_TOOLS: dict[str, set[str]] = {
         "cancel_fitting",
         "get_fitting_price",
         "get_customer_bookings",
+        "find_storage",
         "search_knowledge_base",
         "transfer_to_operator",
     },
@@ -1335,7 +1336,47 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             except Exception:
                 pass
 
-        # 2. 1C SOAP API
+        # 2. 1C REST API (preferred over SOAP)
+        if all_stations is None and _onec_client is not None:
+            try:
+                rest_data = await _onec_client.get_fitting_stations_rest()
+                raw_list = (
+                    rest_data
+                    if isinstance(rest_data, list)
+                    else rest_data.get(
+                        "data", rest_data.get("stations", rest_data.get("items", []))
+                    )
+                )
+                if isinstance(raw_list, list) and raw_list:
+                    all_stations = [
+                        {
+                            "station_id": s.get(
+                                "StationID", s.get("station_id", s.get("id", ""))
+                            ),
+                            "name": s.get("StationName", s.get("name", "")),
+                            "city": s.get("StationCity", s.get("city", "")),
+                            "city_id": s.get("StationCityID", s.get("city_id", "")),
+                            "address": s.get(
+                                "StationAdress",
+                                s.get("StationAddress", s.get("address", "")),
+                            ),
+                        }
+                        for s in raw_list
+                    ]
+                    if _redis and all_stations:
+                        await _redis.setex(
+                            cache_key,
+                            3600,
+                            json.dumps(all_stations, ensure_ascii=False),
+                        )
+            except Exception:
+                logger.warning(
+                    "REST get_fitting_stations failed for call %s, trying SOAP",
+                    session.channel_uuid,
+                    exc_info=True,
+                )
+
+        # 3. 1C SOAP API (fallback)
         if all_stations is None and _soap_client is not None:
             try:
                 all_stations = await _soap_client.get_stations()
@@ -1350,7 +1391,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     exc_info=True,
                 )
 
-        # 3. Return from cache/1C with city filter
+        # 4. Return from cache/1C with city filter
         if all_stations is not None:
             filtered = all_stations
             if city:
@@ -1398,7 +1439,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 "stations": stations_out,
             }
 
-        # 4. Fallback to Store API
+        # 5. Fallback to Store API
         return await client.get_fitting_stations(city)
 
     router.register("get_fitting_stations", _get_fitting_stations)
@@ -1571,6 +1612,27 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
 
     router.register("get_customer_bookings", _get_customer_bookings)
 
+    async def _find_storage(**kwargs: Any) -> dict[str, Any]:
+        """Find storage contracts: 1C REST API."""
+        if _onec_client is not None:
+            try:
+                data = await _onec_client.find_storage(
+                    storage_number=kwargs.get("storage_number", ""),
+                    phone=kwargs.get("phone", ""),
+                )
+                if isinstance(data, dict):
+                    return data
+                return {"result": data}
+            except Exception:
+                logger.warning(
+                    "1C find_storage failed for call %s",
+                    session.channel_uuid,
+                    exc_info=True,
+                )
+        return {"error": "Сервіс зберігання тимчасово недоступний", "contracts": []}
+
+    router.register("find_storage", _find_storage)
+
     async def _search_knowledge(**kwargs: Any) -> dict[str, Any]:
         if _knowledge_search is not None:
             results = await _knowledge_search.search(
@@ -1603,6 +1665,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         "create_order_draft": "customer_phone",
         "get_order_status": "phone",
         "get_customer_bookings": "phone",
+        "find_storage": "phone",
     }
     _original_execute = router.execute
 

@@ -201,6 +201,29 @@ MOCK_RESPONSES: dict[str, Any] = {
             }
         ],
     },
+    "find_storage": {
+        "contracts": [
+            {
+                "contract_number": "ДЗ-2025-0142",
+                "phone": "0501234567",
+                "owner_name": "Петренко Іван",
+                "tires": [
+                    {
+                        "brand": "Michelin",
+                        "model": "Alpin 6",
+                        "size": "205/55 R16",
+                        "season": "winter",
+                        "quantity": 4,
+                    }
+                ],
+                "location": "warehouse",
+                "station_name": "ПроКолесо Центральний",
+                "debt": 0,
+                "status": "active",
+            }
+        ],
+        "total": 1,
+    },
     "search_knowledge_base": "dynamic",  # handled by _search_knowledge_mock
 }
 

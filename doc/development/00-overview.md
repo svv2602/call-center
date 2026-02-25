@@ -139,6 +139,7 @@ call_center/
 | `cancel_fitting` | 3 | Отмена или перенос записи на шиномонтаж | `DELETE /fitting/bookings/{id}`, `PATCH /fitting/bookings/{id}` |
 | `get_fitting_price` | 3 | Стоимость шиномонтажа | `GET /fitting/prices` |
 | `get_customer_bookings` | 3 | Существующие записи клиента на шиномонтаж по номеру телефона | 1C SOAP API |
+| `find_storage` | 3 | Поиск договоров хранения шин по телефону/номеру договора | 1C REST API |
 | `search_knowledge_base` | 3 | Поиск по базе знаний (RAG) | `GET /knowledge/search` |
 
 > **Правило:** при упоминании tools в документах используйте только имена из этой таблицы. При добавлении нового tool — сначала добавьте его сюда.

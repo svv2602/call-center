@@ -171,6 +171,66 @@ class TestOneCClientRequests:
             )
 
 
+class TestOneCClientFittingREST:
+    @pytest.mark.asyncio
+    async def test_get_fitting_stations_rest(self, onec_client: OneCClient) -> None:
+        mock_response = {
+            "data": [
+                {
+                    "StationID": "000000001",
+                    "StationName": "Центральний",
+                    "StationCity": "Київ",
+                    "StationAdress": "вул. Хрещатик, 1",
+                }
+            ]
+        }
+        with patch.object(
+            onec_client, "_get", new_callable=AsyncMock, return_value=mock_response
+        ) as mock_get:
+            result = await onec_client.get_fitting_stations_rest()
+            mock_get.assert_called_once_with("/Trade/hs/site/TireService/station")
+            assert result["data"][0]["StationID"] == "000000001"
+
+    @pytest.mark.asyncio
+    async def test_find_storage_by_phone(self, onec_client: OneCClient) -> None:
+        mock_response = {"contracts": [{"contract_number": "ДЗ-2025-0001"}], "total": 1}
+        with patch.object(
+            onec_client, "_get", new_callable=AsyncMock, return_value=mock_response
+        ) as mock_get:
+            result = await onec_client.find_storage(phone="0501234567")
+            mock_get.assert_called_once_with(
+                "/Trade/hs/site/TireService/findStorage",
+                params={"phone": "0501234567"},
+            )
+            assert result["total"] == 1
+
+    @pytest.mark.asyncio
+    async def test_find_storage_by_number(self, onec_client: OneCClient) -> None:
+        mock_response = {"contracts": [{"contract_number": "ДЗ-2025-0001"}], "total": 1}
+        with patch.object(
+            onec_client, "_get", new_callable=AsyncMock, return_value=mock_response
+        ) as mock_get:
+            result = await onec_client.find_storage(storage_number="ДЗ-2025-0001")
+            mock_get.assert_called_once_with(
+                "/Trade/hs/site/TireService/findStorage",
+                params={"StorageNumber": "ДЗ-2025-0001"},
+            )
+            assert result["contracts"][0]["contract_number"] == "ДЗ-2025-0001"
+
+    @pytest.mark.asyncio
+    async def test_find_storage_no_params(self, onec_client: OneCClient) -> None:
+        mock_response = {"contracts": [], "total": 0}
+        with patch.object(
+            onec_client, "_get", new_callable=AsyncMock, return_value=mock_response
+        ) as mock_get:
+            result = await onec_client.find_storage()
+            mock_get.assert_called_once_with(
+                "/Trade/hs/site/TireService/findStorage",
+                params={},
+            )
+            assert result["total"] == 0
+
+
 class TestOneCClientFittingPrices:
     @pytest.mark.asyncio
     async def test_get_fitting_prices(self, onec_client: OneCClient) -> None:

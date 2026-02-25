@@ -438,6 +438,28 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
         },
     },
     {
+        "name": "find_storage",
+        "description": (
+            "Знайти договори зберігання шин клієнта за номером телефону або номером договору. "
+            "Використовуй, коли клієнт запитує про зберігання шин або хоче забрати шини зі зберігання. "
+            "Якщо є CallerID — одразу шукай за телефоном без додаткових питань."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {
+                    "type": "string",
+                    "description": "Номер телефону клієнта (0XXXXXXXXX або +380XXXXXXXXX)",
+                },
+                "storage_number": {
+                    "type": "string",
+                    "description": "Номер договору зберігання (або кілька через кому)",
+                },
+            },
+            "required": [],
+        },
+    },
+    {
         "name": "search_knowledge_base",
         "description": (
             "Пошук по базі знань магазину: акції, доставка, оплата, повернення, "

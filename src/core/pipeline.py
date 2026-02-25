@@ -29,6 +29,7 @@ from src.agent.prompts import (
     WAIT_ORDER_POOL,
     WAIT_SEARCH_POOL,
     WAIT_STATUS_POOL,
+    WAIT_STORAGE_POOL,
     WAIT_TEXT,
     compute_order_stage,
 )
@@ -102,6 +103,7 @@ def _strip_greeting(text: str) -> str:
 # --- Contextual wait-phrase selection with rotation ---
 
 _WAIT_CONTEXT_PATTERNS: list[tuple[list[str], list[str]]] = [
+    (["зберігання", "зберіганні", "договір", "забрати шини"], WAIT_STORAGE_POOL),
     (["статус", "де замовлення", "де моє"], WAIT_STATUS_POOL),
     (["замовлення", "замовити", "оформити"], WAIT_ORDER_POOL),
     # Pricing keywords before booking — "ціна монтаж" → pricing, not booking

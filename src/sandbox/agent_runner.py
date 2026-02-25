@@ -241,10 +241,28 @@ def _register_live_tools(
 
             return result
 
+        async def _find_storage_live(**kwargs: Any) -> dict[str, Any]:
+            try:
+                data = await onec_client.find_storage(
+                    storage_number=kwargs.get("storage_number", ""),
+                    phone=kwargs.get("phone", ""),
+                )
+                if isinstance(data, dict):
+                    return data
+                return {"result": data}
+            except Exception:
+                logger.warning("1C find_storage failed in sandbox", exc_info=True)
+                return {"error": "Сервіс зберігання тимчасово недоступний", "contracts": []}
+
         router.register("get_pickup_points", _get_pickup_points)
-        logger.info("Live tool registered: get_pickup_points (network=%s)", network)
+        router.register("find_storage", _find_storage_live)
+        logger.info(
+            "Live tools registered: get_pickup_points, find_storage (network=%s)", network
+        )
     else:
-        logger.info("Live tool mode: no OneCClient — get_pickup_points remains mock")
+        logger.info(
+            "Live tool mode: no OneCClient — get_pickup_points, find_storage remain mock"
+        )
 
     if soap_client is not None:
 

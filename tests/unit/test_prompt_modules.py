@@ -22,6 +22,7 @@ from src.agent.prompts import (
     _MOD_OBJECTIONS,
     _MOD_ORDER_FLOW,
     _MOD_ORDER_STATUS,
+    _MOD_STORAGE,
     _MOD_TIRE_SEARCH,
     _STAGE_OFFER_FITTING,
     _STAGE_ORDER_CONFIRMATION,
@@ -48,6 +49,7 @@ class TestAssemblePrompt:
         assert "підбір шин" in prompt
         assert "оформлення замовлення" in prompt
         assert "запис на шиномонтаж" in prompt
+        assert "зберігання шин" in prompt
         assert "статусу замовлення" in prompt
         assert "консультація та інформація" in prompt
         assert "підбір → замовлення → монтаж" in prompt
@@ -79,9 +81,10 @@ class TestAssemblePrompt:
         assert _MOD_FITTING not in prompt
 
     def test_fitting_includes_order_and_consultation(self) -> None:
-        """fitting includes fitting + order flow + consultation + combined."""
+        """fitting includes fitting + storage + order flow + consultation + combined."""
         prompt = assemble_prompt(scenario="fitting")
         assert "запис на шиномонтаж" in prompt
+        assert "зберігання шин" in prompt
         assert "оформлення замовлення" in prompt
         assert "консультація та інформація" in prompt
         assert "підбір → замовлення → монтаж" in prompt
