@@ -917,8 +917,12 @@ function showBulkImportModal() {
 
     const modalHtml = `
         <div id="bulkImportOverlay" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onclick="if(event.target===this)this.remove()">
-            <div class="bg-white dark:bg-neutral-800 rounded-lg shadow-xl w-full max-w-lg mx-4 p-6">
-                <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">${t('sources.bulkImportTitle')}</h3>
+            <div class="bg-white dark:bg-neutral-800 rounded-lg shadow-xl w-full max-w-lg mx-4 overflow-hidden flex flex-col max-h-[80vh]">
+                <div class="modal-fixed-header">
+                    <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50">${t('sources.bulkImportTitle')}</h3>
+                    <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="document.getElementById('bulkImportOverlay').remove()">&times;</span>
+                </div>
+                <div class="modal-body">
                 <textarea id="bulkUrls" rows="8" class="w-full border rounded px-3 py-2 text-sm dark:bg-neutral-700 dark:border-neutral-600 mb-3" placeholder="${t('sources.bulkUrlsPlaceholder')}"></textarea>
                 <div class="grid grid-cols-3 gap-3 mb-4">
                     <div>
@@ -955,6 +959,7 @@ function showBulkImportModal() {
                 <div class="flex justify-end gap-2">
                     <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="document.getElementById('bulkImportOverlay').remove()">${t('common.cancel')}</button>
                     <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.knowledge.submitBulkImport()">${t('sources.bulkImport')}</button>
+                </div>
                 </div>
             </div>
         </div>`;

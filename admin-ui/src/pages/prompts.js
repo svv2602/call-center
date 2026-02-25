@@ -694,12 +694,12 @@ function showOptimizerDetail(id) {
         modal.id = 'optimizerDetailModal';
         modal.onclick = (e) => { if (e.target === modal) modal.remove(); };
         modal.innerHTML = `
-            <div class="bg-white dark:bg-neutral-800 rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-y-auto p-6">
-                <div class="flex justify-between items-center mb-4">
+            <div class="bg-white dark:bg-neutral-800 rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+                <div class="modal-fixed-header">
                     <h3 class="text-lg font-semibold">${t('prompts.optimizerDetailTitle')}</h3>
-                    <button class="text-neutral-400 hover:text-neutral-600" onclick="document.getElementById('optimizerDetailModal').remove()">&#x2715;</button>
+                    <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="document.getElementById('optimizerDetailModal').remove()">&times;</span>
                 </div>
-                ${body}
+                <div class="modal-body">${body}</div>
             </div>`;
         document.body.appendChild(modal);
     });

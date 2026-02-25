@@ -161,8 +161,12 @@ function _showPricingDialog(existing) {
     dialog.id = 'costPricingDialog';
     dialog.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
     dialog.innerHTML = `
-        <div class="bg-white dark:bg-neutral-900 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-            <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">${title}</h3>
+        <div class="bg-white dark:bg-neutral-900 rounded-lg shadow-xl max-w-md w-full mx-4 overflow-hidden flex flex-col max-h-[80vh]">
+            <div class="modal-fixed-header">
+                <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50">${title}</h3>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="document.getElementById('costPricingDialog').remove()">&times;</span>
+            </div>
+            <div class="modal-body">
             <div class="space-y-3">
                 <div>
                     <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('costs.providerKey')}</label>
@@ -197,6 +201,7 @@ function _showPricingDialog(existing) {
                     class="px-4 py-2 text-sm font-medium rounded-md border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-800">${t('costs.cancel')}</button>
                 <button id="dlgSaveBtn"
                     class="px-4 py-2 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700">${t('costs.save')}</button>
+            </div>
             </div>
         </div>
     `;
@@ -329,8 +334,12 @@ function showCatalogAddDialog(modelKey) {
     dialog.id = 'costCatalogAddDialog';
     dialog.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
     dialog.innerHTML = `
-        <div class="bg-white dark:bg-neutral-900 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-            <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">${t('costs.addToPricing')}</h3>
+        <div class="bg-white dark:bg-neutral-900 rounded-lg shadow-xl max-w-md w-full mx-4 overflow-hidden flex flex-col max-h-[80vh]">
+            <div class="modal-fixed-header">
+                <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50">${t('costs.addToPricing')}</h3>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="document.getElementById('costCatalogAddDialog').remove()">&times;</span>
+            </div>
+            <div class="modal-body">
             <div class="space-y-3">
                 <div>
                     <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Model Key</label>
@@ -349,6 +358,7 @@ function showCatalogAddDialog(modelKey) {
                     class="px-4 py-2 text-sm font-medium rounded-md border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-800">${t('costs.cancel')}</button>
                 <button id="dlgCatalogAddBtn"
                     class="px-4 py-2 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700">${t('costs.save')}</button>
+            </div>
             </div>
         </div>
     `;

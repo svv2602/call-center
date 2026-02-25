@@ -167,8 +167,12 @@ function showPermissionsEditor(userId, role) {
     // Build modal content
     let html = `
         <div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" id="permissionsOverlay" onclick="if(event.target===this) window._pages.users.closePermissions()">
-            <div class="bg-white dark:bg-neutral-900 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto p-6">
-                <h3 class="text-lg font-semibold mb-4">${t('users.editPermissions')}</h3>
+            <div class="bg-white dark:bg-neutral-900 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+                <div class="modal-fixed-header">
+                    <h3 class="text-lg font-semibold">${t('users.editPermissions')}</h3>
+                    <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._pages.users.closePermissions()">&times;</span>
+                </div>
+                <div class="modal-body">
                 <label class="flex items-center gap-2 mb-4 cursor-pointer">
                     <input type="checkbox" id="permUseDefaults" ${!isCustom ? 'checked' : ''} onchange="window._pages.users.togglePermDefaults()">
                     <span class="text-sm">${t('users.useRoleDefaults')} (${escapeHtml(roleLabel(role))})</span>
@@ -191,6 +195,7 @@ function showPermissionsEditor(userId, role) {
                 <div class="flex justify-end gap-2 mt-6">
                     <button class="px-4 py-2 text-sm rounded-md border border-neutral-300 dark:border-neutral-600 cursor-pointer" onclick="window._pages.users.closePermissions()">${t('common.cancel')}</button>
                     <button class="px-4 py-2 text-sm rounded-md bg-violet-600 text-white hover:bg-violet-700 cursor-pointer" onclick="window._pages.users.savePermissions('${escapeHtml(userId)}')">${t('common.save')}</button>
+                </div>
                 </div>
             </div>
         </div>

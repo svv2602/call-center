@@ -222,12 +222,12 @@
                     <td class="${p}">${i.frequency||0}</td>
                     <td class="${p}"><div class="max-w-md text-sm">${l(i.suggestion||"")}</div></td>
                 </tr>`}r+="</tbody></table></div>"}const a=document.createElement("div");a.className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50",a.id="optimizerDetailModal",a.onclick=i=>{i.target===a&&a.remove()},a.innerHTML=`
-            <div class="bg-white dark:bg-neutral-800 rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-y-auto p-6">
-                <div class="flex justify-between items-center mb-4">
+            <div class="bg-white dark:bg-neutral-800 rounded-lg shadow-xl max-w-3xl w-full max-h-[80vh] overflow-hidden flex flex-col">
+                <div class="modal-fixed-header">
                     <h3 class="text-lg font-semibold">${e("prompts.optimizerDetailTitle")}</h3>
-                    <button class="text-neutral-400 hover:text-neutral-600" onclick="document.getElementById('optimizerDetailModal').remove()">&#x2715;</button>
+                    <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="document.getElementById('optimizerDetailModal').remove()">&times;</span>
                 </div>
-                ${r}
+                <div class="modal-body">${r}</div>
             </div>`,document.body.appendChild(a)})}function La(){V("prompts",je),document.addEventListener("click",t=>{t.target.closest(".relative")||document.querySelectorAll("#page-prompts .relative > div:not(.hidden)").forEach(s=>s.classList.add("hidden"))})}window._pages=window._pages||{};window._pages.prompts={loadPromptVersions:je,showCreatePrompt:pa,createPrompt:ua,activatePrompt:ga,viewPrompt:ma,loadDefaultPrompt:ha,resetToDefault:ba,deletePrompt:va,loadABTests:Ge,showCreateABTest:xa,createABTest:$a,stopABTest:wa,deleteABTest:ka,showABReport:Ta,exportABReportCSV:_a,loadPronunciationRules:es,savePronunciationRules:Ca,resetPronunciationRules:Ea,loadOptimizerResults:_n,runOptimizer:Ba,showOptimizerDetail:Ia};let Re=[],Cn="articles",ge=0,st=0,Vt=0,kt=0,$t="",Xe=[];function Ms(t){Cn=t,["articles","source-configs","scraper","watched"].forEach(r=>{const a=document.getElementById(`knowledgeContent-${r}`);a&&(a.style.display=r===t?"block":"none")}),document.querySelectorAll("#page-knowledge .tab-bar button").forEach(r=>r.classList.remove("active"));const n=document.querySelector(`#page-knowledge .tab-bar button[data-tab="${t}"]`);n&&n.classList.add("active"),ge=0,st=0,Vt=0,kt=0;const o={articles:Ra,"source-configs":mt,scraper:()=>{Bn(),Pt()},watched:Pe};o[t]&&o[t]()}function Pa(t){switch(t){case"indexed":return`<span class="${I}">indexed</span>`;case"pending":return`<span class="${O}">pending</span>`;case"processing":return`<span class="${F}">processing</span>`;case"error":return`<span class="${R}">error</span>`;default:return`<span class="${A}">${l(t||"unknown")}</span>`}}function Aa(t){if(!t)return`<span class="${T} text-xs">—</span>`;const s=new Date(t),n=new Date,o=z(t);return s<n?`<span class="${R}" title="${o}">${e("knowledge.expired")}</span>`:Math.ceil((s-n)/864e5)<=7?`<span class="${O}" title="${o}">${o}</span>`:`<span class="text-xs" title="${o}">${o}</span>`}function ls(t,s,n){if(t.innerHTML="",n){const o=document.createElement("option");o.value="",o.textContent=e("knowledge.allCategories"),t.appendChild(o)}for(const o of s){const r=document.createElement("option");r.value=o.value,r.textContent=o.label,t.appendChild(r)}}async function Ha(){try{Re=(await u("/knowledge/article-categories")).categories||[]}catch{Re=[{value:"brands",label:"Brands"},{value:"guides",label:"Guides"},{value:"faq",label:"FAQ"},{value:"comparisons",label:"Comparisons"},{value:"general",label:"General"}]}const t=document.getElementById("kbCategory");t&&ls(t,Re,!0);const s=document.getElementById("articleCategory");s&&ls(s,Re,!1);const n=document.getElementById("importCategory");n&&ls(n,Re,!0)}async function Ra(){await Ha(),await Se()}async function Se(t){t!==void 0&&(ge=t);const s=document.getElementById("articlesContainer");s.innerHTML=`<div class="${H}"><div class="spinner"></div></div>`;const n=re({offset:ge,filters:{category:"kbCategory",search:"kbSearch",active:"kbActive"}});try{const o=await u(`/knowledge/articles?${n}`),r=o.articles||[];if(r.length===0){s.innerHTML=`<div class="${w}">${e("knowledge.noArticles")}</div>`,N({containerId:"articlesPagination",total:0,offset:0});return}s.innerHTML=`
             <div class="overflow-x-auto min-h-[480px]"><table class="${P}" id="articlesTable"><thead><tr><th class="${E}" data-sortable>${e("knowledge.articleTitle")}</th><th class="${E}" data-sortable>${e("knowledge.category")}</th><th class="${E}" data-sortable>${e("knowledge.embedding")}</th><th class="${E}" data-sortable>${e("knowledge.activeCol")}</th><th class="${E}" data-sortable>${e("knowledge.expiresAt")}</th><th class="${E}" data-sortable>${e("knowledge.updated")}</th><th class="${h}">${e("knowledge.actions")}</th></tr></thead><tbody>
             ${r.map(a=>`
@@ -433,8 +433,12 @@
             </tbody></table></div>`}s.innerHTML=b,N({containerId:"watchedPagesPagination",total:o.total,offset:kt,onPage:y=>Pe(y)})}catch(n){s.innerHTML=`<div class="${w}">${e("sources.watchedFailedToLoad",{error:l(n.message)})}
             <br><button class="${_} ${k} mt-2" onclick="window._pages.knowledge.loadWatchedPages()">${e("common.retry")}</button></div>`}}}function dr(t){$t=t,kt=0,Pe()}async function cr(){var i,c,g,m,b,y;const t=(c=(i=document.getElementById("watchedPageUrl"))==null?void 0:i.value)==null?void 0:c.trim(),s=(g=document.getElementById("watchedPageCategory"))==null?void 0:g.value,n=(m=document.getElementById("watchedPageInterval"))==null?void 0:m.value,o=((b=document.getElementById("watchedPageDiscovery"))==null?void 0:b.checked)||!1,r=((y=document.getElementById("watchedPageTenant"))==null?void 0:y.value)||null;if(!t){d(e("sources.urlRequired"),"error");return}if(!s){d(e("sources.categoryRequired"),"error");return}if(!n){d(e("sources.intervalRequired"),"error");return}const a=parseInt(n,10);if(isNaN(a)||a<1){d(e("sources.intervalRequired"),"error");return}try{await u("/admin/scraper/watched-pages",{method:"POST",body:JSON.stringify({url:t,category:s,rescrape_interval_hours:a,is_discovery:o,tenant_id:r})}),d(e("sources.watchedPageAdded")),document.getElementById("watchedPageUrl").value="",Pe()}catch(v){d(e("sources.watchedPageAddFailed",{error:v.message}),"error")}}async function pr(t,s){try{await u(`/admin/scraper/watched-pages/${t}`,{method:"PATCH",body:JSON.stringify({rescrape_interval_hours:s})}),d(e("sources.watchedPageUpdated"))}catch(n){d(e("sources.watchedPageUpdateFailed",{error:n.message}),"error")}}async function ur(t){try{d(e("sources.scrapeNowRunning"),"info");const s=await u(`/admin/scraper/watched-pages/${t}/scrape-now`,{method:"POST"});s.status==="unchanged"?d(e("sources.scrapeNowUnchanged")):s.status==="ok"&&s.discovered!==void 0?d(e("sources.scrapeNowDiscoveryDone",{discovered:s.discovered,created:s.created||0,updated:s.updated||0})):d(e("sources.scrapeNowDone",{status:s.status||"ok"})),Pe()}catch(s){d(e("sources.scrapeNowFailed",{error:s.message}),"error")}}async function gr(t){if(confirm(e("sources.watchedPageDeleteConfirm")))try{await u(`/admin/scraper/watched-pages/${t}`,{method:"DELETE"}),d(e("sources.watchedPageDeleted")),Pe()}catch(s){d(e("sources.watchedPageDeleteFailed",{error:s.message}),"error")}}function mr(){let t='<option value="">—</option>';for(const n of Xe)t+=`<option value="${l(n.id)}">${l(n.name)}</option>`;const s=`
         <div id="bulkImportOverlay" class="fixed inset-0 bg-black/50 z-50 flex items-center justify-center" onclick="if(event.target===this)this.remove()">
-            <div class="bg-white dark:bg-neutral-800 rounded-lg shadow-xl w-full max-w-lg mx-4 p-6">
-                <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">${e("sources.bulkImportTitle")}</h3>
+            <div class="bg-white dark:bg-neutral-800 rounded-lg shadow-xl w-full max-w-lg mx-4 overflow-hidden flex flex-col max-h-[80vh]">
+                <div class="modal-fixed-header">
+                    <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50">${e("sources.bulkImportTitle")}</h3>
+                    <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="document.getElementById('bulkImportOverlay').remove()">&times;</span>
+                </div>
+                <div class="modal-body">
                 <textarea id="bulkUrls" rows="8" class="w-full border rounded px-3 py-2 text-sm dark:bg-neutral-700 dark:border-neutral-600 mb-3" placeholder="${e("sources.bulkUrlsPlaceholder")}"></textarea>
                 <div class="grid grid-cols-3 gap-3 mb-4">
                     <div>
@@ -471,6 +475,7 @@
                 <div class="flex justify-end gap-2">
                     <button class="${q} ${k}" onclick="document.getElementById('bulkImportOverlay').remove()">${e("common.cancel")}</button>
                     <button class="${_} ${k}" onclick="window._pages.knowledge.submitBulkImport()">${e("sources.bulkImport")}</button>
+                </div>
                 </div>
             </div>
         </div>`;document.body.insertAdjacentHTML("beforeend",s)}async function hr(){var r,a,i,c,g;const s=(((r=document.getElementById("bulkUrls"))==null?void 0:r.value)||"").split(`
@@ -910,8 +915,12 @@
             </tbody></table></div>
         `,W("usersTable"),N({containerId:"usersPagination",total:o.total,offset:ds,onPage:a=>We(a)})}catch(o){s.innerHTML=`<div class="${w}">${e("users.failedToLoad",{error:l(o.message)})}</div>`}}function Bi(){document.getElementById("newUsername").value="",document.getElementById("newPassword").value="",document.getElementById("newRole").value="operator",document.getElementById("createUserModal").classList.add("show")}async function Ii(){const t=document.getElementById("newUsername").value.trim(),s=document.getElementById("newPassword").value,n=document.getElementById("newRole").value;if(!t||!s){d(e("users.usernameRequired"),"error");return}try{await u("/admin/users",{method:"POST",body:JSON.stringify({username:t,password:s,role:n})}),D("createUserModal"),d(e("users.userCreated")),We()}catch(o){d(e("users.createFailed",{error:o.message}),"error")}}async function Li(t,s){if(s)try{await u(`/admin/users/${t}`,{method:"PATCH",body:JSON.stringify({role:s})}),d(e("users.roleUpdated")),We()}catch(n){d(e("users.roleFailed",{error:n.message}),"error")}}async function Pi(t,s){try{await u(`/admin/users/${t}`,{method:"PATCH",body:JSON.stringify({is_active:!s})}),d(e(s?"users.userDeactivated":"users.userActivated")),We()}catch(n){d(e("users.toggleFailed",{error:n.message}),"error")}}async function Ai(t,s){const n=prompt(e("users.newPasswordPrompt",{username:s}));if(n)try{await u(`/admin/users/${t}/reset-password`,{method:"POST",body:JSON.stringify({new_password:n})}),d(e("users.passwordReset"))}catch(o){d(e("users.resetFailed",{error:o.message}),"error")}}function Hi(t,s){const n=Gn[t]??null,o=n!==null,r=Ei[s]||[],a=o?n:r,i=a.includes("*");let c=`
         <div class="fixed inset-0 bg-black/40 z-50 flex items-center justify-center" id="permissionsOverlay" onclick="if(event.target===this) window._pages.users.closePermissions()">
-            <div class="bg-white dark:bg-neutral-900 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] overflow-y-auto p-6">
-                <h3 class="text-lg font-semibold mb-4">${e("users.editPermissions")}</h3>
+            <div class="bg-white dark:bg-neutral-900 rounded-lg shadow-xl w-full max-w-2xl max-h-[80vh] overflow-hidden flex flex-col">
+                <div class="modal-fixed-header">
+                    <h3 class="text-lg font-semibold">${e("users.editPermissions")}</h3>
+                    <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._pages.users.closePermissions()">&times;</span>
+                </div>
+                <div class="modal-body">
                 <label class="flex items-center gap-2 mb-4 cursor-pointer">
                     <input type="checkbox" id="permUseDefaults" ${o?"":"checked"} onchange="window._pages.users.togglePermDefaults()">
                     <span class="text-sm">${e("users.useRoleDefaults")} (${l(zn(s))})</span>
@@ -922,6 +931,7 @@
                 <div class="flex justify-end gap-2 mt-6">
                     <button class="px-4 py-2 text-sm rounded-md border border-neutral-300 dark:border-neutral-600 cursor-pointer" onclick="window._pages.users.closePermissions()">${e("common.cancel")}</button>
                     <button class="px-4 py-2 text-sm rounded-md bg-violet-600 text-white hover:bg-violet-700 cursor-pointer" onclick="window._pages.users.savePermissions('${l(t)}')">${e("common.save")}</button>
+                </div>
                 </div>
             </div>
         </div>
@@ -1697,8 +1707,12 @@
             </td>
         </tr>
     `).join("")}}async function Rd(t,s){try{await u(`/admin/llm-costs/pricing/${t}`,{method:"PATCH",body:JSON.stringify({include_in_comparison:s})})}catch(n){d(n.message,"error"),await ze()}}async function Md(){try{const t=await u("/admin/llm-costs/pricing/sync-system",{method:"POST"});d(t.message,"success"),await ze()}catch(t){d(t.message,"error")}}async function Dd(t){if(confirm(e("costs.confirmDelete")))try{await u(`/admin/llm-costs/pricing/${t}`,{method:"DELETE"}),d(e("costs.deleted"),"success"),await ze()}catch(s){d(s.message,"error")}}function Fd(){co(null)}function Od(t){const s=Cs.find(n=>n.id===t);s&&co(s)}function co(t){var r;const s=!!t,n=e(s?"costs.edit":"costs.addModel");(r=document.getElementById("costPricingDialog"))==null||r.remove();const o=document.createElement("div");o.id="costPricingDialog",o.className="fixed inset-0 bg-black/50 flex items-center justify-center z-50",o.innerHTML=`
-        <div class="bg-white dark:bg-neutral-900 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-            <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">${n}</h3>
+        <div class="bg-white dark:bg-neutral-900 rounded-lg shadow-xl max-w-md w-full mx-4 overflow-hidden flex flex-col max-h-[80vh]">
+            <div class="modal-fixed-header">
+                <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50">${n}</h3>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="document.getElementById('costPricingDialog').remove()">&times;</span>
+            </div>
+            <div class="modal-body">
             <div class="space-y-3">
                 <div>
                     <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">${e("costs.providerKey")}</label>
@@ -1734,6 +1748,7 @@
                 <button id="dlgSaveBtn"
                     class="px-4 py-2 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700">${e("costs.save")}</button>
             </div>
+            </div>
         </div>
     `,document.body.appendChild(o),o.addEventListener("click",a=>{a.target===o&&o.remove()}),document.getElementById("dlgSaveBtn").addEventListener("click",async()=>{const a={model_name:document.getElementById("dlgModelName").value.trim(),display_name:document.getElementById("dlgDisplayName").value.trim(),input_price_per_1m:parseFloat(document.getElementById("dlgInputPrice").value),output_price_per_1m:parseFloat(document.getElementById("dlgOutputPrice").value)};try{s?(await u(`/admin/llm-costs/pricing/${t.id}`,{method:"PATCH",body:JSON.stringify(a)}),d(e("costs.updated"),"success")):(a.provider_key=document.getElementById("dlgProviderKey").value.trim(),await u("/admin/llm-costs/pricing",{method:"POST",body:JSON.stringify(a)}),d(e("costs.created"),"success")),o.remove(),await ze()}catch(i){d(i.message,"error")}})}async function vt(){var r,a;const t=new URLSearchParams,s=(r=document.getElementById("catalogProviderFilter"))==null?void 0:r.value,n=(a=document.getElementById("catalogSearch"))==null?void 0:a.value;s&&t.set("provider_type",s),n&&t.set("search",n);const o=t.toString();try{const[i,c]=await Promise.all([u(`/admin/llm-costs/catalog${o?"?"+o:""}`),u("/admin/llm-costs/catalog/sync-status")]);Nd(i.items||[]),Kd(c.last_sync_at)}catch(i){d(i.message,"error")}}function Nd(t){const s=document.getElementById("catalogTableBody");if(s){if(!t.length){s.innerHTML=`<tr><td colspan="7" class="px-3 py-8 text-center text-neutral-400">${e("costs.noData")}</td></tr>`;return}s.innerHTML=t.map(n=>{const o=n.max_input_tokens?qd(n.max_input_tokens):"—";let r;n.is_added?r=`<span class="text-green-600 dark:text-green-400 text-xs font-medium">${e("costs.added")}</span>`:n.is_new?r=`<span class="text-blue-600 dark:text-blue-400 text-xs font-medium">${e("costs.new")}</span>`:r='<span class="text-neutral-400 text-xs">—</span>';const a=n.is_added?"":`<button onclick="window._pages.costAnalysis.showCatalogAddDialog('${Y(n.model_key)}')" class="text-blue-600 dark:text-blue-400 hover:underline text-xs mr-2">${e("costs.addToPricing")}</button>`+(n.is_new?`<button onclick="window._pages.costAnalysis.dismissModel('${Y(n.model_key)}')" class="text-neutral-500 hover:underline text-xs">${e("costs.dismiss")}</button>`:"");return`
             <tr class="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
@@ -1746,8 +1761,12 @@
                 <td class="px-3 py-2.5 text-sm text-right">${a}</td>
             </tr>
         `}).join("")}}function Kd(t){const s=document.getElementById("catalogLastSync");if(s)if(t){const n=new Date(t);s.textContent=`${e("costs.lastSync")}: ${n.toLocaleDateString()} ${n.toLocaleTimeString()}`}else s.textContent=e("costs.neverSynced")}function qd(t){return t>=1e6?(t/1e6).toFixed(0)+"M":t>=1e3?(t/1e3).toFixed(0)+"K":String(t)}function Ud(){cs&&clearTimeout(cs),cs=setTimeout(()=>vt(),300)}async function Gd(){try{const t=await u("/admin/llm-costs/catalog/sync",{method:"POST"});d(e("costs.catalogSyncStarted"),"success"),setTimeout(()=>vt(),2e3)}catch(t){d(t.message,"error")}}function zd(t){var n;(n=document.getElementById("costCatalogAddDialog"))==null||n.remove();const s=document.createElement("div");s.id="costCatalogAddDialog",s.className="fixed inset-0 bg-black/50 flex items-center justify-center z-50",s.innerHTML=`
-        <div class="bg-white dark:bg-neutral-900 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
-            <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">${e("costs.addToPricing")}</h3>
+        <div class="bg-white dark:bg-neutral-900 rounded-lg shadow-xl max-w-md w-full mx-4 overflow-hidden flex flex-col max-h-[80vh]">
+            <div class="modal-fixed-header">
+                <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50">${e("costs.addToPricing")}</h3>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="document.getElementById('costCatalogAddDialog').remove()">&times;</span>
+            </div>
+            <div class="modal-body">
             <div class="space-y-3">
                 <div>
                     <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Model Key</label>
@@ -1766,6 +1785,7 @@
                     class="px-4 py-2 text-sm font-medium rounded-md border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-800">${e("costs.cancel")}</button>
                 <button id="dlgCatalogAddBtn"
                     class="px-4 py-2 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700">${e("costs.save")}</button>
+            </div>
             </div>
         </div>
     `,document.body.appendChild(s),s.addEventListener("click",o=>{o.target===s&&s.remove()}),document.getElementById("dlgCatalogAddBtn").addEventListener("click",async()=>{const o=document.getElementById("dlgCatalogProviderKey").value.trim();if(o)try{await u("/admin/llm-costs/catalog/add",{method:"POST",body:JSON.stringify({model_key:t,provider_key:o})}),d(e("costs.modelAdded"),"success"),s.remove(),await Promise.all([vt(),ze(),Qs()])}catch(r){d(r.message,"error")}})}async function Vd(t){try{await u("/admin/llm-costs/catalog/dismiss",{method:"POST",body:JSON.stringify({model_keys:[t]})}),d(e("costs.modelsDismissed"),"success"),await Promise.all([vt(),Qs()])}catch(s){d(s.message,"error")}}async function sn(){const t=Pd();try{const[s,n]=await Promise.all([u(`/admin/llm-costs/usage/summary${t?"?"+t:""}`),u(`/admin/llm-costs/usage/model-comparison${t?"?"+t:""}`)]);jd(s.items||[]),Wd(n)}catch(s){d(s.message,"error")}}function jd(t){const s=document.getElementById("usageSummaryBody");if(s){if(!t.length){s.innerHTML=`<tr><td colspan="7" class="px-3 py-8 text-center text-neutral-400">${e("costs.noData")}</td></tr>`;return}s.innerHTML=t.map(n=>`
