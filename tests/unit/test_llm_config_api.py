@@ -359,3 +359,119 @@ class TestListModels:
         data = response.json()
         assert data["models"] == []
         assert data["default_model"] == ""
+
+
+class TestDeleteProvider:
+    """Test DELETE /admin/llm/config/providers/{key}."""
+
+    @pytest.mark.asyncio()
+    async def test_delete_provider_success(self, app: Any, mock_redis: AsyncMock) -> None:
+        """Delete a provider not used in any task."""
+        # Redis has a custom provider that is not referenced in tasks
+        redis_config = {
+            "providers": {
+                "custom-test": {
+                    "type": "openai",
+                    "model": "test-model",
+                    "api_key_env": "TEST_KEY",
+                    "enabled": False,
+                }
+            }
+        }
+        mock_redis.get = AsyncMock(return_value=json.dumps(redis_config))
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.llm._router_instance", None),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.delete("/admin/llm/config/providers/custom-test")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert "deleted" in data["message"]
+        # Provider should be gone from returned config
+        assert "custom-test" not in data["config"]["providers"]
+        # Redis should have been updated
+        mock_redis.set.assert_called_once()
+
+    @pytest.mark.asyncio()
+    async def test_delete_provider_in_use_as_primary(self, app: Any, mock_redis: AsyncMock) -> None:
+        """Cannot delete provider used as primary in a task."""
+        redis_config = {
+            "tasks": {"agent": {"primary": "anthropic-sonnet"}}
+        }
+        mock_redis.get = AsyncMock(return_value=json.dumps(redis_config))
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_config._get_redis", AsyncMock(return_value=mock_redis)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.delete("/admin/llm/config/providers/anthropic-sonnet")
+
+        assert response.status_code == 409
+        data = response.json()
+        assert "agent (primary)" in data["detail"]
+
+    @pytest.mark.asyncio()
+    async def test_delete_provider_in_use_as_fallback(self, app: Any, mock_redis: AsyncMock) -> None:
+        """Cannot delete provider used as fallback."""
+        redis_config = {
+            "tasks": {"agent": {"primary": "gemini-flash", "fallbacks": ["anthropic-sonnet"]}}
+        }
+        mock_redis.get = AsyncMock(return_value=json.dumps(redis_config))
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_config._get_redis", AsyncMock(return_value=mock_redis)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.delete("/admin/llm/config/providers/anthropic-sonnet")
+
+        assert response.status_code == 409
+        data = response.json()
+        assert "agent (fallback)" in data["detail"]
+
+    @pytest.mark.asyncio()
+    async def test_delete_default_provider(self, app: Any, mock_redis: AsyncMock) -> None:
+        """Delete a provider that exists only in defaults — marks as __deleted__."""
+        # No Redis override, so openai-gpt41-mini comes from defaults
+        # First ensure it's not used in tasks by overriding tasks
+        redis_config = {
+            "tasks": {
+                "agent": {"primary": "anthropic-sonnet", "fallbacks": []},
+                "article_processor": {"primary": "anthropic-sonnet", "fallbacks": []},
+                "quality_scoring": {"primary": "anthropic-sonnet", "fallbacks": []},
+                "prompt_optimizer": {"primary": "anthropic-sonnet", "fallbacks": []},
+            }
+        }
+        mock_redis.get = AsyncMock(return_value=json.dumps(redis_config))
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.llm._router_instance", None),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.delete("/admin/llm/config/providers/openai-gpt41-mini")
+
+        assert response.status_code == 200
+        # Check that __deleted__ marker was saved in Redis
+        stored = json.loads(mock_redis.set.call_args[0][1])
+        assert stored["providers"]["openai-gpt41-mini"]["__deleted__"] is True
+        # Provider should not appear in merged config
+        assert "openai-gpt41-mini" not in response.json()["config"]["providers"]
+
+    @pytest.mark.asyncio()
+    async def test_delete_nonexistent(self, app: Any, mock_redis: AsyncMock) -> None:
+        """404 for provider that doesn't exist."""
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_config._get_redis", AsyncMock(return_value=mock_redis)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.delete("/admin/llm/config/providers/nonexistent-xyz")
+
+        assert response.status_code == 404

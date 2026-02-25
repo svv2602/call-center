@@ -453,6 +453,15 @@ export default {
     'settings.llmTestSuccess': '{key}: OK ({latency}ms)',
     'settings.llmTestFailed': '{key}: ошибка — {error}',
     'settings.llmLoadFailed': 'Не удалось загрузить конфигурацию LLM: {error}',
+    'settings.llmEditProvider': 'Редактировать',
+    'settings.llmDeleteProvider': 'Удалить',
+    'settings.llmDeleteConfirm': 'Удалить провайдер {key}? Это действие необратимо.',
+    'settings.llmProviderDeleted': 'Провайдер {key} удалён',
+    'settings.llmProviderInUse': 'Невозможно удалить: провайдер используется в задачах: {tasks}',
+    'settings.llmProviderUpdated': 'Провайдер {key} обновлён',
+    'settings.llmBaseUrl': 'Base URL',
+    'settings.llmApiKeyEnv': 'Переменная API-ключа',
+    'settings.llmEditTitle': 'Редактирование провайдера',
     // Sandbox defaults
     'settings.sandboxDefaults': 'Настройки Sandbox',
     'settings.sandboxDefaultModel': 'Модель по умолчанию',
@@ -1559,6 +1568,9 @@ export default {
     'help.sttHints.overrides.title': 'Вкладка «Транслитерация»',
     'help.sttHints.overrides.content': '<p>Переопределения целых слов при транслитерации латиницы в кириллицу для STT подсказок. Например, «weather» → «везер» вместо побуквенной транслитерации.</p><ul><li>Поиск по ключу или значению</li><li>Добавление новых переопределений: ключ — латиница, значение — кириллица</li><li><strong>Сохранить</strong> — отправить изменённый набор на сервер</li><li><strong>Сброс к умолчаниям</strong> — вернуть стандартный набор переопределений</li></ul>',
     'help.sttHints.tips': '<ul><li>Кириллические варианты наиболее эффективны (STT uk-UA выводит кириллицу)</li><li>Общий лимит 5000 фраз — следите за процентом заполнения</li><li>Подсказки применяются к новым звонкам автоматически</li></ul>',
+
+    'help.configuration.providerMgmt.title': 'Управление провайдерами',
+    'help.configuration.providerMgmt.content': '<p>Каждый провайдер в таблице имеет кнопки <strong>«Edit»</strong> и <strong>«Delete»</strong>:</p><ul><li><strong>Edit</strong> — открывает диалог редактирования: тип, модель, Base URL, переменная API-ключа. Все поля можно изменить и сохранить.</li><li><strong>Delete</strong> — удаляет провайдера. Перед удалением система проверяет, не используется ли он как primary или fallback в задачах. Если используется — удаление невозможно (сначала переназначьте задачи).</li></ul>',
 
     'help.configuration.affects.title': 'На что влияют изменения',
     'help.configuration.affects.content': '<div class="help-affects"><p><strong>Отключение провайдера</strong> — если он единственный для задачи и нет фоллбэков, задача перестанет работать.</p><p><strong>Смена модели</strong> — мгновенно влияет на все новые запросы. Более мощная модель = лучше качество, но дороже и медленнее.</p><p><strong>Маршрутизация задач</strong> — позволяет использовать дешёвые модели для некритичных задач (качество, скрапинг) и мощные — для диалогов с клиентами.</p><p><strong>Настройки TTS</strong> — новый голос/скорость/тональность применяются к новым звонкам; текущие звонки продолжают со старым голосом.</p><p><strong>Подсказки станций</strong> — район/ориентиры применяются к следующему вызову get_fitting_stations немедленно.</p></div>',

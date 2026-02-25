@@ -84,7 +84,11 @@ function renderLLMProviders(config, healthMap) {
             <td class="${tw.td}" data-label="${t('settings.llmApiKey')}">${keyBadge}</td>
             <td class="${tw.td}" data-label="${t('settings.llmEnabled')}"><input type="checkbox" ${enabledChecked} onchange="window._pages.configuration.toggleLLMProvider('${escapeHtml(key)}', this.checked)"></td>
             <td class="${tw.td}" data-label="${t('settings.llmHealth')}">${healthBadge}</td>
-            <td class="${tw.tdActions}" data-label="${t('settings.llmActions')}"><button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.configuration.testLLMProvider('${escapeHtml(key)}')">${t('settings.llmTest')}</button></td>
+            <td class="${tw.tdActions}" data-label="${t('settings.llmActions')}">
+                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.configuration.testLLMProvider('${escapeHtml(key)}')">${t('settings.llmTest')}</button>
+                <button class="${tw.btnSm} ml-1 border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800" onclick="window._pages.configuration.editLLMProvider('${escapeHtml(key)}')">${t('settings.llmEditProvider')}</button>
+                <button class="${tw.btnSm} ml-1 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20" onclick="window._pages.configuration.deleteLLMProvider('${escapeHtml(key)}')">${t('settings.llmDeleteProvider')}</button>
+            </td>
         </tr>`;
     }
     html += `<tr id="llm-add-row" style="display:none" class="${tw.trHover}">
@@ -104,6 +108,41 @@ function renderLLMProviders(config, healthMap) {
         </tr>`;
     html += '</tbody></table></div>';
     html += `<button class="${tw.btnPrimary} ${tw.btnSm} mt-2" onclick="document.getElementById('llm-add-row').style.display=''">${t('settings.llmAddProvider')}</button>`;
+
+    // Edit provider modal
+    html += `<div id="llm-edit-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" style="display:none">
+        <div class="bg-white dark:bg-neutral-900 rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">${t('settings.llmEditTitle')}: <span id="llm-edit-key" class="font-mono"></span></h3>
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.llmType')}</label>
+                    <select id="llm-edit-type" class="${tw.selectSm} w-full">
+                        <option value="anthropic">anthropic</option>
+                        <option value="openai">openai</option>
+                        <option value="deepseek">deepseek</option>
+                        <option value="gemini">gemini</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.llmModel')}</label>
+                    <input id="llm-edit-model" type="text" class="w-full text-sm font-mono bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-2 py-1 focus:outline-none focus:border-blue-500">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.llmBaseUrl')}</label>
+                    <input id="llm-edit-base-url" type="text" class="w-full text-sm font-mono bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-2 py-1 focus:outline-none focus:border-blue-500" placeholder="https://api.openai.com/v1">
+                </div>
+                <div>
+                    <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.llmApiKeyEnv')}</label>
+                    <input id="llm-edit-api-key-env" type="text" class="w-full text-sm font-mono bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-2 py-1 focus:outline-none focus:border-blue-500" placeholder="OPENAI_API_KEY">
+                </div>
+            </div>
+            <div class="flex justify-end gap-2 mt-5">
+                <button class="${tw.btnSm} border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300" onclick="document.getElementById('llm-edit-modal').style.display='none'">${t('common.cancel')}</button>
+                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.configuration.saveEditProvider()">${t('common.save')}</button>
+            </div>
+        </div>
+    </div>`;
+
     container.innerHTML = html;
 }
 
@@ -398,6 +437,68 @@ async function moveFallback(taskName, index, direction) {
     if (newIndex < 0 || newIndex >= current.length) return;
     [current[index], current[newIndex]] = [current[newIndex], current[index]];
     await _saveFallbacks(taskName, current);
+}
+
+let _editingProviderKey = null;
+
+function editLLMProvider(key) {
+    const cfg = _llmConfig?.providers?.[key];
+    if (!cfg) return;
+    _editingProviderKey = key;
+    document.getElementById('llm-edit-key').textContent = key;
+    document.getElementById('llm-edit-type').value = cfg.type || 'openai';
+    document.getElementById('llm-edit-model').value = cfg.model || '';
+    document.getElementById('llm-edit-base-url').value = cfg.base_url || '';
+    document.getElementById('llm-edit-api-key-env').value = cfg.api_key_env || '';
+    document.getElementById('llm-edit-modal').style.display = '';
+}
+
+async function saveEditProvider() {
+    if (!_editingProviderKey) return;
+    const key = _editingProviderKey;
+    const type = document.getElementById('llm-edit-type').value;
+    const model = document.getElementById('llm-edit-model').value.trim();
+    const base_url = document.getElementById('llm-edit-base-url').value.trim();
+    const api_key_env = document.getElementById('llm-edit-api-key-env').value.trim();
+
+    const update = { type, model };
+    if (base_url) update.base_url = base_url;
+    if (api_key_env) update.api_key_env = api_key_env;
+
+    try {
+        await api('/admin/llm/config', {
+            method: 'PATCH',
+            body: JSON.stringify({ providers: { [key]: update } }),
+        });
+        document.getElementById('llm-edit-modal').style.display = 'none';
+        _editingProviderKey = null;
+        showToast(t('settings.llmProviderUpdated', { key }), 'success');
+        loadLLMConfig();
+    } catch (e) {
+        showToast(t('settings.llmConfigFailed', { error: e.message }), 'error');
+    }
+}
+
+async function deleteLLMProvider(key) {
+    if (!confirm(t('settings.llmDeleteConfirm', { key }))) return;
+    try {
+        await api(`/admin/llm/config/providers/${encodeURIComponent(key)}`, { method: 'DELETE' });
+        showToast(t('settings.llmProviderDeleted', { key }), 'success');
+        loadLLMConfig();
+    } catch (e) {
+        // Parse 409 conflict detail
+        let msg = e.message;
+        try {
+            const body = JSON.parse(e.message);
+            if (body.detail) msg = body.detail;
+        } catch { /* use original */ }
+        if (e.status === 409 || msg.includes('used in tasks')) {
+            const tasks = msg.replace(/^.*tasks:\s*/, '');
+            showToast(t('settings.llmProviderInUse', { tasks }), 'error');
+        } else {
+            showToast(t('settings.llmConfigFailed', { error: msg }), 'error');
+        }
+    }
 }
 
 async function testLLMProvider(key) {
@@ -746,6 +847,7 @@ window._pages = window._pages || {};
 window._pages.configuration = {
     reloadConfig, loadLLMConfig, toggleLLMProvider, updateLLMModel,
     onAddTypeChange, onAddModelInput, saveNewProvider,
+    editLLMProvider, saveEditProvider, deleteLLMProvider,
     updateTaskRoute, addFallback, removeFallback, moveFallback, testLLMProvider,
     saveSandboxDefaults,
     loadTTSConfig, saveTTSConfig, testTTS, resetTTSConfig,

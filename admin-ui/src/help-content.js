@@ -127,6 +127,7 @@ export const HELP_PAGES = {
             { titleKey: 'help.configuration.schedules.title', contentKey: 'help.configuration.schedules.content' },
             { titleKey: 'help.configuration.tts.title', contentKey: 'help.configuration.tts.content' },
             { titleKey: 'help.configuration.ttsBreaks.title', contentKey: 'help.configuration.ttsBreaks.content' },
+            { titleKey: 'help.configuration.providerMgmt.title', contentKey: 'help.configuration.providerMgmt.content' },
             { titleKey: 'help.configuration.affects.title', contentKey: 'help.configuration.affects.content' },
         ],
         tipsKey: 'help.configuration.tips',

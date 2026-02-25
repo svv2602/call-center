@@ -11,7 +11,7 @@ import os
 import time
 from typing import Any
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from redis.asyncio import Redis
 
@@ -228,6 +228,61 @@ async def test_provider(key: str, _: dict[str, Any] = _perm_w) -> dict[str, Any]
         }
 
 
+@router.delete("/config/providers/{key}")
+async def delete_llm_provider(key: str, _: dict[str, Any] = _perm_w) -> dict[str, Any]:
+    """Delete an LLM provider from config.
+
+    Returns 409 if the provider is referenced as primary or fallback in any task.
+    """
+    redis = await _get_redis()
+
+    config_json = await redis.get(REDIS_CONFIG_KEY)
+    redis_config = json.loads(config_json) if config_json else {}
+
+    merged = _merge_config(redis_config)
+
+    if key not in merged.get("providers", {}):
+        raise HTTPException(status_code=404, detail=f"Provider '{key}' not found")
+
+    # Check if provider is used in any task route
+    tasks_using = []
+    for task_name, task_cfg in merged.get("tasks", {}).items():
+        if task_cfg.get("primary") == key:
+            tasks_using.append(f"{task_name} (primary)")
+        if key in (task_cfg.get("fallbacks") or []):
+            tasks_using.append(f"{task_name} (fallback)")
+
+    if tasks_using:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Provider '{key}' is used in tasks: {', '.join(tasks_using)}",
+        )
+
+    # Remove from Redis config
+    if "providers" not in redis_config:
+        redis_config["providers"] = {}
+
+    if key in redis_config.get("providers", {}):
+        del redis_config["providers"][key]
+
+    # If key exists in defaults, mark as deleted so merge won't restore it
+    if key in DEFAULT_ROUTING_CONFIG.get("providers", {}):
+        redis_config["providers"][key] = {"__deleted__": True}
+
+    await redis.set(REDIS_CONFIG_KEY, json.dumps(redis_config))
+    logger.info("LLM provider deleted: %s", key)
+
+    # Hot-reload router if active
+    from src.llm import get_router
+
+    llm_router = get_router()
+    if llm_router is not None:
+        await llm_router.reload_config(redis=redis)
+        logger.info("LLM router reloaded after provider deletion")
+
+    return {"message": f"Provider '{key}' deleted", "config": _merge_config(redis_config)}
+
+
 def _merge_config(redis_config: dict[str, Any]) -> dict[str, Any]:
     """Merge Redis config over defaults."""
     import copy
@@ -235,7 +290,10 @@ def _merge_config(redis_config: dict[str, Any]) -> dict[str, Any]:
     config = copy.deepcopy(DEFAULT_ROUTING_CONFIG)
     if "providers" in redis_config:
         for key, val in redis_config["providers"].items():
-            if key in config["providers"]:
+            # Skip providers marked as deleted
+            if isinstance(val, dict) and val.get("__deleted__"):
+                config["providers"].pop(key, None)
+            elif key in config["providers"]:
                 config["providers"][key].update(val)
             else:
                 config["providers"][key] = val

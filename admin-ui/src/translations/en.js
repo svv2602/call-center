@@ -453,6 +453,15 @@ export default {
     'settings.llmTestSuccess': '{key}: OK ({latency}ms)',
     'settings.llmTestFailed': '{key}: failed — {error}',
     'settings.llmLoadFailed': 'Failed to load LLM config: {error}',
+    'settings.llmEditProvider': 'Edit',
+    'settings.llmDeleteProvider': 'Delete',
+    'settings.llmDeleteConfirm': 'Delete provider {key}? This cannot be undone.',
+    'settings.llmProviderDeleted': 'Provider {key} deleted',
+    'settings.llmProviderInUse': 'Cannot delete: provider is used in tasks: {tasks}',
+    'settings.llmProviderUpdated': 'Provider {key} updated',
+    'settings.llmBaseUrl': 'Base URL',
+    'settings.llmApiKeyEnv': 'API Key Env Var',
+    'settings.llmEditTitle': 'Edit Provider',
     // Sandbox defaults
     'settings.sandboxDefaults': 'Sandbox Defaults',
     'settings.sandboxDefaultModel': 'Default Model',
@@ -1559,6 +1568,9 @@ export default {
     'help.sttHints.overrides.title': 'Transliteration Tab',
     'help.sttHints.overrides.content': '<p>Whole-word overrides for Latin-to-Cyrillic transliteration in STT hints. For example, "weather" → "везер" instead of letter-by-letter transliteration.</p><ul><li>Search by key or value</li><li>Add new overrides: key — Latin, value — Cyrillic</li><li><strong>Save</strong> — send the modified set to the server</li><li><strong>Reset to defaults</strong> — restore the default override set</li></ul>',
     'help.sttHints.tips': '<ul><li>Cyrillic variants are most effective (STT uk-UA outputs Cyrillic)</li><li>Total limit is 5000 phrases — watch the fill percentage</li><li>Hints are applied to new calls automatically</li></ul>',
+
+    'help.configuration.providerMgmt.title': 'Provider Management',
+    'help.configuration.providerMgmt.content': '<p>Each provider in the table has <strong>"Edit"</strong> and <strong>"Delete"</strong> buttons:</p><ul><li><strong>Edit</strong> — opens a dialog to change type, model, Base URL, and API key env var. All fields can be modified and saved.</li><li><strong>Delete</strong> — removes the provider. Before deletion, the system checks whether it is used as primary or fallback in any task. If in use — deletion is blocked (reassign tasks first).</li></ul>',
 
     'help.configuration.affects.title': 'What changes affect',
     'help.configuration.affects.content': '<div class="help-affects"><p><strong>Disabling a provider</strong> — if it\'s the only one for a task with no fallbacks, that task will stop working.</p><p><strong>Changing model</strong> — instantly affects all new requests. A more powerful model = better quality, but more expensive and slower.</p><p><strong>Task routing</strong> — lets you use cheaper models for non-critical tasks (quality, scraping) and powerful ones for customer dialogues.</p><p><strong>TTS settings</strong> — new voice/rate/pitch apply to new calls; current calls continue with the old voice.</p><p><strong>Station hints</strong> — district/landmarks apply to the next get_fitting_stations call immediately.</p></div>',
