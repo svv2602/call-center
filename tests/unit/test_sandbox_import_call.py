@@ -28,7 +28,7 @@ def _make_call_row(
     tenant_id: Any = None,
     quality_score: float | None = 4.2,
     duration_seconds: int | None = 45,
-    prompt_version: str | None = "v3.5-natural",
+    prompt_version: str | None = "v4.0-guided",
 ) -> MagicMock:
     row = MagicMock()
     row.id = str(CALL_ID)

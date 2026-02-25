@@ -78,21 +78,22 @@ class TestAssemblePrompt:
         assert _MOD_ORDER_FLOW not in prompt
         assert _MOD_FITTING not in prompt
 
-    def test_fitting_includes_consultation(self) -> None:
-        """fitting includes fitting + consultation, excludes others."""
+    def test_fitting_includes_order_and_consultation(self) -> None:
+        """fitting includes fitting + order flow + consultation + combined."""
         prompt = assemble_prompt(scenario="fitting")
         assert "запис на шиномонтаж" in prompt
+        assert "оформлення замовлення" in prompt
         assert "консультація та інформація" in prompt
+        assert "підбір → замовлення → монтаж" in prompt
         assert _MOD_TIRE_SEARCH not in prompt
-        assert _MOD_ORDER_FLOW not in prompt
 
-    def test_consultation_minimal(self) -> None:
-        """consultation is the most minimal scenario."""
+    def test_consultation_includes_all_action_modules(self) -> None:
+        """consultation includes all modules for seamless topic switching."""
         prompt = assemble_prompt(scenario="consultation")
         assert "консультація та інформація" in prompt
-        assert _MOD_TIRE_SEARCH not in prompt
-        assert _MOD_ORDER_FLOW not in prompt
-        assert _MOD_FITTING not in prompt
+        assert "підбір шин" in prompt
+        assert "оформлення замовлення" in prompt
+        assert "запис на шиномонтаж" in prompt
         assert _MOD_ORDER_STATUS not in prompt
 
     def test_unknown_scenario_falls_back_to_full(self) -> None:
@@ -137,12 +138,12 @@ class TestAssemblePrompt:
         # Default rules should NOT be present
         assert "Мішлен" not in prompt
 
-    def test_consultation_shorter_than_full(self) -> None:
-        """consultation prompt should be significantly shorter than full."""
+    def test_order_status_shortest_scenario(self) -> None:
+        """order_status is the most minimal scenario (status + consultation only)."""
+        status = assemble_prompt(scenario="order_status", include_pronunciation=False)
         full = assemble_prompt(scenario=None, include_pronunciation=False)
-        consult = assemble_prompt(scenario="consultation", include_pronunciation=False)
-        # Consultation should be at most 60% of the full prompt
-        assert len(consult) < len(full) * 0.6
+        # order_status should be significantly shorter than full
+        assert len(status) < len(full) * 0.6
 
     def test_order_status_shorter_than_tire_search(self) -> None:
         """order_status should be shorter than tire_search (fewer modules)."""
