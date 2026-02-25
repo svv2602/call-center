@@ -1090,6 +1090,29 @@ def _resolve_date(value: str) -> str:
     return value.strip()
 
 
+# Mapping of alternative / Russian / old city names → canonical 1C names.
+_CITY_ALIASES: dict[str, str] = {
+    "днепропетровск": "дніпро",
+    "дніпропетровськ": "дніпро",
+    "днепр": "дніпро",
+    "днипро": "дніпро",
+    "запорожье": "запоріжжя",
+    "запорiжжя": "запоріжжя",
+    "киев": "київ",
+    "кiев": "київ",
+    "харьков": "харків",
+    "харкiв": "харків",
+    "черкассы": "черкаси",
+    "черкаси": "черкаси",
+}
+
+
+def _normalize_city(name: str) -> str:
+    """Normalize city name: lowercase + resolve aliases."""
+    low = name.strip().lower()
+    return _CITY_ALIASES.get(low, low)
+
+
 def _build_tool_router(session: CallSession, store_client: StoreClient | None = None) -> ToolRouter:
     """Build a ToolRouter with all canonical tools registered."""
     router = ToolRouter()
@@ -1331,7 +1354,13 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         if all_stations is not None:
             filtered = all_stations
             if city:
-                filtered = [s for s in filtered if city.lower() in s.get("city", "").lower()]
+                city_q = _normalize_city(city)
+                filtered = [
+                    s
+                    for s in filtered
+                    if city_q in _normalize_city(s.get("city", ""))
+                    or _normalize_city(s.get("city", "")) in city_q
+                ]
 
             # Merge station hints from Redis
             hints: dict[str, Any] = {}
