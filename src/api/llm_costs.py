@@ -447,7 +447,7 @@ async def usage_summary(
         conditions.append("u.created_at >= :df")
         params["df"] = str(date_from)
     if date_to:
-        conditions.append("u.created_at < :dt::date + 1")
+        conditions.append("u.created_at < CAST(:dt AS date) + 1")
         params["dt"] = str(date_to)
     if task_type:
         conditions.append("u.task_type = :tt")
@@ -519,7 +519,7 @@ async def model_comparison(
         conditions.append("created_at >= :df")
         params["df"] = str(date_from)
     if date_to:
-        conditions.append("created_at < :dt::date + 1")
+        conditions.append("created_at < CAST(:dt AS date) + 1")
         params["dt"] = str(date_to)
     if task_type:
         conditions.append("task_type = :tt")
