@@ -68,6 +68,9 @@ SAMPLE_PRICING_ROW = _row(
     input_price_per_1m=0.30,
     output_price_per_1m=2.50,
     is_system=True,
+    provider_type="gemini",
+    include_in_comparison=True,
+    catalog_model_key=None,
     created_at=None,
     updated_at=None,
 )
@@ -93,6 +96,8 @@ class TestListPricing:
         assert item["provider_key"] == "gemini-flash"
         assert item["input_price_per_1m"] == 0.30
         assert item["is_system"] is True
+        assert item["include_in_comparison"] is True
+        assert item["provider_type"] == "gemini"
 
 
 class TestCreatePricing:
@@ -171,6 +176,23 @@ class TestUpdatePricing:
                 resp = await ac.patch(
                     f"/admin/llm-costs/pricing/{pid}",
                     json={"input_price_per_1m": 0.50},
+                )
+
+        assert resp.status_code == 200
+
+    @pytest.mark.asyncio()
+    async def test_updates_include_in_comparison(self, app: Any) -> None:
+        pid = uuid4()
+        engine, _ = _make_mock_engine(rowcount=1)
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.patch(
+                    f"/admin/llm-costs/pricing/{pid}",
+                    json={"include_in_comparison": False},
                 )
 
         assert resp.status_code == 200
@@ -353,6 +375,10 @@ class TestModelComparison:
                 output_price_per_1m=15.00,
             ),
         ]
+        all_pricing_rows = [
+            _row(provider_key="gemini-flash", input_price_per_1m=0.30, output_price_per_1m=2.50),
+            _row(provider_key="anthropic-sonnet", input_price_per_1m=3.00, output_price_per_1m=15.00),
+        ]
 
         engine, mock_conn = _make_mock_engine()
 
@@ -362,7 +388,12 @@ class TestModelComparison:
         pricing_result = MagicMock()
         pricing_result.fetchall = MagicMock(return_value=pricing_rows)
 
-        mock_conn.execute = AsyncMock(side_effect=[agg_result, pricing_result])
+        all_pricing_result = MagicMock()
+        all_pricing_result.fetchall = MagicMock(return_value=all_pricing_rows)
+
+        mock_conn.execute = AsyncMock(
+            side_effect=[agg_result, pricing_result, all_pricing_result]
+        )
 
         with (
             patch("src.api.auth.require_admin", _fake_require_admin),
@@ -405,6 +436,276 @@ class TestModelComparison:
         data = resp.json()
         assert data["comparisons"] == []
         assert data["actual_cost"] == 0
+
+
+class TestCatalogList:
+    @pytest.mark.asyncio()
+    async def test_returns_catalog(self, app: Any) -> None:
+        from datetime import UTC, datetime
+
+        rows = [
+            _row(
+                model_key="gpt-5-mini",
+                provider_type="openai",
+                display_name="GPT 5 Mini",
+                input_price_per_1m=0.25,
+                output_price_per_1m=2.00,
+                max_input_tokens=1000000,
+                max_output_tokens=100000,
+                is_new=False,
+                synced_at=datetime(2026, 2, 25, tzinfo=UTC),
+                is_added=True,
+            )
+        ]
+        engine, _ = _make_mock_engine(rows=rows)
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.get("/admin/llm-costs/catalog?provider_type=openai")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["items"]) == 1
+        item = data["items"][0]
+        assert item["model_key"] == "gpt-5-mini"
+        assert item["is_added"] is True
+
+    @pytest.mark.asyncio()
+    async def test_catalog_with_search(self, app: Any) -> None:
+        engine, _ = _make_mock_engine(rows=[])
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.get("/admin/llm-costs/catalog?search=gpt")
+
+        assert resp.status_code == 200
+        assert resp.json()["items"] == []
+
+
+class TestCatalogNewCount:
+    @pytest.mark.asyncio()
+    async def test_returns_count(self, app: Any) -> None:
+        engine, mock_conn = _make_mock_engine()
+
+        count_result = MagicMock()
+        count_result.scalar = MagicMock(return_value=5)
+        mock_conn.execute = AsyncMock(return_value=count_result)
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.get("/admin/llm-costs/catalog/new-count")
+
+        assert resp.status_code == 200
+        assert resp.json()["count"] == 5
+
+    @pytest.mark.asyncio()
+    async def test_returns_zero_when_empty(self, app: Any) -> None:
+        engine, mock_conn = _make_mock_engine()
+
+        count_result = MagicMock()
+        count_result.scalar = MagicMock(return_value=0)
+        mock_conn.execute = AsyncMock(return_value=count_result)
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.get("/admin/llm-costs/catalog/new-count")
+
+        assert resp.status_code == 200
+        assert resp.json()["count"] == 0
+
+
+class TestCatalogSyncStatus:
+    @pytest.mark.asyncio()
+    async def test_returns_timestamp(self, app: Any) -> None:
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=b"2026-02-25T05:30:00+00:00")
+        mock_redis.close = AsyncMock()
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("redis.asyncio.from_url", return_value=mock_redis),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.get("/admin/llm-costs/catalog/sync-status")
+
+        assert resp.status_code == 200
+        assert resp.json()["last_sync_at"] == "2026-02-25T05:30:00+00:00"
+
+    @pytest.mark.asyncio()
+    async def test_returns_null_when_never_synced(self, app: Any) -> None:
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+        mock_redis.close = AsyncMock()
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("redis.asyncio.from_url", return_value=mock_redis),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.get("/admin/llm-costs/catalog/sync-status")
+
+        assert resp.status_code == 200
+        assert resp.json()["last_sync_at"] is None
+
+
+class TestCatalogAdd:
+    @pytest.mark.asyncio()
+    async def test_adds_model_from_catalog(self, app: Any) -> None:
+        new_id = uuid4()
+        engine, mock_conn = _make_mock_engine()
+
+        # 1: catalog SELECT, 2: dup check, 3: INSERT, 4: UPDATE is_new
+        cat_result = MagicMock()
+        cat_result.first = MagicMock(
+            return_value=_row(
+                model_key="gpt-5-mini",
+                provider_type="openai",
+                display_name="GPT 5 Mini",
+                input_price_per_1m=0.25,
+                output_price_per_1m=2.00,
+            )
+        )
+        dup_result = MagicMock()
+        dup_result.first = MagicMock(return_value=None)
+        insert_result = MagicMock()
+        insert_result.first = MagicMock(return_value=_row(id=new_id))
+        update_result = MagicMock()
+
+        mock_conn.execute = AsyncMock(
+            side_effect=[cat_result, dup_result, insert_result, update_result]
+        )
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.post(
+                    "/admin/llm-costs/catalog/add",
+                    json={"model_key": "gpt-5-mini", "provider_key": "openai-gpt5-mini"},
+                )
+
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["id"] == str(new_id)
+
+    @pytest.mark.asyncio()
+    async def test_404_when_catalog_missing(self, app: Any) -> None:
+        engine, mock_conn = _make_mock_engine()
+
+        cat_result = MagicMock()
+        cat_result.first = MagicMock(return_value=None)
+        mock_conn.execute = AsyncMock(return_value=cat_result)
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.post(
+                    "/admin/llm-costs/catalog/add",
+                    json={"model_key": "no-such-model", "provider_key": "x"},
+                )
+
+        assert resp.status_code == 404
+
+    @pytest.mark.asyncio()
+    async def test_409_duplicate_provider_key(self, app: Any) -> None:
+        engine, mock_conn = _make_mock_engine()
+
+        cat_result = MagicMock()
+        cat_result.first = MagicMock(
+            return_value=_row(
+                model_key="gpt-5-mini",
+                provider_type="openai",
+                display_name="GPT 5 Mini",
+                input_price_per_1m=0.25,
+                output_price_per_1m=2.00,
+            )
+        )
+        dup_result = MagicMock()
+        dup_result.first = MagicMock(return_value=_row(id=uuid4()))
+
+        mock_conn.execute = AsyncMock(side_effect=[cat_result, dup_result])
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.post(
+                    "/admin/llm-costs/catalog/add",
+                    json={"model_key": "gpt-5-mini", "provider_key": "gemini-flash"},
+                )
+
+        assert resp.status_code == 409
+
+
+class TestCatalogDismiss:
+    @pytest.mark.asyncio()
+    async def test_dismisses_models(self, app: Any) -> None:
+        engine, _mock_conn = _make_mock_engine(rowcount=3)
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.post(
+                    "/admin/llm-costs/catalog/dismiss",
+                    json={"model_keys": ["a", "b", "c"]},
+                )
+
+        assert resp.status_code == 200
+        assert resp.json()["dismissed"] == 3
+
+    @pytest.mark.asyncio()
+    async def test_400_on_empty_keys(self, app: Any) -> None:
+        engine, _ = _make_mock_engine()
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.post(
+                    "/admin/llm-costs/catalog/dismiss",
+                    json={"model_keys": []},
+                )
+
+        assert resp.status_code == 400
+
+
+class TestCatalogSync:
+    @pytest.mark.asyncio()
+    async def test_triggers_sync_task(self, app: Any) -> None:
+        mock_task = MagicMock()
+        mock_task.delay = MagicMock()
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch(
+                "src.tasks.pricing_sync.sync_llm_pricing_catalog",
+                mock_task,
+            ),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.post("/admin/llm-costs/catalog/sync")
+
+        assert resp.status_code == 200
+        assert "started" in resp.json()["message"].lower()
 
 
 class TestLlmUsageLogger:

@@ -4,6 +4,7 @@ import { showToast } from '../notifications.js';
 import { registerPageLoader } from '../router.js';
 
 let _pricingData = [];
+let _catalogSearchTimer = null;
 
 function _buildFilterParams() {
     const params = new URLSearchParams();
@@ -16,6 +17,55 @@ function _buildFilterParams() {
     if (tt) params.set('task_type', tt);
     if (tid) params.set('tenant_id', tid);
     return params.toString();
+}
+
+// --- New models banner ---
+
+async function loadNewModelsCount() {
+    try {
+        const data = await api('/admin/llm-costs/catalog/new-count');
+        const banner = document.getElementById('costNewModelsBanner');
+        const textEl = document.getElementById('costNewModelsText');
+        if (!banner || !textEl) return;
+        if (data.count > 0) {
+            textEl.textContent = t('costs.newModelsFound', { count: data.count });
+            banner.style.display = '';
+        } else {
+            banner.style.display = 'none';
+        }
+    } catch {
+        // non-critical
+    }
+}
+
+// --- Pricing sub-tabs ---
+
+function switchPricingTab(tab) {
+    const myTab = document.getElementById('costMyModelsTab');
+    const catTab = document.getElementById('costCatalogTab');
+    const btnMy = document.getElementById('costTabMyModels');
+    const btnCat = document.getElementById('costTabCatalog');
+    if (!myTab || !catTab) return;
+
+    const activeClass = 'pb-2 text-sm font-medium border-b-2 border-blue-600 text-blue-600 dark:text-blue-400 dark:border-blue-400';
+    const inactiveClass = 'pb-2 text-sm font-medium border-b-2 border-transparent text-neutral-500 dark:text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200';
+
+    if (tab === 'catalog') {
+        myTab.style.display = 'none';
+        catTab.style.display = '';
+        btnMy.className = inactiveClass;
+        btnCat.className = activeClass;
+        loadCatalog();
+    } else {
+        myTab.style.display = '';
+        catTab.style.display = 'none';
+        btnMy.className = activeClass;
+        btnCat.className = inactiveClass;
+    }
+}
+
+function switchToCatalog() {
+    switchPricingTab('catalog');
 }
 
 // --- Pricing ---
@@ -34,7 +84,7 @@ function _renderPricingTable(items) {
     const tbody = document.getElementById('pricingTableBody');
     if (!tbody) return;
     if (!items.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="px-3 py-8 text-center text-neutral-400">${t('costs.noData')}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="px-3 py-8 text-center text-neutral-400">${t('costs.noData')}</td></tr>`;
         return;
     }
     tbody.innerHTML = items.map(r => `
@@ -44,6 +94,11 @@ function _renderPricingTable(items) {
             <td class="px-3 py-2.5 text-sm text-neutral-500 dark:text-neutral-400">${_esc(r.model_name)}</td>
             <td class="px-3 py-2.5 text-sm text-right font-mono">$${r.input_price_per_1m.toFixed(2)}</td>
             <td class="px-3 py-2.5 text-sm text-right font-mono">$${r.output_price_per_1m.toFixed(2)}</td>
+            <td class="px-3 py-2.5 text-sm text-center">
+                <input type="checkbox" ${r.include_in_comparison ? 'checked' : ''}
+                    onchange="window._pages.costAnalysis.toggleComparison('${r.id}', this.checked)"
+                    class="w-4 h-4 rounded border-neutral-300 dark:border-neutral-600 text-blue-600 focus:ring-blue-500">
+            </td>
             <td class="px-3 py-2.5 text-sm text-center">${r.is_system ? '<span class="text-blue-600 dark:text-blue-400">&#10003;</span>' : ''}</td>
             <td class="px-3 py-2.5 text-sm text-right">
                 <button onclick="window._pages.costAnalysis.showEditDialog('${r.id}')" class="text-blue-600 dark:text-blue-400 hover:underline text-xs mr-2">${t('costs.edit')}</button>
@@ -51,6 +106,18 @@ function _renderPricingTable(items) {
             </td>
         </tr>
     `).join('');
+}
+
+async function toggleComparison(id, checked) {
+    try {
+        await api(`/admin/llm-costs/pricing/${id}`, {
+            method: 'PATCH',
+            body: JSON.stringify({ include_in_comparison: checked }),
+        });
+    } catch (e) {
+        showToast(e.message, 'error');
+        await loadPricing();
+    }
 }
 
 async function syncSystem() {
@@ -161,6 +228,163 @@ function _showPricingDialog(existing) {
             showToast(e.message, 'error');
         }
     });
+}
+
+// --- Catalog ---
+
+async function loadCatalog() {
+    const params = new URLSearchParams();
+    const pt = document.getElementById('catalogProviderFilter')?.value;
+    const search = document.getElementById('catalogSearch')?.value;
+    if (pt) params.set('provider_type', pt);
+    if (search) params.set('search', search);
+    const qs = params.toString();
+
+    try {
+        const [data, syncStatus] = await Promise.all([
+            api(`/admin/llm-costs/catalog${qs ? '?' + qs : ''}`),
+            api('/admin/llm-costs/catalog/sync-status'),
+        ]);
+        _renderCatalogTable(data.items || []);
+        _renderSyncStatus(syncStatus.last_sync_at);
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+function _renderCatalogTable(items) {
+    const tbody = document.getElementById('catalogTableBody');
+    if (!tbody) return;
+    if (!items.length) {
+        tbody.innerHTML = `<tr><td colspan="7" class="px-3 py-8 text-center text-neutral-400">${t('costs.noData')}</td></tr>`;
+        return;
+    }
+    tbody.innerHTML = items.map(r => {
+        const maxTokens = r.max_input_tokens ? _formatTokens(r.max_input_tokens) : '—';
+        let statusHtml;
+        if (r.is_added) {
+            statusHtml = `<span class="text-green-600 dark:text-green-400 text-xs font-medium">${t('costs.added')}</span>`;
+        } else if (r.is_new) {
+            statusHtml = `<span class="text-blue-600 dark:text-blue-400 text-xs font-medium">${t('costs.new')}</span>`;
+        } else {
+            statusHtml = '<span class="text-neutral-400 text-xs">—</span>';
+        }
+
+        const actions = r.is_added
+            ? ''
+            : `<button onclick="window._pages.costAnalysis.showCatalogAddDialog('${_esc(r.model_key)}')" class="text-blue-600 dark:text-blue-400 hover:underline text-xs mr-2">${t('costs.addToPricing')}</button>` +
+              (r.is_new ? `<button onclick="window._pages.costAnalysis.dismissModel('${_esc(r.model_key)}')" class="text-neutral-500 hover:underline text-xs">${t('costs.dismiss')}</button>` : '');
+
+        return `
+            <tr class="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
+                <td class="px-3 py-2.5 text-sm font-mono">${_esc(r.model_key)}</td>
+                <td class="px-3 py-2.5 text-sm">${_esc(r.display_name)}</td>
+                <td class="px-3 py-2.5 text-sm text-right font-mono">$${r.input_price_per_1m.toFixed(2)}</td>
+                <td class="px-3 py-2.5 text-sm text-right font-mono">$${r.output_price_per_1m.toFixed(2)}</td>
+                <td class="px-3 py-2.5 text-sm text-right font-mono">${maxTokens}</td>
+                <td class="px-3 py-2.5 text-sm text-center">${statusHtml}</td>
+                <td class="px-3 py-2.5 text-sm text-right">${actions}</td>
+            </tr>
+        `;
+    }).join('');
+}
+
+function _renderSyncStatus(lastSyncAt) {
+    const el = document.getElementById('catalogLastSync');
+    if (!el) return;
+    if (lastSyncAt) {
+        const d = new Date(lastSyncAt);
+        el.textContent = `${t('costs.lastSync')}: ${d.toLocaleDateString()} ${d.toLocaleTimeString()}`;
+    } else {
+        el.textContent = t('costs.neverSynced');
+    }
+}
+
+function _formatTokens(n) {
+    if (n >= 1_000_000) return (n / 1_000_000).toFixed(0) + 'M';
+    if (n >= 1_000) return (n / 1_000).toFixed(0) + 'K';
+    return String(n);
+}
+
+function debounceCatalogSearch() {
+    if (_catalogSearchTimer) clearTimeout(_catalogSearchTimer);
+    _catalogSearchTimer = setTimeout(() => loadCatalog(), 300);
+}
+
+async function syncCatalog() {
+    try {
+        const data = await api('/admin/llm-costs/catalog/sync', { method: 'POST' });
+        showToast(t('costs.catalogSyncStarted'), 'success');
+        // Reload after a short delay to see new data
+        setTimeout(() => loadCatalog(), 2000);
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+function showCatalogAddDialog(modelKey) {
+    document.getElementById('costCatalogAddDialog')?.remove();
+
+    const dialog = document.createElement('div');
+    dialog.id = 'costCatalogAddDialog';
+    dialog.className = 'fixed inset-0 bg-black/50 flex items-center justify-center z-50';
+    dialog.innerHTML = `
+        <div class="bg-white dark:bg-neutral-900 rounded-lg shadow-xl max-w-md w-full mx-4 p-6">
+            <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">${t('costs.addToPricing')}</h3>
+            <div class="space-y-3">
+                <div>
+                    <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">Model Key</label>
+                    <input type="text" value="${_esc(modelKey)}" disabled
+                        class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-neutral-50 dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 opacity-60">
+                </div>
+                <div>
+                    <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('costs.providerKey')}</label>
+                    <input type="text" id="dlgCatalogProviderKey" value="${_esc(modelKey)}"
+                        class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100">
+                    <p class="text-xs text-neutral-400 mt-1">${t('costs.providerKeyHint')}</p>
+                </div>
+            </div>
+            <div class="flex justify-end gap-2 mt-5">
+                <button onclick="document.getElementById('costCatalogAddDialog').remove()"
+                    class="px-4 py-2 text-sm font-medium rounded-md border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-50 dark:hover:bg-neutral-800">${t('costs.cancel')}</button>
+                <button id="dlgCatalogAddBtn"
+                    class="px-4 py-2 text-sm font-medium rounded-md bg-blue-600 text-white hover:bg-blue-700">${t('costs.save')}</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(dialog);
+
+    dialog.addEventListener('click', (e) => { if (e.target === dialog) dialog.remove(); });
+
+    document.getElementById('dlgCatalogAddBtn').addEventListener('click', async () => {
+        const providerKey = document.getElementById('dlgCatalogProviderKey').value.trim();
+        if (!providerKey) return;
+
+        try {
+            await api('/admin/llm-costs/catalog/add', {
+                method: 'POST',
+                body: JSON.stringify({ model_key: modelKey, provider_key: providerKey }),
+            });
+            showToast(t('costs.modelAdded'), 'success');
+            dialog.remove();
+            await Promise.all([loadCatalog(), loadPricing(), loadNewModelsCount()]);
+        } catch (e) {
+            showToast(e.message, 'error');
+        }
+    });
+}
+
+async function dismissModel(modelKey) {
+    try {
+        await api('/admin/llm-costs/catalog/dismiss', {
+            method: 'POST',
+            body: JSON.stringify({ model_keys: [modelKey] }),
+        });
+        showToast(t('costs.modelsDismissed'), 'success');
+        await Promise.all([loadCatalog(), loadNewModelsCount()]);
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
 }
 
 // --- Usage summary ---
@@ -303,6 +527,7 @@ export function init() {
         await Promise.all([
             loadPricing(),
             _loadTenants(),
+            loadNewModelsCount(),
         ]);
         await loadUsage();
     });
@@ -315,5 +540,13 @@ export function init() {
         deletePricing,
         showAddDialog,
         showEditDialog,
+        toggleComparison,
+        switchPricingTab,
+        switchToCatalog,
+        loadCatalog,
+        debounceCatalogSearch,
+        syncCatalog,
+        showCatalogAddDialog,
+        dismissModel,
     };
 }

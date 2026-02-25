@@ -32,6 +32,7 @@ app = Celery(
         "src.tasks.stt_hints_tasks",
         "src.tasks.prompt_optimizer",
         "src.tasks.promo_summary_tasks",
+        "src.tasks.pricing_sync",
     ],
 )
 
@@ -59,6 +60,7 @@ app.conf.update(
         "src.tasks.stt_hints_tasks.*": {"queue": "catalog"},
         "src.tasks.prompt_optimizer.*": {"queue": "quality"},
         "src.tasks.promo_summary_tasks.*": {"queue": "embeddings"},
+        "src.tasks.pricing_sync.*": {"queue": "stats"},
     },
 )
 
@@ -126,6 +128,10 @@ app.conf.beat_schedule = {
         "task": "src.tasks.prompt_optimizer.analyze_failed_calls",
         "schedule": crontab(hour=6, minute=0, day_of_week="sunday"),  # Weekly Sunday 06:00
         "kwargs": {"days": 7, "max_calls": 20, "triggered_by": "beat"},
+    },
+    "sync-llm-pricing-catalog": {
+        "task": "src.tasks.pricing_sync.sync_llm_pricing_catalog",
+        "schedule": crontab(hour=5, minute=30),  # Daily at 05:30 Kyiv time
     },
 }
 

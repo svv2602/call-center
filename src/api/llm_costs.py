@@ -1,6 +1,6 @@
 """Admin API for LLM cost analysis.
 
-Manage model pricing and compare costs across providers/task types.
+Manage model pricing, provider catalog, and compare costs across providers/task types.
 """
 
 from __future__ import annotations
@@ -31,6 +31,8 @@ _q_date_from = Query(None)
 _q_date_to = Query(None)
 _q_task_type = Query(None)
 _q_tenant_id = Query(None)
+_q_provider_type = Query(None)
+_q_search = Query(None)
 
 
 async def _get_engine() -> AsyncEngine:
@@ -57,6 +59,18 @@ class PricingUpdate(BaseModel):
     display_name: str | None = None
     input_price_per_1m: float | None = None
     output_price_per_1m: float | None = None
+    include_in_comparison: bool | None = None
+
+
+class CatalogAddRequest(BaseModel):
+    model_key: str
+    provider_key: str
+    display_name: str | None = None
+    include_in_comparison: bool = True
+
+
+class CatalogDismissRequest(BaseModel):
+    model_keys: list[str]
 
 
 # --- Pricing CRUD ---
@@ -71,7 +85,8 @@ async def list_pricing(_: Any = _perm_r) -> dict[str, Any]:
             text("""
                 SELECT id, provider_key, model_name, display_name,
                        input_price_per_1m, output_price_per_1m,
-                       is_system, created_at, updated_at
+                       is_system, provider_type, include_in_comparison,
+                       catalog_model_key, created_at, updated_at
                 FROM llm_model_pricing
                 ORDER BY is_system DESC, display_name
             """)
@@ -85,6 +100,9 @@ async def list_pricing(_: Any = _perm_r) -> dict[str, Any]:
                 "input_price_per_1m": float(r.input_price_per_1m),
                 "output_price_per_1m": float(r.output_price_per_1m),
                 "is_system": r.is_system,
+                "provider_type": r.provider_type,
+                "include_in_comparison": r.include_in_comparison,
+                "catalog_model_key": r.catalog_model_key,
                 "created_at": r.created_at.isoformat() if r.created_at else None,
                 "updated_at": r.updated_at.isoformat() if r.updated_at else None,
             }
@@ -146,6 +164,9 @@ async def update_pricing(
     if body.output_price_per_1m is not None:
         sets.append("output_price_per_1m = :op")
         params["op"] = body.output_price_per_1m
+    if body.include_in_comparison is not None:
+        sets.append("include_in_comparison = :ic")
+        params["ic"] = body.include_in_comparison
 
     if not sets:
         raise HTTPException(400, "No fields to update")
@@ -236,6 +257,177 @@ async def sync_system_pricing(_: Any = _perm_w) -> dict[str, Any]:
     return {"message": f"Synced {synced} system models"}
 
 
+# --- Catalog endpoints ---
+
+
+@router.get("/catalog")
+async def list_catalog(
+    provider_type: str | None = _q_provider_type,
+    search: str | None = _q_search,
+    _: Any = _perm_r,
+) -> dict[str, Any]:
+    """List models from the pricing catalog with optional filters."""
+    conditions = ["1=1"]
+    params: dict[str, Any] = {}
+
+    if provider_type:
+        conditions.append("c.provider_type = :pt")
+        params["pt"] = provider_type
+    if search:
+        conditions.append("(c.model_key ILIKE :s OR c.display_name ILIKE :s)")
+        params["s"] = f"%{search}%"
+
+    where = " AND ".join(conditions)
+
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        rows = await conn.execute(
+            text(f"""
+                SELECT c.model_key, c.provider_type, c.display_name,
+                       c.input_price_per_1m, c.output_price_per_1m,
+                       c.max_input_tokens, c.max_output_tokens,
+                       c.is_new, c.synced_at,
+                       CASE WHEN p.id IS NOT NULL THEN true ELSE false END AS is_added
+                FROM llm_pricing_catalog c
+                LEFT JOIN llm_model_pricing p ON p.catalog_model_key = c.model_key
+                WHERE {where}
+                ORDER BY c.provider_type, c.display_name
+            """),
+            params,
+        )
+        items = [
+            {
+                "model_key": r.model_key,
+                "provider_type": r.provider_type,
+                "display_name": r.display_name,
+                "input_price_per_1m": float(r.input_price_per_1m),
+                "output_price_per_1m": float(r.output_price_per_1m),
+                "max_input_tokens": r.max_input_tokens,
+                "max_output_tokens": r.max_output_tokens,
+                "is_new": r.is_new,
+                "synced_at": r.synced_at.isoformat() if r.synced_at else None,
+                "is_added": r.is_added,
+            }
+            for r in rows
+        ]
+    return {"items": items}
+
+
+@router.get("/catalog/new-count")
+async def catalog_new_count(_: Any = _perm_r) -> dict[str, Any]:
+    """Count of new (unreviewed) models in the catalog."""
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("SELECT COUNT(*) AS cnt FROM llm_pricing_catalog WHERE is_new = true")
+        )
+        count = result.scalar() or 0
+    return {"count": count}
+
+
+@router.get("/catalog/sync-status")
+async def catalog_sync_status(_: Any = _perm_r) -> dict[str, Any]:
+    """Get last catalog sync timestamp from Redis."""
+    import redis.asyncio as aioredis
+
+    settings = get_settings()
+    try:
+        r = aioredis.from_url(settings.redis.url)
+        val = await r.get("llm_pricing:last_sync_at")
+        await r.close()
+        return {"last_sync_at": val.decode() if val else None}
+    except Exception:
+        logger.warning("Failed to read catalog sync status from Redis", exc_info=True)
+        return {"last_sync_at": None}
+
+
+@router.post("/catalog/add", status_code=201)
+async def catalog_add(body: CatalogAddRequest, _: Any = _perm_w) -> dict[str, Any]:
+    """Add a model from the catalog to 'My Models' (llm_model_pricing)."""
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        # Check catalog entry exists
+        cat = await conn.execute(
+            text("""
+                SELECT model_key, provider_type, display_name,
+                       input_price_per_1m, output_price_per_1m
+                FROM llm_pricing_catalog WHERE model_key = :mk
+            """),
+            {"mk": body.model_key},
+        )
+        cat_row = cat.first()
+        if cat_row is None:
+            raise HTTPException(404, f"Catalog model '{body.model_key}' not found")
+
+        # Check for duplicate provider_key
+        dup = await conn.execute(
+            text("SELECT id FROM llm_model_pricing WHERE provider_key = :pk"),
+            {"pk": body.provider_key},
+        )
+        if dup.first() is not None:
+            raise HTTPException(409, f"Provider key '{body.provider_key}' already exists")
+
+        display = body.display_name or cat_row.display_name or body.model_key
+
+        result = await conn.execute(
+            text("""
+                INSERT INTO llm_model_pricing
+                    (provider_key, model_name, display_name,
+                     input_price_per_1m, output_price_per_1m,
+                     is_system, provider_type, include_in_comparison, catalog_model_key)
+                VALUES (:pk, :mn, :dn, :ip, :op, false, :pt, :ic, :cmk)
+                RETURNING id
+            """),
+            {
+                "pk": body.provider_key,
+                "mn": body.model_key,
+                "dn": display,
+                "ip": float(cat_row.input_price_per_1m),
+                "op": float(cat_row.output_price_per_1m),
+                "pt": cat_row.provider_type,
+                "ic": body.include_in_comparison,
+                "cmk": body.model_key,
+            },
+        )
+        row = result.first()
+
+        # Mark as not new in catalog
+        await conn.execute(
+            text("UPDATE llm_pricing_catalog SET is_new = false WHERE model_key = :mk"),
+            {"mk": body.model_key},
+        )
+
+    return {"id": str(row.id), "message": "Model added to pricing"}
+
+
+@router.post("/catalog/dismiss")
+async def catalog_dismiss(body: CatalogDismissRequest, _: Any = _perm_w) -> dict[str, Any]:
+    """Dismiss new models (set is_new=false). Models stay in catalog."""
+    if not body.model_keys:
+        raise HTTPException(400, "No model keys provided")
+
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                UPDATE llm_pricing_catalog
+                SET is_new = false
+                WHERE model_key = ANY(:keys) AND is_new = true
+            """),
+            {"keys": body.model_keys},
+        )
+    return {"dismissed": result.rowcount}
+
+
+@router.post("/catalog/sync")
+async def catalog_sync_trigger(_: Any = _perm_w) -> dict[str, Any]:
+    """Trigger manual catalog sync from LiteLLM."""
+    from src.tasks.pricing_sync import sync_llm_pricing_catalog
+
+    sync_llm_pricing_catalog.delay()
+    return {"message": "Catalog sync started"}
+
+
 # --- Usage analysis ---
 
 
@@ -318,6 +510,7 @@ async def model_comparison(
 
     Takes real token usage from llm_usage_log and recalculates
     what each model in llm_model_pricing would have cost.
+    Only includes models with include_in_comparison=true.
     """
     conditions = ["1=1"]
     params: dict[str, Any] = {}
@@ -372,20 +565,29 @@ async def model_comparison(
         total_output = sum(r.total_output_tokens for r in usage_rows)
         actual_provider = usage_rows[0].actual_provider  # most-used provider
 
-        # Get all pricing
+        # Get pricing for comparison (only include_in_comparison=true)
         pricing = await conn.execute(
             text("""
                 SELECT provider_key, display_name,
                        input_price_per_1m, output_price_per_1m
                 FROM llm_model_pricing
+                WHERE include_in_comparison = true
                 ORDER BY display_name
             """)
         )
         pricing_rows = pricing.fetchall()
 
-        # Calculate actual cost from per-provider usage
+        # Calculate actual cost from per-provider usage (use all pricing for actual calc)
+        all_pricing = await conn.execute(
+            text("""
+                SELECT provider_key, input_price_per_1m, output_price_per_1m
+                FROM llm_model_pricing
+            """)
+        )
+        all_pricing_rows = all_pricing.fetchall()
+        pricing_map = {r.provider_key: r for r in all_pricing_rows}
+
         actual_cost = 0.0
-        pricing_map = {r.provider_key: r for r in pricing_rows}
         for ur in usage_rows:
             pr = pricing_map.get(ur.actual_provider)
             if pr:
@@ -394,7 +596,7 @@ async def model_comparison(
                     + ur.total_output_tokens / 1_000_000 * float(pr.output_price_per_1m)
                 )
 
-        # Calculate hypothetical cost for each model
+        # Calculate hypothetical cost for each comparison model
         comparisons = []
         for pr in pricing_rows:
             cost = (

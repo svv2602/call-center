@@ -212,6 +212,17 @@ export const HELP_PAGES = {
         ],
         tipsKey: 'help.vehicles.tips',
     },
+    'cost-analysis': {
+        titleKey: 'help.costAnalysis.title',
+        overviewKey: 'help.costAnalysis.overview',
+        sections: [
+            { titleKey: 'help.costAnalysis.pricing.title', contentKey: 'help.costAnalysis.pricing.content' },
+            { titleKey: 'help.costAnalysis.catalog.title', contentKey: 'help.costAnalysis.catalog.content' },
+            { titleKey: 'help.costAnalysis.catalog.steps', contentKey: 'help.costAnalysis.catalog.stepsContent' },
+            { titleKey: 'help.costAnalysis.comparison.title', contentKey: 'help.costAnalysis.comparison.content' },
+        ],
+        tipsKey: 'help.costAnalysis.tips',
+    },
     tools: {
         titleKey: 'help.tools.title',
         overviewKey: 'help.tools.overview',
