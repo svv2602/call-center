@@ -162,17 +162,46 @@ async def delete_station_hint(
 
 @router.get("/stations")
 async def list_fitting_stations(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
-    """Return cached fitting stations from Redis (read-only proxy).
+    """Return fitting stations: Redis cache → 1C SOAP fallback.
 
     Admin UI uses this to display station names/addresses alongside hints.
-    Falls back to empty list if no cached data.
+    If Redis cache is expired, fetches fresh data from 1C and re-caches.
     """
     redis = await _get_redis()
     raw = await redis.get("onec:fitting_stations")
     if raw:
         stations = json.loads(raw)
         return {"stations": stations}
-    return {"stations": []}
+
+    # Cache miss — try fetching from 1C SOAP directly
+    from src.onec_client.soap import OneCSOAPClient
+
+    settings = get_settings()
+    if not settings.onec.username:
+        return {"stations": []}
+
+    try:
+        client = OneCSOAPClient(
+            base_url=settings.onec.url,
+            username=settings.onec.username,
+            password=settings.onec.password,
+            wsdl_path=settings.onec.soap_wsdl_path,
+            timeout=settings.onec.soap_timeout,
+        )
+        await client.open()
+        try:
+            stations = await client.get_stations()
+        finally:
+            await client.close()
+        # Re-cache for 1 hour
+        await redis.setex(
+            "onec:fitting_stations", 3600, json.dumps(stations, ensure_ascii=False)
+        )
+        logger.info("Stations cache warmed from 1C SOAP: %d stations", len(stations))
+        return {"stations": stations}
+    except Exception:
+        logger.warning("Failed to fetch stations from 1C for cache warm", exc_info=True)
+        return {"stations": []}
 
 
 @router.post("/stations/refresh")
