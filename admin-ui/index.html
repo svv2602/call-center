@@ -869,8 +869,12 @@
             <!-- Point Hint Edit Modal -->
             <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="pointHintModal">
                 <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl shadow-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
-                    <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-1" id="pointHintModalTitle">Редактировать подсказку</h2>
-                    <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-4" id="pointHintModalSubtitle"></p>
+                    <div class="modal-sticky-header">
+                        <div>
+                            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-1" id="pointHintModalTitle">Редактировать подсказку</h2>
+                            <p class="text-xs text-neutral-500 dark:text-neutral-400" id="pointHintModalSubtitle"></p>
+                        </div>
+                    </div>
                     <input type="hidden" id="pointHintEditId">
                     <input type="hidden" id="pointHintEditType">
                     <div class="space-y-3">
@@ -990,7 +994,9 @@
             <!-- Tenant Modal -->
             <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="tenantModal">
                 <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl shadow-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
-                    <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" id="tenantModalTitle">Новая сеть</h2>
+                    <div class="modal-sticky-header">
+                        <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" id="tenantModalTitle">Новая сеть</h2>
+                    </div>
                     <input type="hidden" id="editTenantId">
                     <div class="space-y-3">
                         <div>
@@ -1117,8 +1123,10 @@
     <!-- New Conversation Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxNewConvModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-md w-[90%] max-h-[80vh] overflow-y-auto">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxNewConvModal')">&times;</span>
-            <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.newConversation">Новый диалог</h3>
+            <div class="modal-sticky-header">
+                <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="sandbox.newConversation">Новый диалог</h3>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('sandboxNewConvModal')">&times;</span>
+            </div>
             <div id="sandboxStartersSection" class="mb-4" style="display:none">
                 <div class="text-xs font-semibold text-neutral-500 dark:text-neutral-400 mb-2" data-i18n="sandbox.quickStart">Быстрый старт</div>
                 <div id="sandboxStarterCards" class="grid grid-cols-2 gap-2 mb-2"></div>
@@ -1168,8 +1176,10 @@
     <!-- Turn Group Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxGroupModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-lg w-[90%] max-h-[80vh] overflow-y-auto">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxGroupModal')">&times;</span>
-            <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.createGroup">Создать группу</h3>
+            <div class="modal-sticky-header">
+                <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="sandbox.createGroup">Создать группу</h3>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('sandboxGroupModal')">&times;</span>
+            </div>
             <!-- Preview of selected turns -->
             <div id="sandboxGroupPreview" class="mb-3"></div>
             <div class="mb-3">
@@ -1220,8 +1230,10 @@
     <!-- Export Pattern Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxExportModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-md w-[90%] max-h-[80vh] overflow-y-auto">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxExportModal')">&times;</span>
-            <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.exportToPatterns">Экспорт в паттерны</h3>
+            <div class="modal-sticky-header">
+                <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="sandbox.exportToPatterns">Экспорт в паттерны</h3>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('sandboxExportModal')">&times;</span>
+            </div>
             <div class="mb-3">
                 <div class="flex items-center justify-between mb-1">
                     <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300" data-i18n="sandbox.guidanceNote">Инструкция для промпта</label>
@@ -1237,8 +1249,10 @@
     <!-- Edit Pattern Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxEditPatternModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-2xl w-[90%] max-h-[85vh] overflow-y-auto">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxEditPatternModal')">&times;</span>
-            <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.editPattern">Редактирование паттерна</h3>
+            <div class="modal-sticky-header">
+                <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="sandbox.editPattern">Редактирование паттерна</h3>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('sandboxEditPatternModal')">&times;</span>
+            </div>
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.intentLabel">Интент</label>
                 <div id="editPatternIntentCheckboxes" class="grid grid-cols-2 gap-1.5 mb-2"></div>
@@ -1260,8 +1274,10 @@
     <!-- Branch Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxBranchModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-md w-[90%] max-h-[80vh] overflow-y-auto">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxBranchModal')">&times;</span>
-            <h3 id="sandboxBranchTitle" class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.branchMessage">Сообщение для ветки</h3>
+            <div class="modal-sticky-header">
+                <h3 id="sandboxBranchTitle" class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="sandbox.branchMessage">Сообщение для ветки</h3>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('sandboxBranchModal')">&times;</span>
+            </div>
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.branchMessage">Сообщение</label>
                 <textarea id="sandboxBranchInput" rows="3" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500"></textarea>
@@ -1273,8 +1289,10 @@
     <!-- Replay Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxReplayModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-md w-[90%] max-h-[80vh] overflow-y-auto">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxReplayModal')">&times;</span>
-            <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.selectPromptForReplay">Выберите версию промпта для регрессии</h3>
+            <div class="modal-sticky-header">
+                <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="sandbox.selectPromptForReplay">Выберите версию промпта для регрессии</h3>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('sandboxReplayModal')">&times;</span>
+            </div>
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.promptVersion">Версия промпта</label>
                 <select id="sandboxReplayPrompt" class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500"></select>
@@ -1287,8 +1305,10 @@
     <!-- Batch Replay Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxBatchReplayModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-lg w-[90%] max-h-[80vh] overflow-y-auto">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxBatchReplayModal')">&times;</span>
-            <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.batchReplay">Пакетная регрессия</h3>
+            <div class="modal-sticky-header">
+                <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="sandbox.batchReplay">Пакетная регрессия</h3>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('sandboxBatchReplayModal')">&times;</span>
+            </div>
             <div id="sandboxBatchReplayBody"></div>
             <button onclick="window._pages.sandbox.submitBatchReplay()" class="w-full py-2 mt-3 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="sandbox.runBatchReplay">Запустить пакетную регрессию</button>
         </div>
@@ -1331,8 +1351,10 @@
     <!-- Starter Modal (CRUD) -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sandboxStarterModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-md w-[90%] max-h-[80vh] overflow-y-auto">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sandboxStarterModal')">&times;</span>
-            <h3 id="sandboxStarterModalTitle" class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sandbox.newStarter">Новый шаблон</h3>
+            <div class="modal-sticky-header">
+                <h3 id="sandboxStarterModalTitle" class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="sandbox.newStarter">Новый шаблон</h3>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('sandboxStarterModal')">&times;</span>
+            </div>
             <input type="hidden" id="sandboxStarterEditId">
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sandbox.starterTitle">Название</label>
@@ -1374,8 +1396,10 @@
     <!-- Vehicle Import Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="vehicleImportModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('vehicleImportModal')">&times;</span>
-            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="vehicles.importTitle">Обновление базы автомобилей</h2>
+            <div class="modal-sticky-header">
+                <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="vehicles.importTitle">Обновление базы автомобилей</h2>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('vehicleImportModal')">&times;</span>
+            </div>
             <div class="mb-3 p-3 bg-neutral-50 dark:bg-neutral-800 rounded-md text-sm text-neutral-600 dark:text-neutral-400">
                 <p class="mb-2 font-medium text-neutral-700 dark:text-neutral-300" data-i18n="vehicles.importInstructions">Разместите 4 CSV-файла в директории на сервере:</p>
                 <ul class="list-disc ml-5 mb-2 space-y-0.5 font-mono text-xs">
@@ -1399,8 +1423,10 @@
     <!-- Create User Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="createUserModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('createUserModal')">&times;</span>
-            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="users.createTitle">Создание нового пользователя</h2>
+            <div class="modal-sticky-header">
+                <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="users.createTitle">Создание нового пользователя</h2>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('createUserModal')">&times;</span>
+            </div>
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="users.usernameLabel">Имя пользователя</label>
                 <input type="text" id="newUsername" data-i18n-placeholder="users.usernamePlaceholder" placeholder="имя пользователя"
@@ -1428,8 +1454,10 @@
     <!-- Call Detail Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="callModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._pages.calls.closeCallModal()">&times;</span>
-            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="calls.detailTitle">Детали звонка</h2>
+            <div class="modal-sticky-header">
+                <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="calls.detailTitle">Детали звонка</h2>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._pages.calls.closeCallModal()">&times;</span>
+            </div>
             <div id="callDetailContent"></div>
         </div>
     </div>
@@ -1437,8 +1465,10 @@
     <!-- Create Prompt Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="createPromptModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('createPromptModal')">&times;</span>
-            <h2 id="createPromptModalTitle" class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="prompts.createTitle">Создание новой версии промпта</h2>
+            <div class="modal-sticky-header">
+                <h2 id="createPromptModalTitle" class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="prompts.createTitle">Создание новой версии промпта</h2>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('createPromptModal')">&times;</span>
+            </div>
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="prompts.nameLabel">Название</label>
                 <input type="text" id="promptName" data-i18n-placeholder="prompts.namePlaceholder" placeholder="напр. v2.0-improved-search"
@@ -1459,8 +1489,10 @@
     <!-- Create A/B Test Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="createABTestModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[500px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('createABTestModal')">&times;</span>
-            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="prompts.createABTestTitle">Создание A/B-теста</h2>
+            <div class="modal-sticky-header">
+                <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="prompts.createABTestTitle">Создание A/B-теста</h2>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('createABTestModal')">&times;</span>
+            </div>
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="prompts.testNameLabel">Название теста</label>
                 <input type="text" id="abTestName" placeholder="напр. test-v3-vs-v4"
@@ -1494,8 +1526,10 @@
     <!-- A/B Test Report Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="abReportModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[900px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('abReportModal')">&times;</span>
-            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" id="abReportModalTitle" data-i18n="prompts.abReportTitle">Отчёт A/B-теста</h2>
+            <div class="modal-sticky-header">
+                <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" id="abReportModalTitle" data-i18n="prompts.abReportTitle">Отчёт A/B-теста</h2>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('abReportModal')">&times;</span>
+            </div>
             <div id="abReportContent"></div>
         </div>
     </div>
@@ -1503,8 +1537,10 @@
     <!-- Create/Edit Article Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="createArticleModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('createArticleModal')">&times;</span>
-            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" id="articleModalTitle" data-i18n="knowledge.newArticleTitle">Новая статья</h2>
+            <div class="modal-sticky-header">
+                <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" id="articleModalTitle" data-i18n="knowledge.newArticleTitle">Новая статья</h2>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('createArticleModal')">&times;</span>
+            </div>
             <input type="hidden" id="editArticleId">
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="knowledge.titleLabel">Название</label>
@@ -1535,8 +1571,10 @@
     <!-- Create/Edit Operator Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="operatorModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('operatorModal')">&times;</span>
-            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" id="operatorModalTitle" data-i18n="operators.newOperatorTitle">Новый оператор</h2>
+            <div class="modal-sticky-header">
+                <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" id="operatorModalTitle" data-i18n="operators.newOperatorTitle">Новый оператор</h2>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('operatorModal')">&times;</span>
+            </div>
             <input type="hidden" id="editOperatorId">
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="operators.nameLabel">Имя</label>
@@ -1570,8 +1608,10 @@
     <!-- Import Documents Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="importDocumentsModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('importDocumentsModal')">&times;</span>
-            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="knowledge.importTitle">Импорт документов</h2>
+            <div class="modal-sticky-header">
+                <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="knowledge.importTitle">Импорт документов</h2>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('importDocumentsModal')">&times;</span>
+            </div>
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="knowledge.importFilesLabel">Файлы (MD, PDF, DOCX)</label>
                 <input type="file" id="importFiles" multiple accept=".md,.markdown,.pdf,.docx"
@@ -1591,8 +1631,10 @@
     <!-- Dialogue Example Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="dialogueModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('dialogueModal')">&times;</span>
-            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" id="dialogueModalTitle" data-i18n="training.newDialogue">Новый сценарий</h2>
+            <div class="modal-sticky-header">
+                <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" id="dialogueModalTitle" data-i18n="training.newDialogue">Новый сценарий</h2>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('dialogueModal')">&times;</span>
+            </div>
             <input type="hidden" id="editDialogueId">
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.dialogueTitle">Название</label>
@@ -1638,8 +1680,10 @@
     <!-- Safety Rule Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="safetyRuleModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('safetyRuleModal')">&times;</span>
-            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" id="safetyRuleModalTitle" data-i18n="training.newSafetyRule">Новое правило</h2>
+            <div class="modal-sticky-header">
+                <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" id="safetyRuleModalTitle" data-i18n="training.newSafetyRule">Новое правило</h2>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('safetyRuleModal')">&times;</span>
+            </div>
             <input type="hidden" id="editSafetyRuleId">
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.ruleTitle">Название</label>
@@ -1685,8 +1729,10 @@
     <!-- Response Template Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="responseTemplateModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('responseTemplateModal')">&times;</span>
-            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" id="templateModalTitle" data-i18n="training.newTemplate">Новый шаблон</h2>
+            <div class="modal-sticky-header">
+                <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" id="templateModalTitle" data-i18n="training.newTemplate">Новый шаблон</h2>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('responseTemplateModal')">&times;</span>
+            </div>
             <input type="hidden" id="editTemplateId">
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.templateKey">Ключ</label>
@@ -1723,8 +1769,10 @@
     <!-- Tool Override Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="toolOverrideModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('toolOverrideModal')">&times;</span>
-            <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" id="toolOverrideModalTitle" data-i18n="training.editTool">Редактирование инструмента</h2>
+            <div class="modal-sticky-header">
+                <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" id="toolOverrideModalTitle" data-i18n="training.editTool">Редактирование инструмента</h2>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('toolOverrideModal')">&times;</span>
+            </div>
             <input type="hidden" id="editToolName">
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="training.originalDescription">Описание по умолчанию</label>
@@ -1742,8 +1790,10 @@
     <!-- Source Config Modal -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" id="sourceConfigModal">
         <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl p-6 max-w-[700px] w-[90%] max-h-[80vh] overflow-y-auto max-md:w-[95%]">
-            <span class="float-right cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none" onclick="window._app.closeModal('sourceConfigModal')">&times;</span>
-            <h2 id="sourceConfigModalTitle" class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="sources.addSource">Добавить источник</h2>
+            <div class="modal-sticky-header">
+                <h2 id="sourceConfigModalTitle" class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="sources.addSource">Добавить источник</h2>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('sourceConfigModal')">&times;</span>
+            </div>
             <input type="hidden" id="editSourceConfigId">
             <div class="mb-3">
                 <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="sources.sourceName">Название</label>
