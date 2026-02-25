@@ -85,9 +85,14 @@ function renderLLMProviders(config, healthMap) {
             <td class="${tw.td}" data-label="${t('settings.llmEnabled')}"><input type="checkbox" ${enabledChecked} onchange="window._pages.configuration.toggleLLMProvider('${escapeHtml(key)}', this.checked)"></td>
             <td class="${tw.td}" data-label="${t('settings.llmHealth')}">${healthBadge}</td>
             <td class="${tw.tdActions}" data-label="${t('settings.llmActions')}">
-                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.configuration.testLLMProvider('${escapeHtml(key)}')">${t('settings.llmTest')}</button>
-                <button class="${tw.btnSm} ml-1 border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800" onclick="window._pages.configuration.editLLMProvider('${escapeHtml(key)}')">${t('settings.llmEditProvider')}</button>
-                <button class="${tw.btnSm} ml-1 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20" onclick="window._pages.configuration.deleteLLMProvider('${escapeHtml(key)}')">${t('settings.llmDeleteProvider')}</button>
+                <div class="relative inline-block">
+                    <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
+                    <div class="hidden absolute right-0 z-20 mt-1 w-40 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
+                        <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="this.closest('.relative').querySelector('.hidden')?.classList.add('hidden'); window._pages.configuration.testLLMProvider('${escapeHtml(key)}')">${t('settings.llmTest')}</button>
+                        <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="this.closest('.relative').querySelector('.hidden')?.classList.add('hidden'); window._pages.configuration.editLLMProvider('${escapeHtml(key)}')">${t('settings.llmEditProvider')}</button>
+                        <button class="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer" onclick="this.closest('.relative').querySelector('.hidden')?.classList.add('hidden'); window._pages.configuration.deleteLLMProvider('${escapeHtml(key)}')">${t('settings.llmDeleteProvider')}</button>
+                    </div>
+                </div>
             </td>
         </tr>`;
     }
