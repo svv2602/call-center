@@ -134,6 +134,21 @@ async def llm_complete(
             kwargs_sdk["system"] = system
 
         response = await client.messages.create(**kwargs_sdk)
+
+        # Log usage for the SDK fallback path
+        try:
+            from src.monitoring.llm_usage_logger import log_llm_usage
+
+            log_llm_usage(
+                task_type=task.value if hasattr(task, "value") else str(task),
+                provider_key="anthropic-sdk-fallback",
+                model_name=response.model,
+                input_tokens=response.usage.input_tokens,
+                output_tokens=response.usage.output_tokens,
+            )
+        except Exception:
+            pass
+
         block = response.content[0] if response.content else None
         return (block.text if block and hasattr(block, "text") else "").strip()
     except Exception:

@@ -140,6 +140,20 @@ DEFAULT_ROUTING_CONFIG: dict[str, Any] = {
             "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
             "enabled": False,
         },
+        "openai-gpt5-mini": {
+            "type": "openai",
+            "model": "gpt-5-mini",
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "https://api.openai.com/v1",
+            "enabled": False,
+        },
+        "openai-gpt5-nano": {
+            "type": "openai",
+            "model": "gpt-5-nano",
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "https://api.openai.com/v1",
+            "enabled": False,
+        },
     },
     "tasks": {
         "agent": {"primary": "anthropic-haiku", "fallbacks": ["anthropic-sonnet"]},

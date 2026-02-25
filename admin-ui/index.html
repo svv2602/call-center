@@ -62,6 +62,11 @@
                     <svg class="nav-icon" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M2.25 6.75c0 8.284 6.716 15 15 15h2.25a2.25 2.25 0 002.25-2.25v-1.372c0-.516-.351-.966-.852-1.091l-4.423-1.106c-.44-.11-.902.055-1.173.417l-.97 1.293c-.282.376-.769.542-1.21.38a12.035 12.035 0 01-7.143-7.143c-.162-.441.004-.928.38-1.21l1.293-.97c.363-.271.527-.734.417-1.173L6.963 3.102a1.125 1.125 0 00-1.091-.852H4.5A2.25 2.25 0 002.25 4.5v2.25z"/></svg>
                     <span class="nav-tooltip" data-i18n="nav.calls">Журнал звонков</span>
                 </a>
+                <!-- Cost Analysis -->
+                <a href="#" class="nav-item" data-page="cost-analysis" onclick="window._app.showPage('cost-analysis')">
+                    <svg class="nav-icon" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6v12m-3-2.818l.879.659c1.171.879 3.07.879 4.242 0 1.172-.879 1.172-2.303 0-3.182C13.536 12.219 12.768 12 12 12c-.725 0-1.45-.22-2.003-.659-1.106-.879-1.106-2.303 0-3.182s2.9-.879 4.006 0l.415.33M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+                    <span class="nav-tooltip" data-i18n="nav.costAnalysis">Анализ стоимости</span>
+                </a>
                 <!-- Training group (flyout) -->
                 <div class="nav-group" data-group="training">
                     <div class="nav-item nav-group-trigger" onclick="window._app.toggleSidebarGroup('training')">
@@ -258,6 +263,81 @@
                         </table>
                     </div>
                     <div class="pagination flex justify-center gap-1 mt-4" id="callsPagination"></div>
+                </div>
+            </div>
+
+            <!-- Cost Analysis -->
+            <div id="page-cost-analysis" style="display:none">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.costAnalysis">Анализ стоимости</span></div>
+                <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4" data-i18n="costs.title">Анализ стоимости LLM</h1>
+
+                <!-- Pricing section -->
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
+                    <div class="flex items-center justify-between mb-3">
+                        <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="costs.pricing">Прайс-лист моделей</h2>
+                        <div class="flex gap-2">
+                            <button onclick="window._pages.costAnalysis.syncSystem()" class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-neutral-100 dark:bg-neutral-800 text-neutral-700 dark:text-neutral-200 hover:bg-neutral-200 dark:hover:bg-neutral-700 border border-neutral-300 dark:border-neutral-600" data-i18n="costs.syncSystem">Синхронизировать</button>
+                            <button onclick="window._pages.costAnalysis.showAddDialog()" class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" data-i18n="costs.addModel">Добавить модель</button>
+                        </div>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm" id="pricingTable">
+                            <thead>
+                                <tr>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700" data-i18n="costs.provider">Провайдер</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700" data-i18n="costs.displayName">Название</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700" data-i18n="costs.model">Модель</th>
+                                    <th class="px-3 py-2.5 text-right text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700" data-i18n="costs.inputPrice">Input $/1M</th>
+                                    <th class="px-3 py-2.5 text-right text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700" data-i18n="costs.outputPrice">Output $/1M</th>
+                                    <th class="px-3 py-2.5 text-center text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700" data-i18n="costs.system">Системная</th>
+                                    <th class="px-3 py-2.5 text-right text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700" data-i18n="costs.actions">Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody id="pricingTableBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Usage Summary section -->
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
+                    <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="costs.summary">Сводка по использованию</h2>
+                    <div class="flex flex-wrap items-center gap-2 mb-4">
+                        <input type="date" id="costDateFrom" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <input type="date" id="costDateTo" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <select id="costTaskType" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="" data-i18n="costs.allTasks">Все задачи</option>
+                            <option value="agent">agent</option>
+                            <option value="article_processor">article_processor</option>
+                            <option value="quality_scoring">quality_scoring</option>
+                            <option value="prompt_optimizer">prompt_optimizer</option>
+                        </select>
+                        <select id="costTenant" class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <option value="" data-i18n="costs.allTenants">Все сети</option>
+                        </select>
+                        <button onclick="window._pages.costAnalysis.loadUsage()" class="inline-flex items-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" data-i18n="costs.apply">Применить</button>
+                    </div>
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm" id="usageSummaryTable">
+                            <thead>
+                                <tr>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700" data-i18n="costs.taskType">Тип задачи</th>
+                                    <th class="px-3 py-2.5 text-left text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700" data-i18n="costs.provider">Провайдер</th>
+                                    <th class="px-3 py-2.5 text-right text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700" data-i18n="costs.callCount">Кол-во</th>
+                                    <th class="px-3 py-2.5 text-right text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700" data-i18n="costs.totalInputTokens">Input токенов</th>
+                                    <th class="px-3 py-2.5 text-right text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700" data-i18n="costs.totalOutputTokens">Output токенов</th>
+                                    <th class="px-3 py-2.5 text-right text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700" data-i18n="costs.avgLatency">Латенция</th>
+                                    <th class="px-3 py-2.5 text-right text-xs font-semibold text-neutral-500 dark:text-neutral-400 uppercase tracking-wider border-b border-neutral-200 dark:border-neutral-700" data-i18n="costs.totalCost">Стоимость ($)</th>
+                                </tr>
+                            </thead>
+                            <tbody id="usageSummaryBody"></tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Cost Comparison section -->
+                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4">
+                    <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 mb-3" data-i18n="costs.comparison">Сравнение стоимости</h2>
+                    <div id="comparisonContent"></div>
                 </div>
             </div>
 

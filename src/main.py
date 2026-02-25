@@ -41,6 +41,7 @@ from src.api.export import router as export_router
 from src.api.fitting_hints import router as fitting_hints_router
 from src.api.knowledge import router as knowledge_router
 from src.api.llm_config import router as llm_config_router
+from src.api.llm_costs import router as llm_costs_router
 from src.api.middleware.audit import AuditMiddleware
 from src.api.middleware.rate_limit import RateLimitMiddleware
 from src.api.middleware.security_headers import SecurityHeadersMiddleware
@@ -102,6 +103,7 @@ app.include_router(export_router)
 app.include_router(fitting_hints_router)
 app.include_router(knowledge_router)
 app.include_router(llm_config_router)
+app.include_router(llm_costs_router)
 app.include_router(notifications_router)
 app.include_router(onec_data_router)
 app.include_router(operators_router)
@@ -970,6 +972,13 @@ async def handle_call(conn: AudioSocketConnection) -> None:
 
         # Run the pipeline (greeting → listen → STT → LLM → TTS loop)
         assert _tts_engine is not None, "TTS engine must be initialized before handling calls"
+
+        # Set context vars so LLM router can associate usage with call/tenant
+        from src.llm.router import llm_call_id_var, llm_tenant_id_var
+
+        llm_call_id_var.set(conn.channel_uuid)
+        llm_tenant_id_var.set(session.tenant_id)
+
         pipeline = CallPipeline(
             conn,
             stt,

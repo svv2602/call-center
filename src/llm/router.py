@@ -6,6 +6,7 @@ and automatic fallback to alternative providers on failure.
 
 from __future__ import annotations
 
+import contextvars
 import copy
 import json
 import logging
@@ -35,6 +36,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 REDIS_CONFIG_KEY = "llm:routing_config"
+
+# Context vars for associating LLM calls with call/tenant
+llm_call_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "llm_call_id", default=None
+)
+llm_tenant_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "llm_tenant_id", default=None
+)
 
 
 class LLMRouter:
@@ -148,7 +157,7 @@ class LLMRouter:
         for idx, provider_key in enumerate(chain):
             try:
                 response = await self._call_provider(
-                    provider_key, messages, system, tools, max_tokens
+                    provider_key, messages, system, tools, max_tokens, task=task
                 )
                 if idx > 0:
                     logger.warning(
@@ -190,7 +199,7 @@ class LLMRouter:
         for idx, provider_key in enumerate(chain):
             try:
                 async for event in self._stream_provider(
-                    provider_key, messages, system, tools or [], max_tokens
+                    provider_key, messages, system, tools or [], max_tokens, task=task
                 ):
                     yield event
                 # Stream completed successfully
@@ -219,6 +228,7 @@ class LLMRouter:
         system: str | None,
         tools: list[dict[str, Any]],
         max_tokens: int,
+        task: LLMTask | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Stream from a single provider with circuit breaker."""
         provider = self._providers[provider_key]
@@ -240,6 +250,11 @@ class LLMRouter:
             if isinstance(event, StreamDone):
                 latency_ms = int((time.monotonic() - start) * 1000)
                 self._record_latency(provider_key, latency_ms)
+                if task is not None:
+                    self._log_usage(
+                        task, provider_key, "", latency_ms,
+                        event.usage.input_tokens, event.usage.output_tokens,
+                    )
 
     def get_available_models(self) -> list[dict[str, str]]:
         """Return list of available provider models for UI dropdowns.
@@ -299,6 +314,7 @@ class LLMRouter:
         system: str | None,
         tools: list[dict[str, Any]] | None,
         max_tokens: int,
+        task: LLMTask | None = None,
     ) -> LLMResponse:
         """Call a specific provider through its circuit breaker."""
         provider = self._providers[provider_key]
@@ -333,6 +349,12 @@ class LLMRouter:
             response.usage.input_tokens,
             response.usage.output_tokens,
         )
+
+        if task is not None:
+            self._log_usage(
+                task, provider_key, response.model, latency_ms,
+                response.usage.input_tokens, response.usage.output_tokens,
+            )
 
         return response
 
@@ -416,6 +438,32 @@ class LLMRouter:
             from src.monitoring.metrics import llm_provider_latency_ms
 
             llm_provider_latency_ms.labels(provider=provider_key).observe(latency_ms)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _log_usage(
+        task: LLMTask,
+        provider_key: str,
+        model_name: str,
+        latency_ms: int,
+        input_tokens: int,
+        output_tokens: int,
+    ) -> None:
+        """Fire-and-forget: persist LLM usage to llm_usage_log."""
+        try:
+            from src.monitoring.llm_usage_logger import log_llm_usage
+
+            log_llm_usage(
+                task_type=task.value,
+                provider_key=provider_key,
+                model_name=model_name,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                latency_ms=latency_ms,
+                call_id=llm_call_id_var.get(None),
+                tenant_id=llm_tenant_id_var.get(None),
+            )
         except Exception:
             pass
 
