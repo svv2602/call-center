@@ -32,7 +32,7 @@ from src.agent.prompt_manager import (
     get_safety_rules_for_prompt,
     inject_pronunciation_rules,
 )
-from src.agent.prompts import assemble_prompt
+from src.agent.prompts import assemble_prompt, format_caller_history
 from src.agent.tool_loader import get_tools_with_overrides
 from src.api.admin_users import router as admin_users_router
 from src.api.analytics import router as analytics_router
@@ -698,6 +698,13 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         session.caller_phone = caller_id
         logger.info("CallerID resolved: %s for call %s", caller_id, conn.channel_uuid)
 
+    # Upsert customer (fast indexed lookup, ~5ms)
+    if _call_logger is not None and session.caller_id:
+        try:
+            session.customer_id = await _call_logger.upsert_customer(session.caller_id)
+        except Exception:
+            logger.debug("upsert_customer failed", exc_info=True)
+
     if _redis is not None:
         store = SessionStore(_redis)
         await store.save(session)
@@ -712,7 +719,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             await _call_logger.log_call_start(
                 call_id=conn.channel_uuid,
                 caller_id=session.caller_id,
-                customer_id=None,
+                customer_id=getattr(session, "customer_id", None),
                 started_at=datetime.now(UTC),
                 prompt_version="default",
                 tenant_id=session.tenant_id,
@@ -820,17 +827,30 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 logger.debug("Tenant promotions loading failed", exc_info=True)
                 return []
 
-        few_shot_examples, safety_rules_extra, pron_rules, promos = await asyncio.gather(
-            _load_few_shot(),
-            _load_safety(),
-            _load_pronunciation(),
-            _load_promotions(),
+        async def _load_caller_history() -> list:
+            if _call_logger is None or not session.caller_id:
+                return []
+            try:
+                return await _call_logger.get_caller_history(session.caller_id)
+            except Exception:
+                logger.debug("Caller history loading failed", exc_info=True)
+                return []
+
+        few_shot_examples, safety_rules_extra, pron_rules, promos, caller_history_raw = (
+            await asyncio.gather(
+                _load_few_shot(),
+                _load_safety(),
+                _load_pronunciation(),
+                _load_promotions(),
+                _load_caller_history(),
+            )
         )
         few_shot_context = format_few_shot_section(
             few_shot_examples, scenario_type=session.scenario
         )
         safety_context = format_safety_rules_section(safety_rules_extra)
         promotions_context = format_promotions_context(promos)
+        caller_history_text = format_caller_history(caller_history_raw)
 
         # Modular prompt assembly: if no DB/A-B prompt, assemble from modules
         is_modular = False
@@ -994,6 +1014,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             agent_name=tenant_agent_name,
             call_logger=_call_logger,
             cost_breakdown=cost,
+            caller_history=caller_history_text,
         )
         await pipeline.run()
 

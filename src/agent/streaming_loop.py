@@ -99,6 +99,7 @@ class StreamingAgentLoop:
         order_id: str | None = None,
         pattern_context: str | None = None,
         order_stage: str | None = None,
+        caller_history: str | None = None,
     ) -> TurnResult:
         """Run a full conversation turn with streaming audio output.
 
@@ -135,6 +136,7 @@ class StreamingAgentLoop:
             order_id=order_id,
             pattern_context=pattern_context,
             agent_name=self._agent_name,
+            caller_history=caller_history,
         )
 
         spoken_parts: list[str] = []

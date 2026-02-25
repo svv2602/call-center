@@ -622,6 +622,72 @@ def compute_order_stage(
 # ---------------------------------------------------------------------------
 
 
+_TOOL_ACTION_MAP: dict[str, str] = {
+    "search_tires": "шукав шини",
+    "check_availability": "перевіряв наявність",
+    "get_vehicle_tire_sizes": "підбирав розмір шин",
+    "create_order_draft": "починав оформлення замовлення",
+    "update_order_delivery": "обирав доставку",
+    "confirm_order": "підтвердив замовлення",
+    "get_order_status": "перевіряв статус замовлення",
+    "get_fitting_stations": "шукав шиномонтаж",
+    "get_fitting_slots": "перевіряв вільні слоти",
+    "book_fitting": "записувався на шиномонтаж",
+    "cancel_fitting": "скасовував запис",
+    "get_fitting_price": "дізнавався вартість монтажу",
+    "get_customer_bookings": "перевіряв записи",
+    "get_pickup_points": "шукав пункти видачі",
+    "find_storage": "перевіряв зберігання",
+    "search_knowledge_base": "шукав інформацію",
+    "transfer_to_operator": "переведено на оператора",
+}
+
+
+def format_caller_history(history: list[dict]) -> str | None:
+    """Format caller history into a Ukrainian prompt section.
+
+    Returns None if history is empty.
+    """
+    if not history:
+        return None
+
+    lines: list[str] = []
+    lines.append("## Історія попередніх дзвінків клієнта")
+    lines.append(f"Клієнт дзвонив {len(history)} раз(ів) за останні 7 днів:")
+
+    for i, call in enumerate(history, 1):
+        started_at = call.get("started_at")
+        date_str = started_at.strftime("%d.%m %H:%M") if started_at is not None else "?"
+
+        scenario = call.get("scenario") or "невідомий"
+        duration = call.get("duration_seconds") or 0
+        duration_min = max(1, duration // 60)
+
+        tool_names = call.get("tool_names") or []
+        actions = [_TOOL_ACTION_MAP[t] for t in tool_names if t in _TOOL_ACTION_MAP]
+        actions_str = ", ".join(actions) if actions else ""
+
+        transferred = call.get("transferred_to_operator")
+        transfer_mark = " [переведено на оператора]" if transferred else ""
+
+        parts = [f"{i}. {date_str} — {scenario}"]
+        if actions_str:
+            parts.append(f" ({actions_str})")
+        parts.append(f"{transfer_mark} {duration_min} хв")
+
+        lines.append("".join(parts))
+
+    lines.append("")
+    lines.append(
+        "Враховуй цю історію: не питай повторно те, що клієнт вже робив."
+    )
+    lines.append(
+        "Запропонуй продовжити або допоможи з новим запитом."
+    )
+
+    return "\n".join(lines)
+
+
 def build_system_prompt_with_context(
     base_prompt: str,
     *,
@@ -634,6 +700,7 @@ def build_system_prompt_with_context(
     order_id: str | None = None,
     pattern_context: str | None = None,
     agent_name: str | None = None,
+    caller_history: str | None = None,
 ) -> str:
     """Build the final system prompt with all dynamic context injected.
 
@@ -731,6 +798,9 @@ def build_system_prompt_with_context(
             parts.append(f"- CallerID клієнта: {caller_phone}")
         if order_id:
             parts.append(f"- Поточне замовлення (чорновик): {order_id}")
+
+    if caller_history:
+        parts.append("\n" + caller_history)
 
     if pattern_context:
         parts.append(pattern_context)

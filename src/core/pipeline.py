@@ -192,6 +192,7 @@ class CallPipeline:
         agent_name: str | None = None,
         call_logger: Any = None,
         cost_breakdown: CostBreakdown | None = None,
+        caller_history: str | None = None,
     ) -> None:
         self._conn = conn
         self._stt = stt
@@ -205,6 +206,7 @@ class CallPipeline:
         self._agent_name = agent_name
         self._call_logger = call_logger
         self._cost = cost_breakdown
+        self._caller_history = caller_history
         self._turn_counter = 0
         self._llm_history: list[dict[str, Any]] = []  # persistent LLM context for streaming path
         self._speaking = False
@@ -409,6 +411,7 @@ class CallPipeline:
                             order_id=self._session.order_id,
                             pattern_context=pattern_context,
                             order_stage=order_stage,
+                            caller_history=self._caller_history,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )
@@ -462,7 +465,11 @@ class CallPipeline:
                         self._agent.process_message(
                             user_text=transcript.text,
                             conversation_history=self._session.messages_for_llm,
+                            caller_phone=self._session.caller_phone,
+                            order_id=self._session.order_id,
                             pattern_context=pattern_context,
+                            order_stage=order_stage,
+                            caller_history=self._caller_history,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )

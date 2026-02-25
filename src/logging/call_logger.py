@@ -10,7 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
@@ -217,6 +217,43 @@ class CallLogger:
         )
         return customer_id
 
+    async def get_caller_history(
+        self,
+        caller_phone: str,
+        *,
+        days: int = 7,
+        max_calls: int = 5,
+    ) -> list[dict[str, Any]]:
+        """Fetch recent calls for a returning caller.
+
+        Returns list of dicts: call_id, started_at, scenario,
+        duration_seconds, transferred_to_operator, tool_names.
+        """
+        since = datetime.now(UTC) - timedelta(days=days)
+        return await self._fetch_all(
+            """
+            SELECT
+                c.id AS call_id,
+                c.started_at,
+                c.scenario,
+                c.duration_seconds,
+                c.transferred_to_operator,
+                COALESCE(tc.tool_names, ARRAY[]::text[]) AS tool_names
+            FROM calls c
+            LEFT JOIN LATERAL (
+                SELECT array_agg(DISTINCT t.tool_name) AS tool_names
+                FROM call_tool_calls t
+                WHERE t.call_id = c.id
+                  AND t.created_at >= :since
+            ) tc ON true
+            WHERE c.caller_id = :phone
+              AND c.started_at >= :since
+            ORDER BY c.started_at DESC
+            LIMIT :max_calls
+            """,
+            {"phone": caller_phone, "since": since, "max_calls": max_calls},
+        )
+
     # --- Internals ---
 
     async def _execute(self, query: str, params: dict[str, Any]) -> None:
@@ -240,6 +277,16 @@ class CallLogger:
         except Exception:
             logger.warning("PostgreSQL read failed")
             return None
+
+    async def _fetch_all(self, query: str, params: dict[str, Any]) -> list[dict[str, Any]]:
+        """Execute a read query and return all rows."""
+        try:
+            async with self._session_factory() as session:
+                result = await session.execute(text(query), params)
+                return [dict(row) for row in result.mappings().fetchall()]
+        except Exception:
+            logger.warning("PostgreSQL read (fetch_all) failed")
+            return []
 
     async def _buffer_to_redis(self, query: str, params: dict[str, Any]) -> None:
         """Buffer a log entry in Redis when PostgreSQL is unavailable."""

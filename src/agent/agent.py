@@ -141,6 +141,7 @@ class LLMAgent:
         order_id: str | None = None,
         pattern_context: str | None = None,
         order_stage: str | None = None,
+        caller_history: str | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         """Process a user message and return the agent's text response.
 
@@ -196,6 +197,7 @@ class LLMAgent:
             order_id=order_id,
             pattern_context=pattern_context,
             agent_name=self._agent_name,
+            caller_history=caller_history,
         )
 
         response_text = ""
