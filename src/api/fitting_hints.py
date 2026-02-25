@@ -95,13 +95,28 @@ class StationHint(BaseModel):
 
 @router.get("/station-hints")
 async def get_station_hints(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
-    """Return all station hints {station_id: {district, landmarks, description}}."""
+    """Return all station hints merged with station info.
+
+    Returns {hints: {station_id: {district, landmarks, description}},
+             stations: [...]} where stations list is from Redis/1C cache.
+    Hints are always from PostgreSQL (source of truth).
+    """
     engine = await _get_engine()
     async with engine.begin() as conn:
         hints = await _load_hints_from_pg(conn, "fitting_station")
     # Warm Redis cache
     await _sync_hints_to_redis(REDIS_KEY, hints)
-    return {"hints": hints}
+
+    # Also return stations list for UI convenience
+    stations: list[dict[str, Any]] = []
+    try:
+        redis = await _get_redis()
+        raw = await redis.get("onec:fitting_stations")
+        if raw:
+            stations = json.loads(raw)
+    except Exception:
+        pass
+    return {"hints": hints, "stations": stations}
 
 
 @router.put("/station-hints/{station_id}")

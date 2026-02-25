@@ -164,7 +164,9 @@ class TestGetStationHints:
         mock_get_redis.return_value = mock_redis
         resp = client.get("/admin/fitting/station-hints", headers=_auth())
         assert resp.status_code == 200
-        assert resp.json() == {"hints": {}}
+        data = resp.json()
+        assert data["hints"] == {}
+        assert "stations" in data
 
     @patch("src.api.auth.get_settings")
     @patch("src.api.fitting_hints._get_redis")

@@ -102,12 +102,10 @@ async function loadStationHints() {
     if (!container) return;
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
     try {
-        const [hintsData, stationsData] = await Promise.all([
-            api('/admin/fitting/station-hints'),
-            api('/admin/fitting/stations'),
-        ]);
+        // station-hints API returns both hints (from PG) and stations (from cache)
+        const hintsData = await api('/admin/fitting/station-hints');
         _stationHints = hintsData.hints || {};
-        _stationsList = stationsData.stations || [];
+        _stationsList = hintsData.stations || [];
         renderStationHints();
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('pointHints.loadFailed', {error: escapeHtml(e.message)})}</div>`;
@@ -125,7 +123,20 @@ function renderStationHints() {
     const container = document.getElementById('pointHintsContent-fitting');
     if (!container) return;
 
-    if (_stationsList.length === 0) {
+    // Build unified list: all stations + hints-only entries (for stations not in cache)
+    const stationsById = {};
+    for (const station of _stationsList) {
+        const sid = station.station_id || station.id || '';
+        if (sid) stationsById[sid] = station;
+    }
+
+    // Collect all IDs: stations from cache + stations that have hints in DB
+    const allIds = new Set(Object.keys(stationsById));
+    for (const hintId of Object.keys(_stationHints)) {
+        allIds.add(hintId);
+    }
+
+    if (allIds.size === 0) {
         container.innerHTML = `<div class="${tw.emptyState}">
             <p>${t('pointHints.noStations')}</p>
             <button class="${tw.btnPrimary} ${tw.btnSm} mt-3" onclick="window._pages.pointHints.refreshStations()">${t('pointHints.refreshFromOnec')}</button>
@@ -146,8 +157,15 @@ function renderStationHints() {
             <th class="${tw.th}">${t('pointHints.actions')}</th>
         </tr></thead><tbody>`;
 
-    for (const station of _stationsList) {
-        const sid = station.station_id || station.id || '';
+    // Show stations with hints first, then without
+    const sortedIds = [...allIds].sort((a, b) => {
+        const aHas = _stationHints[a] ? 1 : 0;
+        const bHas = _stationHints[b] ? 1 : 0;
+        return bHas - aHas; // hints first
+    });
+
+    for (const sid of sortedIds) {
+        const station = stationsById[sid] || {};
         const hint = _stationHints[sid] || {};
         const district = hint.district || '';
         const landmarks = hint.landmarks || '';
@@ -157,7 +175,7 @@ function renderStationHints() {
         const hasHint = !!(district || landmarks || description);
 
         html += `<tr class="${tw.trHover}">
-            <td class="${tw.td}" data-label="${t('pointHints.name')}"><strong>${escapeHtml(name)}</strong><div class="text-[10px] text-neutral-400 font-mono">${escapeHtml(sid)}</div></td>
+            <td class="${tw.td}" data-label="${t('pointHints.name')}"><strong>${escapeHtml(name || sid)}</strong><div class="text-[10px] text-neutral-400 font-mono">${escapeHtml(sid)}</div></td>
             <td class="${tw.td}" data-label="${t('pointHints.address')}">${escapeHtml(address)}</td>
             <td class="${tw.td}" data-label="${t('pointHints.district')}">${_hintPreview(district, 30)}</td>
             <td class="${tw.td}" data-label="${t('pointHints.landmarks')}">${_hintPreview(landmarks, 40)}</td>
