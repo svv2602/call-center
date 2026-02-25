@@ -28,6 +28,7 @@ from src.agent.prompts import (
     WAIT_AVAILABILITY_TEXT,
     WAIT_DEFAULT_POOL,
     WAIT_FITTING_POOL,
+    WAIT_FITTING_PRICE_POOL,
     WAIT_FITTING_TEXT,
     WAIT_KNOWLEDGE_POOL,
     WAIT_KNOWLEDGE_TEXT,
@@ -44,6 +45,7 @@ from src.core.pipeline import (
     _FAREWELL_MIN_TURNS,
     CallPipeline,
     _select_wait_message,
+    _strip_greeting,
     _time_of_day_greeting,
     _wait_counters,
 )
@@ -200,6 +202,77 @@ class TestContextualWaitPhrase:
         assert set(results[: len(WAIT_SEARCH_POOL)]) == set(WAIT_SEARCH_POOL)
         # After cycling, it wraps around
         assert results[len(WAIT_SEARCH_POOL)] == WAIT_SEARCH_POOL[0]
+
+
+# ---------------------------------------------------------------------------
+# 3b. Fitting price vs booking wait-phrase split
+# ---------------------------------------------------------------------------
+
+
+class TestFittingPriceWaitPhrase:
+    """Verify that pricing keywords route to WAIT_FITTING_PRICE_POOL,
+    booking keywords to WAIT_FITTING_POOL, and bare 'шиномонтаж' to default."""
+
+    DEFAULT = "default wait"
+
+    @pytest.fixture(autouse=True)
+    def _reset_counters(self) -> None:
+        _wait_counters.clear()
+
+    def test_price_keyword_routes_to_pricing_pool(self) -> None:
+        assert _select_wait_message("Яка ціна на шиномонтаж?", self.DEFAULT) in WAIT_FITTING_PRICE_POOL
+
+    def test_cost_keyword_routes_to_pricing_pool(self) -> None:
+        assert _select_wait_message("вартість монтажу", self.DEFAULT) in WAIT_FITTING_PRICE_POOL
+
+    def test_how_much_routes_to_pricing_pool(self) -> None:
+        assert _select_wait_message("скільки коштує шиномонтаж R18", self.DEFAULT) in WAIT_FITTING_PRICE_POOL
+
+    def test_booking_keyword_routes_to_fitting_pool(self) -> None:
+        assert _select_wait_message("Запис на шиномонтаж", self.DEFAULT) in WAIT_FITTING_POOL
+
+    def test_zapisati_routes_to_fitting_pool(self) -> None:
+        assert _select_wait_message("хочу записатися", self.DEFAULT) in WAIT_FITTING_POOL
+
+    def test_bare_shinomontazh_routes_to_default(self) -> None:
+        assert _select_wait_message("шиномонтаж", self.DEFAULT) in WAIT_DEFAULT_POOL
+
+    def test_bare_montazh_routes_to_default(self) -> None:
+        assert _select_wait_message("монтаж коліс", self.DEFAULT) in WAIT_DEFAULT_POOL
+
+
+# ---------------------------------------------------------------------------
+# 3c. Strip duplicate greeting from LLM response
+# ---------------------------------------------------------------------------
+
+
+class TestStripGreeting:
+    """Test _strip_greeting removes greeting prefix from LLM output."""
+
+    def test_strips_dobriy_den(self) -> None:
+        assert _strip_greeting("Добрий день! Підкажіть розмір.") == "Підкажіть розмір."
+
+    def test_strips_vitayu(self) -> None:
+        assert _strip_greeting("Вітаю! Чим можу допомогти?") == "Чим можу допомогти?"
+
+    def test_strips_dobriy_ranok(self) -> None:
+        assert _strip_greeting("Добрий ранок, як вам допомогти?") == "Як вам допомогти?"
+
+    def test_strips_pryvit(self) -> None:
+        assert _strip_greeting("Привіт! Шукаєте шини?") == "Шукаєте шини?"
+
+    def test_no_greeting_unchanged(self) -> None:
+        assert _strip_greeting("Підкажіть, будь ласка, розмір.") == "Підкажіть, будь ласка, розмір."
+
+    def test_greeting_only_returns_original(self) -> None:
+        # If entire text is just a greeting — return as-is (don't lose it)
+        assert _strip_greeting("Добрий день!") == "Добрий день!"
+
+    def test_case_insensitive(self) -> None:
+        assert _strip_greeting("добрий день! Підкажіть.") == "Підкажіть."
+
+    def test_strips_with_dash_separator(self) -> None:
+        assert _strip_greeting("Добрий день — підкажіть.") == "Підкажіть."
 
 
 # ---------------------------------------------------------------------------

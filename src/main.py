@@ -1433,6 +1433,27 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
 
     router.register("cancel_fitting", _cancel_fitting)
 
+    def _matches_diameter(price_item: dict[str, Any], diameter: int) -> bool:
+        """Check if a price item matches the given tire diameter.
+
+        Handles multiple formats from 1C data: R16, r16, Р16 (cyrillic),
+        R 16, bare "16" with word boundaries.
+        """
+        import re
+
+        d = str(diameter)
+        for field in ("artikul", "service", "name", "description"):
+            val = price_item.get(field, "")
+            if not val:
+                continue
+            # Case-insensitive match: R16, r16, Р16 (cyrillic Р), R 16
+            if re.search(rf"[RrРр]\s*{re.escape(d)}(?:\b|[^0-9]|$)", val):
+                return True
+            # Bare diameter as a standalone number (e.g. "16" in "16 дюймів")
+            if re.search(rf"(?<![0-9]){re.escape(d)}(?![0-9])", val):
+                return True
+        return False
+
     async def _get_fitting_price(
         tire_diameter: int = 0,
         station_id: str = "",
@@ -1471,12 +1492,25 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             if station_id:
                 filtered = [p for p in filtered if p.get("point_id") == station_id]
             if tire_diameter:
-                diameter_str = f"R{tire_diameter}"
-                filtered = [
+                by_diameter = [
                     p
                     for p in filtered
-                    if diameter_str in p.get("artikul", "") or diameter_str in p.get("service", "")
+                    if _matches_diameter(p, tire_diameter)
                 ]
+                if by_diameter:
+                    filtered = by_diameter
+                elif filtered:
+                    # Diameter filter matched nothing — return all with hint
+                    logger.info(
+                        "Fitting price: R%d filter empty, returning all %d items",
+                        tire_diameter,
+                        len(filtered),
+                    )
+                    return {
+                        "prices": filtered,
+                        "note": f"Цін за діаметром R{tire_diameter} не знайдено. "
+                        "Ось загальний прайс на послуги шиномонтажу.",
+                    }
             return {"prices": filtered}
 
         # 4. Fallback to Store API

@@ -272,9 +272,9 @@ class TestBlockingPathUnchanged:
         await pipeline._transcript_processor_loop()
 
         # Blocking path speaks wait filler first
-        from src.agent.prompts import WAIT_TEXT
+        from src.agent.prompts import WAIT_DEFAULT_POOL
 
-        assert any(WAIT_TEXT in call for call in speak_calls)
+        assert any(call in WAIT_DEFAULT_POOL for call in speak_calls)
         # Agent was called via blocking path
         pipeline._agent.process_message.assert_called_once()
 

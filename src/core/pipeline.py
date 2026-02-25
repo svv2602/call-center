@@ -24,6 +24,7 @@ from src.agent.prompts import (
     WAIT_AVAILABILITY_POOL,
     WAIT_DEFAULT_POOL,
     WAIT_FITTING_POOL,
+    WAIT_FITTING_PRICE_POOL,
     WAIT_KNOWLEDGE_POOL,
     WAIT_ORDER_POOL,
     WAIT_SEARCH_POOL,
@@ -72,12 +73,41 @@ def _time_of_day_greeting() -> str:
     return "Доброї ночі"
 
 
+# --- Strip duplicate greeting from LLM response ---
+
+_GREETING_PREFIXES = (
+    "добрий ранок",
+    "добрий день",
+    "добрий вечір",
+    "доброї ночі",
+    "вітаю",
+    "привіт",
+)
+
+
+def _strip_greeting(text: str) -> str:
+    """Remove greeting prefix from LLM response to avoid double greeting."""
+    lowered = text.lstrip()
+    for prefix in _GREETING_PREFIXES:
+        if lowered.lower().startswith(prefix):
+            # Strip the greeting and any following punctuation/whitespace
+            rest = lowered[len(prefix):].lstrip(" !.,;:—–-")
+            if rest:
+                return rest[0].upper() + rest[1:] if rest else ""
+            # If only the greeting and nothing else — return as-is
+            return text
+    return text
+
+
 # --- Contextual wait-phrase selection with rotation ---
 
 _WAIT_CONTEXT_PATTERNS: list[tuple[list[str], list[str]]] = [
     (["статус", "де замовлення", "де моє"], WAIT_STATUS_POOL),
     (["замовлення", "замовити", "оформити"], WAIT_ORDER_POOL),
-    (["монтаж", "шиномонтаж", "запис"], WAIT_FITTING_POOL),
+    # Pricing keywords before booking — "ціна монтаж" → pricing, not booking
+    (["ціна", "вартість", "скільки коштує", "прайс"], WAIT_FITTING_PRICE_POOL),
+    (["запис", "записати", "вільні час"], WAIT_FITTING_POOL),
+    (["монтаж", "шиномонтаж"], WAIT_DEFAULT_POOL),
     (["наявність", "є в наявності", "склад"], WAIT_AVAILABILITY_POOL),
     (["шини", "шину", "підібрати", "розмір", "зимов", "літн"], WAIT_SEARCH_POOL),
     (["порівняти", "рекомендац", "відмінн"], WAIT_KNOWLEDGE_POOL),
@@ -470,6 +500,8 @@ class CallPipeline:
                 )
 
                 if response_text:
+                    # Strip duplicate greeting that LLM may produce
+                    response_text = _strip_greeting(response_text)
                     self._session.add_assistant_turn(response_text)
                     await self._log_turn("bot", response_text, llm_latency_ms=llm_latency_ms)
                     await self._speak_streaming(response_text)
