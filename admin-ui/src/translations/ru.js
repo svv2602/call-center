@@ -462,6 +462,8 @@ export default {
     'settings.llmBaseUrl': 'Base URL',
     'settings.llmApiKeyEnv': 'Переменная API-ключа',
     'settings.llmEditTitle': 'Редактирование провайдера',
+    'settings.llmProviderKey': 'Название (ключ)',
+    'settings.llmProviderRenamed': 'Провайдер {oldKey} переименован в {newKey}',
     // Sandbox defaults
     'settings.sandboxDefaults': 'Настройки Sandbox',
     'settings.sandboxDefaultModel': 'Модель по умолчанию',

@@ -112,8 +112,12 @@ function renderLLMProviders(config, healthMap) {
     // Edit provider modal
     html += `<div id="llm-edit-modal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40" style="display:none">
         <div class="bg-white dark:bg-neutral-900 rounded-lg shadow-xl p-6 w-full max-w-md">
-            <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">${t('settings.llmEditTitle')}: <span id="llm-edit-key" class="font-mono"></span></h3>
+            <h3 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50 mb-4">${t('settings.llmEditTitle')}</h3>
             <div class="space-y-3">
+                <div>
+                    <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.llmProviderKey')}</label>
+                    <input id="llm-edit-key" type="text" class="w-full text-sm font-mono bg-transparent border border-neutral-300 dark:border-neutral-700 rounded px-2 py-1 focus:outline-none focus:border-blue-500" placeholder="openai-gpt41">
+                </div>
                 <div>
                     <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.llmType')}</label>
                     <select id="llm-edit-type" class="${tw.selectSm} w-full">
@@ -445,7 +449,7 @@ function editLLMProvider(key) {
     const cfg = _llmConfig?.providers?.[key];
     if (!cfg) return;
     _editingProviderKey = key;
-    document.getElementById('llm-edit-key').textContent = key;
+    document.getElementById('llm-edit-key').value = key;
     document.getElementById('llm-edit-type').value = cfg.type || 'openai';
     document.getElementById('llm-edit-model').value = cfg.model || '';
     document.getElementById('llm-edit-base-url').value = cfg.base_url || '';
@@ -455,24 +459,58 @@ function editLLMProvider(key) {
 
 async function saveEditProvider() {
     if (!_editingProviderKey) return;
-    const key = _editingProviderKey;
+    const oldKey = _editingProviderKey;
+    const newKey = document.getElementById('llm-edit-key').value.trim();
     const type = document.getElementById('llm-edit-type').value;
     const model = document.getElementById('llm-edit-model').value.trim();
     const base_url = document.getElementById('llm-edit-base-url').value.trim();
     const api_key_env = document.getElementById('llm-edit-api-key-env').value.trim();
 
-    const update = { type, model };
-    if (base_url) update.base_url = base_url;
-    if (api_key_env) update.api_key_env = api_key_env;
+    if (!newKey) {
+        showToast(t('settings.llmAddFillRequired'), 'error');
+        return;
+    }
+
+    const isRename = newKey !== oldKey;
+    const oldCfg = _llmConfig?.providers?.[oldKey] || {};
+    const providerData = { type, model, enabled: oldCfg.enabled ?? false };
+    if (base_url) providerData.base_url = base_url;
+    if (api_key_env) providerData.api_key_env = api_key_env;
 
     try {
-        await api('/admin/llm/config', {
-            method: 'PATCH',
-            body: JSON.stringify({ providers: { [key]: update } }),
-        });
+        if (isRename) {
+            // 1. Create new provider + update task routes that reference old key
+            const tasks = _llmConfig?.tasks || {};
+            const taskPatch = {};
+            for (const [taskName, taskCfg] of Object.entries(tasks)) {
+                const patch = {};
+                if (taskCfg.primary === oldKey) patch.primary = newKey;
+                const fb = taskCfg.fallbacks || [];
+                if (fb.includes(oldKey)) patch.fallbacks = fb.map(k => k === oldKey ? newKey : k);
+                if (Object.keys(patch).length > 0) taskPatch[taskName] = patch;
+            }
+            const patchBody = { providers: { [newKey]: providerData } };
+            if (Object.keys(taskPatch).length > 0) patchBody.tasks = taskPatch;
+
+            await api('/admin/llm/config', {
+                method: 'PATCH',
+                body: JSON.stringify(patchBody),
+            });
+
+            // 2. Delete old provider (now safe — tasks already point to new key)
+            await api(`/admin/llm/config/providers/${encodeURIComponent(oldKey)}`, { method: 'DELETE' });
+
+            showToast(t('settings.llmProviderRenamed', { oldKey, newKey }), 'success');
+        } else {
+            await api('/admin/llm/config', {
+                method: 'PATCH',
+                body: JSON.stringify({ providers: { [oldKey]: providerData } }),
+            });
+            showToast(t('settings.llmProviderUpdated', { key: oldKey }), 'success');
+        }
+
         document.getElementById('llm-edit-modal').style.display = 'none';
         _editingProviderKey = null;
-        showToast(t('settings.llmProviderUpdated', { key }), 'success');
         loadLLMConfig();
     } catch (e) {
         showToast(t('settings.llmConfigFailed', { error: e.message }), 'error');

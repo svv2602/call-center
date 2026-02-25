@@ -462,6 +462,8 @@ export default {
     'settings.llmBaseUrl': 'Base URL',
     'settings.llmApiKeyEnv': 'API Key Env Var',
     'settings.llmEditTitle': 'Edit Provider',
+    'settings.llmProviderKey': 'Name (key)',
+    'settings.llmProviderRenamed': 'Provider {oldKey} renamed to {newKey}',
     // Sandbox defaults
     'settings.sandboxDefaults': 'Sandbox Defaults',
     'settings.sandboxDefaultModel': 'Default Model',
