@@ -6,7 +6,7 @@ Manage model pricing, provider catalog, and compare costs across providers/task 
 from __future__ import annotations
 
 import logging
-from datetime import date  # noqa: TC003
+from datetime import date, timedelta  # noqa: TC003
 from typing import Any
 from uuid import UUID  # noqa: TC003
 
@@ -447,8 +447,8 @@ async def usage_summary(
         conditions.append("u.created_at >= :df")
         params["df"] = date_from
     if date_to:
-        conditions.append("u.created_at < :dt + interval '1 day'")
-        params["dt"] = date_to
+        conditions.append("u.created_at < :dt")
+        params["dt"] = date_to + timedelta(days=1)
     if task_type:
         conditions.append("u.task_type = :tt")
         params["tt"] = task_type
@@ -519,8 +519,8 @@ async def model_comparison(
         conditions.append("created_at >= :df")
         params["df"] = date_from
     if date_to:
-        conditions.append("created_at < :dt + interval '1 day'")
-        params["dt"] = date_to
+        conditions.append("created_at < :dt")
+        params["dt"] = date_to + timedelta(days=1)
     if task_type:
         conditions.append("task_type = :tt")
         params["tt"] = task_type
