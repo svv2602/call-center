@@ -229,7 +229,7 @@ def sync_llm_pricing_catalog(self: Any, **kwargs: Any) -> dict[str, int]:
     import asyncio
 
     try:
-        return asyncio.get_event_loop().run_until_complete(_do_sync())
+        return asyncio.run(_do_sync())
     except Exception as exc:
         logger.error("pricing_sync failed: %s", exc, exc_info=True)
         raise self.retry(exc=exc) from exc
