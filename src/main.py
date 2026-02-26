@@ -692,6 +692,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         )
     if ivr_intent:
         session.scenario = ivr_intent
+        session.active_scenarios.add(ivr_intent)
         logger.info("IVR intent resolved: %s for call %s", ivr_intent, conn.channel_uuid)
     if caller_id:
         session.caller_id = caller_id

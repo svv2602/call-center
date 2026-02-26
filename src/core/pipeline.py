@@ -360,14 +360,24 @@ class CallPipeline:
             if transcript.language:
                 self._session.detected_language = transcript.language
 
-            # Auto-detect scenario from customer text when IVR didn't set one
-            if self._session.scenario is None:
-                detected = detect_scenario_from_text(transcript.text)
-                if detected:
+            # Auto-detect scenario from customer text (every turn).
+            # First detection sets session.scenario; subsequent detections
+            # accumulate in active_scenarios so modules are only added, never removed.
+            detected = detect_scenario_from_text(transcript.text)
+            if detected:
+                if self._session.scenario is None:
                     self._session.scenario = detected
                     logger.info(
                         "Scenario auto-detected: %s for call %s",
                         detected,
+                        self._session.channel_uuid,
+                    )
+                if detected not in self._session.active_scenarios:
+                    self._session.active_scenarios.add(detected)
+                    logger.info(
+                        "Scenario added: %s (active: %s) for call %s",
+                        detected,
+                        self._session.active_scenarios,
                         self._session.channel_uuid,
                     )
 
@@ -421,6 +431,7 @@ class CallPipeline:
                             fitting_booked=self._session.fitting_booked,
                             tools_called=self._session.tools_called,
                             scenario=self._session.scenario,
+                            active_scenarios=self._session.active_scenarios,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )
@@ -483,6 +494,7 @@ class CallPipeline:
                             fitting_booked=self._session.fitting_booked,
                             tools_called=self._session.tools_called,
                             scenario=self._session.scenario,
+                            active_scenarios=self._session.active_scenarios,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )

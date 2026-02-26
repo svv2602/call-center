@@ -107,6 +107,7 @@ class StreamingAgentLoop:
         fitting_booked: bool = False,
         tools_called: set[str] | None = None,
         scenario: str | None = None,
+        active_scenarios: set[str] | None = None,
     ) -> TurnResult:
         """Run a full conversation turn with streaming audio output.
 
@@ -148,6 +149,7 @@ class StreamingAgentLoop:
             storage_context=storage_context,
             tools_called=tools_called,
             scenario=scenario,
+            active_scenarios=active_scenarios,
         )
 
         # Filter tools by conversation state (remove irrelevant tools)

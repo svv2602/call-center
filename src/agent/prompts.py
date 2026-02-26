@@ -942,6 +942,7 @@ def build_system_prompt_with_context(
     storage_context: str | None = None,
     tools_called: set[str] | None = None,
     scenario: str | None = None,
+    active_scenarios: set[str] | None = None,
 ) -> str:
     """Build the final system prompt with all dynamic context injected.
 
@@ -960,6 +961,8 @@ def build_system_prompt_with_context(
         order_id: Current order draft ID.
         pattern_context: Pattern injection text from conversation patterns.
         agent_name: Tenant-specific agent name (overrides default "Олена").
+        active_scenarios: All scenarios detected during this call (accumulated).
+                         Used to add modules when customer switches topics.
 
     Returns:
         Final system prompt string ready to send to LLM.
@@ -976,6 +979,28 @@ def build_system_prompt_with_context(
             scenario=scenario, include_pronunciation=False
         )
         logger.info("Compact→full upgrade: scenario=%s", scenario)
+
+    # Topic switching: when customer changes topic mid-call, add modules
+    # from newly detected scenarios (only add, never remove).
+    if is_modular and active_scenarios and scenario:
+        base_modules = set(SCENARIO_MODULES.get(scenario, _ALL_SCENARIO_MODULES))
+        extra: list[str] = []
+        seen: set[int] = {id(m) for m in base_modules}
+        for sc in active_scenarios:
+            if sc == scenario:
+                continue
+            for mod in SCENARIO_MODULES.get(sc, []):
+                mod_id = id(mod)
+                if mod_id not in seen:
+                    extra.append(mod)
+                    seen.add(mod_id)
+        if extra:
+            base_prompt = base_prompt + "\n" + "\n".join(extra)
+            logger.info(
+                "Topic switch expansion: primary=%s, added modules from %s",
+                scenario,
+                active_scenarios - {scenario},
+            )
 
     # Dynamic module expansion: if tools were called that require modules
     # not in the current scenario, append them to the base prompt.

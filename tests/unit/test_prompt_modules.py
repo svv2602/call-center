@@ -478,3 +478,79 @@ class TestDetectScenarioFromText:
         """Russian keywords also detected (customers may speak Russian)."""
         assert detect_scenario_from_text("Хочу поменять резину") == "fitting"
         assert detect_scenario_from_text("покрышки нужны") == "tire_search"
+
+
+# ---------------------------------------------------------------------------
+# TestTopicSwitching
+# ---------------------------------------------------------------------------
+
+
+class TestTopicSwitching:
+    """Test that active_scenarios adds modules when customer changes topic."""
+
+    def test_fitting_plus_tire_search(self) -> None:
+        """Starting with fitting, switching to tire search adds tire module."""
+        base = assemble_prompt(scenario="fitting", include_pronunciation=False)
+        # Before topic switch — no tire search
+        assert _MOD_TIRE_SEARCH not in base
+
+        result = build_system_prompt_with_context(
+            base,
+            is_modular=True,
+            scenario="fitting",
+            active_scenarios={"fitting", "tire_search"},
+        )
+        # After topic switch — tire search module present
+        assert "підбір шин" in result
+        # Fitting still present
+        assert "запис на шиномонтаж" in result
+
+    def test_tire_search_plus_fitting(self) -> None:
+        """Starting with tire search, switching to fitting adds fitting module."""
+        base = assemble_prompt(scenario="tire_search", include_pronunciation=False)
+        assert _MOD_FITTING not in base
+
+        result = build_system_prompt_with_context(
+            base,
+            is_modular=True,
+            scenario="tire_search",
+            active_scenarios={"tire_search", "fitting"},
+        )
+        assert "запис на шиномонтаж" in result
+        assert "підбір шин" in result
+
+    def test_single_scenario_no_expansion(self) -> None:
+        """Single active scenario doesn't add extra modules."""
+        base = assemble_prompt(scenario="fitting", include_pronunciation=False)
+        result = build_system_prompt_with_context(
+            base,
+            is_modular=True,
+            scenario="fitting",
+            active_scenarios={"fitting"},
+        )
+        # No tire search added — only fitting's modules
+        assert _MOD_TIRE_SEARCH not in result
+
+    def test_no_active_scenarios_no_expansion(self) -> None:
+        """None active_scenarios doesn't cause expansion."""
+        base = assemble_prompt(scenario="fitting", include_pronunciation=False)
+        result = build_system_prompt_with_context(
+            base,
+            is_modular=True,
+            scenario="fitting",
+            active_scenarios=None,
+        )
+        assert _MOD_TIRE_SEARCH not in result
+
+    def test_no_duplicate_modules(self) -> None:
+        """Modules shared between scenarios should not be duplicated."""
+        base = assemble_prompt(scenario="fitting", include_pronunciation=False)
+        # Both fitting and consultation include _MOD_CONSULTATION
+        result = build_system_prompt_with_context(
+            base,
+            is_modular=True,
+            scenario="fitting",
+            active_scenarios={"fitting", "consultation"},
+        )
+        # _MOD_CONSULTATION should appear only once
+        assert result.count("## Сценарій: консультація та інформація") == 1

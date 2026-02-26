@@ -146,6 +146,7 @@ class LLMAgent:
         fitting_booked: bool = False,
         tools_called: set[str] | None = None,
         scenario: str | None = None,
+        active_scenarios: set[str] | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         """Process a user message and return the agent's text response.
 
@@ -161,6 +162,7 @@ class LLMAgent:
             fitting_booked: Whether a fitting has already been booked this call.
             tools_called: Set of tool names invoked during this call (for module expansion).
             scenario: Current IVR scenario (for module expansion).
+            active_scenarios: All detected scenarios (for topic switching).
 
         Returns:
             Tuple of (response_text, updated_conversation_history).
@@ -211,6 +213,7 @@ class LLMAgent:
             storage_context=storage_context,
             tools_called=tools_called,
             scenario=scenario,
+            active_scenarios=active_scenarios,
         )
 
         # Filter tools by conversation state (remove irrelevant tools)
