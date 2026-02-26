@@ -1717,15 +1717,17 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
     async def _execute_with_caller_id(name: str, args: dict[str, Any]) -> Any:
         phone_field = _PHONE_FIELDS.get(name)
         if phone_field and session.caller_phone:
+            # Always override with real CallerID — LLM may hallucinate phone numbers
             current = args.get(phone_field, "")
-            if not current or current.strip() in ("", "unknown"):
+            if current != session.caller_phone:
                 args[phone_field] = session.caller_phone
                 logger.info(
-                    "Auto-injected CallerID %s into %s.%s for call %s",
+                    "Auto-injected CallerID %s into %s.%s for call %s (was: %s)",
                     session.caller_phone,
                     name,
                     phone_field,
                     session.channel_uuid,
+                    current or "(empty)",
                 )
         return await _original_execute(name, args)
 
