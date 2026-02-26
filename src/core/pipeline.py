@@ -111,8 +111,45 @@ _WAIT_CONTEXT_PATTERNS: list[tuple[list[str], list[str]]] = [
 _wait_counters: dict[int, int] = {}
 
 
-def _select_wait_message(user_text: str, default: str) -> str:
-    """Pick a contextual wait message, rotating through the pool."""
+# Keywords that indicate a real request (not a simple reply like a name or "yes")
+_ACTION_KEYWORDS: list[str] = [
+    # from _WAIT_CONTEXT_PATTERNS
+    "статус", "де замовлення", "де моє",
+    "запис", "записати", "шиномонтаж", "монтаж",
+    "наявність", "є в наявності",
+    "підібрати", "підбери", "пошукай",
+    # additional action/topic keywords
+    "замовлення", "замовити", "оформити", "заказ",
+    "шини", "шину", "резину", "покришк",
+    "доставк", "оплат", "гаранті", "повернен",
+    "знижк", "акці", "промокод",
+    "перевір", "дізнати", "розкажи", "підкажи", "порад", "порівня",
+    "оператор", "менеджер", "переключи",
+]
+
+
+def _is_simple_reply(text: str) -> bool:
+    """Detect short/simple replies that don't need a wait message.
+
+    Examples: name, car brand, yes/no, license plate, single number.
+    These process fast (no tool calls) so the wait filler is annoying.
+    """
+    words = text.split()
+    if len(words) > 5:
+        return False
+    # Even short text with action keywords is NOT a simple reply
+    lowered = text.lower()
+    return not any(kw in lowered for kw in _ACTION_KEYWORDS)
+
+
+def _select_wait_message(user_text: str, default: str) -> str | None:
+    """Pick a contextual wait message, rotating through the pool.
+
+    Returns None for simple replies (name, brand, yes/no) that don't
+    warrant a wait message.
+    """
+    if _is_simple_reply(user_text):
+        return None
     lowered = user_text.lower()
     for keywords, pool in _WAIT_CONTEXT_PATTERNS:
         if any(kw in lowered for kw in keywords):
@@ -476,8 +513,9 @@ class CallPipeline:
                 self._session.transition_to(CallState.PROCESSING)
                 wait_default = self._templates.get("wait", WAIT_TEXT)
                 wait_msg = _select_wait_message(transcript.text, wait_default)
-                await self._log_turn("bot", wait_msg)
-                await self._speak(wait_msg)  # contextual filler while processing
+                if wait_msg:
+                    await self._log_turn("bot", wait_msg)
+                    await self._speak(wait_msg)  # contextual filler while processing
 
                 start = time.monotonic()
                 try:

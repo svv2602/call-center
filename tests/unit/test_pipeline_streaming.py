@@ -11,10 +11,9 @@ import pytest
 
 from src.agent.prompts import ERROR_TEXT
 from src.agent.streaming_loop import TurnResult
-from src.core.call_session import CallSession, CallState
+from src.core.call_session import CallSession
 from src.core.pipeline import CallPipeline
 from src.llm.models import Usage
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -137,7 +136,6 @@ class TestNoWaitFiller:
 
         # Track all _speak calls
         speak_calls: list[str] = []
-        original_speak = pipeline._speak
 
         async def _track_speak(text: str) -> None:
             speak_calls.append(text)
@@ -238,16 +236,16 @@ class TestFallbackOnTimeout:
 
 class TestBlockingPathUnchanged:
     @pytest.mark.asyncio
-    async def test_blocking_path_unchanged(self) -> None:
-        """streaming_loop=None → existing blocking behavior."""
+    async def test_blocking_path_with_action_request(self) -> None:
+        """streaming_loop=None → blocking path sends wait filler for action requests."""
         pipeline = _make_pipeline(streaming_loop=None)
 
         transcript = MagicMock()
-        transcript.text = "Привіт"
+        transcript.text = "Хочу підібрати зимові шини на авто"
         transcript.confidence = 0.9
         transcript.language = "uk-UA"
 
-        pipeline._agent.process_message = AsyncMock(return_value=("Добрий день!", []))
+        pipeline._agent.process_message = AsyncMock(return_value=("Допоможу підібрати!", []))
 
         call_count = 0
 
@@ -271,11 +269,53 @@ class TestBlockingPathUnchanged:
 
         await pipeline._transcript_processor_loop()
 
-        # Blocking path speaks wait filler first
-        from src.agent.prompts import WAIT_DEFAULT_POOL
+        # Blocking path speaks wait filler for action requests
+        from src.agent.prompts import WAIT_SEARCH_POOL
 
-        assert any(call in WAIT_DEFAULT_POOL for call in speak_calls)
+        assert any(call in WAIT_SEARCH_POOL for call in speak_calls)
         # Agent was called via blocking path
+        pipeline._agent.process_message.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_blocking_path_simple_reply_no_wait(self) -> None:
+        """streaming_loop=None → blocking path skips wait for simple replies."""
+        pipeline = _make_pipeline(streaming_loop=None)
+
+        transcript = MagicMock()
+        transcript.text = "Валерій"
+        transcript.confidence = 0.9
+        transcript.language = "uk-UA"
+
+        pipeline._agent.process_message = AsyncMock(return_value=("Дякую, Валерію!", []))
+
+        call_count = 0
+
+        async def _fake_wait():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                return transcript
+            pipeline._conn.is_closed = True
+            return None
+
+        pipeline._wait_for_final_transcript = _fake_wait
+
+        speak_calls: list[str] = []
+
+        async def _track_speak(text: str) -> None:
+            speak_calls.append(text)
+
+        pipeline._speak = _track_speak
+        pipeline._speak_streaming = _track_speak
+
+        await pipeline._transcript_processor_loop()
+
+        # No wait filler for simple reply — first spoken text is the agent response
+        from src.agent.prompts import WAIT_DEFAULT_POOL, WAIT_SEARCH_POOL
+
+        all_wait = set(WAIT_DEFAULT_POOL + WAIT_SEARCH_POOL)
+        assert speak_calls[0] == "Дякую, Валерію!"
+        assert not any(call in all_wait for call in speak_calls)
         pipeline._agent.process_message.assert_called_once()
 
 

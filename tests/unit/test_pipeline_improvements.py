@@ -176,11 +176,15 @@ class TestContextualWaitPhrase:
         # Knowledge keywords removed from patterns (reduced to avoid false matches)
         assert _select_wait_message("Порівняти бренди", self.DEFAULT) in WAIT_DEFAULT_POOL
 
-    def test_no_match_returns_default_pool(self) -> None:
-        assert _select_wait_message("Привіт", self.DEFAULT) in WAIT_DEFAULT_POOL
+    def test_simple_reply_returns_none(self) -> None:
+        # Short replies without action keywords → no wait message
+        assert _select_wait_message("Привіт", self.DEFAULT) is None
+        assert _select_wait_message("Валерій", self.DEFAULT) is None
+        assert _select_wait_message("Toyota Camry", self.DEFAULT) is None
+        assert _select_wait_message("так", self.DEFAULT) is None
 
     def test_case_insensitive(self) -> None:
-        assert _select_wait_message("ЗАПИС", self.DEFAULT) in WAIT_FITTING_POOL
+        assert _select_wait_message("ЗАПИС на шиномонтаж будь ласка", self.DEFAULT) in WAIT_FITTING_POOL
 
     def test_first_match_wins(self) -> None:
         # "статус" matches status pattern (first in list)
@@ -222,9 +226,9 @@ class TestFittingPriceWaitPhrase:
         # Price keywords removed; "шиномонтаж" matches fitting pattern
         assert _select_wait_message("Яка ціна на шиномонтаж?", self.DEFAULT) in WAIT_FITTING_POOL
 
-    def test_cost_keyword_routes_to_default(self) -> None:
-        # Price/cost keywords removed from patterns (reduced set)
-        assert _select_wait_message("вартість послуг", self.DEFAULT) in WAIT_DEFAULT_POOL
+    def test_cost_keyword_simple_returns_none(self) -> None:
+        # "вартість послуг" is 2 words without action keywords → simple reply
+        assert _select_wait_message("вартість послуг", self.DEFAULT) is None
 
     def test_how_much_routes_to_fitting_pool(self) -> None:
         # "шиномонтаж" matches fitting pattern
@@ -236,13 +240,13 @@ class TestFittingPriceWaitPhrase:
     def test_zapisati_routes_to_fitting_pool(self) -> None:
         assert _select_wait_message("хочу записатися", self.DEFAULT) in WAIT_FITTING_POOL
 
-    def test_shinomontazh_routes_to_fitting_pool(self) -> None:
-        # "шиномонтаж" now matches fitting pattern directly
+    def test_shinomontazh_alone_is_simple(self) -> None:
+        # Single word "шиномонтаж" → simple reply (≤5 words but has action keyword)
+        # Actually "шиномонтаж" IS an action keyword, so wait message returned
         assert _select_wait_message("шиномонтаж", self.DEFAULT) in WAIT_FITTING_POOL
 
     def test_montazh_routes_to_fitting_pool(self) -> None:
-        # "монтаж" now matches fitting pattern directly
-        assert _select_wait_message("монтаж коліс", self.DEFAULT) in WAIT_FITTING_POOL
+        assert _select_wait_message("монтаж коліс будь ласка завтра вранці", self.DEFAULT) in WAIT_FITTING_POOL
 
 
 # ---------------------------------------------------------------------------
