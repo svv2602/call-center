@@ -270,17 +270,10 @@ _MOD_FITTING = """\
 ⛔ НЕ збирай ім'я, телефон, авто ПЕРЕД перевіркою слотів — спочатку покажи вільний час!
 
 **Крок 4 — Зберігання шин:**
-Запитай: «Чи є у вас шини на зберіганні у нас?»
-- Якщо ТАК → виклич find_storage(phone=CallerID) для пошуку договорів
-  - ОДИН договір → озвуч: номер, кількість шин, розмір/модель, сезонність
-  - КІЛЬКА договорів → перелічи коротко, запитай який саме
-  - НЕ знайдено → запитай телефон власника договору, повтори find_storage
-  - Після ідентифікації:
-    а) Шини НА СКЛАДІ (location=warehouse) → запис НЕ РАНІШЕ ніж через 3 робочих дні (доставка зі складу). Попередь клієнта.
-    б) Шини В ШИННОМУ ЦЕНТРІ → продовжуй з обраним слотом
-    в) Клієнт хоче доставку Новою Поштою → збери ПІБ, телефон, місто, відділення НП. Оплата доставки клієнтом.
-  - Якщо є борг (debt > 0) → повідом про заборгованість: «За вашим договором є заборгованість [сума] гривень»
-- Якщо НІ → переходь далі
+Система автоматично перевірила зберігання за CallerID.
+- Якщо в контексті є секція "Зберігання шин клієнта" → озвуч клієнту і дотримуйся обмежень по даті (мінімальна дата запису вказана в секції)
+- Якщо секції немає → зберігання не знайдено, пропусти цей крок
+- ⚠️ Якщо клієнт САМ запитує про шини на зберіганні, але секції немає → скажи: «Перевірила, за вашим номером договорів зберігання не знайдено. Переведу вас на оператора для уточнення.» → transfer_to_operator
 
 **Крок 5 — Номер автомобіля:**
 Запитай: «Назвіть, будь ласка, номер вашого автомобіля»
@@ -315,8 +308,10 @@ _MOD_STORAGE = """\
 ### Чекліст: задавай питання послідовно (по одному)
 
 **Крок 1 — Пошук договору:**
-⚡ Одразу виклич find_storage(phone=CallerID) — не питай нічого зайвого.
-- Якщо CallerID немає → запитай номер телефону, потім шукай.
+Система вже автоматично перевірила зберігання за CallerID.
+- Якщо в контексті є секція "Зберігання шин клієнта" → переходь одразу до Крок 2
+- Якщо секції немає → «За вашим номером договорів не знайдено. Можливо, оформлено на інший номер?»
+  Запитай телефон → виклич find_storage(phone=...) вручну
 
 **Крок 2 — Озвучення інформації:**
 - ОДИН договір → «Знайшла ваш договір [номер]: [кількість] шин [бренд] [модель] [розмір], [сезонність]. \
@@ -690,6 +685,81 @@ def format_caller_history(history: list[dict]) -> str | None:
     return "\n".join(lines)
 
 
+def _add_business_days(start_date: datetime.date, days: int) -> datetime.date:
+    """Add *days* business days (Mon-Fri) to *start_date*."""
+    current = start_date
+    added = 0
+    while added < days:
+        current += datetime.timedelta(days=1)
+        if current.weekday() < 5:  # Mon=0 … Fri=4
+            added += 1
+    return current
+
+
+_SEASON_UA = {
+    "winter": "зимові",
+    "summer": "літні",
+    "all_season": "всесезонні",
+}
+
+_LOCATION_UA = {
+    "warehouse": "СКЛАД → потрібно мінімум 3 робочих дні на доставку",
+    "station": "шинний центр (на місці)",
+}
+
+
+def format_storage_context(data: dict) -> str | None:
+    """Format 1C storage contracts into a Ukrainian prompt section.
+
+    Returns ``None`` when there are no contracts to report.
+    """
+    contracts = data.get("contracts") if isinstance(data, dict) else None
+    if not contracts:
+        return None
+
+    lines: list[str] = []
+    lines.append("## Зберігання шин клієнта (автоматична перевірка за CallerID)")
+    lines.append(f"Знайдено {len(contracts)} договір(ів):")
+
+    has_warehouse = False
+    for i, c in enumerate(contracts, 1):
+        number = c.get("contract_number", "?")
+        owner = c.get("owner_name", "")
+        header = f"{i}. Договір {number}"
+        if owner:
+            header += f" ({owner})"
+        lines.append(header + ":")
+
+        for tire in c.get("tires", []):
+            qty = tire.get("quantity", "?")
+            brand = tire.get("brand", "")
+            model = tire.get("model", "")
+            size = tire.get("size", "")
+            season_key = tire.get("season", "")
+            season = _SEASON_UA.get(season_key, season_key)
+            lines.append(f"   - {qty}× {brand} {model} {size} ({season})")
+
+        location = c.get("location", "")
+        loc_text = _LOCATION_UA.get(location, location)
+        lines.append(f"   - Місцезнаходження: {loc_text}")
+
+        if location == "warehouse":
+            has_warehouse = True
+
+        debt = c.get("debt", 0)
+        if debt and debt > 0:
+            lines.append(f"   - Борг: {debt} грн")
+        else:
+            lines.append("   - Борг: немає")
+
+    if has_warehouse:
+        min_date = _add_business_days(datetime.date.today(), 3)
+        lines.append(f"⚡ Мінімальна дата запису на монтаж: {min_date.isoformat()} (3 робочих дні)")
+
+    lines.append("⚡ Одразу озвуч клієнту інформацію про його шини на зберіганні.")
+    return "\n".join(lines)
+
+
 def build_system_prompt_with_context(
     base_prompt: str,
     *,
@@ -703,6 +773,7 @@ def build_system_prompt_with_context(
     pattern_context: str | None = None,
     agent_name: str | None = None,
     caller_history: str | None = None,
+    storage_context: str | None = None,
 ) -> str:
     """Build the final system prompt with all dynamic context injected.
 
@@ -803,6 +874,9 @@ def build_system_prompt_with_context(
 
     if caller_history:
         parts.append("\n" + caller_history)
+
+    if storage_context:
+        parts.append("\n" + storage_context)
 
     if pattern_context:
         parts.append(pattern_context)

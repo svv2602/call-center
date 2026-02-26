@@ -32,7 +32,7 @@ from src.agent.prompt_manager import (
     get_safety_rules_for_prompt,
     inject_pronunciation_rules,
 )
-from src.agent.prompts import assemble_prompt, format_caller_history
+from src.agent.prompts import assemble_prompt, format_caller_history, format_storage_context
 from src.agent.tool_loader import get_tools_with_overrides
 from src.api.admin_users import router as admin_users_router
 from src.api.analytics import router as analytics_router
@@ -836,14 +836,29 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 logger.debug("Caller history loading failed", exc_info=True)
                 return []
 
-        few_shot_examples, safety_rules_extra, pron_rules, promos, caller_history_raw = (
-            await asyncio.gather(
-                _load_few_shot(),
-                _load_safety(),
-                _load_pronunciation(),
-                _load_promotions(),
-                _load_caller_history(),
-            )
+        async def _load_storage_contracts() -> dict:
+            if _onec_client is None or not session.caller_id:
+                return {}
+            try:
+                return await _onec_client.find_storage(phone=session.caller_id)
+            except Exception:
+                logger.debug("Storage contracts preload failed", exc_info=True)
+                return {}
+
+        (
+            few_shot_examples,
+            safety_rules_extra,
+            pron_rules,
+            promos,
+            caller_history_raw,
+            storage_raw,
+        ) = await asyncio.gather(
+            _load_few_shot(),
+            _load_safety(),
+            _load_pronunciation(),
+            _load_promotions(),
+            _load_caller_history(),
+            _load_storage_contracts(),
         )
         few_shot_context = format_few_shot_section(
             few_shot_examples, scenario_type=session.scenario
@@ -851,6 +866,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         safety_context = format_safety_rules_section(safety_rules_extra)
         promotions_context = format_promotions_context(promos)
         caller_history_text = format_caller_history(caller_history_raw)
+        storage_context_text = format_storage_context(storage_raw)
 
         # Modular prompt assembly: if no DB/A-B prompt, assemble from modules
         is_modular = False
@@ -1015,6 +1031,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             call_logger=_call_logger,
             cost_breakdown=cost,
             caller_history=caller_history_text,
+            storage_context=storage_context_text,
         )
         await pipeline.run()
 

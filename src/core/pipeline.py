@@ -193,6 +193,7 @@ class CallPipeline:
         call_logger: Any = None,
         cost_breakdown: CostBreakdown | None = None,
         caller_history: str | None = None,
+        storage_context: str | None = None,
     ) -> None:
         self._conn = conn
         self._stt = stt
@@ -207,6 +208,7 @@ class CallPipeline:
         self._call_logger = call_logger
         self._cost = cost_breakdown
         self._caller_history = caller_history
+        self._storage_context = storage_context
         self._turn_counter = 0
         self._llm_history: list[dict[str, Any]] = []  # persistent LLM context for streaming path
         self._speaking = False
@@ -412,6 +414,7 @@ class CallPipeline:
                             pattern_context=pattern_context,
                             order_stage=order_stage,
                             caller_history=self._caller_history,
+                            storage_context=self._storage_context,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )
@@ -470,6 +473,7 @@ class CallPipeline:
                             pattern_context=pattern_context,
                             order_stage=order_stage,
                             caller_history=self._caller_history,
+                            storage_context=self._storage_context,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )
