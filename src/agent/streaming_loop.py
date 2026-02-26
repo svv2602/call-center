@@ -80,7 +80,7 @@ class StreamingAgentLoop:
     ) -> None:
         self._llm_router = llm_router
         self._tool_router = tool_router
-        self._tts = tts
+        self._tts_initial = tts
         self._conn = conn
         self._barge_in = barge_in_event
         self._tools = tools
@@ -93,6 +93,13 @@ class StreamingAgentLoop:
         self._promotions_context = promotions_context
         self._is_modular = is_modular
         self._agent_name = agent_name
+
+    @property
+    def _tts(self) -> TTSEngine:
+        """Return the current global TTS engine (picks up hot-reloaded config)."""
+        from src.tts import get_engine
+
+        return get_engine() or self._tts_initial
 
     async def run_turn(
         self,

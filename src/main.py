@@ -2021,18 +2021,28 @@ async def main() -> None:
     logger.info("StoreClient initialized: %s", settings.store_api.url)
 
     try:
+        # Read effective config: Redis (admin UI overrides) merged over env defaults
+        from src.api.tts_config import _get_effective_config
+
+        tts_cfg, tts_cfg_source = await _get_effective_config(_redis)
         _tts_engine = GoogleTTSEngine(
             config=TTSConfig(
-                voice_name=settings.google_tts.voice,
-                speaking_rate=settings.google_tts.speaking_rate,
-                pitch=settings.google_tts.pitch,
+                voice_name=tts_cfg.get("voice_name", settings.google_tts.voice),
+                speaking_rate=tts_cfg.get("speaking_rate", settings.google_tts.speaking_rate),
+                pitch=tts_cfg.get("pitch", settings.google_tts.pitch),
+                break_comma_ms=tts_cfg.get("break_comma_ms", 100),
+                break_period_ms=tts_cfg.get("break_period_ms", 200),
+                break_exclamation_ms=tts_cfg.get("break_exclamation_ms", 250),
+                break_colon_ms=tts_cfg.get("break_colon_ms", 200),
+                break_semicolon_ms=tts_cfg.get("break_semicolon_ms", 150),
+                break_em_dash_ms=tts_cfg.get("break_em_dash_ms", 150),
             )
         )
         await _tts_engine.initialize()
         from src.tts import set_engine as set_tts_engine
 
         set_tts_engine(_tts_engine)
-        logger.info("TTS engine initialized")
+        logger.info("TTS engine initialized (config source: %s)", tts_cfg_source)
     except Exception:
         logger.warning(
             "TTS engine unavailable (no Google credentials?) — calls will not work, but API is running"

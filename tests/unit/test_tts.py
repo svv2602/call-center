@@ -1,5 +1,7 @@
 """Unit tests for TTS module using MockTTSEngine."""
 
+from unittest.mock import patch
+
 import pytest
 
 from src.tts.base import TTSConfig
@@ -232,3 +234,87 @@ class TestSSMLFallback:
 
         actual_input = engine._client.synthesize_speech.call_args.kwargs["input"]
         assert actual_input.text == "Дякую за дзвінок!"
+
+
+class TestTTSEngineHotReload:
+    """Test that get_engine()/set_engine() hot-reload works correctly."""
+
+    def test_set_and_get_engine(self) -> None:
+        """set_engine() updates the global, get_engine() returns it."""
+        from src.tts import get_engine, set_engine
+
+        old = get_engine()
+        try:
+            engine = MockTTSEngine()
+            set_engine(engine)
+            assert get_engine() is engine
+        finally:
+            set_engine(old)
+
+    def test_pipeline_tts_property_follows_global(self) -> None:
+        """Pipeline._tts property returns the current global engine, not the initial one."""
+        from src.tts import get_engine, set_engine
+
+        old = get_engine()
+        try:
+            initial_engine = MockTTSEngine()
+            new_engine = MockTTSEngine()
+
+            set_engine(initial_engine)
+
+            from src.core.pipeline import CallPipeline
+
+            pipeline = CallPipeline.__new__(CallPipeline)
+            pipeline._tts_initial = initial_engine
+
+            # pipeline._tts should return the global (initial_engine)
+            assert pipeline._tts is initial_engine
+
+            # Swap global engine (simulates hot-reload)
+            set_engine(new_engine)
+
+            # pipeline._tts should now return the new engine
+            assert pipeline._tts is new_engine
+        finally:
+            set_engine(old)
+
+    def test_pipeline_tts_property_falls_back_to_initial(self) -> None:
+        """When global engine is None, pipeline falls back to initial engine."""
+        from src.tts import get_engine, set_engine
+
+        old = get_engine()
+        try:
+            initial_engine = MockTTSEngine()
+            set_engine(None)
+
+            from src.core.pipeline import CallPipeline
+
+            pipeline = CallPipeline.__new__(CallPipeline)
+            pipeline._tts_initial = initial_engine
+
+            assert pipeline._tts is initial_engine
+        finally:
+            set_engine(old)
+
+    def test_streaming_loop_tts_property_follows_global(self) -> None:
+        """StreamingAgentLoop._tts property returns the current global engine."""
+        from src.tts import get_engine, set_engine
+
+        old = get_engine()
+        try:
+            initial_engine = MockTTSEngine()
+            new_engine = MockTTSEngine()
+
+            set_engine(initial_engine)
+
+            from src.agent.streaming_loop import StreamingAgentLoop
+
+            loop = StreamingAgentLoop.__new__(StreamingAgentLoop)
+            loop._tts_initial = initial_engine
+
+            assert loop._tts is initial_engine
+
+            set_engine(new_engine)
+            assert loop._tts is new_engine
+        finally:
+            set_engine(old)

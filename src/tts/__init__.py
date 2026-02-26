@@ -34,8 +34,8 @@ def get_engine() -> GoogleTTSEngine | None:
 async def reinitialize_engine(config: TTSConfig) -> GoogleTTSEngine:
     """Create a new TTS engine with the given config, initialize it, and swap the global reference.
 
-    Active calls keep their old engine reference (safe in asyncio single-threaded model).
-    New calls will pick up the new engine.
+    Both active and new calls pick up the new engine via the _tts property
+    (get_engine() is called on each synthesize, not cached at call start).
     """
     from src.tts.google_tts import GoogleTTSEngine
 

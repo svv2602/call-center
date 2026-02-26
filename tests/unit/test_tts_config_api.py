@@ -63,6 +63,38 @@ def _env_patch():
     return mock_settings
 
 
+class TestGetEffectiveConfig:
+    """Test _get_effective_config() used by both API and startup."""
+
+    @pytest.mark.asyncio()
+    async def test_returns_env_defaults_when_redis_empty(self, mock_redis: AsyncMock) -> None:
+        from src.api.tts_config import _get_effective_config
+
+        with patch("src.api.tts_config.get_settings", _env_patch()):
+            config, source = await _get_effective_config(mock_redis)
+
+        assert source == "env"
+        assert config["speaking_rate"] == 0.93
+        assert config["voice_name"] == "uk-UA-Wavenet-A"
+
+    @pytest.mark.asyncio()
+    async def test_redis_overrides_env_defaults(self, mock_redis: AsyncMock) -> None:
+        """Redis config merges over env defaults — startup should use this."""
+        from src.api.tts_config import _get_effective_config
+
+        mock_redis._store["tts:config"] = json.dumps({"speaking_rate": 1.5, "pitch": 0.0})
+
+        with patch("src.api.tts_config.get_settings", _env_patch()):
+            config, source = await _get_effective_config(mock_redis)
+
+        assert source == "redis"
+        assert config["speaking_rate"] == 1.5
+        assert config["pitch"] == 0.0
+        # Non-overridden fields fall back to env
+        assert config["voice_name"] == "uk-UA-Wavenet-A"
+        assert config["break_comma_ms"] == 100
+
+
 class TestGetConfig:
     """Test GET /admin/tts/config."""
 

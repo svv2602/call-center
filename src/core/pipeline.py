@@ -226,7 +226,7 @@ class CallPipeline:
     ) -> None:
         self._conn = conn
         self._stt = stt
-        self._tts = tts
+        self._tts_initial = tts
         self._agent = agent
         self._session = session
         self._stt_config = stt_config or STTConfig()
@@ -243,6 +243,13 @@ class CallPipeline:
         self._speaking = False
         self._barge_in_event = barge_in_event or asyncio.Event()
         self._final_transcript_queue: asyncio.Queue[Transcript | None] = asyncio.Queue()
+
+    @property
+    def _tts(self) -> TTSEngine:
+        """Return the current global TTS engine (picks up hot-reloaded config)."""
+        from src.tts import get_engine
+
+        return get_engine() or self._tts_initial
 
     async def _log_turn(
         self,
