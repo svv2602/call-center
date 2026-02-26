@@ -150,7 +150,7 @@ class OneCSOAPClient:
         """Book a tire fitting appointment.
 
         SOAP operation: GetTireRecording (Status=Записан)
-        1C params: Person, PhoneNumber, StationID, Date (dateTime), Time (special),
+        1C params: Person, PhoneNumber, StationID, Date (xs:date), Time (xs:time),
                    Status, CheckBalance, CallBack, ClientMode, Comment, AutoType, AutoNumber, etc.
 
         Args:
@@ -168,8 +168,8 @@ class OneCSOAPClient:
             Dict with booking_id, status, etc.
         """
         comment = _build_comment(vehicle_info, tire_diameter, service_type)
-        dt_date = _to_datetime(date)
-        dt_time = _to_time(time)
+        xsd_date = _to_date(date)
+        xsd_time = _to_time_only(time)
         norm_phone = _normalize_phone(phone)
 
         params = f"<ns:Person>{escape(person)}</ns:Person>"
@@ -178,8 +178,8 @@ class OneCSOAPClient:
         params += f"<ns:AutoNumber>{escape(auto_number)}</ns:AutoNumber>"
         params += "<ns:StoreTires>false</ns:StoreTires>"
         params += f"<ns:StationID>{escape(station_id)}</ns:StationID>"
-        params += f"<ns:Date>{escape(dt_date)}</ns:Date>"
-        params += f"<ns:Time>{escape(dt_time)}</ns:Time>"
+        params += f"<ns:Date>{escape(xsd_date)}</ns:Date>"
+        params += f"<ns:Time>{escape(xsd_time)}</ns:Time>"
         params += "<ns:Status>Записан</ns:Status>"
         params += "<ns:CheckBalance>true</ns:CheckBalance>"
         params += "<ns:CallBack>false</ns:CallBack>"
@@ -588,6 +588,21 @@ def _to_time(value: str) -> str:
     if len(parts) == 2:
         value = f"{value}:00"
     return f"0001-01-01T{value}"
+
+
+def _to_date(value: str) -> str:
+    """Ensure xs:date format YYYY-MM-DD (strip time part if present)."""
+    return value.split("T")[0]
+
+
+def _to_time_only(value: str) -> str:
+    """Ensure xs:time format HH:MM:SS (strip date prefix if present)."""
+    if "T" in value:
+        value = value.split("T")[1]
+    parts = value.split(":")
+    if len(parts) == 2:
+        value = f"{value}:00"
+    return value
 
 
 def _parse_cdata_lines(root: ET.Element) -> list[ET.Element]:

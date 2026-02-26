@@ -8,15 +8,17 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from src.onec_client.soap import (
-    OneCSOAPClient,
-    OneCSOAPError,
     _ENVELOPE_TEMPLATE,
     _SOAP_NS,
+    OneCSOAPClient,
+    OneCSOAPError,
     _build_comment,
     _inner_text,
     _text,
+    _to_date,
     _to_datetime,
     _to_time,
+    _to_time_only,
 )
 
 
@@ -376,9 +378,9 @@ class TestSOAPMethods:
             # Verify correct 1C parameter names
             assert "PhoneNumber" in call_body
             assert "<ns:Phone>" not in call_body
-            # Verify dateTime/time formats
-            assert "2026-02-20T00:00:00" in call_body
-            assert "0001-01-01T09:00:00" in call_body
+            # Verify xs:date/xs:time formats (WSDL-compliant)
+            assert "<ns:Date>2026-02-20</ns:Date>" in call_body
+            assert "<ns:Time>09:00:00</ns:Time>" in call_body
 
         assert result["booking_id"] == "new-guid"
         assert result["status"] == "Записан"
@@ -679,6 +681,21 @@ class TestDateTimeHelpers:
 
     def test_to_time_already_full(self) -> None:
         assert _to_time("0001-01-01T09:00:00") == "0001-01-01T09:00:00"
+
+    def test_to_date_strips_time(self) -> None:
+        assert _to_date("2026-02-27T00:00:00") == "2026-02-27"
+
+    def test_to_date_passthrough(self) -> None:
+        assert _to_date("2026-02-27") == "2026-02-27"
+
+    def test_to_time_only_hhmm(self) -> None:
+        assert _to_time_only("09:00") == "09:00:00"
+
+    def test_to_time_only_hhmmss(self) -> None:
+        assert _to_time_only("14:30:00") == "14:30:00"
+
+    def test_to_time_only_strips_date_prefix(self) -> None:
+        assert _to_time_only("0001-01-01T09:00:00") == "09:00:00"
 
 
 class TestParseScheduleCDATA:
