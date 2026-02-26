@@ -1260,6 +1260,21 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
 
     async def _book_fitting_with_metric(**kwargs: Any) -> Any:
         """Book fitting: try SOAP, fallback to Store API."""
+        # Server-side validation: reject booking without required customer data
+        customer_name = (kwargs.get("customer_name") or "").strip()
+        auto_number = (kwargs.get("auto_number") or "").strip()
+        missing: list[str] = []
+        if not customer_name:
+            missing.append("customer_name (ім'я клієнта)")
+        if not auto_number:
+            missing.append("auto_number (державний номер авто)")
+        if missing:
+            return {
+                "error": True,
+                "message": f"Неможливо записати без: {', '.join(missing)}. "
+                "Поверніся до чеклісту і запитай у клієнта відсутні дані.",
+            }
+
         if _soap_client is not None:
             try:
                 result = await _soap_client.book_fitting(
