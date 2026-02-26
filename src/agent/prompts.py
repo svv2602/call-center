@@ -624,8 +624,61 @@ _ALL_SCENARIO_MODULES = [
     _MOD_OBJECTIONS,
 ]
 
+# Marker to detect compact mode in build_system_prompt_with_context
+_COMPACT_MARKER = "Доступні сценарії"
+
+_MOD_ROUTER = """\
+
+## Доступні сценарії
+Визнач тему клієнта за його першим повідомленням і переходь до дій:
+- **Підбір шин** — пошук за розміром, автомобілем, порівняння брендів
+- **Замовлення** — статус, оформлення, доставка, підтвердження
+- **Шиномонтаж** — запис на станцію, перенесення, скасування, вартість
+- **Зберігання шин** — пошук договору, інформація про шини на зберіганні
+- **Консультація** — відповіді з бази знань, порівняння, рекомендації
+
+Після визначення теми переходь до першого питання за сценарієм. \
+Детальні інструкції з чеклістом будуть додані автоматично.\
+"""
+
+
+# Keywords for auto-detecting scenario from customer text (no-IVR mode)
+_SCENARIO_KEYWORDS: dict[str, list[str]] = {
+    "fitting": [
+        "монтаж", "шиномонтаж", "запис", "записати", "записатися",
+        "перезувати", "перебувати", "перевзути", "поменять колес",
+        "поменять резин", "переобу",
+    ],
+    "tire_search": [
+        "шини", "шину", "шин ", "підібрати", "розмір", "зимов", "літн",
+        "резину", "резина", "колеса", "покрышк",
+    ],
+    "order_status": [
+        "замовлення", "статус", "де замовлення", "де моє", "трек",
+        "відстежити", "заказ",
+    ],
+    "consultation": [
+        "питання", "порада", "порівняти", "різниця", "рекомендац",
+        "що краще", "який кращ", "підкажіть",
+    ],
+}
+
+
+def detect_scenario_from_text(text: str) -> str | None:
+    """Detect scenario from customer text using keyword matching.
+
+    Used as a lightweight IVR substitute when Asterisk IVR is not configured.
+    Returns scenario name or None if no confident match.
+    """
+    lowered = text.lower()
+    for scenario, keywords in _SCENARIO_KEYWORDS.items():
+        if any(kw in lowered for kw in keywords):
+            return scenario
+    return None
+
+
 SCENARIO_MODULES: dict[str | None, list[str]] = {
-    None: _ALL_SCENARIO_MODULES,  # no IVR → full prompt
+    None: _ALL_SCENARIO_MODULES,  # no IVR, fallback → full prompt
     "tire_search": [
         _MOD_TIRE_SEARCH,
         _MOD_ORDER_FLOW,
@@ -665,6 +718,7 @@ def assemble_prompt(
     *,
     include_pronunciation: bool = True,
     pronunciation_rules: str | None = None,
+    compact: bool = False,
 ) -> str:
     """Assemble system prompt from modules based on IVR scenario.
 
@@ -674,15 +728,21 @@ def assemble_prompt(
         include_pronunciation: Whether to include pronunciation rules.
         pronunciation_rules: Custom pronunciation rules text. If None, uses
                            the default PRONUNCIATION_RULES constant.
+        compact: If True and scenario is None, use lightweight router module
+                 instead of loading all scenario modules. Saves ~4000 tokens
+                 on the first turn before the topic is identified.
 
     Returns:
         Assembled system prompt string.
     """
-    modules = SCENARIO_MODULES.get(scenario)
-    if modules is None:
-        # Unknown scenario → fall back to full prompt
-        logger.warning("Unknown scenario '%s', using full prompt", scenario)
-        modules = _ALL_SCENARIO_MODULES
+    if compact and scenario is None:
+        modules = [_MOD_ROUTER]
+    else:
+        modules = SCENARIO_MODULES.get(scenario)
+        if modules is None:
+            # Unknown scenario → fall back to full prompt
+            logger.warning("Unknown scenario '%s', using full prompt", scenario)
+            modules = _ALL_SCENARIO_MODULES
 
     parts = [_MOD_CORE]
     parts.extend(modules)
@@ -908,6 +968,14 @@ def build_system_prompt_with_context(
     if agent_name and agent_name != "Олена":
         base_prompt = base_prompt.replace("Тебе звати Олена", f"Тебе звати {agent_name}")
         base_prompt = base_prompt.replace("ти Олена", f"ти {agent_name}")
+
+    # Upgrade from compact router to full scenario modules when scenario
+    # is detected mid-call (first turn was compact, now we know the topic).
+    if is_modular and scenario and _COMPACT_MARKER in base_prompt:
+        base_prompt = assemble_prompt(
+            scenario=scenario, include_pronunciation=False
+        )
+        logger.info("Compact→full upgrade: scenario=%s", scenario)
 
     # Dynamic module expansion: if tools were called that require modules
     # not in the current scenario, append them to the base prompt.

@@ -874,6 +874,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             system_prompt = assemble_prompt(
                 scenario=session.scenario,
                 include_pronunciation=False,  # added separately via inject_pronunciation_rules
+                compact=(session.scenario is None),  # lightweight router when no IVR
             )
             is_modular = True
 

@@ -14,23 +14,19 @@ from unittest.mock import patch
 import pytest
 
 from src.agent.prompts import (
-    PRONUNCIATION_RULES,
-    SYSTEM_PROMPT,
-    _MOD_CONSULTATION,
-    _MOD_CORE,
+    _COMPACT_MARKER,
     _MOD_FITTING,
-    _MOD_OBJECTIONS,
     _MOD_ORDER_FLOW,
     _MOD_ORDER_STATUS,
-    _MOD_STORAGE,
     _MOD_TIRE_SEARCH,
     _STAGE_OFFER_FITTING,
     _STAGE_ORDER_CONFIRMATION,
+    SYSTEM_PROMPT,
     assemble_prompt,
     build_system_prompt_with_context,
     compute_order_stage,
+    detect_scenario_from_text,
 )
-
 
 # ---------------------------------------------------------------------------
 # TestAssemblePrompt
@@ -368,3 +364,117 @@ class TestBackwardCompatibility:
         """SYSTEM_PROMPT must be a non-empty string."""
         assert isinstance(SYSTEM_PROMPT, str)
         assert len(SYSTEM_PROMPT) > 100
+
+
+# ---------------------------------------------------------------------------
+# TestCompactRouter
+# ---------------------------------------------------------------------------
+
+
+class TestCompactRouter:
+    """Test compact=True mode and scenario detection from text."""
+
+    def test_compact_uses_router_module(self) -> None:
+        """compact=True with no scenario produces MOD_CORE + MOD_ROUTER only."""
+        prompt = assemble_prompt(scenario=None, compact=True, include_pronunciation=False)
+        assert _COMPACT_MARKER in prompt
+        assert "Ти — голосовий асистент" in prompt
+        # Should NOT contain full scenario modules
+        assert _MOD_TIRE_SEARCH not in prompt
+        assert _MOD_FITTING not in prompt
+        assert _MOD_ORDER_FLOW not in prompt
+        assert _MOD_ORDER_STATUS not in prompt
+
+    def test_compact_shorter_than_full(self) -> None:
+        """Compact prompt should be significantly shorter than full."""
+        compact = assemble_prompt(scenario=None, compact=True, include_pronunciation=False)
+        full = assemble_prompt(scenario=None, compact=False, include_pronunciation=False)
+        # Compact should be less than 50% of full
+        assert len(compact) < len(full) * 0.5
+
+    def test_compact_ignored_when_scenario_set(self) -> None:
+        """compact=True has no effect when scenario is explicitly set."""
+        prompt = assemble_prompt(scenario="fitting", compact=True, include_pronunciation=False)
+        assert "запис на шиномонтаж" in prompt
+        assert _COMPACT_MARKER not in prompt
+
+    def test_compact_includes_pronunciation_when_requested(self) -> None:
+        """Pronunciation rules still included in compact mode."""
+        prompt = assemble_prompt(scenario=None, compact=True, include_pronunciation=True)
+        assert "Правила вимови" in prompt
+
+    def test_compact_to_full_upgrade_in_builder(self) -> None:
+        """build_system_prompt_with_context upgrades compact→full when scenario detected."""
+        compact_base = assemble_prompt(
+            scenario=None, compact=True, include_pronunciation=False
+        )
+        assert _COMPACT_MARKER in compact_base
+
+        # Simulate: scenario detected mid-call
+        result = build_system_prompt_with_context(
+            compact_base,
+            is_modular=True,
+            scenario="fitting",
+        )
+        # After upgrade, fitting module content should be present
+        assert "запис на шиномонтаж" in result
+        # Router module should be replaced
+        assert _COMPACT_MARKER not in result
+
+    def test_compact_no_upgrade_when_scenario_none(self) -> None:
+        """No upgrade when scenario is still None."""
+        compact_base = assemble_prompt(
+            scenario=None, compact=True, include_pronunciation=False
+        )
+        result = build_system_prompt_with_context(
+            compact_base,
+            is_modular=True,
+            scenario=None,
+        )
+        # Router module still present (no upgrade)
+        assert _COMPACT_MARKER in result
+        assert _MOD_FITTING not in result
+
+
+# ---------------------------------------------------------------------------
+# TestDetectScenarioFromText
+# ---------------------------------------------------------------------------
+
+
+class TestDetectScenarioFromText:
+    """Test detect_scenario_from_text() keyword matching."""
+
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("Хочу записатися на шиномонтаж", "fitting"),
+            ("Мені потрібно перезувати колеса", "fitting"),
+            ("Записати на монтаж", "fitting"),
+            ("Хочу переобутися", "fitting"),
+            ("Шукаю зимові шини", "tire_search"),
+            ("Підібрати резину на авто", "tire_search"),
+            ("Потрібні літні колеса", "tire_search"),
+            ("Де моє замовлення?", "order_status"),
+            ("Статус замовлення", "order_status"),
+            ("Хочу відстежити заказ", "order_status"),
+            ("Підкажіть що краще вибрати", "consultation"),
+            ("Яка різниця між брендами", "consultation"),
+            ("Порівняти Continental і Michelin", "consultation"),
+        ],
+    )
+    def test_detects_known_scenarios(self, text: str, expected: str) -> None:
+        assert detect_scenario_from_text(text) == expected
+
+    def test_returns_none_for_unrecognized(self) -> None:
+        assert detect_scenario_from_text("Добрий день") is None
+        assert detect_scenario_from_text("Мене звати Олександр") is None
+        assert detect_scenario_from_text("") is None
+
+    def test_case_insensitive(self) -> None:
+        assert detect_scenario_from_text("ШИНОМОНТАЖ") == "fitting"
+        assert detect_scenario_from_text("ШИНИ") == "tire_search"
+
+    def test_mixed_language(self) -> None:
+        """Russian keywords also detected (customers may speak Russian)."""
+        assert detect_scenario_from_text("Хочу поменять резину") == "fitting"
+        assert detect_scenario_from_text("покрышки нужны") == "tire_search"

@@ -24,14 +24,11 @@ from src.agent.prompts import (
     WAIT_AVAILABILITY_POOL,
     WAIT_DEFAULT_POOL,
     WAIT_FITTING_POOL,
-    WAIT_FITTING_PRICE_POOL,
-    WAIT_KNOWLEDGE_POOL,
-    WAIT_ORDER_POOL,
     WAIT_SEARCH_POOL,
     WAIT_STATUS_POOL,
-    WAIT_STORAGE_POOL,
     WAIT_TEXT,
     compute_order_stage,
+    detect_scenario_from_text,
 )
 from src.core.audio_socket import AudioSocketConnection, PacketType
 from src.core.call_session import SILENCE_TIMEOUT_SEC, CallSession, CallState
@@ -362,6 +359,17 @@ class CallPipeline:
             self._session.timeout_count = 0
             if transcript.language:
                 self._session.detected_language = transcript.language
+
+            # Auto-detect scenario from customer text when IVR didn't set one
+            if self._session.scenario is None:
+                detected = detect_scenario_from_text(transcript.text)
+                if detected:
+                    self._session.scenario = detected
+                    logger.info(
+                        "Scenario auto-detected: %s for call %s",
+                        detected,
+                        self._session.channel_uuid,
+                    )
 
             # Search for relevant conversation patterns
             pattern_context = None

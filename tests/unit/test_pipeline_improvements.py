@@ -28,11 +28,8 @@ from src.agent.prompts import (
     WAIT_AVAILABILITY_TEXT,
     WAIT_DEFAULT_POOL,
     WAIT_FITTING_POOL,
-    WAIT_FITTING_PRICE_POOL,
     WAIT_FITTING_TEXT,
-    WAIT_KNOWLEDGE_POOL,
     WAIT_KNOWLEDGE_TEXT,
-    WAIT_ORDER_POOL,
     WAIT_ORDER_TEXT,
     WAIT_SEARCH_POOL,
     WAIT_SEARCH_TEXT,
@@ -158,8 +155,9 @@ class TestContextualWaitPhrase:
         """Reset rotation counters so each test starts from pool[0]."""
         _wait_counters.clear()
 
-    def test_order_keywords(self) -> None:
-        assert _select_wait_message("Хочу оформити замовлення", self.DEFAULT) in WAIT_ORDER_POOL
+    def test_order_keywords_fall_through_to_default(self) -> None:
+        # "замовлення" alone no longer matches a specific pool (reduced patterns)
+        assert _select_wait_message("Хочу оформити замовлення", self.DEFAULT) in WAIT_DEFAULT_POOL
 
     def test_status_keywords(self) -> None:
         assert _select_wait_message("Де моє замовлення?", self.DEFAULT) in WAIT_STATUS_POOL
@@ -174,23 +172,24 @@ class TestContextualWaitPhrase:
     def test_search_keywords(self) -> None:
         assert _select_wait_message("Підібрати зимові шини", self.DEFAULT) in WAIT_SEARCH_POOL
 
-    def test_knowledge_keywords(self) -> None:
-        assert _select_wait_message("Порівняти бренди", self.DEFAULT) in WAIT_KNOWLEDGE_POOL
+    def test_knowledge_keywords_fall_through_to_default(self) -> None:
+        # Knowledge keywords removed from patterns (reduced to avoid false matches)
+        assert _select_wait_message("Порівняти бренди", self.DEFAULT) in WAIT_DEFAULT_POOL
 
     def test_no_match_returns_default_pool(self) -> None:
         assert _select_wait_message("Привіт", self.DEFAULT) in WAIT_DEFAULT_POOL
 
     def test_case_insensitive(self) -> None:
-        assert _select_wait_message("ЗАМОВЛЕННЯ", self.DEFAULT) in WAIT_ORDER_POOL
+        assert _select_wait_message("ЗАПИС", self.DEFAULT) in WAIT_FITTING_POOL
 
     def test_first_match_wins(self) -> None:
-        # "статус" matches status pattern (first in list) before order's "замовлення"
-        result = _select_wait_message("замовлення статус", self.DEFAULT)
+        # "статус" matches status pattern (first in list)
+        result = _select_wait_message("де статус замовлення", self.DEFAULT)
         assert result in WAIT_STATUS_POOL
 
     def test_partial_keyword_match(self) -> None:
-        # "зимов" should match as a substring
-        assert _select_wait_message("зимові шини 205/55", self.DEFAULT) in WAIT_SEARCH_POOL
+        # "підібрати" matches search pattern
+        assert _select_wait_message("підібрати зимові шини 205/55", self.DEFAULT) in WAIT_SEARCH_POOL
 
     def test_rotation_cycles_through_pool(self) -> None:
         """Consecutive calls rotate through pool variants."""
@@ -219,14 +218,17 @@ class TestFittingPriceWaitPhrase:
     def _reset_counters(self) -> None:
         _wait_counters.clear()
 
-    def test_price_keyword_routes_to_pricing_pool(self) -> None:
-        assert _select_wait_message("Яка ціна на шиномонтаж?", self.DEFAULT) in WAIT_FITTING_PRICE_POOL
+    def test_price_keyword_routes_to_fitting_pool(self) -> None:
+        # Price keywords removed; "шиномонтаж" matches fitting pattern
+        assert _select_wait_message("Яка ціна на шиномонтаж?", self.DEFAULT) in WAIT_FITTING_POOL
 
-    def test_cost_keyword_routes_to_pricing_pool(self) -> None:
-        assert _select_wait_message("вартість монтажу", self.DEFAULT) in WAIT_FITTING_PRICE_POOL
+    def test_cost_keyword_routes_to_default(self) -> None:
+        # Price/cost keywords removed from patterns (reduced set)
+        assert _select_wait_message("вартість послуг", self.DEFAULT) in WAIT_DEFAULT_POOL
 
-    def test_how_much_routes_to_pricing_pool(self) -> None:
-        assert _select_wait_message("скільки коштує шиномонтаж R18", self.DEFAULT) in WAIT_FITTING_PRICE_POOL
+    def test_how_much_routes_to_fitting_pool(self) -> None:
+        # "шиномонтаж" matches fitting pattern
+        assert _select_wait_message("скільки коштує шиномонтаж R18", self.DEFAULT) in WAIT_FITTING_POOL
 
     def test_booking_keyword_routes_to_fitting_pool(self) -> None:
         assert _select_wait_message("Запис на шиномонтаж", self.DEFAULT) in WAIT_FITTING_POOL
@@ -234,11 +236,13 @@ class TestFittingPriceWaitPhrase:
     def test_zapisati_routes_to_fitting_pool(self) -> None:
         assert _select_wait_message("хочу записатися", self.DEFAULT) in WAIT_FITTING_POOL
 
-    def test_bare_shinomontazh_routes_to_default(self) -> None:
-        assert _select_wait_message("шиномонтаж", self.DEFAULT) in WAIT_DEFAULT_POOL
+    def test_shinomontazh_routes_to_fitting_pool(self) -> None:
+        # "шиномонтаж" now matches fitting pattern directly
+        assert _select_wait_message("шиномонтаж", self.DEFAULT) in WAIT_FITTING_POOL
 
-    def test_bare_montazh_routes_to_default(self) -> None:
-        assert _select_wait_message("монтаж коліс", self.DEFAULT) in WAIT_DEFAULT_POOL
+    def test_montazh_routes_to_fitting_pool(self) -> None:
+        # "монтаж" now matches fitting pattern directly
+        assert _select_wait_message("монтаж коліс", self.DEFAULT) in WAIT_FITTING_POOL
 
 
 # ---------------------------------------------------------------------------
