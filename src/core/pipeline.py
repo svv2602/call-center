@@ -103,16 +103,11 @@ def _strip_greeting(text: str) -> str:
 # --- Contextual wait-phrase selection with rotation ---
 
 _WAIT_CONTEXT_PATTERNS: list[tuple[list[str], list[str]]] = [
-    (["зберігання", "зберіганні", "договір", "забрати шини"], WAIT_STORAGE_POOL),
+    # Only match explicit action requests — avoid false matches on car brands, names, etc.
     (["статус", "де замовлення", "де моє"], WAIT_STATUS_POOL),
-    (["замовлення", "замовити", "оформити"], WAIT_ORDER_POOL),
-    # Pricing keywords before booking — "ціна монтаж" → pricing, not booking
-    (["ціна", "вартість", "скільки коштує", "прайс"], WAIT_FITTING_PRICE_POOL),
-    (["запис", "записати", "вільні час"], WAIT_FITTING_POOL),
-    (["монтаж", "шиномонтаж"], WAIT_DEFAULT_POOL),
-    (["наявність", "є в наявності", "склад"], WAIT_AVAILABILITY_POOL),
-    (["шини", "шину", "підібрати", "розмір", "зимов", "літн"], WAIT_SEARCH_POOL),
-    (["порівняти", "рекомендац", "відмінн"], WAIT_KNOWLEDGE_POOL),
+    (["запис", "записати", "шиномонтаж", "монтаж"], WAIT_FITTING_POOL),
+    (["наявність", "є в наявності"], WAIT_AVAILABILITY_POOL),
+    (["підібрати", "підбери", "пошукай"], WAIT_SEARCH_POOL),
 ]
 
 # Per-pool rotation counters (round-robin within a call and across calls)
