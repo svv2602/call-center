@@ -33,6 +33,7 @@ _q_task_type = Query(None)
 _q_tenant_id = Query(None)
 _q_provider_type = Query(None)
 _q_search = Query(None)
+_q_include_hidden = Query(False)
 
 
 async def _get_engine() -> AsyncEngine:
@@ -70,6 +71,10 @@ class CatalogAddRequest(BaseModel):
 
 
 class CatalogDismissRequest(BaseModel):
+    model_keys: list[str]
+
+
+class CatalogHideRequest(BaseModel):
     model_keys: list[str]
 
 
@@ -264,12 +269,15 @@ async def sync_system_pricing(_: Any = _perm_w) -> dict[str, Any]:
 async def list_catalog(
     provider_type: str | None = _q_provider_type,
     search: str | None = _q_search,
+    include_hidden: bool = _q_include_hidden,
     _: Any = _perm_r,
 ) -> dict[str, Any]:
     """List models from the pricing catalog with optional filters."""
     conditions = ["1=1"]
     params: dict[str, Any] = {}
 
+    if not include_hidden:
+        conditions.append("c.is_hidden = false")
     if provider_type:
         conditions.append("c.provider_type = :pt")
         params["pt"] = provider_type
@@ -286,7 +294,7 @@ async def list_catalog(
                 SELECT c.model_key, c.provider_type, c.display_name,
                        c.input_price_per_1m, c.output_price_per_1m,
                        c.max_input_tokens, c.max_output_tokens,
-                       c.is_new, c.synced_at,
+                       c.is_new, c.is_hidden, c.synced_at,
                        CASE WHEN p.id IS NOT NULL THEN true ELSE false END AS is_added
                 FROM llm_pricing_catalog c
                 LEFT JOIN llm_model_pricing p ON p.catalog_model_key = c.model_key
@@ -305,6 +313,7 @@ async def list_catalog(
                 "max_input_tokens": r.max_input_tokens,
                 "max_output_tokens": r.max_output_tokens,
                 "is_new": r.is_new,
+                "is_hidden": r.is_hidden,
                 "synced_at": r.synced_at.isoformat() if r.synced_at else None,
                 "is_added": r.is_added,
             }
@@ -319,7 +328,7 @@ async def catalog_new_count(_: Any = _perm_r) -> dict[str, Any]:
     engine = await _get_engine()
     async with engine.begin() as conn:
         result = await conn.execute(
-            text("SELECT COUNT(*) AS cnt FROM llm_pricing_catalog WHERE is_new = true")
+            text("SELECT COUNT(*) AS cnt FROM llm_pricing_catalog WHERE is_new = true AND is_hidden = false")
         )
         count = result.scalar() or 0
     return {"count": count}
@@ -417,6 +426,44 @@ async def catalog_dismiss(body: CatalogDismissRequest, _: Any = _perm_w) -> dict
             {"keys": body.model_keys},
         )
     return {"dismissed": result.rowcount}
+
+
+@router.post("/catalog/hide")
+async def catalog_hide(body: CatalogHideRequest, _: Any = _perm_w) -> dict[str, Any]:
+    """Hide models from the catalog view."""
+    if not body.model_keys:
+        raise HTTPException(400, "No model keys provided")
+
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                UPDATE llm_pricing_catalog
+                SET is_hidden = true
+                WHERE model_key = ANY(:keys) AND is_hidden = false
+            """),
+            {"keys": body.model_keys},
+        )
+    return {"hidden": result.rowcount}
+
+
+@router.post("/catalog/unhide")
+async def catalog_unhide(body: CatalogHideRequest, _: Any = _perm_w) -> dict[str, Any]:
+    """Unhide previously hidden models."""
+    if not body.model_keys:
+        raise HTTPException(400, "No model keys provided")
+
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("""
+                UPDATE llm_pricing_catalog
+                SET is_hidden = false
+                WHERE model_key = ANY(:keys) AND is_hidden = true
+            """),
+            {"keys": body.model_keys},
+        )
+    return {"unhidden": result.rowcount}
 
 
 @router.post("/catalog/sync")

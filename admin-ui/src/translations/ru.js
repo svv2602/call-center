@@ -1734,6 +1734,12 @@ export default {
     'costs.modelsDismissed': 'Модели отклонены',
     'costs.providerKeyHint': 'Уникальный ключ для привязки к LLM-роутеру',
     'costs.neverSynced': 'Каталог ещё не синхронизирован',
+    'costs.hide': 'Скрыть',
+    'costs.unhide': 'Показать',
+    'costs.hidden': 'Скрыта',
+    'costs.modelsHidden': 'Модели скрыты',
+    'costs.modelUnhidden': 'Модель восстановлена',
+    'costs.showHidden': 'Показать скрытые',
 
     // Help — Cost Analysis
     'help.costAnalysis.title': 'Анализ стоимости LLM',

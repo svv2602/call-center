@@ -1734,6 +1734,12 @@ export default {
     'costs.modelsDismissed': 'Models dismissed',
     'costs.providerKeyHint': 'Unique key for LLM router binding',
     'costs.neverSynced': 'Catalog not synced yet',
+    'costs.hide': 'Hide',
+    'costs.unhide': 'Unhide',
+    'costs.hidden': 'Hidden',
+    'costs.modelsHidden': 'Models hidden',
+    'costs.modelUnhidden': 'Model unhidden',
+    'costs.showHidden': 'Show hidden',
 
     // Help — Cost Analysis
     'help.costAnalysis.title': 'LLM Cost Analysis',

@@ -653,6 +653,141 @@ class TestCatalogAdd:
         assert resp.status_code == 409
 
 
+class TestCatalogHide:
+    @pytest.mark.asyncio()
+    async def test_hides_models(self, app: Any) -> None:
+        engine, _mock_conn = _make_mock_engine(rowcount=2)
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.post(
+                    "/admin/llm-costs/catalog/hide",
+                    json={"model_keys": ["old-model-1", "old-model-2"]},
+                )
+
+        assert resp.status_code == 200
+        assert resp.json()["hidden"] == 2
+
+    @pytest.mark.asyncio()
+    async def test_unhides_models(self, app: Any) -> None:
+        engine, _mock_conn = _make_mock_engine(rowcount=1)
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.post(
+                    "/admin/llm-costs/catalog/unhide",
+                    json={"model_keys": ["old-model-1"]},
+                )
+
+        assert resp.status_code == 200
+        assert resp.json()["unhidden"] == 1
+
+    @pytest.mark.asyncio()
+    async def test_hide_400_on_empty_keys(self, app: Any) -> None:
+        engine, _ = _make_mock_engine()
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.post(
+                    "/admin/llm-costs/catalog/hide",
+                    json={"model_keys": []},
+                )
+
+        assert resp.status_code == 400
+
+    @pytest.mark.asyncio()
+    async def test_unhide_400_on_empty_keys(self, app: Any) -> None:
+        engine, _ = _make_mock_engine()
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.post(
+                    "/admin/llm-costs/catalog/unhide",
+                    json={"model_keys": []},
+                )
+
+        assert resp.status_code == 400
+
+
+class TestCatalogListHiddenFilter:
+    @pytest.mark.asyncio()
+    async def test_excludes_hidden_by_default(self, app: Any) -> None:
+        """GET /catalog without include_hidden should add is_hidden=false filter."""
+        engine, mock_conn = _make_mock_engine(rows=[])
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.get("/admin/llm-costs/catalog")
+
+        assert resp.status_code == 200
+        # Verify the SQL contained is_hidden filter
+        sql_arg = mock_conn.execute.call_args[0][0].text
+        assert "is_hidden = false" in sql_arg
+
+    @pytest.mark.asyncio()
+    async def test_includes_hidden_when_requested(self, app: Any) -> None:
+        """GET /catalog?include_hidden=true should NOT filter by is_hidden."""
+        engine, mock_conn = _make_mock_engine(rows=[])
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.get("/admin/llm-costs/catalog?include_hidden=true")
+
+        assert resp.status_code == 200
+        sql_arg = mock_conn.execute.call_args[0][0].text
+        assert "is_hidden = false" not in sql_arg
+
+    @pytest.mark.asyncio()
+    async def test_catalog_item_includes_is_hidden_field(self, app: Any) -> None:
+        from datetime import UTC, datetime
+
+        rows = [
+            _row(
+                model_key="old-model",
+                provider_type="openai",
+                display_name="Old Model",
+                input_price_per_1m=1.0,
+                output_price_per_1m=2.0,
+                max_input_tokens=None,
+                max_output_tokens=None,
+                is_new=False,
+                is_hidden=True,
+                synced_at=datetime(2026, 2, 25, tzinfo=UTC),
+                is_added=False,
+            )
+        ]
+        engine, _ = _make_mock_engine(rows=rows)
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.get("/admin/llm-costs/catalog?include_hidden=true")
+
+        assert resp.status_code == 200
+        item = resp.json()["items"][0]
+        assert item["is_hidden"] is True
+
+
 class TestCatalogDismiss:
     @pytest.mark.asyncio()
     async def test_dismisses_models(self, app: Any) -> None:

@@ -241,8 +241,10 @@ async function loadCatalog() {
     const params = new URLSearchParams();
     const pt = document.getElementById('catalogProviderFilter')?.value;
     const search = document.getElementById('catalogSearch')?.value;
+    const showHidden = document.getElementById('catalogShowHidden')?.checked;
     if (pt) params.set('provider_type', pt);
     if (search) params.set('search', search);
+    if (showHidden) params.set('include_hidden', 'true');
     const qs = params.toString();
 
     try {
@@ -267,7 +269,9 @@ function _renderCatalogTable(items) {
     tbody.innerHTML = items.map(r => {
         const maxTokens = r.max_input_tokens ? _formatTokens(r.max_input_tokens) : '—';
         let statusHtml;
-        if (r.is_added) {
+        if (r.is_hidden) {
+            statusHtml = `<span class="text-neutral-400 dark:text-neutral-500 text-xs font-medium">${t('costs.hidden')}</span>`;
+        } else if (r.is_added) {
             statusHtml = `<span class="text-green-600 dark:text-green-400 text-xs font-medium">${t('costs.added')}</span>`;
         } else if (r.is_new) {
             statusHtml = `<span class="text-blue-600 dark:text-blue-400 text-xs font-medium">${t('costs.new')}</span>`;
@@ -275,13 +279,20 @@ function _renderCatalogTable(items) {
             statusHtml = '<span class="text-neutral-400 text-xs">—</span>';
         }
 
-        const actions = r.is_added
-            ? ''
-            : `<button onclick="window._pages.costAnalysis.showCatalogAddDialog('${_esc(r.model_key)}')" class="text-blue-600 dark:text-blue-400 hover:underline text-xs mr-2">${t('costs.addToPricing')}</button>` +
-              (r.is_new ? `<button onclick="window._pages.costAnalysis.dismissModel('${_esc(r.model_key)}')" class="text-neutral-500 hover:underline text-xs">${t('costs.dismiss')}</button>` : '');
+        let actions = '';
+        if (r.is_hidden) {
+            actions = `<button onclick="window._pages.costAnalysis.unhideModel('${_esc(r.model_key)}')" class="text-blue-600 dark:text-blue-400 hover:underline text-xs">${t('costs.unhide')}</button>`;
+        } else if (!r.is_added) {
+            actions = `<button onclick="window._pages.costAnalysis.showCatalogAddDialog('${_esc(r.model_key)}')" class="text-blue-600 dark:text-blue-400 hover:underline text-xs mr-2">${t('costs.addToPricing')}</button>`;
+            if (r.is_new) {
+                actions += `<button onclick="window._pages.costAnalysis.dismissModel('${_esc(r.model_key)}')" class="text-neutral-500 hover:underline text-xs mr-2">${t('costs.dismiss')}</button>`;
+            }
+            actions += `<button onclick="window._pages.costAnalysis.hideModel('${_esc(r.model_key)}')" class="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-300 hover:underline text-xs">${t('costs.hide')}</button>`;
+        }
 
+        const rowClass = r.is_hidden ? 'opacity-50 ' : '';
         return `
-            <tr class="border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
+            <tr class="${rowClass}border-b border-neutral-100 dark:border-neutral-800 hover:bg-neutral-50 dark:hover:bg-neutral-800/50">
                 <td class="px-3 py-2.5 text-sm font-mono">${_esc(r.model_key)}</td>
                 <td class="px-3 py-2.5 text-sm">${_esc(r.display_name)}</td>
                 <td class="px-3 py-2.5 text-sm text-right font-mono">$${r.input_price_per_1m.toFixed(2)}</td>
@@ -391,6 +402,34 @@ async function dismissModel(modelKey) {
             body: JSON.stringify({ model_keys: [modelKey] }),
         });
         showToast(t('costs.modelsDismissed'), 'success');
+        await Promise.all([loadCatalog(), loadNewModelsCount()]);
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+// --- Hide / Unhide ---
+
+async function hideModel(modelKey) {
+    try {
+        await api('/admin/llm-costs/catalog/hide', {
+            method: 'POST',
+            body: JSON.stringify({ model_keys: [modelKey] }),
+        });
+        showToast(t('costs.modelsHidden'), 'success');
+        await Promise.all([loadCatalog(), loadNewModelsCount()]);
+    } catch (e) {
+        showToast(e.message, 'error');
+    }
+}
+
+async function unhideModel(modelKey) {
+    try {
+        await api('/admin/llm-costs/catalog/unhide', {
+            method: 'POST',
+            body: JSON.stringify({ model_keys: [modelKey] }),
+        });
+        showToast(t('costs.modelUnhidden'), 'success');
         await Promise.all([loadCatalog(), loadNewModelsCount()]);
     } catch (e) {
         showToast(e.message, 'error');
@@ -558,5 +597,7 @@ export function init() {
         syncCatalog,
         showCatalogAddDialog,
         dismissModel,
+        hideModel,
+        unhideModel,
     };
 }
