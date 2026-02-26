@@ -15,12 +15,13 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from src.agent.agent import MAX_HISTORY_MESSAGES, MAX_TOOL_CALLS_PER_TURN
+from src.agent.tools import filter_tools_by_state
 
 # Per-tool execution timeout (seconds). Prevents a single slow 1C/API call
 # from blocking the entire agent turn. On timeout, tool returns an error
 # message so the LLM can respond gracefully.
 _TOOL_TIMEOUT_SEC = 15
-from src.agent.history_compressor import compress_history
+from src.agent.history_compressor import summarize_old_messages
 from src.agent.prompts import SYSTEM_PROMPT, build_system_prompt_with_context
 from src.agent.tool_result_compressor import compress_tool_result
 from src.core.audio_sender import send_audio_stream
@@ -73,6 +74,7 @@ class StreamingAgentLoop:
         max_tool_rounds: int = MAX_TOOL_CALLS_PER_TURN,
         few_shot_context: str | None = None,
         safety_context: str | None = None,
+        promotions_context: str | None = None,
         is_modular: bool = False,
         agent_name: str | None = None,
     ) -> None:
@@ -88,6 +90,7 @@ class StreamingAgentLoop:
         self._max_tool_rounds = max_tool_rounds
         self._few_shot_context = few_shot_context
         self._safety_context = safety_context
+        self._promotions_context = promotions_context
         self._is_modular = is_modular
         self._agent_name = agent_name
 
@@ -101,6 +104,9 @@ class StreamingAgentLoop:
         order_stage: str | None = None,
         caller_history: str | None = None,
         storage_context: str | None = None,
+        fitting_booked: bool = False,
+        tools_called: set[str] | None = None,
+        scenario: str | None = None,
     ) -> TurnResult:
         """Run a full conversation turn with streaming audio output.
 
@@ -120,8 +126,8 @@ class StreamingAgentLoop:
                 conversation_history[:1] + conversation_history[-(MAX_HISTORY_MESSAGES - 1) :]
             )
 
-        # Compress old tool results to save tokens
-        conversation_history[:] = compress_history(conversation_history)
+        # Compress/summarize old messages to save tokens
+        conversation_history[:] = summarize_old_messages(conversation_history)
 
         # Build system prompt with caller context (mask caller phone)
         masked_phone = caller_phone
@@ -133,12 +139,20 @@ class StreamingAgentLoop:
             order_stage=order_stage,
             safety_context=self._safety_context,
             few_shot_context=self._few_shot_context,
+            promotions_context=self._promotions_context,
             caller_phone=masked_phone,
             order_id=order_id,
             pattern_context=pattern_context,
             agent_name=self._agent_name,
             caller_history=caller_history,
             storage_context=storage_context,
+            tools_called=tools_called,
+            scenario=scenario,
+        )
+
+        # Filter tools by conversation state (remove irrelevant tools)
+        tools = filter_tools_by_state(
+            self._tools or [], order_stage=order_stage, fitting_booked=fitting_booked
         )
 
         spoken_parts: list[str] = []
@@ -159,7 +173,7 @@ class StreamingAgentLoop:
                     LLMTask.AGENT,
                     conversation_history,
                     system=system,
-                    tools=self._tools,
+                    tools=tools,
                     max_tokens=1024,
                     provider_override=self._provider_override,
                 )

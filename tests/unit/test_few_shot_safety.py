@@ -203,7 +203,9 @@ class TestSystemPromptInjection:
         assert "Приклади діалогів" not in prompt
         assert "Додаткові правила безпеки" not in prompt
 
-    def test_safety_before_few_shot_before_season(self) -> None:
+    def test_season_before_safety_before_few_shot(self) -> None:
+        """In the cache-optimized ordering: date/season (stable, high-freq)
+        comes before safety and few-shot (stable, but lower in prefix)."""
         from src.agent.prompts import SYSTEM_PROMPT, build_system_prompt_with_context
 
         prompt = build_system_prompt_with_context(
@@ -211,11 +213,11 @@ class TestSystemPromptInjection:
             few_shot_context="## Few-shot section",
             safety_context="## Safety section",
         )
-        # Safety should appear before few-shot, both before season hint
+        idx_season = prompt.index("## Підказка по сезону")
         idx_safety = prompt.index("## Safety section")
         idx_fewshot = prompt.index("## Few-shot section")
-        idx_season = prompt.index("## Підказка по сезону")
-        assert idx_safety < idx_fewshot < idx_season
+        # Season hint → safety → few-shot (all stable, but season first for max cache prefix)
+        assert idx_season < idx_safety < idx_fewshot
 
     def test_streaming_loop_uses_shared_builder(self) -> None:
         """StreamingAgentLoop also uses build_system_prompt_with_context."""

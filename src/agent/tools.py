@@ -485,3 +485,42 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
 
 # All tools for the agent (MVP + Orders + Fitting/Knowledge)
 ALL_TOOLS = MVP_TOOLS + ORDER_TOOLS + FITTING_TOOLS
+
+
+def filter_tools_by_state(
+    tools: list[dict],  # type: ignore[type-arg]
+    *,
+    order_stage: str | None = None,
+    fitting_booked: bool = False,
+) -> list[dict]:  # type: ignore[type-arg]
+    """Filter tool definitions based on current conversation state.
+
+    Removes tools that are irrelevant to the current order/fitting stage,
+    reducing the number of tool definitions sent to the LLM each turn.
+
+    Args:
+        tools: Full list of tool definitions (not mutated).
+        order_stage: Current order stage (None, "draft", "delivery_set", "confirmed").
+        fitting_booked: Whether a fitting has already been booked this call.
+
+    Returns:
+        Filtered copy of the tools list.
+    """
+    exclude: set[str] = set()
+
+    if order_stage is None:
+        exclude.update(("update_order_delivery", "confirm_order"))
+    elif order_stage == "draft":
+        exclude.add("confirm_order")
+    elif order_stage == "confirmed":
+        exclude.update(("create_order_draft", "update_order_delivery", "confirm_order"))
+
+    if fitting_booked:
+        exclude.update(("book_fitting", "get_fitting_slots"))
+
+    if not exclude:
+        return tools
+
+    filtered = [t for t in tools if t["name"] not in exclude]
+    # Return original list if nothing was actually filtered
+    return filtered if len(filtered) != len(tools) else tools

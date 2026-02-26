@@ -74,6 +74,8 @@ class CallSession:
         self.transfer_reason: str | None = None
         self.order_id: str | None = None
         self.order_draft: dict[str, Any] | None = None
+        self.fitting_booked: bool = False
+        self.tools_called: set[str] = set()
         self.tenant_id: str | None = None
         self.tenant_slug: str | None = None
         self.network_id: str | None = None

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any
 
 import anthropic
 
-from src.agent.history_compressor import compress_history
+from src.agent.history_compressor import summarize_old_messages
 from src.agent.prompts import (
     ERROR_TEXT,
     PROMPT_VERSION,
@@ -22,7 +22,7 @@ from src.agent.prompts import (
     build_system_prompt_with_context,
 )
 from src.agent.tool_result_compressor import compress_tool_result
-from src.agent.tools import ALL_TOOLS
+from src.agent.tools import ALL_TOOLS, filter_tools_by_state
 
 if TYPE_CHECKING:
     from src.llm.router import LLMRouter
@@ -143,6 +143,9 @@ class LLMAgent:
         order_stage: str | None = None,
         caller_history: str | None = None,
         storage_context: str | None = None,
+        fitting_booked: bool = False,
+        tools_called: set[str] | None = None,
+        scenario: str | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         """Process a user message and return the agent's text response.
 
@@ -152,6 +155,12 @@ class LLMAgent:
             caller_phone: CallerID phone number (if available).
             order_id: Current order draft ID (if in progress).
             pattern_context: Optional pattern injection text for system prompt.
+            order_stage: Current order stage (None, "draft", "delivery_set", "confirmed").
+            caller_history: Formatted caller history section.
+            storage_context: Formatted storage contracts section.
+            fitting_booked: Whether a fitting has already been booked this call.
+            tools_called: Set of tool names invoked during this call (for module expansion).
+            scenario: Current IVR scenario (for module expansion).
 
         Returns:
             Tuple of (response_text, updated_conversation_history).
@@ -180,8 +189,8 @@ class LLMAgent:
                 conversation_history[:1] + conversation_history[-(MAX_HISTORY_MESSAGES - 1) :]
             )
 
-        # Compress old tool results to save tokens
-        conversation_history[:] = compress_history(conversation_history)
+        # Compress/summarize old messages to save tokens
+        conversation_history[:] = summarize_old_messages(conversation_history)
 
         # Build system prompt with caller context (mask caller phone)
         masked_phone = caller_phone
@@ -200,6 +209,13 @@ class LLMAgent:
             agent_name=self._agent_name,
             caller_history=caller_history,
             storage_context=storage_context,
+            tools_called=tools_called,
+            scenario=scenario,
+        )
+
+        # Filter tools by conversation state (remove irrelevant tools)
+        tools = filter_tools_by_state(
+            self._tools, order_stage=order_stage, fitting_booked=fitting_booked
         )
 
         response_text = ""
@@ -225,7 +241,7 @@ class LLMAgent:
                         LLMTask.AGENT,
                         conversation_history,
                         system=system,
-                        tools=self._tools,
+                        tools=tools,
                         max_tokens=1024,
                         provider_override=self._provider_override,
                     )
@@ -268,7 +284,7 @@ class LLMAgent:
                         model=self._model,
                         max_tokens=1024,
                         system=system,
-                        tools=self._tools,  # type: ignore[arg-type]
+                        tools=tools,  # type: ignore[arg-type]
                         messages=conversation_history,  # type: ignore[arg-type]
                     )
                 except anthropic.APIStatusError as exc:

@@ -415,6 +415,9 @@ class CallPipeline:
                             order_stage=order_stage,
                             caller_history=self._caller_history,
                             storage_context=self._storage_context,
+                            fitting_booked=self._session.fitting_booked,
+                            tools_called=self._session.tools_called,
+                            scenario=self._session.scenario,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )
@@ -474,6 +477,9 @@ class CallPipeline:
                             order_stage=order_stage,
                             caller_history=self._caller_history,
                             storage_context=self._storage_context,
+                            fitting_booked=self._session.fitting_booked,
+                            tools_called=self._session.tools_called,
+                            scenario=self._session.scenario,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )

@@ -517,6 +517,66 @@ PRONUNCIATION_RULES = """\
 """
 
 # ---------------------------------------------------------------------------
+# Tool → module mapping (for dynamic module expansion mid-call)
+# ---------------------------------------------------------------------------
+
+_TOOL_MODULE_MAP: dict[str, list[str]] = {
+    "search_tires": [_MOD_TIRE_SEARCH],
+    "get_vehicle_tire_sizes": [_MOD_TIRE_SEARCH],
+    "check_availability": [_MOD_TIRE_SEARCH],
+    "create_order_draft": [_MOD_ORDER_FLOW],
+    "update_order_delivery": [_MOD_ORDER_FLOW],
+    "confirm_order": [_MOD_ORDER_FLOW, _MOD_FITTING, _MOD_COMBINED_FLOW],
+    "get_order_status": [_MOD_ORDER_STATUS],
+    "get_fitting_stations": [_MOD_FITTING],
+    "get_fitting_slots": [_MOD_FITTING],
+    "book_fitting": [_MOD_FITTING],
+    "cancel_fitting": [_MOD_FITTING],
+    "get_fitting_price": [_MOD_FITTING],
+    "get_customer_bookings": [_MOD_FITTING],
+    "find_storage": [_MOD_STORAGE],
+    "get_pickup_points": [_MOD_ORDER_FLOW],
+    "search_knowledge_base": [_MOD_CONSULTATION],
+    "transfer_to_operator": [],
+}
+
+
+def infer_expanded_modules(
+    scenario: str | None,
+    tools_called: set[str] | None,
+) -> list[str] | None:
+    """Infer additional prompt modules needed based on tools already called.
+
+    Returns a list of modules to ADD to the current scenario modules,
+    or None if no expansion is needed.  Modules already present in the
+    scenario's default set are never duplicated.
+
+    Args:
+        scenario: Current IVR scenario (may be None).
+        tools_called: Set of tool names invoked during this call so far.
+
+    Returns:
+        List of new module strings to append, or None if no expansion.
+    """
+    if not tools_called:
+        return None
+
+    base_modules = set(SCENARIO_MODULES.get(scenario, _ALL_SCENARIO_MODULES))
+
+    extra: list[str] = []
+    seen: set[int] = set()
+
+    for tool_name in tools_called:
+        for mod in _TOOL_MODULE_MAP.get(tool_name, []):
+            mod_id = id(mod)
+            if mod not in base_modules and mod_id not in seen:
+                extra.append(mod)
+                seen.add(mod_id)
+
+    return extra if extra else None
+
+
+# ---------------------------------------------------------------------------
 # Scenario → modules mapping
 # ---------------------------------------------------------------------------
 
@@ -788,6 +848,8 @@ def build_system_prompt_with_context(
     agent_name: str | None = None,
     caller_history: str | None = None,
     storage_context: str | None = None,
+    tools_called: set[str] | None = None,
+    scenario: str | None = None,
 ) -> str:
     """Build the final system prompt with all dynamic context injected.
 
@@ -815,24 +877,33 @@ def build_system_prompt_with_context(
         base_prompt = base_prompt.replace("Тебе звати Олена", f"Тебе звати {agent_name}")
         base_prompt = base_prompt.replace("ти Олена", f"ти {agent_name}")
 
+    # Dynamic module expansion: if tools were called that require modules
+    # not in the current scenario, append them to the base prompt.
+    if is_modular and tools_called:
+        extra_modules = infer_expanded_modules(scenario, tools_called)
+        if extra_modules:
+            base_prompt = base_prompt + "\n" + "\n".join(extra_modules)
+            logger.info(
+                "Module expansion: scenario=%s, added %d modules from tools %s",
+                scenario,
+                len(extra_modules),
+                tools_called,
+            )
+
+    # ---------------------------------------------------------------
+    # Section ordering for implicit cache (Gemini 2.5 Flash, etc.):
+    #   STABLE prefix (same across all turns within a call) →
+    #   DYNAMIC suffix (changes every turn).
+    # The LLM provider caches the longest matching prefix, so putting
+    # stable content first maximises cache hits and saves ~90% on
+    # cached tokens.
+    # ---------------------------------------------------------------
+
     parts = [base_prompt]
 
-    # Stage-aware injection (modular prompts only)
-    if is_modular and order_stage:
-        if order_stage == "delivery_set":
-            parts.append(_STAGE_ORDER_CONFIRMATION)
-        elif order_stage == "confirmed":
-            parts.append(_STAGE_OFFER_FITTING)
+    # --- STABLE sections (constant within a single call) ---
 
-    # Safety rules, few-shot examples, and promotions
-    if safety_context:
-        parts.append(safety_context)
-    if few_shot_context:
-        parts.append(few_shot_context)
-    if promotions_context:
-        parts.append(promotions_context)
-
-    # Current date and day of week — critical for relative date handling
+    # Current date and season hint (fixed for the call's day)
     today = datetime.date.today()
     weekday_names = [
         "понеділок",
@@ -879,18 +950,36 @@ def build_system_prompt_with_context(
     parts.append(f"\n## Підказка по сезону\n- {hint}")
     parts.append("- Якщо клієнт обирає нетиповий сезон — не заперечуй, виконуй запит")
 
+    # Safety rules, few-shot examples, and promotions (stable per call)
+    if safety_context:
+        parts.append(safety_context)
+    if few_shot_context:
+        parts.append(few_shot_context)
+    if promotions_context:
+        parts.append(promotions_context)
+
+    # Caller history and storage contracts (stable per call)
+    if caller_history:
+        parts.append("\n" + caller_history)
+
+    if storage_context:
+        parts.append("\n" + storage_context)
+
+    # --- DYNAMIC sections (change between turns) ---
+
+    # Stage-aware injection (modular prompts only)
+    if is_modular and order_stage:
+        if order_stage == "delivery_set":
+            parts.append(_STAGE_ORDER_CONFIRMATION)
+        elif order_stage == "confirmed":
+            parts.append(_STAGE_OFFER_FITTING)
+
     if caller_phone or order_id:
         parts.append("\n## Контекст дзвінка")
         if caller_phone:
             parts.append(f"- CallerID клієнта: {caller_phone}")
         if order_id:
             parts.append(f"- Поточне замовлення (чорновик): {order_id}")
-
-    if caller_history:
-        parts.append("\n" + caller_history)
-
-    if storage_context:
-        parts.append("\n" + storage_context)
 
     if pattern_context:
         parts.append(pattern_context)

@@ -940,6 +940,10 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 success: bool,
             ) -> None:
                 _tool_turn_counter[0] += 1
+                # Track tool calls for OPT-2 (lazy tool filtering) and OPT-3 (module expansion)
+                session.tools_called.add(name)
+                if name == "book_fitting" and success:
+                    session.fitting_booked = True
                 await _call_logger.log_tool_call(
                     call_id=conn.channel_uuid,
                     turn_number=_tool_turn_counter[0],
@@ -1003,6 +1007,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 pii_vault=vault,
                 few_shot_context=few_shot_context,
                 safety_context=safety_context,
+                promotions_context=promotions_context,
                 is_modular=is_modular,
                 agent_name=tenant_agent_name,
             )

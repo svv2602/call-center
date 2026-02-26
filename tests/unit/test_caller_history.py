@@ -251,7 +251,8 @@ class TestBuildSystemPromptWithCallerHistory:
         )
         assert "Історія попередніх дзвінків" not in prompt
 
-    def test_caller_history_after_call_context(self):
+    def test_caller_history_before_call_context(self):
+        """Caller history (stable) comes before CallerID (dynamic) for cache efficiency."""
         prompt = build_system_prompt_with_context(
             "Base prompt text",
             caller_phone="+380501234567",
@@ -260,10 +261,10 @@ class TestBuildSystemPromptWithCallerHistory:
         # Both should be present
         assert "CallerID клієнта: +380501234567" in prompt
         assert "Історія" in prompt
-        # History should come after CallerID context
+        # History is stable (same across turns) → before dynamic CallerID/order context
         caller_idx = prompt.index("CallerID")
         history_idx = prompt.index("Історія")
-        assert history_idx > caller_idx
+        assert history_idx < caller_idx
 
 
 # ---------------------------------------------------------------------------

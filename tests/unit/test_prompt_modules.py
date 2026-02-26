@@ -300,6 +300,46 @@ class TestBuildSystemPromptWithContext:
         result = build_system_prompt_with_context("base")
         assert "міжсезоння" in result
 
+    def test_stable_sections_before_dynamic(self) -> None:
+        """Stable sections (date, safety, few-shot, promos, caller_history, storage)
+        must appear before dynamic sections (stage injection, caller context, patterns)
+        for optimal implicit cache hits."""
+        result = build_system_prompt_with_context(
+            "base prompt",
+            is_modular=True,
+            order_stage="delivery_set",
+            safety_context="## Safety rules here",
+            few_shot_context="## Few-shot examples",
+            promotions_context="## Active promotions",
+            caller_phone="+380671234567",
+            order_id="DRAFT-999",
+            pattern_context="## Pattern context",
+            caller_history="## Caller history section",
+            storage_context="## Storage contracts",
+        )
+        # Stable sections positions
+        pos_date = result.index("Поточна дата")
+        pos_season = result.index("Підказка по сезону")
+        pos_safety = result.index("Safety rules here")
+        pos_few_shot = result.index("Few-shot examples")
+        pos_promos = result.index("Active promotions")
+        pos_caller_history = result.index("Caller history section")
+        pos_storage = result.index("Storage contracts")
+        # Dynamic sections positions
+        pos_stage = result.index("Підтвердження замовлення")
+        pos_caller_ctx = result.index("Контекст дзвінка")
+        pos_pattern = result.index("Pattern context")
+
+        # All stable sections before all dynamic sections
+        stable_positions = [
+            pos_date, pos_season, pos_safety, pos_few_shot,
+            pos_promos, pos_caller_history, pos_storage,
+        ]
+        dynamic_positions = [pos_stage, pos_caller_ctx, pos_pattern]
+        assert max(stable_positions) < min(dynamic_positions), (
+            "Stable sections must all appear before dynamic sections"
+        )
+
 
 # ---------------------------------------------------------------------------
 # TestBackwardCompatibility
