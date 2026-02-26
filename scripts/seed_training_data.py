@@ -690,10 +690,18 @@ def get_dialogue_examples() -> list[dict]:
                         "Підкажіть, будь ласка?"
                     ),
                 },
-                {"role": "customer", "text": "380 67 123 45 67"},
+                {"role": "customer", "text": "380 67 555 12 34"},
                 {
                     "role": "agent",
-                    "text": ("Дякую! Номер +380671234567. Які саме шини бажаєте замовити?"),
+                    "text": (
+                        "Дякую! Номер нуль шістдесят сім, п'ятсот п'ятдесят п'ять, "
+                        "дванадцять, тридцять чотири, вірно?"
+                    ),
+                },
+                {"role": "customer", "text": "Так, вірно"},
+                {
+                    "role": "agent",
+                    "text": "Добре. Які саме шини бажаєте замовити?",
                 },
                 {"role": "customer", "text": "Continental IceContact 3, 4 штуки, 215/55 R17"},
                 {
@@ -707,7 +715,7 @@ def get_dialogue_examples() -> list[dict]:
                             "name": "create_order_draft",
                             "input": {
                                 "items": [{"product_id": "CONT-IC3-215-55-R17", "quantity": 4}],
-                                "customer_phone": "+380671234567",
+                                "customer_phone": "+380XXXXXXXXX",
                             },
                         }
                     ],

@@ -334,7 +334,7 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
                 },
                 "auto_number": {
                     "type": "string",
-                    "description": "Державний номер автомобіля (якщо клієнт назвав)",
+                    "description": "Державний номер автомобіля клієнта (обов'язково запитай!)",
                 },
                 "vehicle_info": {
                     "type": "string",
@@ -358,7 +358,7 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
                     "description": "ID пов'язаного замовлення (якщо клієнт замовив шини)",
                 },
             },
-            "required": ["station_id", "date", "time", "customer_name", "customer_phone"],
+            "required": ["station_id", "date", "time", "customer_name", "customer_phone", "auto_number"],
         },
     },
     {
