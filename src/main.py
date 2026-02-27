@@ -105,10 +105,10 @@ app = FastAPI(
     version="0.1.0",
 )
 app.include_router(admin_users_router)
+app.include_router(export_router)  # Must be before analytics (both use /analytics prefix, export has /calls/export that conflicts with /calls/{call_id})
 app.include_router(analytics_router)
 app.include_router(auth_router)
 app.include_router(customers_router)
-app.include_router(export_router)
 app.include_router(fitting_hints_router)
 app.include_router(knowledge_router)
 app.include_router(llm_config_router)
