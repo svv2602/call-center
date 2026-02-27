@@ -418,13 +418,22 @@ class OneCSOAPClient:
         if inner is not None:
             ok = _text(inner, "Result", "false").lower() == "true"
             guid = _text(inner, "GUID")
+            msg = _text(inner, "Message")
             if guid or ok:
                 result = {
                     "booking_id": guid,
                     "status": "confirmed" if ok else "error",
-                    "message": _text(inner, "Message"),
+                    "message": msg,
                 }
                 return result
+            # 1C returned CDATA but Result=false and no GUID
+            logger.warning(
+                "1C booking rejected: Result=%s, GUID=%s, Message=%s",
+                _text(inner, "Result", "(missing)"),
+                guid or "(empty)",
+                msg or "(no message)",
+            )
+            return {"status": "error", "message": msg or "1С відмовив у записі"}
 
         # Fallback: namespace-aware elements
         for resp in root.iter(f"{{{_SOAP_NS}}}RecordingResult"):
@@ -446,6 +455,11 @@ class OneCSOAPClient:
                         "message": _text(child, "Message"),
                     }
                     break
+        if result.get("status") == "error":
+            logger.warning(
+                "1C booking parse: no booking_id found, raw XML size=%d",
+                len(ET.tostring(root, encoding="unicode")),
+            )
         return result
 
     @staticmethod

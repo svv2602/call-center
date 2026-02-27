@@ -1330,10 +1330,22 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 )
                 if result.get("booking_id"):
                     fittings_booked_total.inc()
-                return result
+                    return result
+                # SOAP returned error (Result=false or parse failure) — log and
+                # fall through to Store API instead of returning error directly.
+                logger.warning(
+                    "SOAP book_fitting returned error for call %s: "
+                    "status=%s, message=%s, station=%s, date=%s, time=%s",
+                    session.channel_uuid,
+                    result.get("status"),
+                    result.get("message", "(no message)"),
+                    kwargs.get("station_id"),
+                    kwargs.get("date"),
+                    kwargs.get("time"),
+                )
             except Exception:
                 logger.warning(
-                    "SOAP book_fitting failed for call %s, falling back to Store API",
+                    "SOAP book_fitting exception for call %s, falling back to Store API",
                     session.channel_uuid,
                     exc_info=True,
                 )
