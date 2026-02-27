@@ -26,9 +26,17 @@ RUN python -m venv /build/venv && \
 # ---- Runtime stage ----
 FROM python:3.12-slim
 
-# libpq is needed at runtime by asyncpg
+# libpq for asyncpg, libgobject/pango/cairo/gdk-pixbuf for WeasyPrint PDF generation
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libpq5 && \
+    apt-get install -y --no-install-recommends \
+        libpq5 \
+        libgobject-2.0-0 \
+        libpango-1.0-0 \
+        libpangocairo-1.0-0 \
+        libpangoft2-1.0-0 \
+        libcairo2 \
+        libgdk-pixbuf-2.0-0 \
+        libffi8 && \
     rm -rf /var/lib/apt/lists/*
 
 # Non-root user
