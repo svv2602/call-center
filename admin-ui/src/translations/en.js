@@ -25,6 +25,8 @@ export default {
     'common.actions': 'Actions',
     'common.seconds': 'sec',
     'common.skipToContent': 'Skip to content',
+    'common.lastUpdated': 'Updated:',
+    'common.unsavedChanges': 'You have unsaved changes. Leave page?',
 
     // Accessibility
     'nav.ariaMainNav': 'Main navigation',

@@ -89,17 +89,23 @@ export async function fetchWithAuth(path) {
  */
 export async function withButtonLock(btnId, fn, loadingText) {
     const btn = document.getElementById(btnId);
-    const origText = btn?.textContent;
+    const origHTML = btn?.innerHTML;
     if (btn) {
         btn.disabled = true;
-        if (loadingText) btn.textContent = loadingText;
+        btn.setAttribute('aria-busy', 'true');
+        btn.classList.add('opacity-50', 'cursor-not-allowed');
+        if (loadingText) {
+            btn.innerHTML = `<span class="inline-block w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin mr-1.5 align-middle"></span>${loadingText}`;
+        }
     }
     try {
         return await fn();
     } finally {
         if (btn) {
             btn.disabled = false;
-            if (loadingText) btn.textContent = origText;
+            btn.removeAttribute('aria-busy');
+            btn.classList.remove('opacity-50', 'cursor-not-allowed');
+            if (loadingText) btn.innerHTML = origHTML;
         }
     }
 }

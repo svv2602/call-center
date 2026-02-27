@@ -1,6 +1,6 @@
 import { api, fetchWithAuth } from '../api.js';
 import { showToast } from '../notifications.js';
-import { qualityBadge, formatDate, escapeHtml, downloadBlob } from '../utils.js';
+import { qualityBadge, formatDate, escapeHtml, downloadBlob, updateTimestamp } from '../utils.js';
 import { registerPageLoader } from '../router.js';
 import { t } from '../i18n.js';
 import { makeSortable } from '../sorting.js';
@@ -85,6 +85,7 @@ async function loadCalls(offset = 0) {
         ).join('');
 
         makeSortable('callsTable');
+        updateTimestamp('callsLastUpdated');
     } catch (e) {
         loading.style.display = 'none';
         tbody.innerHTML = `<tr><td colspan="7" class="${tw.emptyState}">${t('calls.failedToLoad', {error: escapeHtml(e.message)})}

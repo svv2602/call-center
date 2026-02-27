@@ -1,6 +1,6 @@
 import { api, fetchWithAuth } from '../api.js';
 import { showToast } from '../notifications.js';
-import { escapeHtml, downloadBlob } from '../utils.js';
+import { escapeHtml, downloadBlob, updateTimestamp } from '../utils.js';
 import { registerPageLoader, setRefreshTimer } from '../router.js';
 import { hasPermission } from '../auth.js';
 import { t } from '../i18n.js';
@@ -66,6 +66,7 @@ async function loadDashboard() {
             <div class="${tw.card} text-center"><div class="${tw.statValue}">${(latest.avg_quality_score || 0).toFixed(2)}</div><div class="${tw.statLabel}">${t('dashboard.avgQuality')}</div></div>
             <div class="${tw.card} text-center"><div class="${tw.statValue}">$${(latest.total_cost_usd || 0).toFixed(2)}</div><div class="${tw.statLabel}">${t('dashboard.costToday')}</div></div>
         `;
+        updateTimestamp('dashboardLastUpdated');
         // Reset backoff on success
         if (_currentInterval !== _BASE_INTERVAL) {
             _currentInterval = _BASE_INTERVAL;

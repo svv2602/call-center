@@ -1,3 +1,5 @@
+import { confirmIfDirty } from './form-guard.js';
+
 let dashboardRefreshTimer = null;
 let pageLoaders = {};
 let _currentPage = null;
@@ -24,6 +26,9 @@ export function getPageFromHash() {
 }
 
 export function showPage(page) {
+    // Guard: warn if there are unsaved form changes
+    if (_currentPage && _currentPage !== page && !confirmIfDirty()) return;
+
     document.querySelectorAll('[id^="page-"]').forEach(el => el.style.display = 'none');
     const pageEl = document.getElementById(`page-${page}`);
     if (pageEl) pageEl.style.display = 'block';
@@ -44,6 +49,11 @@ export function showPage(page) {
     }
 
     _currentPage = page;
+
+    // Scroll to top on page change
+    const mainContent = document.getElementById('mainContent');
+    if (mainContent) mainContent.scrollTop = 0;
+    window.scrollTo(0, 0);
 
     // Sync URL hash
     if (getPageFromHash() !== page) {

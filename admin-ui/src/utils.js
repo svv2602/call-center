@@ -1,5 +1,5 @@
 import * as tw from './tw.js';
-import { getLocale } from './i18n.js';
+import { getLocale, t } from './i18n.js';
 import { trapFocus } from './focus-trap.js';
 
 // Active focus trap cleanups keyed by modal id
@@ -59,6 +59,36 @@ export function closeTopmostModal() {
     const topmost = openModals[openModals.length - 1];
     closeModal(topmost.id);
     return true;
+}
+
+/**
+ * Update a "last updated" timestamp element.
+ * @param {string} elementId - DOM element id
+ */
+export function updateTimestamp(elementId) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    const now = new Date();
+    const time = now.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    el.textContent = `${t('common.lastUpdated')} ${time}`;
+}
+
+/**
+ * Reset all form fields inside a modal.
+ * @param {string} modalId - Modal element id
+ */
+export function resetModalForm(modalId) {
+    const modal = document.getElementById(modalId);
+    if (!modal) return;
+    modal.querySelectorAll('input:not([type="hidden"]), textarea, select').forEach(el => {
+        if (el.type === 'checkbox' || el.type === 'radio') {
+            el.checked = false;
+        } else if (el.tagName === 'SELECT') {
+            el.selectedIndex = 0;
+        } else {
+            el.value = '';
+        }
+    });
 }
 
 export function escapeHtml(str) {

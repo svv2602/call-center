@@ -25,6 +25,8 @@ export default {
     'common.actions': 'Действия',
     'common.seconds': 'сек',
     'common.skipToContent': 'Перейти к содержимому',
+    'common.lastUpdated': 'Обновлено:',
+    'common.unsavedChanges': 'У вас есть несохранённые изменения. Покинуть страницу?',
 
     // Accessibility
     'nav.ariaMainNav': 'Главная навигация',
