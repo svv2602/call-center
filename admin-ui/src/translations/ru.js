@@ -24,6 +24,16 @@ export default {
     'common.filters': 'Фильтры',
     'common.actions': 'Действия',
     'common.seconds': 'сек',
+    'common.skipToContent': 'Перейти к содержимому',
+
+    // Accessibility
+    'nav.ariaMainNav': 'Главная навигация',
+    'nav.ariaExpandSidebar': 'Развернуть/Свернуть боковую панель',
+    'nav.ariaToggleTheme': 'Переключить тему',
+    'nav.ariaToggleLang': 'Переключить язык',
+    'nav.ariaLogout': 'Выйти из системы',
+    'nav.ariaWsStatus': 'Статус подключения',
+    'nav.ariaOpenMenu': 'Открыть меню',
 
     // Login
     'login.title': 'Call Center AI',

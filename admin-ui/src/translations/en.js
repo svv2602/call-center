@@ -24,6 +24,16 @@ export default {
     'common.filters': 'Filters',
     'common.actions': 'Actions',
     'common.seconds': 'sec',
+    'common.skipToContent': 'Skip to content',
+
+    // Accessibility
+    'nav.ariaMainNav': 'Main navigation',
+    'nav.ariaExpandSidebar': 'Expand/Collapse sidebar',
+    'nav.ariaToggleTheme': 'Toggle theme',
+    'nav.ariaToggleLang': 'Toggle language',
+    'nav.ariaLogout': 'Log out',
+    'nav.ariaWsStatus': 'Connection status',
+    'nav.ariaOpenMenu': 'Open menu',
 
     // Login
     'login.title': 'Call Center AI',

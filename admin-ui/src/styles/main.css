@@ -3,6 +3,44 @@
 /* Class-based dark mode (toggle via .dark on <html>) */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/* Skip link — hidden until focused (WCAG 2.4.1) */
+.skip-link {
+  position: absolute;
+  top: -100%;
+  left: 1rem;
+  z-index: 9999;
+  padding: 0.5rem 1rem;
+  background: rgb(37 99 235);
+  color: white;
+  font-size: 0.875rem;
+  font-weight: 500;
+  border-radius: 0 0 0.5rem 0.5rem;
+  text-decoration: none;
+  transition: top 0.15s ease;
+}
+.skip-link:focus {
+  top: 0;
+  outline: 2px solid rgb(37 99 235);
+  outline-offset: 2px;
+}
+
+/* Global focus-visible styles (keyboard navigation only, not mouse clicks) */
+:focus-visible {
+  outline: 2px solid rgb(59 130 246);
+  outline-offset: 2px;
+}
+:focus:not(:focus-visible) {
+  outline: none;
+}
+/* Ensure focus-visible works in dark mode */
+.dark :focus-visible {
+  outline-color: rgb(96 165 250);
+}
+/* Remove default outline on main content (programmatic focus via skip-link) */
+#mainContent:focus {
+  outline: none;
+}
+
 /* Details/accordion chevron rotation */
 details summary { list-style: none; }
 details summary::-webkit-details-marker { display: none; }
@@ -55,7 +93,7 @@ details[open] .details-chevron { transform: rotate(90deg); }
   justify-content: center;
   width: 100%;
   height: 44px;
-  color: rgb(163 163 163); /* neutral-400 */
+  color: rgb(212 212 212); /* neutral-300 — improved contrast (WCAG AA 4.2:1 on zinc-950) */
   transition: color 0.15s, background-color 0.15s;
   text-decoration: none;
   border: none;
@@ -117,7 +155,7 @@ details[open] .details-chevron { transform: rotate(90deg); }
   gap: 8px;
   padding: 6px 14px;
   font-size: 0.8125rem;
-  color: rgb(163 163 163);
+  color: rgb(212 212 212); /* neutral-300 — improved contrast */
   text-decoration: none;
   transition: color 0.15s, background-color 0.15s;
 }
