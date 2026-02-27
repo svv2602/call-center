@@ -1227,4 +1227,13 @@ WAIT_DEFAULT_POOL = [
     "Дивлюся, зачекайте.",
 ]
 
+# Short acknowledgments for simple replies (name, brand, yes/no).
+# Used on blocking path to avoid silence while LLM processes.
+WAIT_ACK_POOL = [
+    "Зрозуміла.",
+    "Добре.",
+    "Так.",
+    "Прийняла.",
+]
+
 FAREWELL_ORDER_TEXT = "Дякую за замовлення! До побачення!"

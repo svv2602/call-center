@@ -310,12 +310,11 @@ class TestBlockingPathUnchanged:
 
         await pipeline._transcript_processor_loop()
 
-        # No wait filler for simple reply — first spoken text is the agent response
-        from src.agent.prompts import WAIT_DEFAULT_POOL, WAIT_SEARCH_POOL
+        # Simple reply gets short ack, then agent response
+        from src.agent.prompts import WAIT_ACK_POOL
 
-        all_wait = set(WAIT_DEFAULT_POOL + WAIT_SEARCH_POOL)
-        assert speak_calls[0] == "Дякую, Валерію!"
-        assert not any(call in all_wait for call in speak_calls)
+        assert speak_calls[0] in WAIT_ACK_POOL
+        assert "Дякую, Валерію!" in speak_calls
         pipeline._agent.process_message.assert_called_once()
 
 

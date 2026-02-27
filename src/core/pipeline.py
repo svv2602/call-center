@@ -21,6 +21,7 @@ from src.agent.prompts import (
     GREETING_TEXT,
     SILENCE_PROMPT_TEXT,
     TRANSFER_TEXT,
+    WAIT_ACK_POOL,
     WAIT_AVAILABILITY_POOL,
     WAIT_DEFAULT_POOL,
     WAIT_FITTING_POOL,
@@ -142,14 +143,14 @@ def _is_simple_reply(text: str) -> bool:
     return not any(kw in lowered for kw in _ACTION_KEYWORDS)
 
 
-def _select_wait_message(user_text: str, default: str) -> str | None:
+def _select_wait_message(user_text: str, default: str) -> str:
     """Pick a contextual wait message, rotating through the pool.
 
-    Returns None for simple replies (name, brand, yes/no) that don't
-    warrant a wait message.
+    For simple replies (name, brand, yes/no) uses short acknowledgments
+    ("Зрозуміла", "Добре") instead of full wait phrases.
     """
     if _is_simple_reply(user_text):
-        return None
+        return _rotate(WAIT_ACK_POOL)
     lowered = user_text.lower()
     for keywords, pool in _WAIT_CONTEXT_PATTERNS:
         if any(kw in lowered for kw in keywords):
@@ -520,9 +521,8 @@ class CallPipeline:
                 self._session.transition_to(CallState.PROCESSING)
                 wait_default = self._templates.get("wait", WAIT_TEXT)
                 wait_msg = _select_wait_message(transcript.text, wait_default)
-                if wait_msg:
-                    await self._log_turn("bot", wait_msg)
-                    await self._speak(wait_msg)  # contextual filler while processing
+                await self._log_turn("bot", wait_msg)
+                await self._speak(wait_msg)  # contextual filler while processing
 
                 start = time.monotonic()
                 try:

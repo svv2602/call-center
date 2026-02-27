@@ -374,3 +374,29 @@ class TestGetCallerHistory:
         assert "c.started_at >= :since" in query
         assert "LIMIT :max_calls" in query
         assert "LATERAL" in query
+
+    @pytest.mark.asyncio
+    async def test_get_caller_history_with_tenant_id(self):
+        """When tenant_id is provided, SQL filters by tenant."""
+        logger = CallLogger.__new__(CallLogger)
+        logger._fetch_all = AsyncMock(return_value=[])
+
+        await logger.get_caller_history("+380501234567", tenant_id="abc-123")
+
+        query = logger._fetch_all.call_args[0][0]
+        params = logger._fetch_all.call_args[0][1]
+        assert "c.tenant_id = :tenant_id" in query
+        assert params["tenant_id"] == "abc-123"
+
+    @pytest.mark.asyncio
+    async def test_get_caller_history_without_tenant_id(self):
+        """Without tenant_id, SQL does not filter by tenant."""
+        logger = CallLogger.__new__(CallLogger)
+        logger._fetch_all = AsyncMock(return_value=[])
+
+        await logger.get_caller_history("+380501234567")
+
+        query = logger._fetch_all.call_args[0][0]
+        params = logger._fetch_all.call_args[0][1]
+        assert "tenant_id" not in query
+        assert "tenant_id" not in params

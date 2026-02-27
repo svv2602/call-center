@@ -176,12 +176,14 @@ class TestContextualWaitPhrase:
         # Knowledge keywords removed from patterns (reduced to avoid false matches)
         assert _select_wait_message("Порівняти бренди", self.DEFAULT) in WAIT_DEFAULT_POOL
 
-    def test_simple_reply_returns_none(self) -> None:
-        # Short replies without action keywords → no wait message
-        assert _select_wait_message("Привіт", self.DEFAULT) is None
-        assert _select_wait_message("Валерій", self.DEFAULT) is None
-        assert _select_wait_message("Toyota Camry", self.DEFAULT) is None
-        assert _select_wait_message("так", self.DEFAULT) is None
+    def test_simple_reply_returns_ack(self) -> None:
+        # Short replies without action keywords → short acknowledgment
+        from src.agent.prompts import WAIT_ACK_POOL
+
+        assert _select_wait_message("Привіт", self.DEFAULT) in WAIT_ACK_POOL
+        assert _select_wait_message("Валерій", self.DEFAULT) in WAIT_ACK_POOL
+        assert _select_wait_message("Toyota Camry", self.DEFAULT) in WAIT_ACK_POOL
+        assert _select_wait_message("так", self.DEFAULT) in WAIT_ACK_POOL
 
     def test_case_insensitive(self) -> None:
         assert _select_wait_message("ЗАПИС на шиномонтаж будь ласка", self.DEFAULT) in WAIT_FITTING_POOL
@@ -226,9 +228,11 @@ class TestFittingPriceWaitPhrase:
         # Price keywords removed; "шиномонтаж" matches fitting pattern
         assert _select_wait_message("Яка ціна на шиномонтаж?", self.DEFAULT) in WAIT_FITTING_POOL
 
-    def test_cost_keyword_simple_returns_none(self) -> None:
-        # "вартість послуг" is 2 words without action keywords → simple reply
-        assert _select_wait_message("вартість послуг", self.DEFAULT) is None
+    def test_cost_keyword_simple_returns_ack(self) -> None:
+        # "вартість послуг" is 2 words without action keywords → short ack
+        from src.agent.prompts import WAIT_ACK_POOL
+
+        assert _select_wait_message("вартість послуг", self.DEFAULT) in WAIT_ACK_POOL
 
     def test_how_much_routes_to_fitting_pool(self) -> None:
         # "шиномонтаж" matches fitting pattern

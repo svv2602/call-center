@@ -832,7 +832,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             if _call_logger is None or not session.caller_id:
                 return []
             try:
-                return await _call_logger.get_caller_history(session.caller_id)
+                return await _call_logger.get_caller_history(
+                    session.caller_id, tenant_id=session.tenant_id
+                )
             except Exception:
                 logger.debug("Caller history loading failed", exc_info=True)
                 return []

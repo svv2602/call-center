@@ -221,17 +221,30 @@ class CallLogger:
         self,
         caller_phone: str,
         *,
+        tenant_id: str | None = None,
         days: int = 7,
         max_calls: int = 5,
     ) -> list[dict[str, Any]]:
         """Fetch recent calls for a returning caller.
 
+        When tenant_id is provided, only returns calls for that tenant
+        (different tenants are different businesses for the customer).
+
         Returns list of dicts: call_id, started_at, scenario,
         duration_seconds, transferred_to_operator, tool_names.
         """
         since = datetime.now(UTC) - timedelta(days=days)
+        tenant_filter = ""
+        params: dict[str, Any] = {
+            "phone": caller_phone,
+            "since": since,
+            "max_calls": max_calls,
+        }
+        if tenant_id:
+            tenant_filter = "AND c.tenant_id = :tenant_id"
+            params["tenant_id"] = tenant_id
         return await self._fetch_all(
-            """
+            f"""
             SELECT
                 c.id AS call_id,
                 c.started_at,
@@ -248,10 +261,11 @@ class CallLogger:
             ) tc ON true
             WHERE c.caller_id = :phone
               AND c.started_at >= :since
+              {tenant_filter}
             ORDER BY c.started_at DESC
             LIMIT :max_calls
             """,
-            {"phone": caller_phone, "since": since, "max_calls": max_calls},
+            params,
         )
 
     # --- Internals ---
