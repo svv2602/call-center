@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date as date_type
+from datetime import timedelta
 from typing import Any
 from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
@@ -58,8 +59,8 @@ async def get_quality_report(
         conditions.append("started_at >= :date_from")
         params["date_from"] = date_type.fromisoformat(date_from)
     if date_to:
-        conditions.append("started_at < :date_to + interval '1 day'")
-        params["date_to"] = date_type.fromisoformat(date_to)
+        conditions.append("started_at < :date_to_end")
+        params["date_to_end"] = date_type.fromisoformat(date_to) + timedelta(days=1)
     if scenario:
         conditions.append("scenario = :scenario")
         params["scenario"] = scenario
@@ -148,8 +149,8 @@ async def get_calls_list(
         conditions.append("started_at >= :date_from")
         params["date_from"] = date_type.fromisoformat(date_from)
     if date_to:
-        conditions.append("started_at < :date_to + interval '1 day'")
-        params["date_to"] = date_type.fromisoformat(date_to)
+        conditions.append("started_at < :date_to_end")
+        params["date_to_end"] = date_type.fromisoformat(date_to) + timedelta(days=1)
     if search:
         conditions.append(
             "id IN (SELECT call_id FROM call_turns "
@@ -354,8 +355,8 @@ async def get_summary(
             conditions.append("started_at >= :date_from")
             params["date_from"] = date_type.fromisoformat(date_from)
         if date_to:
-            conditions.append("started_at < :date_to + interval '1 day'")
-            params["date_to"] = date_type.fromisoformat(date_to)
+            conditions.append("started_at < :date_to_end")
+            params["date_to_end"] = date_type.fromisoformat(date_to) + timedelta(days=1)
 
         where_clause = " AND ".join(conditions)
 

@@ -12,6 +12,7 @@ import csv
 import io
 import logging
 from datetime import date as date_type
+from datetime import timedelta
 from typing import Any
 
 import typer
@@ -47,8 +48,8 @@ async def _export_calls_csv(
         conditions.append("started_at >= :date_from")
         params["date_from"] = date_type.fromisoformat(date_from)
     if date_to:
-        conditions.append("started_at < :date_to + interval '1 day'")
-        params["date_to"] = date_type.fromisoformat(date_to)
+        conditions.append("started_at < :date_to_end")
+        params["date_to_end"] = date_type.fromisoformat(date_to) + timedelta(days=1)
 
     where_clause = " AND ".join(conditions)
 
