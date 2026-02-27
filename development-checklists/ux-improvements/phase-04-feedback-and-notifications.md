@@ -1,12 +1,12 @@
 # Фаза 4: Feedback & Notifications
 
 ## Статус
-- [ ] Не начата
-- [ ] В процессе
-- [ ] Завершена
+- [x] Не начата
+- [x] В процессе
+- [x] Завершена
 
-**Начата:** -
-**Завершена:** -
+**Начата:** 2026-02-27
+**Завершена:** 2026-02-27
 
 ## Цель фазы
 Улучшить систему обратной связи: расширить toast-уведомления (типы, dismiss, длительность), добавить skeleton loaders, улучшить отображение ошибок.
@@ -16,10 +16,10 @@
 ### 4.0 ОБЯЗАТЕЛЬНО: Анализ и планирование
 
 #### A. Анализ существующего кода
-- [ ] Изучить `admin-ui/src/notifications.js` — текущая реализация showToast
-- [ ] Найти все вызовы `showToast()` в проекте — какие типы используются
-- [ ] Изучить текущие loading-состояния (spinner vs skeleton)
-- [ ] Изучить текущие error-состояния — что видит пользователь при ошибке
+- [x] Изучить `admin-ui/src/notifications.js` — текущая реализация showToast
+- [x] Найти все вызовы `showToast()` в проекте — какие типы используются
+- [x] Изучить текущие loading-состояния (spinner vs skeleton)
+- [x] Изучить текущие error-состояния — что видит пользователь при ошибке
 
 **Команды для поиска:**
 ```bash
@@ -34,9 +34,9 @@ grep -rn "failedToLoad\|emptyState.*error\|catch.*e" admin-ui/src/pages/
 ```
 
 #### B. Анализ зависимостей
-- [ ] Сколько вызовов showToast в проекте? — Подсчитать
-- [ ] Используется ли где-то тип 'warning'? — Проверить
-- [ ] Какие страницы имеют таблицы (для skeleton)?
+- [x] Сколько вызовов showToast в проекте? — Подсчитать
+- [x] Используется ли где-то тип 'warning'? — Проверить
+- [x] Какие страницы имеют таблицы (для skeleton)?
 
 **Новые абстракции:** Расширение `notifications.js`
 **Новые env variables:** Нет
@@ -44,8 +44,8 @@ grep -rn "failedToLoad\|emptyState.*error\|catch.*e" admin-ui/src/pages/
 **Миграции БД:** Нет
 
 #### C. Проверка архитектуры
-- [ ] Определить API расширенного showToast
-- [ ] Определить паттерн skeleton loader (сколько строк, какие колонки)
+- [x] Определить API расширенного showToast
+- [x] Определить паттерн skeleton loader (сколько строк, какие колонки)
 
 **Референс-модуль:** `admin-ui/src/notifications.js`
 
@@ -59,13 +59,13 @@ grep -rn "failedToLoad\|emptyState.*error\|catch.*e" admin-ui/src/pages/
 
 Расширить `admin-ui/src/notifications.js`:
 
-- [ ] Добавить тип `warning` (amber/yellow фон)
-- [ ] Добавить тип `info` (blue фон)
-- [ ] Увеличить время dismiss: success=4s, info=5s, warning=6s, error=8s
-- [ ] Добавить кнопку dismiss (×) на каждый toast
-- [ ] Добавить CSS-анимацию появления (slide-in from right) и исчезновения (fade-out)
-- [ ] Ограничить max 5 toast одновременно (убирать старые при превышении)
-- [ ] Сохранить обратную совместимость: `showToast(msg)` → success, `showToast(msg, 'error')` → error
+- [x] Добавить тип `warning` (amber/yellow фон)
+- [x] Добавить тип `info` (blue фон)
+- [x] Увеличить время dismiss: success=4s, info=5s, warning=6s, error=8s
+- [x] Добавить кнопку dismiss (×) на каждый toast
+- [x] Добавить CSS-анимацию появления (slide-in from right) и исчезновения (fade-out)
+- [x] Ограничить max 5 toast одновременно (убирать старые при превышении)
+- [x] Сохранить обратную совместимость: `showToast(msg)` → success, `showToast(msg, 'error')` → error
 
 **Файлы:** `admin-ui/src/notifications.js`, `admin-ui/src/styles/main.css`
 **Заметки:** Текущая реализация — 11 строк. Расширять аккуратно, сохраняя простоту API.
@@ -76,10 +76,10 @@ grep -rn "failedToLoad\|emptyState.*error\|catch.*e" admin-ui/src/pages/
 
 Создать переиспользуемый skeleton loader:
 
-- [ ] Создать утилиту `renderSkeleton(rows, cols)` в `admin-ui/src/utils.js` или отдельном файле
-- [ ] Skeleton — серые пульсирующие прямоугольники (Tailwind `animate-pulse bg-neutral-200 dark:bg-neutral-700`)
-- [ ] Поддержка вариантов: table (строки×колонки), card (прямоугольник), text (несколько строк)
-- [ ] CSS-анимация в `main.css` (если Tailwind `animate-pulse` недостаточно)
+- [x] Создать утилиту `renderSkeleton(rows, cols)` в `admin-ui/src/utils.js` или отдельном файле
+- [x] Skeleton — серые пульсирующие прямоугольники (Tailwind `animate-pulse bg-neutral-200 dark:bg-neutral-700`)
+- [x] Поддержка вариантов: table (строки×колонки), card (прямоугольник), text (несколько строк)
+- [x] CSS-анимация в `main.css` (если Tailwind `animate-pulse` недостаточно)
 
 **Файлы:** `admin-ui/src/skeleton.js` (новый) или `admin-ui/src/utils.js`, `admin-ui/src/styles/main.css`
 **Заметки:** Skeleton лучше спиннера: показывает структуру будущего контента, снижает perceived latency.
@@ -90,12 +90,12 @@ grep -rn "failedToLoad\|emptyState.*error\|catch.*e" admin-ui/src/pages/
 
 Заменить spinner на skeleton loader:
 
-- [ ] Dashboard — skeleton для stat-карточек (4 прямоугольника)
-- [ ] Calls — skeleton для таблицы (5 строк × количество колонок)
-- [ ] Users — skeleton для таблицы
-- [ ] Knowledge — skeleton для таблицы статей
-- [ ] Audit — skeleton для таблицы
-- [ ] Vehicles — skeleton для таблицы
+- [x] Dashboard — skeleton для stat-карточек (4 прямоугольника)
+- [x] Calls — skeleton для таблицы (5 строк × количество колонок)
+- [x] Users — skeleton для таблицы
+- [x] Knowledge — skeleton для таблицы статей
+- [x] Audit — skeleton для таблицы
+- [x] Vehicles — skeleton для таблицы
 
 **Файлы:** Соответствующие страницы в `admin-ui/src/pages/`
 **Заметки:** Оставить spinner для мелких действий (загрузка одной модалки). Skeleton — только для основного контента страницы.
@@ -104,11 +104,11 @@ grep -rn "failedToLoad\|emptyState.*error\|catch.*e" admin-ui/src/pages/
 
 ### 4.4 Улучшение error-состояний
 
-- [ ] Ошибки API: показывать user-friendly сообщение, не raw backend detail
-- [ ] Создать маппинг HTTP-кодов → понятные сообщения: 403→«Нет доступа», 404→«Не найдено», 500→«Серверная ошибка»
-- [ ] Для network errors: «Нет подключения к серверу. Проверьте соединение.»
-- [ ] Добавить i18n ключи: `errors.noAccess`, `errors.notFound`, `errors.serverError`, `errors.networkError`
-- [ ] Retry кнопка — показывать loading state при повторной попытке
+- [x] Ошибки API: показывать user-friendly сообщение, не raw backend detail
+- [x] Создать маппинг HTTP-кодов → понятные сообщения: 403→«Нет доступа», 404→«Не найдено», 500→«Серверная ошибка»
+- [x] Для network errors: «Нет подключения к серверу. Проверьте соединение.»
+- [x] Добавить i18n ключи: `errors.noAccess`, `errors.notFound`, `errors.serverError`, `errors.networkError`
+- [x] Retry кнопка — показывать loading state при повторной попытке
 
 **Файлы:** `admin-ui/src/api.js`, `admin-ui/src/translations/ru.js`, `admin-ui/src/translations/en.js`
 **Заметки:** Текущий код выбрасывает `body.detail || HTTP ${res.status}` — пользователь видит технические детали. Маппинг делать в `api.js`, не в каждой странице.
@@ -117,11 +117,11 @@ grep -rn "failedToLoad\|emptyState.*error\|catch.*e" admin-ui/src/pages/
 
 ### 4.5 Подтверждение деструктивных действий
 
-- [ ] Создать утилиту `confirmAction(message)` → Promise<boolean> (показывает модалку с Да/Нет)
-- [ ] Применить к: удаление пользователя, удаление статьи, удаление оператора, удаление тенанта
-- [ ] Стиль: модалка с красной кнопкой «Удалить» и серой «Отмена»
-- [ ] Добавить i18n ключи: `common.confirmDelete`, `common.confirmAction`, `common.cancel`, `common.delete`
-- [ ] Focus на кнопку «Отмена» по умолчанию (safety-first)
+- [x] Создать утилиту `confirmAction(message)` → Promise<boolean> (показывает модалку с Да/Нет)
+- [x] Применить к: удаление пользователя, удаление статьи, удаление оператора, удаление тенанта
+- [x] Стиль: модалка с красной кнопкой «Удалить» и серой «Отмена»
+- [x] Добавить i18n ключи: `common.confirmDelete`, `common.confirmAction`, `common.cancel`, `common.delete`
+- [x] Focus на кнопку «Отмена» по умолчанию (safety-first)
 
 **Файлы:** `admin-ui/src/confirm.js` (новый), страницы с delete-действиями
 **Заметки:** Текущие удаления — без подтверждения или с browser `confirm()`. Кастомная модалка лучше интегрируется со стилем.

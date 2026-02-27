@@ -17,6 +17,22 @@ function _buildError(err) {
     return err;
 }
 
+function _friendlyHttpError(status, detail) {
+    if (detail) return detail;
+    const key = {
+        400: 'api.badRequest',
+        403: 'api.noAccess',
+        404: 'api.notFound',
+        409: 'api.conflict',
+        422: 'api.validationError',
+        429: 'api.tooManyRequests',
+        500: 'api.serverError',
+        502: 'api.serverError',
+        503: 'api.serverError',
+    }[status];
+    return key ? t(key) : `HTTP ${status}`;
+}
+
 export async function api(path, opts = {}) {
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -42,7 +58,7 @@ export async function api(path, opts = {}) {
     }
     if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail || `HTTP ${res.status}`);
+        throw new Error(_friendlyHttpError(res.status, body.detail));
     }
     return res.json();
 }
@@ -70,7 +86,7 @@ export async function apiUpload(path, formData) {
     }
     if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail || `HTTP ${res.status}`);
+        throw new Error(_friendlyHttpError(res.status, body.detail));
     }
     return res.json();
 }

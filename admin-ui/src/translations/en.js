@@ -75,7 +75,14 @@ export default {
     'api.sessionExpired': 'Session expired. Please login again.',
     'api.unauthorized': 'Unauthorized',
     'api.requestTimeout': 'Server response timed out',
-    'api.networkError': 'Unable to connect to server',
+    'api.networkError': 'Unable to connect to server. Check your connection.',
+    'api.badRequest': 'Bad request',
+    'api.noAccess': 'Access denied',
+    'api.notFound': 'Not found',
+    'api.conflict': 'Data conflict',
+    'api.validationError': 'Validation error',
+    'api.tooManyRequests': 'Too many requests. Try again later.',
+    'api.serverError': 'Server error. Try again later.',
 
     // Dashboard
     'dashboard.breadcrumb': 'Dashboard',

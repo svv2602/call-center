@@ -313,6 +313,27 @@ details[open] .details-chevron { transform: rotate(90deg); }
 /* RBAC visibility — toggled by auth.js */
 /* .admin-only — no default styles, JS controls display */
 
+/* --- Sticky table headers --- */
+thead th {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+/* Ensure background covers content when scrolling */
+.dark thead th { background-color: rgb(23 23 23); }
+:root:not(.dark) thead th { background-color: rgb(249 250 251); }
+/* Subtle shadow when scrolled */
+thead th::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -1px;
+  height: 1px;
+  background: rgb(229 231 235);
+}
+.dark thead th::after { background: rgb(64 64 64); }
+
 /* --- Loading spinner --- */
 .spinner {
   display: inline-block;
@@ -328,9 +349,12 @@ details[open] .details-chevron { transform: rotate(90deg); }
   border-top-color: rgb(96 165 250);
 }
 
-/* --- Toast slide-in --- */
+/* --- Toast slide-in / slide-out --- */
 .toast {
   animation: slideIn 0.3s ease;
+}
+.toast-exit {
+  animation: slideOut 0.3s ease forwards;
 }
 
 @keyframes spin {
@@ -340,6 +364,11 @@ details[open] .details-chevron { transform: rotate(90deg); }
 @keyframes slideIn {
   from { transform: translateX(100%); opacity: 0; }
   to { transform: translateX(0); opacity: 1; }
+}
+
+@keyframes slideOut {
+  from { transform: translateX(0); opacity: 1; }
+  to { transform: translateX(100%); opacity: 0; }
 }
 
 /* ==========================================================================

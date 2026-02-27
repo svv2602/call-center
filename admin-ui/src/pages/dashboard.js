@@ -1,6 +1,7 @@
 import { api, fetchWithAuth } from '../api.js';
 import { showToast } from '../notifications.js';
 import { escapeHtml, downloadBlob, updateTimestamp } from '../utils.js';
+import { skeletonCards } from '../skeleton.js';
 import { registerPageLoader, setRefreshTimer } from '../router.js';
 import { hasPermission } from '../auth.js';
 import { t } from '../i18n.js';
@@ -48,6 +49,12 @@ async function loadDashboard() {
         `;
         return;
     }
+    // Show skeleton on initial load
+    const statsEl = document.getElementById('dashboardStats');
+    if (statsEl && statsEl.children.length === 0) {
+        statsEl.innerHTML = skeletonCards(5);
+    }
+
     try {
         const params = _selectedTenantId ? `?tenant_id=${_selectedTenantId}` : '';
         const data = await api(`/analytics/summary${params}`);

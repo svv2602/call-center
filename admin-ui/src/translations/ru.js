@@ -75,7 +75,14 @@ export default {
     'api.sessionExpired': 'Сессия истекла. Пожалуйста, войдите снова.',
     'api.unauthorized': 'Не авторизован',
     'api.requestTimeout': 'Превышено время ожидания ответа сервера',
-    'api.networkError': 'Нет соединения с сервером',
+    'api.networkError': 'Нет соединения с сервером. Проверьте подключение.',
+    'api.badRequest': 'Некорректный запрос',
+    'api.noAccess': 'Нет доступа',
+    'api.notFound': 'Не найдено',
+    'api.conflict': 'Конфликт данных',
+    'api.validationError': 'Ошибка валидации',
+    'api.tooManyRequests': 'Слишком много запросов. Попробуйте позже.',
+    'api.serverError': 'Серверная ошибка. Попробуйте позже.',
 
     // Dashboard
     'dashboard.breadcrumb': 'Дашборд',
