@@ -94,5 +94,5 @@ class TestFilterToolsByState:
         assert len(result) == len(ALL_TOOLS)
 
     def test_all_tools_count_unchanged(self) -> None:
-        """ALL_TOOLS should have 17 tool definitions."""
-        assert len(ALL_TOOLS) == 17
+        """ALL_TOOLS should have 18 tool definitions."""
+        assert len(ALL_TOOLS) == 18

@@ -25,6 +25,35 @@ _REDIS_LOG_BUFFER_KEY = "call_log_buffer"
 _REDIS_LOG_BUFFER_TTL = 3600  # 1 hour buffer
 
 
+def _merge_vehicles(
+    existing: list[dict[str, Any]],
+    incoming: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Merge vehicle lists by plate number.
+
+    - Vehicles with matching plate: update fields from incoming.
+    - Vehicles in incoming without a plate match: append.
+    - Vehicles only in existing: preserve.
+    """
+    by_plate: dict[str, dict[str, Any]] = {}
+    for v in existing:
+        plate = v.get("plate", "")
+        if plate:
+            by_plate[plate] = dict(v)
+
+    for v in incoming:
+        plate = v.get("plate", "")
+        if plate and plate in by_plate:
+            by_plate[plate].update(v)
+        elif plate:
+            by_plate[plate] = dict(v)
+        else:
+            # No plate — append as-is (can't merge without key)
+            by_plate[f"_no_plate_{len(by_plate)}"] = dict(v)
+
+    return list(by_plate.values())
+
+
 class CallLogger:
     """Asynchronous call logger writing to PostgreSQL.
 
@@ -194,10 +223,11 @@ class CallLogger:
                 """
                 UPDATE customers
                 SET total_calls = total_calls + 1,
-                    last_call_at = :now
+                    last_call_at = :now,
+                    name = COALESCE(:name, name)
                 WHERE id = :id
                 """,
-                {"id": customer_id, "now": datetime.now(UTC)},
+                {"id": customer_id, "now": datetime.now(UTC), "name": name},
             )
             return str(customer_id)
 
@@ -267,6 +297,76 @@ class CallLogger:
             """,
             params,
         )
+
+    # --- Customer profile ---
+
+    async def get_customer_profile(self, phone: str) -> dict[str, Any] | None:
+        """Load full customer profile by phone (lifetime data, no day limit)."""
+        return await self._fetch_one(
+            """
+            SELECT name, city, vehicles, delivery_address,
+                   total_calls, first_call_at
+            FROM customers
+            WHERE phone = :phone
+            """,
+            {"phone": phone},
+        )
+
+    async def update_customer_profile(
+        self,
+        phone: str,
+        *,
+        name: str | None = None,
+        city: str | None = None,
+        vehicles: list[dict[str, Any]] | None = None,
+        delivery_address: str | None = None,
+    ) -> dict[str, Any]:
+        """Merge-patch customer profile: only update provided fields.
+
+        For vehicles, merges by plate number: updates existing, adds new,
+        preserves unlisted.
+        """
+        current = await self._fetch_one(
+            "SELECT id, vehicles FROM customers WHERE phone = :phone",
+            {"phone": phone},
+        )
+        if current is None:
+            return {"status": "not_found"}
+
+        updates: list[str] = []
+        params: dict[str, Any] = {"id": current["id"]}
+        fields_updated: list[str] = []
+
+        if name is not None:
+            updates.append("name = :name")
+            params["name"] = name
+            fields_updated.append("name")
+
+        if city is not None:
+            updates.append("city = :city")
+            params["city"] = city
+            fields_updated.append("city")
+
+        if delivery_address is not None:
+            updates.append("delivery_address = :delivery_address")
+            params["delivery_address"] = delivery_address
+            fields_updated.append("delivery_address")
+
+        if vehicles is not None:
+            existing = current.get("vehicles") or []
+            if isinstance(existing, str):
+                existing = json.loads(existing)
+            merged = _merge_vehicles(existing, vehicles)
+            updates.append("vehicles = CAST(:vehicles AS jsonb)")
+            params["vehicles"] = json.dumps(merged, ensure_ascii=False)
+            fields_updated.append("vehicles")
+
+        if not updates:
+            return {"status": "no_changes"}
+
+        sql = f"UPDATE customers SET {', '.join(updates)} WHERE id = :id"
+        await self._execute(sql, params)
+        return {"status": "updated", "fields": fields_updated}
 
     # --- Internals ---
 

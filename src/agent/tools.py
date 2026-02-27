@@ -483,8 +483,60 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
     },
 ]
 
-# All tools for the agent (MVP + Orders + Fitting/Knowledge)
-ALL_TOOLS = MVP_TOOLS + ORDER_TOOLS + FITTING_TOOLS
+# Profile tools
+PROFILE_TOOLS: list[dict] = [  # type: ignore[type-arg]
+    {
+        "name": "update_customer_profile",
+        "description": (
+            "Оновити профіль клієнта (ім'я, місто, авто, адреса доставки). "
+            "Викликай при отриманні нових даних від клієнта. "
+            "Передавай ТІЛЬКИ нові/змінені поля — решта збережеться."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "type": "string",
+                    "description": "Ім'я клієнта (як він назвався)",
+                },
+                "city": {
+                    "type": "string",
+                    "description": "Місто клієнта",
+                },
+                "vehicles": {
+                    "type": "array",
+                    "description": "Автомобілі клієнта",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "plate": {
+                                "type": "string",
+                                "description": "Державний номер (наприклад AA1234BB)",
+                            },
+                            "brand": {
+                                "type": "string",
+                                "description": "Марка та модель (наприклад Toyota Camry)",
+                            },
+                            "tire_size": {
+                                "type": "string",
+                                "description": "Розмір шин (наприклад 205/55R16)",
+                            },
+                        },
+                        "required": ["plate"],
+                    },
+                },
+                "delivery_address": {
+                    "type": "string",
+                    "description": "Адреса доставки (місто, вулиця, будинок)",
+                },
+            },
+            "required": [],
+        },
+    },
+]
+
+# All tools for the agent (MVP + Orders + Fitting/Knowledge + Profile)
+ALL_TOOLS = MVP_TOOLS + ORDER_TOOLS + FITTING_TOOLS + PROFILE_TOOLS
 
 
 def filter_tools_by_state(

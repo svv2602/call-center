@@ -34,7 +34,7 @@ All documentation is written in **Russian**. The AI agent speaks **Ukrainian** t
 
 Single source of truth for LLM agent tools is in `doc/development/00-overview.md` (section "Канонический список tools"). When referencing tools in any document, use these exact names:
 
-`get_vehicle_tire_sizes`, `search_tires`, `check_availability`, `transfer_to_operator`, `get_order_status`, `create_order_draft`, `update_order_delivery`, `confirm_order`, `get_pickup_points`, `get_fitting_stations`, `get_fitting_slots`, `book_fitting`, `cancel_fitting`, `get_fitting_price`, `get_customer_bookings`, `find_storage`, `search_knowledge_base`
+`get_vehicle_tire_sizes`, `search_tires`, `check_availability`, `transfer_to_operator`, `get_order_status`, `create_order_draft`, `update_order_delivery`, `confirm_order`, `get_pickup_points`, `get_fitting_stations`, `get_fitting_slots`, `book_fitting`, `cancel_fitting`, `get_fitting_price`, `get_customer_bookings`, `find_storage`, `search_knowledge_base`, `update_customer_profile`
 
 **Important:** The tool is `create_order_draft` (not `create_order`).
 

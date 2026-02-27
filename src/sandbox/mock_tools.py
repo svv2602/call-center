@@ -225,6 +225,7 @@ MOCK_RESPONSES: dict[str, Any] = {
         "total": 1,
     },
     "search_knowledge_base": "dynamic",  # handled by _search_knowledge_mock
+    "update_customer_profile": {"status": "updated", "fields": ["name", "city"]},
 }
 
 

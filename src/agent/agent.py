@@ -143,6 +143,7 @@ class LLMAgent:
         order_stage: str | None = None,
         caller_history: str | None = None,
         storage_context: str | None = None,
+        customer_profile: str | None = None,
         fitting_booked: bool = False,
         tools_called: set[str] | None = None,
         scenario: str | None = None,
@@ -159,6 +160,7 @@ class LLMAgent:
             order_stage: Current order stage (None, "draft", "delivery_set", "confirmed").
             caller_history: Formatted caller history section.
             storage_context: Formatted storage contracts section.
+            customer_profile: Formatted customer profile section.
             fitting_booked: Whether a fitting has already been booked this call.
             tools_called: Set of tool names invoked during this call (for module expansion).
             scenario: Current IVR scenario (for module expansion).
@@ -209,6 +211,7 @@ class LLMAgent:
             order_id=order_id,
             pattern_context=pattern_context,
             agent_name=self._agent_name,
+            customer_profile=customer_profile,
             caller_history=caller_history,
             storage_context=storage_context,
             tools_called=tools_called,

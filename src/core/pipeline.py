@@ -224,6 +224,7 @@ class CallPipeline:
         cost_breakdown: CostBreakdown | None = None,
         caller_history: str | None = None,
         storage_context: str | None = None,
+        customer_profile: str | None = None,
     ) -> None:
         self._conn = conn
         self._stt = stt
@@ -239,6 +240,7 @@ class CallPipeline:
         self._cost = cost_breakdown
         self._caller_history = caller_history
         self._storage_context = storage_context
+        self._customer_profile = customer_profile
         self._turn_counter = 0
         self._llm_history: list[dict[str, Any]] = []  # persistent LLM context for streaming path
         self._speaking = False
@@ -473,6 +475,7 @@ class CallPipeline:
                             order_stage=order_stage,
                             caller_history=self._caller_history,
                             storage_context=self._storage_context,
+                            customer_profile=self._customer_profile,
                             fitting_booked=self._session.fitting_booked,
                             tools_called=self._session.tools_called,
                             scenario=self._session.scenario,
@@ -543,6 +546,7 @@ class CallPipeline:
                             order_stage=order_stage,
                             caller_history=self._caller_history,
                             storage_context=self._storage_context,
+                            customer_profile=self._customer_profile,
                             fitting_booked=self._session.fitting_booked,
                             tools_called=self._session.tools_called,
                             scenario=self._session.scenario,

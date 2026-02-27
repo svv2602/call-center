@@ -63,12 +63,23 @@ _MOD_CORE = """\
 запис на шиномонтаж, чи є питання щодо товарів або послуг?»
 3. Після визначення теми — переходь до відповідного сценарію і послідовно задавай питання з чеклісту.
 
+**Клієнт з профілем** (є секція "Профіль клієнта"):
+1. Одразу звертайся по імені з профілю — НЕ питай ім'я.
+2. НЕ питай місто, якщо є в профілі — використовуй його.
+3. НЕ питай авто, якщо є в профілі — використовуй для підбору та шиномонтажу.
+4. Якщо клієнт назвав ІНШЕ ім'я — вибачся: «Перепрошую, {нове_ім'я}!» і виклич update_customer_profile(name=нове_ім'я).
+
 **Повторний клієнт** (є секція "Історія попередніх дзвінків"):
 1. Якщо клієнт назвав ім'я → «Раді знову вас чути, {ім'я}! Чим можу допомогти?»
 2. Якщо клієнт НЕ назвав ім'я, а одразу перейшов до теми → НЕ наполягай на імені, одразу переходь до сценарію.
 3. Враховуй попередні дзвінки: не питай повторно те, що клієнт вже робив. \
 Наприклад, якщо клієнт нещодавно записувався на шиномонтаж і дзвонить знову — \
 запитай: «Ваше звернення пов'язано з попереднім записом на шиномонтаж, чи є нове питання?»
+
+## Збереження профілю клієнта
+Коли клієнт повідомляє нові дані (ім'я, місто, авто, адресу доставки) — \
+ОДРАЗУ виклич update_customer_profile з відповідними полями. \
+⛔ НЕ повідомляй клієнту що зберігаєш дані — роби це мовчки.
 
 ### Правила ведення бесіди
 - Кожне питання має передбачати ОДНОЗНАЧНУ відповідь: місто, дата, так/ні, вибір із варіантів
@@ -824,6 +835,7 @@ _TOOL_ACTION_MAP: dict[str, str] = {
     "find_storage": "перевіряв зберігання",
     "search_knowledge_base": "шукав інформацію",
     "transfer_to_operator": "переведено на оператора",
+    "update_customer_profile": "оновив профіль",
 }
 
 
@@ -867,6 +879,65 @@ def format_caller_history(history: list[dict]) -> str | None:
     )
     lines.append(
         "Запропонуй продовжити або допоможи з новим запитом."
+    )
+
+    return "\n".join(lines)
+
+
+def format_customer_profile(profile: dict[str, Any] | None) -> str | None:
+    """Format customer profile into a Ukrainian prompt section.
+
+    Returns None if profile is empty or has no useful data.
+    """
+    if not profile:
+        return None
+
+    name = profile.get("name")
+    city = profile.get("city")
+    vehicles = profile.get("vehicles") or []
+    delivery_address = profile.get("delivery_address")
+    total_calls = profile.get("total_calls", 0)
+
+    # Parse vehicles from JSON string if needed
+    if isinstance(vehicles, str):
+        import json
+
+        try:
+            vehicles = json.loads(vehicles)
+        except (ValueError, TypeError):
+            vehicles = []
+
+    # Only include if there's at least one piece of useful info
+    if not any([name, city, vehicles, delivery_address]):
+        return None
+
+    lines: list[str] = []
+    lines.append("## Профіль клієнта (з попередніх дзвінків)")
+
+    if name:
+        lines.append(f"- Ім'я: {name}")
+    if city:
+        lines.append(f"- Місто: {city}")
+    if vehicles:
+        for v in vehicles:
+            plate = v.get("plate", "")
+            brand = v.get("brand", "")
+            tire_size = v.get("tire_size", "")
+            parts = [p for p in [brand, plate, tire_size] if p]
+            if parts:
+                lines.append(f"- Авто: {', '.join(parts)}")
+    if delivery_address:
+        lines.append(f"- Адреса доставки: {delivery_address}")
+    if total_calls and total_calls > 1:
+        lines.append(f"- Всього дзвінків: {total_calls}")
+
+    lines.append("")
+    lines.append(
+        "Використовуй ці дані — НЕ питай повторно те, що вже відомо з профілю."
+    )
+    lines.append(
+        "Якщо клієнт назвав інше ім'я — вибачся і виклич "
+        "update_customer_profile(name=нове_ім'я)."
     )
 
     return "\n".join(lines)
@@ -959,6 +1030,7 @@ def build_system_prompt_with_context(
     order_id: str | None = None,
     pattern_context: str | None = None,
     agent_name: str | None = None,
+    customer_profile: str | None = None,
     caller_history: str | None = None,
     storage_context: str | None = None,
     tools_called: set[str] | None = None,
@@ -1104,7 +1176,10 @@ def build_system_prompt_with_context(
     if promotions_context:
         parts.append(promotions_context)
 
-    # Caller history and storage contracts (stable per call)
+    # Customer profile, caller history and storage contracts (stable per call)
+    if customer_profile:
+        parts.append("\n" + customer_profile)
+
     if caller_history:
         parts.append("\n" + caller_history)
 

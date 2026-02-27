@@ -32,7 +32,12 @@ from src.agent.prompt_manager import (
     get_safety_rules_for_prompt,
     inject_pronunciation_rules,
 )
-from src.agent.prompts import assemble_prompt, format_caller_history, format_storage_context
+from src.agent.prompts import (
+    assemble_prompt,
+    format_caller_history,
+    format_customer_profile,
+    format_storage_context,
+)
 from src.agent.tool_loader import get_tools_with_overrides
 from src.api.admin_users import router as admin_users_router
 from src.api.analytics import router as analytics_router
@@ -865,6 +870,15 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 logger.debug("Storage contracts preload failed", exc_info=True)
                 return {}
 
+        async def _load_customer_profile() -> dict | None:
+            if _call_logger is None or not session.caller_id:
+                return None
+            try:
+                return await _call_logger.get_customer_profile(session.caller_id)
+            except Exception:
+                logger.debug("Customer profile loading failed", exc_info=True)
+                return None
+
         (
             few_shot_examples,
             safety_rules_extra,
@@ -872,6 +886,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             promos,
             caller_history_raw,
             storage_raw,
+            customer_profile_raw,
         ) = await asyncio.gather(
             _load_few_shot(),
             _load_safety(),
@@ -879,6 +894,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             _load_promotions(),
             _load_caller_history(),
             _load_storage_contracts(),
+            _load_customer_profile(),
         )
         few_shot_context = format_few_shot_section(
             few_shot_examples, scenario_type=session.scenario
@@ -887,6 +903,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         promotions_context = format_promotions_context(promos)
         caller_history_text = format_caller_history(caller_history_raw)
         storage_context_text = format_storage_context(storage_raw)
+        customer_profile_text = format_customer_profile(customer_profile_raw)
 
         # Modular prompt assembly: if no DB/A-B prompt, assemble from modules
         is_modular = False
@@ -1058,6 +1075,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             cost_breakdown=cost,
             caller_history=caller_history_text,
             storage_context=storage_context_text,
+            customer_profile=customer_profile_text,
         )
         await pipeline.run()
 
@@ -1735,6 +1753,20 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         return {"error": "Сервіс зберігання тимчасово недоступний", "contracts": []}
 
     router.register("find_storage", _find_storage)
+
+    async def _update_customer_profile(**kwargs: Any) -> dict[str, Any]:
+        """Update customer profile with merge-patch semantics."""
+        if _call_logger is None or not session.caller_phone:
+            return {"status": "unavailable"}
+        return await _call_logger.update_customer_profile(
+            session.caller_phone,
+            name=kwargs.get("name"),
+            city=kwargs.get("city"),
+            vehicles=kwargs.get("vehicles"),
+            delivery_address=kwargs.get("delivery_address"),
+        )
+
+    router.register("update_customer_profile", _update_customer_profile)
 
     async def _search_knowledge(**kwargs: Any) -> dict[str, Any]:
         if _knowledge_search is not None:
