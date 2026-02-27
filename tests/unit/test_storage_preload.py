@@ -234,7 +234,8 @@ class TestBuildSystemPromptWithStorageContext:
 
 class TestPromptModuleUpdates:
     def test_fitting_step4_auto_check(self):
-        assert "автоматично перевірила" in _MOD_FITTING
+        assert "АВТОМАТИЧНО перевірила" in _MOD_FITTING
+        assert "НЕ ВИКЛИКАЙ find_storage" in _MOD_FITTING
         assert "Запитай: «Чи є у вас шини на зберіганні" not in _MOD_FITTING
 
     def test_fitting_step4_transfer_on_not_found(self):
