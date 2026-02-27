@@ -246,4 +246,13 @@ export const HELP_PAGES = {
         ],
         tipsKey: 'help.customers.tips',
     },
+    'onec-data': {
+        titleKey: 'help.onecData.title',
+        overviewKey: 'help.onecData.overview',
+        sections: [
+            { titleKey: 'help.onecData.viewer.title', contentKey: 'help.onecData.viewer.content' },
+            { titleKey: 'help.onecData.refresh.title', contentKey: 'help.onecData.refresh.content' },
+        ],
+        tipsKey: 'help.onecData.tips',
+    },
 };

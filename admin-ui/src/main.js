@@ -11,6 +11,7 @@ import { initDropdownKeyboard } from './dropdown-keyboard.js';
 import { initTheme, toggleTheme, refreshThemeLabel } from './theme.js';
 import { initLang, toggleLang, translateStaticDOM } from './i18n.js';
 import { initHelp, openHelp, closeHelp } from './help.js';
+import { initTooltips } from './tooltip.js';
 
 // Page modules — each registers its page loader via init()
 import { init as initDashboard } from './pages/dashboard.js';
@@ -41,6 +42,7 @@ translateStaticDOM();
 initRouter();
 initHelp();
 initDropdownKeyboard();
+initTooltips();
 
 // Initialize all page loaders
 initDashboard();

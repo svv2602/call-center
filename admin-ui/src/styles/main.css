@@ -556,3 +556,21 @@ thead th::after {
 .dark .help-drawer-content strong { color: rgb(229 231 235); }
 .help-drawer-content .help-affects { background: rgb(254 252 232); border: 1px solid rgb(253 224 71); border-radius: 0.5rem; padding: 0.75rem; margin-top: 0.5rem; }
 .dark .help-drawer-content .help-affects { background: rgb(66 32 6); border-color: rgb(133 77 14); }
+
+/* === Tooltip === */
+.tooltip-trigger {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 1rem; height: 1rem; font-size: 0.65rem; font-weight: 700;
+  border-radius: 50%; border: 1px solid rgb(163 163 163);
+  color: rgb(115 115 115); cursor: help; margin-left: 0.25rem;
+  vertical-align: middle; line-height: 1;
+}
+.dark .tooltip-trigger { border-color: rgb(115 115 115); color: rgb(163 163 163); }
+.tooltip-popover {
+  position: absolute; z-index: 80; max-width: 240px; padding: 0.5rem 0.75rem;
+  font-size: 0.8rem; line-height: 1.4; border-radius: 0.5rem;
+  background: rgb(23 23 23); color: white; box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+  pointer-events: none; animation: fadeIn 0.15s ease;
+}
+.dark .tooltip-popover { background: rgb(38 38 38); }
+@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }

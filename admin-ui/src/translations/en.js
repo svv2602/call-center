@@ -1348,6 +1348,7 @@ export default {
     // Help
     'help.close': 'Close help',
     'help.tipsTitle': 'Useful tips',
+    'help.searchPlaceholder': 'Search help...',
 
     // ── Help — Dashboard ───────────────────────────────────────
     'help.dashboard.title': 'Help: Dashboard',
@@ -1842,4 +1843,13 @@ export default {
     'help.customers.detail.title': 'Customer Details',
     'help.customers.detail.content': 'Click a row in the table to open a modal with the full profile: contacts, delivery address, vehicle list (plate, brand, tire size), and the last 20 calls.',
     'help.customers.tips': '<ul><li>Profiles are created <strong>automatically</strong> — the AI agent collects information during calls</li><li>This page is <strong>read-only</strong> — editing is not available</li><li>Use <strong>phone number</strong> search for quick customer lookup</li></ul>',
+
+    // ── Help — 1C Data ──────────────────────────────────────────
+    'help.onecData.title': '1C Data',
+    'help.onecData.overview': 'View data fetched from the 1C system: pickup points, fitting stations, orders.',
+    'help.onecData.viewer.title': 'Data viewer',
+    'help.onecData.viewer.content': 'The table shows data cached from the 1C API. Data refreshes automatically on schedule. Use tabs to switch between data types.',
+    'help.onecData.refresh.title': 'Refreshing data',
+    'help.onecData.refresh.content': 'Click the "Refresh" button to force-update data from 1C. The cache will be refreshed for the selected trading network.',
+    'help.onecData.tips': '<ul><li>Data is cached in Redis with a <strong>1 hour</strong> TTL</li><li>Pickup points are grouped by <strong>trading network</strong></li><li>On 1C errors, the system falls back to the Store API</li></ul>',
 };
