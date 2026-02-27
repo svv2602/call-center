@@ -47,6 +47,7 @@ class TurnResult:
     tool_calls_made: int
     stop_reason: str
     total_usage: Usage
+    provider_key: str = ""
     interrupted: bool = False
     disconnected: bool = False
 
@@ -171,6 +172,7 @@ class StreamingAgentLoop:
         total_output_tokens = 0
         tool_calls_made = 0
         stop_reason = "end_turn"
+        provider_key = ""
         interrupted = False
         disconnected = False
 
@@ -215,6 +217,7 @@ class StreamingAgentLoop:
             total_input_tokens += result.usage.input_tokens
             total_output_tokens += result.usage.output_tokens
             stop_reason = result.stop_reason
+            provider_key = result.provider_key or provider_key
 
             # Build assistant content blocks for history
             assistant_content: list[dict[str, Any]] = []
@@ -318,6 +321,7 @@ class StreamingAgentLoop:
             tool_calls_made=tool_calls_made,
             stop_reason=stop_reason,
             total_usage=Usage(total_input_tokens, total_output_tokens),
+            provider_key=provider_key,
             interrupted=interrupted,
             disconnected=disconnected,
         )

@@ -33,16 +33,15 @@ class TestLLMRouterConfig:
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=None)
 
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}):
             await router.initialize(redis=mock_redis)
 
         assert router.config is not None
         assert "providers" in router.config
         assert "tasks" in router.config
-        assert router.config["tasks"]["agent"]["primary"] == "anthropic-haiku"
-        # Anthropic providers should be initialized (key is set)
-        assert "anthropic-haiku" in router.providers
-        assert "anthropic-haiku" in router.providers
+        assert router.config["tasks"]["agent"]["primary"] == "gemini-2.5-flash"
+        # Gemini providers should be initialized (key is set)
+        assert "gemini-2.5-flash" in router.providers
         await router.close()
 
     @pytest.mark.asyncio()
@@ -97,10 +96,10 @@ class TestLLMRouterConfig:
     @pytest.mark.asyncio()
     async def test_no_redis_uses_defaults(self) -> None:
         router = LLMRouter()
-        with patch.dict("os.environ", {"ANTHROPIC_API_KEY": "test-key"}):
+        with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}):
             await router.initialize(redis=None)
 
-        assert router.config["tasks"]["agent"]["primary"] == "anthropic-haiku"
+        assert router.config["tasks"]["agent"]["primary"] == "gemini-2.5-flash"
         await router.close()
 
 

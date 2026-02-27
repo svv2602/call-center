@@ -307,13 +307,20 @@ class TestListModels:
     async def test_returns_only_enabled_providers(
         self, sandbox_app: Any, mock_redis: AsyncMock
     ) -> None:
-        # Only gemini-flash is enabled in this config
+        # Only gemini-2.5-flash is enabled in this config; disable others
         redis_config = {
             "providers": {
-                "gemini-flash": {"enabled": True},
+                "gemini-2.5-flash": {"enabled": True},
+                "gemini-3-flash": {"enabled": False},
                 "anthropic-sonnet": {"enabled": False},
+                "anthropic-haiku": {"enabled": False},
+                "openai-gpt41-mini": {"enabled": False},
+                "openai-gpt41-nano": {"enabled": False},
+                "deepseek-chat": {"enabled": False},
+                "openai-gpt5-mini": {"enabled": False},
+                "openai-gpt5-nano": {"enabled": False},
             },
-            "sandbox": {"default_model": "gemini-flash"},
+            "sandbox": {"default_model": "gemini-2.5-flash"},
         }
         mock_redis.get = AsyncMock(return_value=json.dumps(redis_config))
 
@@ -329,9 +336,9 @@ class TestListModels:
         assert response.status_code == 200
         data = response.json()
         model_ids = [m["id"] for m in data["models"]]
-        assert "gemini-flash" in model_ids
+        assert "gemini-2.5-flash" in model_ids
         assert "anthropic-sonnet" not in model_ids
-        assert data["default_model"] == "gemini-flash"
+        assert data["default_model"] == "gemini-2.5-flash"
 
     @pytest.mark.asyncio()
     async def test_returns_empty_when_all_disabled(
@@ -342,6 +349,13 @@ class TestListModels:
             "providers": {
                 "anthropic-sonnet": {"enabled": False},
                 "anthropic-haiku": {"enabled": False},
+                "openai-gpt41-mini": {"enabled": False},
+                "openai-gpt41-nano": {"enabled": False},
+                "deepseek-chat": {"enabled": False},
+                "gemini-2.5-flash": {"enabled": False},
+                "gemini-3-flash": {"enabled": False},
+                "openai-gpt5-mini": {"enabled": False},
+                "openai-gpt5-nano": {"enabled": False},
             },
         }
         mock_redis.get = AsyncMock(return_value=json.dumps(redis_config))

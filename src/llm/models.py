@@ -91,6 +91,7 @@ class StreamDone:
 
     stop_reason: str  # "end_turn" | "tool_use" | "max_tokens"
     usage: Usage
+    provider_key: str = ""
 
 
 # Union type for type hints
@@ -104,61 +105,68 @@ DEFAULT_ROUTING_CONFIG: dict[str, Any] = {
             "type": "anthropic",
             "model": "claude-sonnet-4-5-20250929",
             "api_key_env": "ANTHROPIC_API_KEY",
-            "enabled": True,
+            "enabled": False,
         },
         "anthropic-haiku": {
             "type": "anthropic",
             "model": "claude-haiku-4-5-20251001",
             "api_key_env": "ANTHROPIC_API_KEY",
-            "enabled": True,
+            "enabled": False,
         },
         "openai-gpt41-mini": {
             "type": "openai",
             "model": "gpt-4.1-mini",
             "api_key_env": "OPENAI_API_KEY",
             "base_url": "https://api.openai.com/v1",
-            "enabled": False,
+            "enabled": True,
         },
         "openai-gpt41-nano": {
             "type": "openai",
             "model": "gpt-4.1-nano",
             "api_key_env": "OPENAI_API_KEY",
             "base_url": "https://api.openai.com/v1",
-            "enabled": False,
+            "enabled": True,
         },
         "deepseek-chat": {
             "type": "deepseek",
             "model": "deepseek-chat",
             "api_key_env": "DEEPSEEK_API_KEY",
             "base_url": "https://api.deepseek.com/v1",
-            "enabled": False,
+            "enabled": True,
         },
-        "gemini-flash": {
+        "gemini-2.5-flash": {
             "type": "gemini",
             "model": "gemini-2.5-flash",
             "api_key_env": "GEMINI_API_KEY",
             "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
-            "enabled": False,
+            "enabled": True,
+        },
+        "gemini-3-flash": {
+            "type": "gemini",
+            "model": "gemini-3-flash-preview",
+            "api_key_env": "GEMINI_API_KEY",
+            "base_url": "https://generativelanguage.googleapis.com/v1beta/openai",
+            "enabled": True,
         },
         "openai-gpt5-mini": {
             "type": "openai",
             "model": "gpt-5-mini",
             "api_key_env": "OPENAI_API_KEY",
             "base_url": "https://api.openai.com/v1",
-            "enabled": False,
+            "enabled": True,
         },
         "openai-gpt5-nano": {
             "type": "openai",
             "model": "gpt-5-nano",
             "api_key_env": "OPENAI_API_KEY",
             "base_url": "https://api.openai.com/v1",
-            "enabled": False,
+            "enabled": True,
         },
     },
     "tasks": {
-        "agent": {"primary": "anthropic-haiku", "fallbacks": ["anthropic-sonnet"]},
-        "article_processor": {"primary": "anthropic-haiku", "fallbacks": []},
-        "quality_scoring": {"primary": "anthropic-haiku", "fallbacks": []},
-        "prompt_optimizer": {"primary": "anthropic-haiku", "fallbacks": []},
+        "agent": {"primary": "gemini-2.5-flash", "fallbacks": ["openai-gpt41-mini"]},
+        "article_processor": {"primary": "gemini-2.5-flash", "fallbacks": ["openai-gpt41-nano"]},
+        "quality_scoring": {"primary": "gemini-2.5-flash", "fallbacks": ["openai-gpt41-mini"]},
+        "prompt_optimizer": {"primary": "openai-gpt41-mini", "fallbacks": ["openai-gpt41-nano"]},
     },
 }

@@ -73,14 +73,15 @@ def upgrade() -> None:
         INSERT INTO llm_model_pricing
             (provider_key, model_name, display_name, input_price_per_1m, output_price_per_1m, is_system)
         VALUES
-            ('anthropic-sonnet', 'claude-sonnet-4-5-20250929', 'Claude Sonnet 4.5', 3.0000, 15.0000, true),
-            ('anthropic-haiku',  'claude-haiku-4-5-20251001',  'Claude Haiku 4.5',  1.0000,  5.0000, true),
-            ('openai-gpt41-mini','gpt-4.1-mini',               'GPT-4.1 Mini',      0.4000,  1.6000, true),
-            ('openai-gpt41-nano','gpt-4.1-nano',               'GPT-4.1 Nano',      0.1000,  0.4000, true),
-            ('deepseek-chat',    'deepseek-chat',               'DeepSeek Chat',     0.2700,  1.1000, true),
-            ('gemini-flash',     'gemini-2.5-flash',            'Gemini 2.5 Flash',  0.3000,  2.5000, true),
-            ('openai-gpt5-mini', 'gpt-5-mini',                  'GPT-5 Mini',        0.2500,  2.0000, true),
-            ('openai-gpt5-nano', 'gpt-5-nano',                  'GPT-5 Nano',        0.0500,  0.4000, true)
+            ('anthropic-sonnet',  'claude-sonnet-4-5-20250929', 'Claude Sonnet 4.5',        3.0000, 15.0000, true),
+            ('anthropic-haiku',   'claude-haiku-4-5-20251001',  'Claude Haiku 4.5',         1.0000,  5.0000, true),
+            ('openai-gpt41-mini', 'gpt-4.1-mini',               'GPT-4.1 Mini',             0.4000,  1.6000, true),
+            ('openai-gpt41-nano', 'gpt-4.1-nano',               'GPT-4.1 Nano',             0.1000,  0.4000, true),
+            ('deepseek-chat',     'deepseek-chat',               'DeepSeek Chat',            0.2700,  1.1000, true),
+            ('gemini-2.5-flash',  'gemini-2.5-flash',            'Gemini 2.5 Flash',         0.3000,  2.5000, true),
+            ('gemini-3-flash',    'gemini-3-flash-preview',      'Gemini 3 Flash (preview)', 0.3000,  2.5000, true),
+            ('openai-gpt5-mini',  'gpt-5-mini',                  'GPT-5 Mini',               0.2500,  2.0000, true),
+            ('openai-gpt5-nano',  'gpt-5-nano',                  'GPT-5 Nano',               0.0500,  0.4000, true)
     """)
 
 

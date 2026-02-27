@@ -126,6 +126,7 @@ class LLMAgent:
         # Accumulated usage from last process_message call (all LLM rounds)
         self.last_input_tokens: int = 0
         self.last_output_tokens: int = 0
+        self.last_provider_key: str = ""
         # Last error message (if LLM call failed) — consumed by sandbox
         self.last_error: str | None = None
 
@@ -228,6 +229,7 @@ class LLMAgent:
         tool_call_count = 0
         self.last_input_tokens = 0
         self.last_output_tokens = 0
+        self.last_provider_key = ""
         self.last_error = None
 
         while tool_call_count <= MAX_TOOL_CALLS_PER_TURN:
@@ -255,6 +257,7 @@ class LLMAgent:
                     latency_ms = int((time.monotonic() - start) * 1000)
                     self.last_input_tokens += llm_response.usage.input_tokens
                     self.last_output_tokens += llm_response.usage.output_tokens
+                    self.last_provider_key = llm_response.provider
                     logger.info(
                         "LLM response: provider=%s, stop=%s, latency=%dms, tokens_in=%d, tokens_out=%d",
                         llm_response.provider,

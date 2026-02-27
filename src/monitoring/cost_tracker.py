@@ -15,19 +15,31 @@ from src.monitoring.metrics import call_cost_usd
 logger = logging.getLogger(__name__)
 
 
-# Pricing per unit (approximate, as of 2026)
+# Pricing per 1M tokens (USD), keyed by provider_key.
+# Must stay in sync with llm_model_pricing DB table.
+LLM_PRICING_PER_1M: dict[str, tuple[float, float]] = {
+    # (input_price_per_1m, output_price_per_1m)
+    "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-3-flash": (0.30, 2.50),
+    "gemini-flash": (0.30, 2.50),  # legacy key
+    "openai-gpt41-mini": (0.40, 1.60),
+    "openai-gpt41-nano": (0.10, 0.40),
+    "openai-gpt5-mini": (0.25, 2.00),
+    "openai-gpt5-nano": (0.05, 0.40),
+    "deepseek-chat": (0.27, 1.10),
+    "anthropic-haiku": (1.00, 5.00),
+    "anthropic-sonnet": (3.00, 15.00),
+}
+
+# Fallback for unknown providers: Gemini Flash pricing (cheapest common model)
+_FALLBACK_PRICING = (0.30, 2.50)
+
+# Non-LLM pricing
 PRICING = {
     # Google Cloud STT: $0.006 per 15-second interval
     "google_stt_per_15s": 0.006,
     # Faster-Whisper: ~$150/month for GPU, amortized per call
-    # Assuming 500 calls/day, ~30 days = 15000 calls/month
-    "whisper_per_call": 0.01,  # $150 / 15000
-    # Claude Sonnet: $3 / 1M input tokens, $15 / 1M output tokens
-    "claude_sonnet_input_per_1k": 0.003,
-    "claude_sonnet_output_per_1k": 0.015,
-    # Claude Haiku: $0.25 / 1M input tokens, $1.25 / 1M output tokens
-    "claude_haiku_input_per_1k": 0.00025,
-    "claude_haiku_output_per_1k": 0.00125,
+    "whisper_per_call": 0.01,
     # Google TTS: $4 per 1M characters (Standard)
     "google_tts_per_1k_chars": 0.004,
 }
@@ -41,7 +53,7 @@ class CostBreakdown:
     llm_cost: float = 0.0
     tts_cost: float = 0.0
     stt_provider: str = "google"
-    llm_model: str = "sonnet"
+    llm_model: str = ""
     _llm_input_tokens: int = 0
     _llm_output_tokens: int = 0
     _stt_seconds: float = 0.0
@@ -68,23 +80,26 @@ class CostBreakdown:
         self,
         input_tokens: int,
         output_tokens: int,
-        model: str = "sonnet",
+        provider_key: str = "",
     ) -> None:
-        """Record LLM token usage."""
-        self.llm_model = model
+        """Record LLM token usage.
+
+        Args:
+            input_tokens: Number of input tokens consumed.
+            output_tokens: Number of output tokens generated.
+            provider_key: LLM router provider key (e.g. "gemini-2.5-flash").
+                If empty, falls back to Gemini Flash pricing.
+        """
+        if provider_key:
+            self.llm_model = provider_key
         self._llm_input_tokens += input_tokens
         self._llm_output_tokens += output_tokens
 
-        if "haiku" in model:
-            self.llm_cost += (
-                input_tokens / 1000 * PRICING["claude_haiku_input_per_1k"]
-                + output_tokens / 1000 * PRICING["claude_haiku_output_per_1k"]
-            )
-        else:
-            self.llm_cost += (
-                input_tokens / 1000 * PRICING["claude_sonnet_input_per_1k"]
-                + output_tokens / 1000 * PRICING["claude_sonnet_output_per_1k"]
-            )
+        inp_per_1m, out_per_1m = LLM_PRICING_PER_1M.get(provider_key, _FALLBACK_PRICING)
+        self.llm_cost += (
+            input_tokens / 1_000_000 * inp_per_1m
+            + output_tokens / 1_000_000 * out_per_1m
+        )
 
     def add_tts_usage(self, characters: int, cached: bool = False) -> None:
         """Record TTS usage."""

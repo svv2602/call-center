@@ -302,8 +302,8 @@ class TestSyncSystemPricing:
         assert resp.status_code == 200
         data = resp.json()
         assert "Synced" in data["message"]
-        # Should sync all 8 providers from DEFAULT_ROUTING_CONFIG
-        assert "8" in data["message"]
+        # Should sync all 9 providers from DEFAULT_ROUTING_CONFIG
+        assert "9" in data["message"]
 
 
 class TestUsageSummary:

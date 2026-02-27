@@ -226,7 +226,8 @@ async def sync_system_pricing(_: Any = _perm_w) -> dict[str, Any]:
         "openai-gpt41-mini": ("gpt-4.1-mini", "GPT-4.1 Mini", 0.4, 1.6),
         "openai-gpt41-nano": ("gpt-4.1-nano", "GPT-4.1 Nano", 0.1, 0.4),
         "deepseek-chat": ("deepseek-chat", "DeepSeek Chat", 0.27, 1.1),
-        "gemini-flash": ("gemini-2.5-flash", "Gemini 2.5 Flash", 0.3, 2.5),
+        "gemini-2.5-flash": ("gemini-2.5-flash", "Gemini 2.5 Flash", 0.3, 2.5),
+        "gemini-3-flash": ("gemini-3-flash-preview", "Gemini 3 Flash (preview)", 0.3, 2.5),
         "openai-gpt5-mini": ("gpt-5-mini", "GPT-5 Mini", 0.25, 2.0),
         "openai-gpt5-nano": ("gpt-5-nano", "GPT-5 Nano", 0.05, 0.4),
     }

@@ -246,8 +246,13 @@ class LLMRouter:
 
         # Remaining events — provider is alive, stream directly
         async for event in gen:
-            yield event
             if isinstance(event, StreamDone):
+                # Enrich with provider_key so callers know which provider served this
+                event = StreamDone(
+                    stop_reason=event.stop_reason,
+                    usage=event.usage,
+                    provider_key=provider_key,
+                )
                 latency_ms = int((time.monotonic() - start) * 1000)
                 self._record_latency(provider_key, latency_ms)
                 if task is not None:
@@ -255,6 +260,7 @@ class LLMRouter:
                         task, provider_key, "", latency_ms,
                         event.usage.input_tokens, event.usage.output_tokens,
                     )
+            yield event
 
     def get_available_models(self) -> list[dict[str, str]]:
         """Return list of available provider models for UI dropdowns.

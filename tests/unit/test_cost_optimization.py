@@ -112,26 +112,33 @@ class TestCostBreakdown:
 
     def test_llm_sonnet_cost(self) -> None:
         cost = CostBreakdown()
-        cost.add_llm_usage(1000, 200, model="sonnet")
-        # input: 1000/1000 * 0.003 = 0.003
-        # output: 200/1000 * 0.015 = 0.003
+        cost.add_llm_usage(1000, 200, provider_key="anthropic-sonnet")
+        # input: 1000/1M * $3.00 = 0.003
+        # output: 200/1M * $15.00 = 0.003
         assert cost.llm_cost == pytest.approx(0.006)
 
     def test_llm_haiku_cost(self) -> None:
         cost = CostBreakdown()
-        cost.add_llm_usage(1000, 200, model="haiku")
-        # input: 1000/1000 * 0.00025 = 0.00025
-        # output: 200/1000 * 0.00125 = 0.00025
-        assert cost.llm_cost == pytest.approx(0.0005)
+        cost.add_llm_usage(1000, 200, provider_key="anthropic-haiku")
+        # input: 1000/1M * $1.00 = 0.001
+        # output: 200/1M * $5.00 = 0.001
+        assert cost.llm_cost == pytest.approx(0.002)
+
+    def test_llm_gemini_flash_cost(self) -> None:
+        cost = CostBreakdown()
+        cost.add_llm_usage(1000, 200, provider_key="gemini-2.5-flash")
+        # input: 1000/1M * $0.30 = 0.0003
+        # output: 200/1M * $2.50 = 0.0005
+        assert cost.llm_cost == pytest.approx(0.0008)
 
     def test_haiku_much_cheaper_than_sonnet(self) -> None:
         sonnet = CostBreakdown()
-        sonnet.add_llm_usage(1000, 200, model="sonnet")
+        sonnet.add_llm_usage(1000, 200, provider_key="anthropic-sonnet")
 
         haiku = CostBreakdown()
-        haiku.add_llm_usage(1000, 200, model="haiku")
+        haiku.add_llm_usage(1000, 200, provider_key="anthropic-haiku")
 
-        assert haiku.llm_cost < sonnet.llm_cost * 0.2  # Haiku is >5x cheaper
+        assert haiku.llm_cost < sonnet.llm_cost * 0.5  # Haiku is ~3x cheaper
 
     def test_tts_cost(self) -> None:
         cost = CostBreakdown()
@@ -154,7 +161,7 @@ class TestCostBreakdown:
     def test_to_dict(self) -> None:
         cost = CostBreakdown()
         cost.add_stt_usage(30.0, provider="google")
-        cost.add_llm_usage(1000, 200, model="sonnet")
+        cost.add_llm_usage(1000, 200, provider_key="anthropic-sonnet")
         cost.add_tts_usage(500)
 
         d = cost.to_dict()
@@ -163,7 +170,7 @@ class TestCostBreakdown:
         assert "tts_cost" in d
         assert "total_cost" in d
         assert d["stt_provider"] == "google"
-        assert d["llm_model"] == "sonnet"
+        assert d["llm_model"] == "anthropic-sonnet"
         assert d["llm_input_tokens"] == 1000
         assert d["llm_output_tokens"] == 200
         assert d["tts_characters"] == 500

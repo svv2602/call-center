@@ -498,6 +498,7 @@ class CallPipeline:
                     self._cost.add_llm_usage(
                         result.total_usage.input_tokens,
                         result.total_usage.output_tokens,
+                        provider_key=result.provider_key,
                     )
 
                 if result is not None and result.spoken_text:
@@ -569,6 +570,7 @@ class CallPipeline:
                     self._cost.add_llm_usage(
                         self._agent.last_input_tokens,
                         self._agent.last_output_tokens,
+                        provider_key=self._agent.last_provider_key,
                     )
 
                 # Now record the user turn in session (for DB/analytics)

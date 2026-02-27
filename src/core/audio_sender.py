@@ -38,6 +38,7 @@ class SendResult:
     tool_calls: list[CollectedToolCall] = field(default_factory=list)
     stop_reason: str = "end_turn"
     usage: Usage = field(default_factory=lambda: Usage(0, 0))
+    provider_key: str = ""
     interrupted: bool = False
     disconnected: bool = False
 
@@ -80,6 +81,7 @@ class StreamingAudioSender:
         disconnected = False
         stop_reason = "end_turn"
         usage = Usage(0, 0)
+        provider_key = ""
 
         async for event in stream:
             if isinstance(event, AudioReady):
@@ -123,6 +125,7 @@ class StreamingAudioSender:
             elif isinstance(event, StreamDone):
                 stop_reason = event.stop_reason
                 usage = event.usage
+                provider_key = event.provider_key
 
         # Finalize any pending tool calls that never got a ToolCallEnd event.
         # OpenAI-compatible providers (Gemini) don't emit ToolCallEnd — they
@@ -141,6 +144,7 @@ class StreamingAudioSender:
             tool_calls=completed_tool_calls,
             stop_reason=stop_reason,
             usage=usage,
+            provider_key=provider_key,
             interrupted=interrupted,
             disconnected=disconnected,
         )
