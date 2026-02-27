@@ -934,7 +934,7 @@ function renderTestPhones() {
     html += `<div class="flex items-end gap-2 pt-2 border-t border-neutral-200 dark:border-neutral-700 mt-2">
         <div>
             <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.testPhonesNumber')}</label>
-            <input id="newTestPhone" type="text" placeholder="0501234567" class="${tw.inputSm} w-40 font-mono">
+            <input id="newTestPhone" type="text" placeholder="0501234567" class="${tw.selectSm} w-40 font-mono">
         </div>
         <div>
             <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.testPhonesMode')}</label>
