@@ -11,6 +11,7 @@ import asyncio
 import csv
 import io
 import logging
+from datetime import date as date_type
 from typing import Any
 
 import typer
@@ -44,10 +45,10 @@ async def _export_calls_csv(
 
     if date_from:
         conditions.append("started_at >= :date_from")
-        params["date_from"] = date_from
+        params["date_from"] = date_type.fromisoformat(date_from)
     if date_to:
-        conditions.append("started_at < CAST(:date_to AS date) + interval '1 day'")
-        params["date_to"] = date_to
+        conditions.append("started_at < :date_to + interval '1 day'")
+        params["date_to"] = date_type.fromisoformat(date_to)
 
     where_clause = " AND ".join(conditions)
 

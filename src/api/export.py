@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import io
 import logging
+from datetime import date as date_type
 from typing import Any
 
 from fastapi import APIRouter, Depends, Query
@@ -89,10 +90,10 @@ async def export_calls_csv(
 
     if date_from:
         conditions.append("started_at >= :date_from")
-        params["date_from"] = date_from
+        params["date_from"] = date_type.fromisoformat(date_from)
     if date_to:
-        conditions.append("started_at < CAST(:date_to AS date) + interval '1 day'")
-        params["date_to"] = date_to
+        conditions.append("started_at < :date_to + interval '1 day'")
+        params["date_to"] = date_type.fromisoformat(date_to)
     if scenario:
         conditions.append("scenario = :scenario")
         params["scenario"] = scenario
@@ -181,10 +182,10 @@ async def export_summary_csv(
         params: dict[str, Any] = {"tenant_id": tenant_id, "limit": _MAX_EXPORT_ROWS}
         if date_from:
             conditions.append("started_at >= :date_from")
-            params["date_from"] = date_from
+            params["date_from"] = date_type.fromisoformat(date_from)
         if date_to:
-            conditions.append("started_at < CAST(:date_to AS date) + interval '1 day'")
-            params["date_to"] = date_to
+            conditions.append("started_at < :date_to + interval '1 day'")
+            params["date_to"] = date_type.fromisoformat(date_to)
         where_clause = " AND ".join(conditions)
 
         async with engine.begin() as conn:
@@ -213,10 +214,10 @@ async def export_summary_csv(
 
         if date_from:
             conditions.append("stat_date >= :date_from")
-            params["date_from"] = date_from
+            params["date_from"] = date_type.fromisoformat(date_from)
         if date_to:
             conditions.append("stat_date <= :date_to")
-            params["date_to"] = date_to
+            params["date_to"] = date_type.fromisoformat(date_to)
 
         where_clause = " AND ".join(conditions)
 

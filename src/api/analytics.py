@@ -7,6 +7,7 @@ for the admin interface.
 from __future__ import annotations
 
 import logging
+from datetime import date as date_type
 from typing import Any
 from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
@@ -55,10 +56,10 @@ async def get_quality_report(
 
     if date_from:
         conditions.append("started_at >= :date_from")
-        params["date_from"] = date_from
+        params["date_from"] = date_type.fromisoformat(date_from)
     if date_to:
-        conditions.append("started_at < CAST(:date_to AS date) + interval '1 day'")
-        params["date_to"] = date_to
+        conditions.append("started_at < :date_to + interval '1 day'")
+        params["date_to"] = date_type.fromisoformat(date_to)
     if scenario:
         conditions.append("scenario = :scenario")
         params["scenario"] = scenario
@@ -145,10 +146,10 @@ async def get_calls_list(
         params["transferred"] = transferred
     if date_from:
         conditions.append("started_at >= :date_from")
-        params["date_from"] = date_from
+        params["date_from"] = date_type.fromisoformat(date_from)
     if date_to:
-        conditions.append("started_at < CAST(:date_to AS date) + interval '1 day'")
-        params["date_to"] = date_to
+        conditions.append("started_at < :date_to + interval '1 day'")
+        params["date_to"] = date_type.fromisoformat(date_to)
     if search:
         conditions.append(
             "id IN (SELECT call_id FROM call_turns "
@@ -351,10 +352,10 @@ async def get_summary(
 
         if date_from:
             conditions.append("started_at >= :date_from")
-            params["date_from"] = date_from
+            params["date_from"] = date_type.fromisoformat(date_from)
         if date_to:
-            conditions.append("started_at < CAST(:date_to AS date) + interval '1 day'")
-            params["date_to"] = date_to
+            conditions.append("started_at < :date_to + interval '1 day'")
+            params["date_to"] = date_type.fromisoformat(date_to)
 
         where_clause = " AND ".join(conditions)
 
@@ -387,10 +388,10 @@ async def get_summary(
 
     if date_from:
         conditions.append("stat_date >= :date_from")
-        params["date_from"] = date_from
+        params["date_from"] = date_type.fromisoformat(date_from)
     if date_to:
         conditions.append("stat_date <= :date_to")
-        params["date_to"] = date_to
+        params["date_to"] = date_type.fromisoformat(date_to)
 
     where_clause = " AND ".join(conditions)
 

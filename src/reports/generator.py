@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 import logging
 from collections import Counter
+from datetime import date as date_type
 from pathlib import Path
 from typing import Any
 
@@ -40,7 +41,7 @@ async def _fetch_report_data(
                 WHERE stat_date >= :date_from AND stat_date <= :date_to
                 ORDER BY stat_date
             """),
-            {"date_from": date_from, "date_to": date_to},
+            {"date_from": date_type.fromisoformat(date_from), "date_to": date_type.fromisoformat(date_to)},
         )
         rows = [dict(row._mapping) for row in result]
 

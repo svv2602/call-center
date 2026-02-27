@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import logging
+from datetime import date as date_type
 from typing import Any
 
 import bcrypt
@@ -245,10 +246,10 @@ async def get_audit_log(
         params["action"] = action
     if date_from:
         conditions.append("created_at >= :date_from")
-        params["date_from"] = date_from
+        params["date_from"] = date_type.fromisoformat(date_from)
     if date_to:
-        conditions.append("created_at < CAST(:date_to AS date) + interval '1 day'")
-        params["date_to"] = date_to
+        conditions.append("created_at < :date_to + interval '1 day'")
+        params["date_to"] = date_type.fromisoformat(date_to)
 
     where_clause = " AND ".join(conditions)
 
