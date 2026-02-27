@@ -509,6 +509,13 @@ class CallPipeline:
                         result.tool_calls_made,
                         llm_latency_ms,
                     )
+                elif result is not None and (result.interrupted or result.disconnected):
+                    # Barge-in or hangup before LLM produced any text — not an error
+                    logger.info(
+                        "Streaming turn interrupted before speech: call=%s, user='%s'",
+                        self._session.channel_uuid,
+                        transcript.text[:50],
+                    )
                 else:
                     logger.warning("Empty streaming response: call=%s", self._session.channel_uuid)
                     fallback = self._templates.get("error", ERROR_TEXT)
