@@ -124,6 +124,18 @@ class StreamingAudioSender:
                 stop_reason = event.stop_reason
                 usage = event.usage
 
+        # Finalize any pending tool calls that never got a ToolCallEnd event.
+        # OpenAI-compatible providers (Gemini) don't emit ToolCallEnd — they
+        # just send ToolCallStart + ToolCallDelta chunks and then StreamDone.
+        for p in pending_tool_calls.values():
+            completed_tool_calls.append(
+                CollectedToolCall(
+                    id=p.id,
+                    name=p.name,
+                    arguments_json="".join(p.chunks),
+                )
+            )
+
         return SendResult(
             spoken_text=" ".join(spoken_parts),
             tool_calls=completed_tool_calls,
