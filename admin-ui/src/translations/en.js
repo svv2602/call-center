@@ -29,6 +29,11 @@ export default {
     'common.unsavedChanges': 'You have unsaved changes. Leave page?',
     'common.filtersActive': '{count} filter(s) active',
     'common.resetFilters': 'Reset filters',
+    'common.offline': 'No network connection',
+    'common.backOnline': 'Connection restored',
+
+    // Auth
+    'auth.sessionExpiringSoon': 'Session expiring soon. Save your work.',
 
     // Accessibility
     'nav.ariaMainNav': 'Main navigation',

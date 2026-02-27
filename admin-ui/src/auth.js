@@ -2,6 +2,7 @@ import { api, getToken, setToken, clearToken, onLogout } from './api.js';
 import { showToast } from './notifications.js';
 import { connectWebSocket, disconnectWebSocket } from './websocket.js';
 import { showPage, clearRefreshTimer, getPageFromHash } from './router.js';
+import { clearCache } from './api-cache.js';
 import { t } from './i18n.js';
 
 let _userPermissions = [];
@@ -108,23 +109,36 @@ export async function login() {
 export function logout() {
     clearToken();
     _userPermissions = [];
+    _expiryWarned = false;
     localStorage.removeItem('admin_permissions');
     clearRefreshTimer();
+    clearCache();
     disconnectWebSocket();
     document.getElementById('app').style.display = 'none';
     document.getElementById('loginContainer').style.display = 'flex';
 }
+
+let _expiryWarned = false;
 
 export function checkTokenExpiry() {
     const token = getToken();
     if (!token) return;
     try {
         const payload = JSON.parse(atob(token.split('.')[1]));
-        if (payload.exp && payload.exp < Date.now() / 1000) {
+        if (!payload.exp) return;
+        const remaining = payload.exp - Date.now() / 1000;
+        if (remaining <= 0) {
             showToast(t('api.sessionExpired'), 'error');
             logout();
+        } else if (remaining <= 300 && !_expiryWarned) {
+            _expiryWarned = true;
+            showToast(t('auth.sessionExpiringSoon'), 'warning');
         }
     } catch { /* ignore parse errors */ }
+}
+
+export function resetExpiryWarning() {
+    _expiryWarned = false;
 }
 
 // Register logout callback for 401 handling in api.js

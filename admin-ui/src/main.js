@@ -107,6 +107,24 @@ if (getToken()) {
     }
 }
 
+// Offline/online detection
+function _showOfflineBanner(show) {
+    let banner = document.getElementById('offlineBanner');
+    if (show && !banner) {
+        banner = document.createElement('div');
+        banner.id = 'offlineBanner';
+        banner.className = 'fixed top-0 left-0 right-0 z-[70] bg-amber-500 text-white text-center text-sm py-2 font-medium';
+        banner.setAttribute('role', 'alert');
+        banner.textContent = t('common.offline');
+        document.body.prepend(banner);
+    } else if (!show && banner) {
+        banner.remove();
+        showToast(t('common.backOnline'), 'info');
+    }
+}
+window.addEventListener('offline', () => _showOfflineBanner(true));
+window.addEventListener('online', () => _showOfflineBanner(false));
+
 // Global event listeners
 document.getElementById('loginPassword').addEventListener('keypress', e => {
     if (e.key === 'Enter') login();

@@ -29,6 +29,11 @@ export default {
     'common.unsavedChanges': 'У вас есть несохранённые изменения. Покинуть страницу?',
     'common.filtersActive': '{count} фильтр(ов) активно',
     'common.resetFilters': 'Сбросить фильтры',
+    'common.offline': 'Нет подключения к сети',
+    'common.backOnline': 'Подключение восстановлено',
+
+    // Auth
+    'auth.sessionExpiringSoon': 'Сессия скоро истечёт. Сохраните свою работу.',
 
     // Accessibility
     'nav.ariaMainNav': 'Главная навигация',

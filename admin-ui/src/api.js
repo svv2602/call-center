@@ -6,6 +6,9 @@ const DEFAULT_TIMEOUT_MS = 30_000;
 let token = localStorage.getItem('admin_token');
 let logoutCallback = null;
 
+// Request deduplication for GET requests
+const _inflight = new Map();
+
 export function getToken() { return token; }
 export function setToken(t) { token = t; localStorage.setItem('admin_token', t); }
 export function clearToken() { token = null; localStorage.removeItem('admin_token'); }
@@ -34,6 +37,23 @@ function _friendlyHttpError(status, detail) {
 }
 
 export async function api(path, opts = {}) {
+    const method = (opts.method || 'GET').toUpperCase();
+    const isGet = method === 'GET';
+
+    // Dedup: if the same GET is already inflight, return the same promise
+    if (isGet && _inflight.has(path)) return _inflight.get(path);
+
+    const promise = _apiRaw(path, opts);
+
+    if (isGet) {
+        _inflight.set(path, promise);
+        promise.finally(() => _inflight.delete(path));
+    }
+
+    return promise;
+}
+
+async function _apiRaw(path, opts = {}) {
     const headers = { 'Content-Type': 'application/json' };
     if (token) headers['Authorization'] = `Bearer ${token}`;
 
