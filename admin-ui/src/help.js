@@ -1,15 +1,17 @@
 import { t } from './i18n.js';
 import { HELP_PAGES } from './help-content.js';
+import { trapFocus } from './focus-trap.js';
 
 let overlayEl = null;
 let contentEl = null;
 let currentPageId = null;
+let releaseTrap = null;
 
 export function initHelp() {
     overlayEl = document.createElement('div');
     overlayEl.className = 'help-overlay';
     overlayEl.innerHTML = `
-        <div class="help-drawer">
+        <div class="help-drawer" role="complementary" aria-label="Help">
             <div class="flex items-center justify-between px-5 py-4 border-b border-neutral-200 dark:border-neutral-700">
                 <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50 help-drawer-title"></h2>
                 <button onclick="window._app.closeHelp()" class="text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200" aria-label="Close">
@@ -42,11 +44,18 @@ export function openHelp(pageId) {
     currentPageId = pageId;
     renderContent(pageId);
     overlayEl.classList.add('open');
+    // Trap focus inside the drawer
+    const drawer = overlayEl.querySelector('.help-drawer');
+    releaseTrap = trapFocus(drawer);
 }
 
 export function closeHelp() {
     overlayEl.classList.remove('open');
     currentPageId = null;
+    if (releaseTrap) {
+        releaseTrap();
+        releaseTrap = null;
+    }
 }
 
 function renderContent(pageId) {

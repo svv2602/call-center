@@ -6,7 +6,8 @@ import { getToken } from './api.js';
 import { login, logout, checkTokenExpiry, applyRoleVisibility, loadPermissions } from './auth.js';
 import { showPage, toggleSidebarGroup, initRouter, getPageFromHash } from './router.js';
 import { connectWebSocket, setWsEventHandler, refreshWsStatus } from './websocket.js';
-import { closeModal } from './utils.js';
+import { closeModal, closeTopmostModal } from './utils.js';
+import { initDropdownKeyboard } from './dropdown-keyboard.js';
 import { initTheme, toggleTheme, refreshThemeLabel } from './theme.js';
 import { initLang, toggleLang, translateStaticDOM } from './i18n.js';
 import { initHelp, openHelp, closeHelp } from './help.js';
@@ -39,6 +40,7 @@ initTheme();
 translateStaticDOM();
 initRouter();
 initHelp();
+initDropdownKeyboard();
 
 // Initialize all page loaders
 initDashboard();
@@ -112,8 +114,40 @@ document.getElementById('loginPassword').addEventListener('keypress', e => {
 
 document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
-        document.querySelectorAll('.modal-overlay.show').forEach(m => m.classList.remove('show'));
+        closeTopmostModal();
     }
+});
+
+// Auto focus trap: observe .modal-overlay elements for .show class changes
+import { trapFocus } from './focus-trap.js';
+const _autoTraps = new Map();
+
+const modalObserver = new MutationObserver((mutations) => {
+    for (const m of mutations) {
+        if (m.type !== 'attributes' || m.attributeName !== 'class') continue;
+        const el = m.target;
+        if (!el.classList.contains('modal-overlay')) continue;
+        const id = el.id;
+        if (el.classList.contains('show')) {
+            // Modal opened — trap focus (if not already trapped by showModal)
+            if (!_autoTraps.has(id)) {
+                _autoTraps.set(id, trapFocus(el));
+            }
+        } else {
+            // Modal closed — release trap
+            const release = _autoTraps.get(id);
+            if (release) {
+                release();
+                _autoTraps.delete(id);
+            }
+        }
+    }
+});
+// Start observing once DOM is ready
+requestAnimationFrame(() => {
+    document.querySelectorAll('.modal-overlay').forEach(el => {
+        modalObserver.observe(el, { attributes: true, attributeFilter: ['class'] });
+    });
 });
 
 // Mobile sidebar toggle
@@ -151,6 +185,41 @@ document.querySelectorAll('a[data-page]').forEach(a => {
             document.getElementById('sidebar').classList.remove('open');
         }
     });
+});
+
+// Sidebar keyboard navigation (Arrow Up/Down between nav items)
+document.getElementById('sidebar')?.addEventListener('keydown', (e) => {
+    if (!['ArrowDown', 'ArrowUp', 'ArrowRight', 'ArrowLeft'].includes(e.key)) return;
+    const items = [...document.querySelectorAll('#sidebar .nav-item, #sidebar .nav-group-trigger, #sidebar .nav-flyout-link')].filter(
+        el => el.offsetParent !== null
+    );
+    const idx = items.indexOf(document.activeElement);
+    if (idx === -1) return;
+
+    e.preventDefault();
+    if (e.key === 'ArrowDown') {
+        items[(idx + 1) % items.length].focus();
+    } else if (e.key === 'ArrowUp') {
+        items[(idx - 1 + items.length) % items.length].focus();
+    } else if (e.key === 'ArrowRight') {
+        // Open group submenu
+        const group = document.activeElement.closest('.nav-group');
+        if (group && !group.classList.contains('open')) {
+            toggleSidebarGroup(group.dataset.group);
+            requestAnimationFrame(() => {
+                const firstLink = group.querySelector('.nav-flyout-link');
+                if (firstLink) firstLink.focus();
+            });
+        }
+    } else if (e.key === 'ArrowLeft') {
+        // Close group submenu
+        const group = document.activeElement.closest('.nav-group');
+        if (group && group.classList.contains('open')) {
+            toggleSidebarGroup(group.dataset.group);
+            const trigger = group.querySelector('.nav-group-trigger');
+            if (trigger) trigger.focus();
+        }
+    }
 });
 
 // Language change handler — re-render active page and refresh labels

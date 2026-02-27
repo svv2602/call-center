@@ -1,5 +1,9 @@
 import * as tw from './tw.js';
 import { getLocale } from './i18n.js';
+import { trapFocus } from './focus-trap.js';
+
+// Active focus trap cleanups keyed by modal id
+const _modalTraps = new Map();
 
 export function qualityBadge(score) {
     if (score == null) return `<span class="${tw.badge}">N/A</span>`;
@@ -14,8 +18,47 @@ export function formatDate(d) {
     return new Date(d).toLocaleString(getLocale(), { dateStyle: 'short', timeStyle: 'short' });
 }
 
+/**
+ * Open a modal with focus trap and ARIA attributes.
+ * @param {string} id - Modal element id
+ */
+export function showModal(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.classList.add('show');
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    // Trap focus inside the modal
+    const release = trapFocus(el);
+    _modalTraps.set(id, release);
+}
+
+/**
+ * Close a modal and release focus trap.
+ * @param {string} id - Modal element id
+ */
 export function closeModal(id) {
-    document.getElementById(id).classList.remove('show');
+    const el = document.getElementById(id);
+    if (el) el.classList.remove('show');
+    // Release focus trap and restore previous focus
+    const release = _modalTraps.get(id);
+    if (release) {
+        release();
+        _modalTraps.delete(id);
+    }
+}
+
+/**
+ * Close the topmost open modal (used by Escape key handler).
+ * @returns {boolean} true if a modal was closed
+ */
+export function closeTopmostModal() {
+    const openModals = document.querySelectorAll('.modal-overlay.show');
+    if (openModals.length === 0) return false;
+    // Close the last (topmost) one
+    const topmost = openModals[openModals.length - 1];
+    closeModal(topmost.id);
+    return true;
 }
 
 export function escapeHtml(str) {
