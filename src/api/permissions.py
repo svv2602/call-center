@@ -33,6 +33,7 @@ SYSTEM_PERMISSIONS = [
     "users:read",
     "users:write",
     "audit:read",
+    "customers:read",
     "tenants:read",
     "tenants:write",
     "tenants:delete",
@@ -67,6 +68,7 @@ ROLE_DEFAULT_PERMISSIONS: dict[str, list[str]] = {
     "analyst": [
         "analytics:read",
         "analytics:export",
+        "customers:read",
         "knowledge:read",
         "training:read",
         "prompts:read",
@@ -89,6 +91,7 @@ PERMISSION_GROUPS: dict[str, list[str]] = {
     "prompts": ["prompts:read", "prompts:write", "prompts:delete"],
     "users": ["users:read", "users:write"],
     "audit": ["audit:read"],
+    "customers": ["customers:read"],
     "tenants": ["tenants:read", "tenants:write", "tenants:delete"],
     "operators": ["operators:read", "operators:write"],
     "analytics": ["analytics:read", "analytics:export"],

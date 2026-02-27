@@ -33,6 +33,7 @@ from src.agent.prompt_manager import (
     inject_pronunciation_rules,
 )
 from src.agent.prompts import (
+    GREETING_TEXT_KNOWN,
     assemble_prompt,
     format_caller_history,
     format_customer_profile,
@@ -42,6 +43,7 @@ from src.agent.tool_loader import get_tools_with_overrides
 from src.api.admin_users import router as admin_users_router
 from src.api.analytics import router as analytics_router
 from src.api.auth import router as auth_router
+from src.api.customers import router as customers_router
 from src.api.export import router as export_router
 from src.api.fitting_hints import router as fitting_hints_router
 from src.api.knowledge import router as knowledge_router
@@ -105,6 +107,7 @@ app = FastAPI(
 app.include_router(admin_users_router)
 app.include_router(analytics_router)
 app.include_router(auth_router)
+app.include_router(customers_router)
 app.include_router(export_router)
 app.include_router(fitting_hints_router)
 app.include_router(knowledge_router)
@@ -156,6 +159,7 @@ async def _dispose_api_engines() -> None:
         admin_users,
         analytics,
         auth,
+        customers,
         export,
         knowledge,
         operators,
@@ -176,6 +180,7 @@ async def _dispose_api_engines() -> None:
         admin_users,
         analytics,
         auth,
+        customers,
         export,
         knowledge,
         operators,
@@ -904,6 +909,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         caller_history_text = format_caller_history(caller_history_raw)
         storage_context_text = format_storage_context(storage_raw)
         customer_profile_text = format_customer_profile(customer_profile_raw)
+        profile_name = (
+            customer_profile_raw.get("name") if customer_profile_raw else None
+        )
 
         # Modular prompt assembly: if no DB/A-B prompt, assemble from modules
         is_modular = False
@@ -930,6 +938,27 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 templates["greeting"] = tenant["greeting"]
             if tenant.get("prompt_suffix") and system_prompt:
                 system_prompt = system_prompt + "\n\n" + tenant["prompt_suffix"]
+
+        # Personalized greeting for known customers (after tenant override)
+        if profile_name and templates:
+            templates = dict(templates)  # copy to avoid mutating shared dict
+            current_greeting = templates.get("greeting", "")
+            # Replace "Як можу до вас звертатися?" with personalized version
+            if "Як можу до вас звертатися?" in current_greeting:
+                templates["greeting"] = current_greeting.replace(
+                    "Як можу до вас звертатися?",
+                    f"{profile_name}, чим можу допомогти?",
+                )
+            else:
+                # Tenant custom greeting without name question — prepend name
+                templates["greeting"] = GREETING_TEXT_KNOWN.replace(
+                    "{customer_name}", profile_name
+                )
+            logger.info(
+                "Known customer greeting: %s for call %s",
+                profile_name,
+                conn.channel_uuid,
+            )
 
         # Apply IVR scenario-based tool filtering
         if session.scenario and session.scenario in _SCENARIO_TOOLS:

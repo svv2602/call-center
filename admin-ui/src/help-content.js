@@ -236,4 +236,14 @@ export const HELP_PAGES = {
         ],
         tipsKey: 'help.tools.tips',
     },
+    customers: {
+        titleKey: 'help.customers.title',
+        overviewKey: 'help.customers.overview',
+        sections: [
+            { titleKey: 'help.customers.table.title', contentKey: 'help.customers.table.content' },
+            { titleKey: 'help.customers.search.title', contentKey: 'help.customers.search.content' },
+            { titleKey: 'help.customers.detail.title', contentKey: 'help.customers.detail.content' },
+        ],
+        tipsKey: 'help.customers.tips',
+    },
 };

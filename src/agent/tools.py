@@ -334,7 +334,7 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
                 },
                 "auto_number": {
                     "type": "string",
-                    "description": "Державний номер автомобіля клієнта (обов'язково запитай!)",
+                    "description": "Державний номер автомобіля — прийми як є, НЕ вимагай літери",
                 },
                 "vehicle_info": {
                     "type": "string",
@@ -347,7 +347,7 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
                 },
                 "tire_diameter": {
                     "type": "integer",
-                    "description": "Діаметр шин у дюймах (наприклад, 16, 17)",
+                    "description": "Діаметр шин у дюймах — НЕ питай клієнта, передавай тільки якщо вже відомо",
                 },
                 "storage_contract": {
                     "type": "string",

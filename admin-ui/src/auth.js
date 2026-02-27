@@ -40,6 +40,7 @@ export async function loadPermissions() {
 const PAGE_PERMISSIONS = {
     dashboard: null, // all authenticated users
     calls: 'analytics:read',
+    customers: 'customers:read',
     prompts: 'prompts:read',
     knowledge: 'knowledge:read',
     scenarios: 'training:read',
