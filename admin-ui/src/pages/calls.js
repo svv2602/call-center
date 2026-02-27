@@ -152,6 +152,26 @@ async function showCallDetail(callId) {
             html += '</table></div>';
         }
 
+        if (c.cost_breakdown) {
+            const cb = c.cost_breakdown;
+            html += `<h3 class="${tw.sectionTitle} mt-4">${t('calls.costBreakdownTitle')}</h3><div class="overflow-x-auto"><table class="${tw.table}">`;
+            html += `<tr class="${tw.trHover}"><td class="${tw.td} font-medium">${t('calls.sttProvider')}</td><td class="${tw.td}">${escapeHtml(cb.stt_provider || 'google')}</td></tr>`;
+            html += `<tr class="${tw.trHover}"><td class="${tw.td} font-medium">${t('calls.sttSeconds')}</td><td class="${tw.td}">${cb.stt_seconds ?? '-'}</td></tr>`;
+            html += `<tr class="${tw.trHover}"><td class="${tw.td} font-medium">${t('calls.sttCost')}</td><td class="${tw.td}">$${(cb.stt_cost || 0).toFixed(6)}</td></tr>`;
+            html += `<tr class="${tw.trHover}"><td class="${tw.td} font-medium">${t('calls.llmModel')}</td><td class="${tw.td}">${escapeHtml(cb.llm_model || '-')}</td></tr>`;
+            html += `<tr class="${tw.trHover}"><td class="${tw.td} font-medium">${t('calls.llmInputTokens')}</td><td class="${tw.td}">${cb.llm_input_tokens ?? 0}</td></tr>`;
+            html += `<tr class="${tw.trHover}"><td class="${tw.td} font-medium">${t('calls.llmOutputTokens')}</td><td class="${tw.td}">${cb.llm_output_tokens ?? 0}</td></tr>`;
+            if (cb.llm_input_price_per_1m != null) {
+                html += `<tr class="${tw.trHover}"><td class="${tw.td} font-medium">${t('calls.llmInputPrice')}</td><td class="${tw.td}">$${cb.llm_input_price_per_1m}</td></tr>`;
+                html += `<tr class="${tw.trHover}"><td class="${tw.td} font-medium">${t('calls.llmOutputPrice')}</td><td class="${tw.td}">$${cb.llm_output_price_per_1m}</td></tr>`;
+            }
+            html += `<tr class="${tw.trHover}"><td class="${tw.td} font-medium">${t('calls.llmCost')}</td><td class="${tw.td}">$${(cb.llm_cost || 0).toFixed(6)}</td></tr>`;
+            html += `<tr class="${tw.trHover}"><td class="${tw.td} font-medium">${t('calls.ttsCharacters')}</td><td class="${tw.td}">${cb.tts_characters ?? 0}</td></tr>`;
+            html += `<tr class="${tw.trHover}"><td class="${tw.td} font-medium">${t('calls.ttsCost')}</td><td class="${tw.td}">$${(cb.tts_cost || 0).toFixed(6)}</td></tr>`;
+            html += `<tr class="${tw.trHover} font-semibold"><td class="${tw.td}">${t('calls.totalCost')}</td><td class="${tw.td}">$${(cb.total_cost || 0).toFixed(6)}</td></tr>`;
+            html += '</table></div>';
+        }
+
         html += `<div class="flex items-center justify-between mt-4"><h3 class="${tw.sectionTitle}">${t('calls.transcription')}</h3><div class="flex gap-2"><button class="${tw.btnPrimary} ${tw.btnSm}" data-id="${escapeHtml(callId)}" onclick="window._pages.calls.importToSandbox(this.dataset.id, this)">${t('calls.openInSandbox')}</button><button class="${tw.btnPrimary} ${tw.btnSm}" data-id="${escapeHtml(callId)}" onclick="window._pages.calls.downloadTranscript(this.dataset.id)">${t('calls.downloadTranscript')}</button></div></div>`;
         if (turns.length === 0) {
             html += `<div class="${tw.emptyState}">${t('calls.noTranscription')}</div>`;

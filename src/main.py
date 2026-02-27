@@ -229,6 +229,7 @@ _tts_engine: GoogleTTSEngine | None = None
 _onec_client: OneCClient | None = None
 _soap_client: OneCSOAPClient | None = None
 _embedding_task: asyncio.Task | None = None  # type: ignore[type-arg]
+_pricing_task: asyncio.Task | None = None  # type: ignore[type-arg]
 _db_engine: Any = None
 _call_logger: Any = None  # CallLogger for persisting calls to PostgreSQL
 _llm_router: Any = None  # LLMRouter when FF_LLM_ROUTING_ENABLED=true
@@ -1928,10 +1929,25 @@ async def _periodic_embedding_check(interval_minutes: int = 5) -> None:
         await asyncio.sleep(interval_minutes * 60)
 
 
+async def _periodic_pricing_refresh(interval_minutes: int = 5) -> None:
+    """Periodically reload LLM pricing from the DB into the in-memory cache."""
+    from src.monitoring.pricing_cache import refresh_from_db as _refresh_pricing
+
+    await asyncio.sleep(60)  # first refresh already done at startup
+    while True:
+        try:
+            if _db_engine is not None:
+                await _refresh_pricing(_db_engine)
+        except Exception:
+            logger.warning("Periodic pricing refresh failed", exc_info=True)
+        await asyncio.sleep(interval_minutes * 60)
+
+
 async def main() -> None:
     """Main application entry point."""
     global _audio_server, _redis, _store_client, _tts_engine
-    global _onec_client, _soap_client, _embedding_task, _db_engine, _llm_router, _asyncpg_pool
+    global _onec_client, _soap_client, _embedding_task, _pricing_task
+    global _db_engine, _llm_router, _asyncpg_pool
     global _knowledge_search, _search_embedding_gen
 
     settings = get_settings()
@@ -2065,6 +2081,12 @@ async def main() -> None:
         logger.warning("CallLogger init failed — calls will not be persisted", exc_info=True)
         _call_logger = None
 
+    # Initialize LLM pricing cache from DB
+    if _db_engine is not None:
+        from src.monitoring.pricing_cache import refresh_from_db as _refresh_pricing
+
+        await _refresh_pricing(_db_engine)
+
     # Initialize asyncpg pool for PatternSearch (pgvector direct queries)
     if settings.openai.api_key and _db_engine is not None:
         try:
@@ -2148,6 +2170,10 @@ async def main() -> None:
     _embedding_task = asyncio.create_task(_periodic_embedding_check(interval_minutes=5))
     logger.info("Periodic embedding check started (every 5 min)")
 
+    # Start periodic pricing cache refresh
+    _pricing_task = asyncio.create_task(_periodic_pricing_refresh(interval_minutes=5))
+    logger.info("Periodic pricing cache refresh started (every 5 min)")
+
     logger.info(
         "Call Center AI started — AudioSocket:%d, API:%d",
         settings.audio_socket.port,
@@ -2167,6 +2193,12 @@ async def main() -> None:
         with contextlib.suppress(asyncio.CancelledError):
             await _embedding_task
         logger.info("Periodic embedding check stopped")
+
+    if _pricing_task is not None:
+        _pricing_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _pricing_task
+        logger.info("Periodic pricing refresh stopped")
 
     if _llm_router is not None:
         await _llm_router.close()

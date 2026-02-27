@@ -11,28 +11,10 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.monitoring.metrics import call_cost_usd
+from src.monitoring.pricing_cache import get_pricing
 
 logger = logging.getLogger(__name__)
 
-
-# Pricing per 1M tokens (USD), keyed by provider_key.
-# Must stay in sync with llm_model_pricing DB table.
-LLM_PRICING_PER_1M: dict[str, tuple[float, float]] = {
-    # (input_price_per_1m, output_price_per_1m)
-    "gemini-2.5-flash": (0.30, 2.50),
-    "gemini-3-flash": (0.30, 2.50),
-    "gemini-flash": (0.30, 2.50),  # legacy key
-    "openai-gpt41-mini": (0.40, 1.60),
-    "openai-gpt41-nano": (0.10, 0.40),
-    "openai-gpt5-mini": (0.25, 2.00),
-    "openai-gpt5-nano": (0.05, 0.40),
-    "deepseek-chat": (0.27, 1.10),
-    "anthropic-haiku": (1.00, 5.00),
-    "anthropic-sonnet": (3.00, 15.00),
-}
-
-# Fallback for unknown providers: Gemini Flash pricing (cheapest common model)
-_FALLBACK_PRICING = (0.30, 2.50)
 
 # Non-LLM pricing
 PRICING = {
@@ -59,6 +41,8 @@ class CostBreakdown:
     _stt_seconds: float = 0.0
     _tts_characters: int = 0
     _tts_cached: int = 0
+    _llm_input_price_per_1m: float = 0.0
+    _llm_output_price_per_1m: float = 0.0
 
     @property
     def total_cost(self) -> float:
@@ -88,14 +72,16 @@ class CostBreakdown:
             input_tokens: Number of input tokens consumed.
             output_tokens: Number of output tokens generated.
             provider_key: LLM router provider key (e.g. "gemini-2.5-flash").
-                If empty, falls back to Gemini Flash pricing.
+                If empty, falls back to default pricing.
         """
         if provider_key:
             self.llm_model = provider_key
         self._llm_input_tokens += input_tokens
         self._llm_output_tokens += output_tokens
 
-        inp_per_1m, out_per_1m = LLM_PRICING_PER_1M.get(provider_key, _FALLBACK_PRICING)
+        inp_per_1m, out_per_1m = get_pricing(provider_key)
+        self._llm_input_price_per_1m = inp_per_1m
+        self._llm_output_price_per_1m = out_per_1m
         self.llm_cost += (
             input_tokens / 1_000_000 * inp_per_1m
             + output_tokens / 1_000_000 * out_per_1m
@@ -120,6 +106,8 @@ class CostBreakdown:
             "llm_model": self.llm_model,
             "llm_input_tokens": self._llm_input_tokens,
             "llm_output_tokens": self._llm_output_tokens,
+            "llm_input_price_per_1m": self._llm_input_price_per_1m,
+            "llm_output_price_per_1m": self._llm_output_price_per_1m,
             "stt_seconds": round(self._stt_seconds, 1),
             "tts_characters": self._tts_characters,
             "tts_cached_characters": self._tts_cached,

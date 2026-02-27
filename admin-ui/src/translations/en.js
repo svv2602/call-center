@@ -165,6 +165,19 @@ export default {
     'calls.importingToSandbox': 'Importing...',
     'calls.importedToSandbox': 'Call imported to sandbox',
     'calls.importFailed': 'Import failed: {error}',
+    'calls.costBreakdownTitle': 'Cost Breakdown',
+    'calls.sttCost': 'STT cost',
+    'calls.llmCost': 'LLM cost',
+    'calls.ttsCost': 'TTS cost',
+    'calls.totalCost': 'Total',
+    'calls.llmModel': 'LLM model',
+    'calls.llmInputTokens': 'Input tokens',
+    'calls.llmOutputTokens': 'Output tokens',
+    'calls.llmInputPrice': 'Input price (per 1M)',
+    'calls.llmOutputPrice': 'Output price (per 1M)',
+    'calls.sttProvider': 'STT provider',
+    'calls.sttSeconds': 'STT duration (sec)',
+    'calls.ttsCharacters': 'TTS characters',
 
     // Prompts
     'prompts.breadcrumb': 'Prompts',
@@ -1391,6 +1404,9 @@ export default {
     'help.calls.import.content': '<p>The <strong>"Open in Sandbox"</strong> button in call details lets you copy the entire dialogue into the Sandbox for deep analysis.</p><p><strong>What gets imported:</strong></p><ul><li><strong>All turns</strong> — preserving order and speaker mapping (customer / agent)</li><li><strong>Tool calls</strong> — linked to the corresponding agent turns, marked as real (not mock)</li><li><strong>Metadata</strong> — source call ID, quality score, duration, scenario, tenant</li></ul><p><strong>What you can do with imported dialogues:</strong></p><ul><li>View complete conversation history with tool calls</li><li>Rate individual agent responses (1–5 stars)</li><li>Create branches — try alternative customer messages</li><li>Mark turn groups and export to patterns</li><li>Mark as baseline for regression tests</li></ul>',
     'help.calls.import.steps': 'Step-by-step: Import to Sandbox',
     'help.calls.import.stepsContent': '<p><strong>Importing a call:</strong></p><ol><li>Open <strong>call details</strong> — click a row in the table</li><li>Click the <strong>"Open in Sandbox"</strong> button (next to "Download transcript")</li><li>Wait for the import — a success notification will appear</li><li>You\'ll be automatically redirected to the <strong>Sandbox</strong> where the imported dialogue opens</li></ol><p><strong>Analyzing the imported dialogue:</strong></p><ol><li>Review the turns — note any problematic moments</li><li>Rate agent responses with stars</li><li>If you find a problematic moment — click <strong>"Branch"</strong> and try a different customer message</li><li>Compare how the agent reacts to alternative requests</li><li>If needed, mark turn groups for pattern export</li></ol>',
+
+    'help.calls.costBreakdown.title': 'Call cost breakdown',
+    'help.calls.costBreakdown.content': '<p>Each call\'s detail view includes a <strong>cost breakdown table</strong> when data is available:</p><ul><li><strong>STT</strong> — speech recognition provider, processing duration, cost</li><li><strong>LLM</strong> — model, input/output token counts, per-1M pricing rates, total cost</li><li><strong>TTS</strong> — character count, speech synthesis cost</li><li><strong>Total</strong> — overall call cost</li></ul><p>LLM pricing is sourced from the <strong>"Model Pricing"</strong> table on the Cost Analysis page and refreshes automatically every 5 minutes.</p>',
 
     'help.calls.tips': '<ul><li>Regularly review calls with <strong>quality below 0.5</strong> — they indicate problems</li><li>Use <strong>transcription search</strong> to find specific topics or issues</li><li>Calls with <strong>"Transferred"</strong> status — potential areas for prompt improvement</li><li>Export data to <strong>CSV</strong> for building charts in Excel</li><li><strong>Download the transcript</strong> of a problematic call and use it to create a new dialogue in "Scenarios"</li><li>Click <strong>"Open in Sandbox"</strong> — import a problematic call for analysis, branching, and pattern marking</li></ul>',
 

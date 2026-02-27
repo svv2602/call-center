@@ -6,7 +6,7 @@ Manage model pricing, provider catalog, and compare costs across providers/task 
 from __future__ import annotations
 
 import logging
-from datetime import date, timedelta  # noqa: TC003
+from datetime import date, timedelta
 from typing import Any
 from uuid import UUID  # noqa: TC003
 
@@ -17,6 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.api.auth import require_permission
 from src.config import get_settings
+from src.monitoring.pricing_cache import invalidate as _invalidate_pricing
+from src.monitoring.pricing_cache import refresh_from_db as _refresh_pricing
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/llm-costs", tags=["llm-costs"])
@@ -146,6 +148,8 @@ async def create_pricing(body: PricingCreate, _: Any = _perm_w) -> dict[str, Any
             },
         )
         row = result.first()
+    _invalidate_pricing()
+    await _refresh_pricing(engine)
     return {"id": str(row.id), "message": "Created"}
 
 
@@ -186,6 +190,8 @@ async def update_pricing(
         )
         if result.rowcount == 0:
             raise HTTPException(404, "Pricing entry not found")
+    _invalidate_pricing()
+    await _refresh_pricing(engine)
     return {"message": "Updated"}
 
 
@@ -208,6 +214,8 @@ async def delete_pricing(pricing_id: UUID, _: Any = _perm_w) -> dict[str, Any]:
             text("DELETE FROM llm_model_pricing WHERE id = :pid"),
             {"pid": str(pricing_id)},
         )
+    _invalidate_pricing()
+    await _refresh_pricing(engine)
     return {"message": "Deleted"}
 
 
@@ -260,6 +268,8 @@ async def sync_system_pricing(_: Any = _perm_w) -> dict[str, Any]:
             )
             synced += 1
 
+    _invalidate_pricing()
+    await _refresh_pricing(engine)
     return {"message": f"Synced {synced} system models"}
 
 
@@ -407,6 +417,8 @@ async def catalog_add(body: CatalogAddRequest, _: Any = _perm_w) -> dict[str, An
             {"mk": body.model_key},
         )
 
+    _invalidate_pricing()
+    await _refresh_pricing(engine)
     return {"id": str(row.id), "message": "Model added to pricing"}
 
 

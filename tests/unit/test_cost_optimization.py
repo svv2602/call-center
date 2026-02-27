@@ -2,10 +2,36 @@
 
 from __future__ import annotations
 
+from unittest.mock import patch
+
 import pytest
 
 from src.agent.model_router import ModelRouter
 from src.monitoring.cost_tracker import CostBreakdown
+
+# Pricing lookup used by CostBreakdown — matches the old hardcoded values
+_TEST_PRICING = {
+    "gemini-2.5-flash": (0.30, 2.50),
+    "gemini-3-flash": (0.30, 2.50),
+    "openai-gpt41-mini": (0.40, 1.60),
+    "openai-gpt41-nano": (0.10, 0.40),
+    "openai-gpt5-mini": (0.25, 2.00),
+    "openai-gpt5-nano": (0.05, 0.40),
+    "deepseek-chat": (0.27, 1.10),
+    "anthropic-haiku": (1.00, 5.00),
+    "anthropic-sonnet": (3.00, 15.00),
+}
+_FALLBACK = (0.30, 2.50)
+
+
+@pytest.fixture(autouse=True)
+def _mock_pricing():
+    """Patch pricing_cache.get_pricing so tests are deterministic."""
+    with patch(
+        "src.monitoring.cost_tracker.get_pricing",
+        side_effect=lambda key: _TEST_PRICING.get(key, _FALLBACK),
+    ):
+        yield
 
 
 class TestModelRouter:
@@ -174,6 +200,13 @@ class TestCostBreakdown:
         assert d["llm_input_tokens"] == 1000
         assert d["llm_output_tokens"] == 200
         assert d["tts_characters"] == 500
+
+    def test_to_dict_contains_price_audit_fields(self) -> None:
+        cost = CostBreakdown()
+        cost.add_llm_usage(1000, 200, provider_key="gemini-2.5-flash")
+        d = cost.to_dict()
+        assert d["llm_input_price_per_1m"] == 0.30
+        assert d["llm_output_price_per_1m"] == 2.50
 
     def test_whisper_savings(self) -> None:
         """Verify Whisper provides cost savings over Google STT."""

@@ -26,6 +26,7 @@ export const HELP_PAGES = {
             { titleKey: 'help.calls.quality.title', contentKey: 'help.calls.quality.content' },
             { titleKey: 'help.calls.import.title', contentKey: 'help.calls.import.content' },
             { titleKey: 'help.calls.import.steps', contentKey: 'help.calls.import.stepsContent' },
+            { titleKey: 'help.calls.costBreakdown.title', contentKey: 'help.calls.costBreakdown.content' },
         ],
         tipsKey: 'help.calls.tips',
     },
