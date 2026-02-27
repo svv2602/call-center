@@ -526,6 +526,26 @@ export default {
     'settings.taskDaySun': 'Воскресенье',
     'settings.taskLabel_catalog-full-sync': 'Полная синхронизация каталога 1С',
     'settings.taskLabel_refresh-stt-hints': 'Обновление STT подсказок из каталога',
+    // Test Phones
+    'settings.testPhones': 'Тестовые номера',
+    'settings.testPhonesDesc': 'Управление тестовыми номерами: включение/отключение истории звонков для тестирования поведения AI-агента.',
+    'settings.testPhonesLoad': 'Загрузить',
+    'settings.testPhonesLoadFailed': 'Не удалось загрузить: {error}',
+    'settings.testPhonesNumber': 'Номер телефона',
+    'settings.testPhonesMode': 'Режим',
+    'settings.testPhonesActions': 'Действия',
+    'settings.testPhonesModeNoHistory': 'Без истории',
+    'settings.testPhonesModeWithHistory': 'С историей',
+    'settings.testPhonesClearHistory': 'Очистить историю',
+    'settings.testPhonesEmpty': 'Тестовые номера не настроены',
+    'settings.testPhonesAdded': 'Номер {phone} добавлен',
+    'settings.testPhonesModeUpdated': 'Режим для {phone} обновлён',
+    'settings.testPhonesSaveFailed': 'Ошибка сохранения: {error}',
+    'settings.testPhonesRemoveConfirm': 'Удалить номер {phone} из тестовых?',
+    'settings.testPhonesRemoved': 'Номер {phone} удалён',
+    'settings.testPhonesClearConfirm': 'Очистить ВСЮ историю звонков для {phone}? Это удалит звонки, реплики и вызовы инструментов из базы данных.',
+    'settings.testPhonesClearDone': 'История {phone} очищена: {calls} звонков, {turns} реплик, {tools} вызовов инструментов',
+    'settings.testPhonesClearFailed': 'Ошибка очистки: {error}',
     // Point Hints (standalone page)
     'nav.pointHints': 'Подсказки для точек',
     'pointHints.title': 'Подсказки для точек',
@@ -1573,6 +1593,9 @@ export default {
 
     'help.configuration.providerMgmt.title': 'Управление провайдерами',
     'help.configuration.providerMgmt.content': '<p>Каждый провайдер в таблице имеет кнопки <strong>«Edit»</strong> и <strong>«Delete»</strong>:</p><ul><li><strong>Edit</strong> — открывает диалог редактирования: тип, модель, Base URL, переменная API-ключа. Все поля можно изменить и сохранить.</li><li><strong>Delete</strong> — удаляет провайдера. Перед удалением система проверяет, не используется ли он как primary или fallback в задачах. Если используется — удаление невозможно (сначала переназначьте задачи).</li></ul>',
+
+    'help.configuration.testPhones.title': 'Тестовые номера',
+    'help.configuration.testPhones.content': '<p>Секция <strong>«Тестовые номера»</strong> позволяет управлять поведением AI-агента для определённых телефонных номеров:</p><ul><li><strong>Без истории</strong> — агент не получает историю предыдущих звонков. Звонок обрабатывается как первый (стандартное приветствие).</li><li><strong>С историей</strong> — обычное поведение, агент видит предыдущие звонки клиента.</li><li><strong>Очистить историю</strong> — удаляет все записи о звонках из базы данных (звонки, реплики, вызовы инструментов) и сбрасывает счётчик звонков клиента.</li></ul>',
 
     'help.configuration.affects.title': 'На что влияют изменения',
     'help.configuration.affects.content': '<div class="help-affects"><p><strong>Отключение провайдера</strong> — если он единственный для задачи и нет фоллбэков, задача перестанет работать.</p><p><strong>Смена модели</strong> — мгновенно влияет на все новые запросы. Более мощная модель = лучше качество, но дороже и медленнее.</p><p><strong>Маршрутизация задач</strong> — позволяет использовать дешёвые модели для некритичных задач (качество, скрапинг) и мощные — для диалогов с клиентами.</p><p><strong>Настройки TTS</strong> — новый голос/скорость/тональность применяются к новым звонкам; текущие звонки продолжают со старым голосом.</p><p><strong>Подсказки станций</strong> — район/ориентиры применяются к следующему вызову get_fitting_stations немедленно.</p></div>',

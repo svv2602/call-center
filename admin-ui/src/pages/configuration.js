@@ -9,6 +9,7 @@ import * as tw from '../tw.js';
 let _llmConfig = null;
 let _ttsConfig = null;
 let _taskSchedules = null;
+let _testPhones = {};
 
 // ═══════════════════════════════════════════════════════════
 //  Hot-reload конфиг
@@ -878,11 +879,143 @@ async function resetSchedules() {
     }
 }
 
+// ═══════════════════════════════════════════════════════════
+//  Test Phones
+// ═══════════════════════════════════════════════════════════
+async function loadTestPhones() {
+    const container = document.getElementById('testPhonesContainer');
+    if (!container) return;
+    container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+    try {
+        const data = await api('/admin/test-phones/config');
+        _testPhones = data.phones || {};
+        renderTestPhones();
+    } catch (e) {
+        container.innerHTML = `<div class="${tw.emptyState}">${t('settings.testPhonesLoadFailed', {error: escapeHtml(e.message)})}</div>`;
+    }
+}
+
+function renderTestPhones() {
+    const container = document.getElementById('testPhonesContainer');
+    if (!container) return;
+    const entries = Object.entries(_testPhones);
+
+    let html = `<div class="space-y-3">`;
+    if (entries.length > 0) {
+        html += `<table class="w-full text-sm">
+            <thead><tr class="text-left text-xs text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-700">
+                <th class="pb-2 font-medium">${t('settings.testPhonesNumber')}</th>
+                <th class="pb-2 font-medium">${t('settings.testPhonesMode')}</th>
+                <th class="pb-2 font-medium">${t('settings.testPhonesActions')}</th>
+            </tr></thead><tbody>`;
+        for (const [phone, mode] of entries) {
+            html += `<tr class="border-b border-neutral-100 dark:border-neutral-800">
+                <td class="py-2 font-mono text-neutral-900 dark:text-neutral-100">${escapeHtml(phone)}</td>
+                <td class="py-2">
+                    <select class="${tw.selectSm}" onchange="window._pages.configuration.updateTestPhoneMode('${escapeHtml(phone)}', this.value)">
+                        <option value="no_history" ${mode === 'no_history' ? 'selected' : ''}>${t('settings.testPhonesModeNoHistory')}</option>
+                        <option value="with_history" ${mode === 'with_history' ? 'selected' : ''}>${t('settings.testPhonesModeWithHistory')}</option>
+                    </select>
+                </td>
+                <td class="py-2">
+                    <div class="flex gap-1">
+                        <button class="${tw.btnSm} text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20" onclick="window._pages.configuration.clearPhoneHistory('${escapeHtml(phone)}')">${t('settings.testPhonesClearHistory')}</button>
+                        <button class="${tw.btnSm} text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20" onclick="window._pages.configuration.removeTestPhone('${escapeHtml(phone)}')">${t('common.delete')}</button>
+                    </div>
+                </td>
+            </tr>`;
+        }
+        html += `</tbody></table>`;
+    } else {
+        html += `<div class="text-sm text-neutral-400 dark:text-neutral-500 py-2">${t('settings.testPhonesEmpty')}</div>`;
+    }
+
+    // Add new phone form
+    html += `<div class="flex items-end gap-2 pt-2 border-t border-neutral-200 dark:border-neutral-700 mt-2">
+        <div>
+            <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.testPhonesNumber')}</label>
+            <input id="newTestPhone" type="text" placeholder="0501234567" class="${tw.inputSm} w-40 font-mono">
+        </div>
+        <div>
+            <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.testPhonesMode')}</label>
+            <select id="newTestPhoneMode" class="${tw.selectSm}">
+                <option value="no_history">${t('settings.testPhonesModeNoHistory')}</option>
+                <option value="with_history">${t('settings.testPhonesModeWithHistory')}</option>
+            </select>
+        </div>
+        <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.configuration.addTestPhone()">${t('common.add')}</button>
+    </div>`;
+
+    html += `</div>`;
+    container.innerHTML = html;
+}
+
+async function addTestPhone() {
+    const phoneInput = document.getElementById('newTestPhone');
+    const modeSelect = document.getElementById('newTestPhoneMode');
+    const phone = phoneInput?.value?.trim();
+    const mode = modeSelect?.value || 'no_history';
+    if (!phone) return;
+
+    try {
+        const data = await api('/admin/test-phones/config', {
+            method: 'PUT',
+            body: JSON.stringify({ phone, mode }),
+        });
+        _testPhones = data.phones;
+        renderTestPhones();
+        showToast(t('settings.testPhonesAdded', {phone: data.phone}), 'success');
+    } catch (e) {
+        showToast(t('settings.testPhonesSaveFailed', {error: e.message}), 'error');
+    }
+}
+
+async function updateTestPhoneMode(phone, mode) {
+    try {
+        const data = await api('/admin/test-phones/config', {
+            method: 'PUT',
+            body: JSON.stringify({ phone, mode }),
+        });
+        _testPhones = data.phones;
+        showToast(t('settings.testPhonesModeUpdated', {phone}), 'success');
+    } catch (e) {
+        showToast(t('settings.testPhonesSaveFailed', {error: e.message}), 'error');
+    }
+}
+
+async function removeTestPhone(phone) {
+    if (!confirm(t('settings.testPhonesRemoveConfirm', {phone}))) return;
+    try {
+        const data = await api(`/admin/test-phones/config/${encodeURIComponent(phone)}`, { method: 'DELETE' });
+        _testPhones = data.phones;
+        renderTestPhones();
+        showToast(t('settings.testPhonesRemoved', {phone}), 'success');
+    } catch (e) {
+        showToast(t('settings.testPhonesSaveFailed', {error: e.message}), 'error');
+    }
+}
+
+async function clearPhoneHistory(phone) {
+    if (!confirm(t('settings.testPhonesClearConfirm', {phone}))) return;
+    try {
+        const data = await api(`/admin/test-phones/clear-history/${encodeURIComponent(phone)}`, { method: 'POST' });
+        showToast(t('settings.testPhonesClearDone', {
+            phone: data.phone,
+            calls: data.calls_deleted,
+            turns: data.turns_deleted,
+            tools: data.tool_calls_deleted,
+        }), 'success');
+    } catch (e) {
+        showToast(t('settings.testPhonesClearFailed', {error: e.message}), 'error');
+    }
+}
+
 export function init() {
     registerPageLoader('configuration', () => {
         loadLLMConfig();
         loadTTSConfig();
         loadTaskSchedules();
+        loadTestPhones();
     });
 }
 
@@ -895,4 +1028,5 @@ window._pages.configuration = {
     saveSandboxDefaults,
     loadTTSConfig, saveTTSConfig, testTTS, resetTTSConfig,
     loadTaskSchedules, saveSchedule, runTask, resetSchedules, onFreqChange,
+    loadTestPhones, addTestPhone, updateTestPhoneMode, removeTestPhone, clearPhoneHistory,
 };

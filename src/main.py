@@ -56,6 +56,7 @@ from src.api.stt_config import router as stt_config_router
 from src.api.system import router as system_router
 from src.api.task_schedules import router as task_schedules_router
 from src.api.tenants import router as tenants_router
+from src.api.test_phones import router as test_phones_router
 from src.api.training_dialogues import router as training_dialogues_router
 from src.api.training_safety import router as training_safety_router
 from src.api.training_templates import router as training_templates_router
@@ -115,6 +116,7 @@ app.include_router(stt_config_router)
 app.include_router(system_router)
 app.include_router(task_schedules_router)
 app.include_router(tenants_router)
+app.include_router(test_phones_router)
 app.include_router(tts_config_router)
 app.include_router(training_dialogues_router)
 app.include_router(training_safety_router)
@@ -832,6 +834,21 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             if _call_logger is None or not session.caller_id:
                 return []
             try:
+                # Test phone override — skip history if configured
+                if _redis is not None:
+                    raw = await _redis.get("test:phones")
+                    if raw:
+                        from src.utils.phone import normalize_phone_ua
+
+                        phones = json.loads(
+                            raw.decode() if isinstance(raw, bytes) else raw
+                        )
+                        normalized = normalize_phone_ua(session.caller_id)
+                        if phones.get(normalized) == "no_history":
+                            logger.info(
+                                "Test phone %s: skipping history", session.caller_id
+                            )
+                            return []
                 return await _call_logger.get_caller_history(
                     session.caller_id, tenant_id=session.tenant_id
                 )

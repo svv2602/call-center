@@ -526,6 +526,26 @@ export default {
     'settings.taskDaySun': 'Sunday',
     'settings.taskLabel_catalog-full-sync': 'Full 1C Catalog Sync',
     'settings.taskLabel_refresh-stt-hints': 'STT Hints Refresh from Catalog',
+    // Test Phones
+    'settings.testPhones': 'Test Phones',
+    'settings.testPhonesDesc': 'Manage test phone numbers: enable/disable call history to test AI agent behavior.',
+    'settings.testPhonesLoad': 'Load',
+    'settings.testPhonesLoadFailed': 'Failed to load: {error}',
+    'settings.testPhonesNumber': 'Phone Number',
+    'settings.testPhonesMode': 'Mode',
+    'settings.testPhonesActions': 'Actions',
+    'settings.testPhonesModeNoHistory': 'No History',
+    'settings.testPhonesModeWithHistory': 'With History',
+    'settings.testPhonesClearHistory': 'Clear History',
+    'settings.testPhonesEmpty': 'No test phones configured',
+    'settings.testPhonesAdded': 'Phone {phone} added',
+    'settings.testPhonesModeUpdated': 'Mode for {phone} updated',
+    'settings.testPhonesSaveFailed': 'Save failed: {error}',
+    'settings.testPhonesRemoveConfirm': 'Remove {phone} from test phones?',
+    'settings.testPhonesRemoved': 'Phone {phone} removed',
+    'settings.testPhonesClearConfirm': 'Clear ALL call history for {phone}? This deletes calls, turns and tool calls from the database.',
+    'settings.testPhonesClearDone': 'History for {phone} cleared: {calls} calls, {turns} turns, {tools} tool calls',
+    'settings.testPhonesClearFailed': 'Clear failed: {error}',
     // Point Hints (standalone page)
     'nav.pointHints': 'Point Hints',
     'pointHints.title': 'Point Hints',
@@ -1573,6 +1593,9 @@ export default {
 
     'help.configuration.providerMgmt.title': 'Provider Management',
     'help.configuration.providerMgmt.content': '<p>Each provider in the table has <strong>"Edit"</strong> and <strong>"Delete"</strong> buttons:</p><ul><li><strong>Edit</strong> — opens a dialog to change type, model, Base URL, and API key env var. All fields can be modified and saved.</li><li><strong>Delete</strong> — removes the provider. Before deletion, the system checks whether it is used as primary or fallback in any task. If in use — deletion is blocked (reassign tasks first).</li></ul>',
+
+    'help.configuration.testPhones.title': 'Test Phones',
+    'help.configuration.testPhones.content': '<p>The <strong>"Test Phones"</strong> section lets you control AI agent behavior for specific phone numbers:</p><ul><li><strong>No History</strong> — the agent does not receive previous call history. The call is treated as the first one (standard greeting).</li><li><strong>With History</strong> — normal behavior, the agent sees the customer\'s previous calls.</li><li><strong>Clear History</strong> — deletes all call records from the database (calls, turns, tool calls) and resets the customer\'s call counter.</li></ul>',
 
     'help.configuration.affects.title': 'What changes affect',
     'help.configuration.affects.content': '<div class="help-affects"><p><strong>Disabling a provider</strong> — if it\'s the only one for a task with no fallbacks, that task will stop working.</p><p><strong>Changing model</strong> — instantly affects all new requests. A more powerful model = better quality, but more expensive and slower.</p><p><strong>Task routing</strong> — lets you use cheaper models for non-critical tasks (quality, scraping) and powerful ones for customer dialogues.</p><p><strong>TTS settings</strong> — new voice/rate/pitch apply to new calls; current calls continue with the old voice.</p><p><strong>Station hints</strong> — district/landmarks apply to the next get_fitting_stations call immediately.</p></div>',
