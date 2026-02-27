@@ -243,8 +243,18 @@ class StreamingAgentLoop:
                 disconnected = True
                 break
 
-            # No tool calls → done
+            # No tool calls → done (or retry if empty)
             if not result.tool_calls:
+                if not result.spoken_text and not spoken_parts and tool_round == 0:
+                    # LLM returned empty on first round — retry once
+                    logger.warning(
+                        "Empty LLM response (0 text, 0 tools), "
+                        "stop=%s, out_tokens=%d — retrying",
+                        result.stop_reason,
+                        result.usage.output_tokens,
+                    )
+                    tool_round += 1
+                    continue
                 break
 
             # Deduplicate tool calls (same name + same args → skip)
