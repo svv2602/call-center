@@ -74,15 +74,29 @@ details[open] .details-chevron { transform: rotate(90deg); }
   padding: 0 1.5rem 1.5rem;
 }
 
-/* Mobile sidebar slide-in */
+/* Mobile sidebar slide-in + backdrop */
 @media (max-width: 768px) {
   .sidebar {
     transform: translateX(-100%);
     transition: transform 0.3s ease;
+    z-index: 40;
   }
   .sidebar.open {
     transform: translateX(0);
   }
+  .sidebar-backdrop {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.4);
+    z-index: 39;
+  }
+  .sidebar.open ~ .sidebar-backdrop {
+    display: block;
+  }
+}
+@media (min-width: 769px) {
+  .sidebar-backdrop { display: none !important; }
 }
 
 /* === Icon-only sidebar === */
@@ -434,11 +448,26 @@ thead th::after {
   /* Mobile-only cells (hidden on desktop, shown on mobile) */
   .mobile-only-cell { display: flex !important; }
 
-  /* --- (b) Tab bar horizontal scroll --- */
+  /* --- (b) Tab bar horizontal scroll with fade indicator --- */
   .tab-bar {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;         /* Firefox */
+    position: relative;
+    mask-image: linear-gradient(to right, black 85%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, black 85%, transparent 100%);
+  }
+  .tab-bar.scrolled-end {
+    mask-image: linear-gradient(to left, black 85%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to left, black 85%, transparent 100%);
+  }
+  .tab-bar.scrolled-mid {
+    mask-image: linear-gradient(to right, transparent 0%, black 10%, black 85%, transparent 100%);
+    -webkit-mask-image: linear-gradient(to right, transparent 0%, black 10%, black 85%, transparent 100%);
+  }
+  .tab-bar.no-overflow {
+    mask-image: none;
+    -webkit-mask-image: none;
   }
   .tab-bar::-webkit-scrollbar { display: none; }
   .tab-bar button {
@@ -456,8 +485,22 @@ thead th::after {
 
   /* --- (d) Touch targets --- */
   input[type="checkbox"] {
-    width: 1.25rem;
-    height: 1.25rem;
+    width: 1.5rem;
+    height: 1.5rem;
+    min-width: 1.5rem;
+    min-height: 1.5rem;
+  }
+
+  /* --- (g) Full-screen modals on mobile --- */
+  .modal-overlay .modal-box {
+    width: 100vw !important;
+    max-width: 100vw !important;
+    min-height: 100vh;
+    border-radius: 0;
+    margin: 0;
+  }
+  .modal-overlay {
+    align-items: stretch;
   }
 
   /* --- (e) Sandbox split layout --- */

@@ -27,6 +27,8 @@ export default {
     'common.skipToContent': 'Skip to content',
     'common.lastUpdated': 'Updated:',
     'common.unsavedChanges': 'You have unsaved changes. Leave page?',
+    'common.filtersActive': '{count} filter(s) active',
+    'common.resetFilters': 'Reset filters',
 
     // Accessibility
     'nav.ariaMainNav': 'Main navigation',

@@ -1,13 +1,13 @@
 # Прогресс выполнения
 
 ## Текущий статус
-- **Последнее обновление:** 2026-02-27 23:00
-- **Текущая фаза:** 5 из 7
+- **Последнее обновление:** 2026-02-27 23:30
+- **Текущая фаза:** 6 из 7
 - **Статус фазы:** не начата
-- **Общий прогресс:** 163/287 задач (57%)
+- **Общий прогресс:** 201/287 задач (70%)
 
 ## Как продолжить работу
-1. Открой файл текущей фазы: `phase-05-responsive-mobile.md`
+1. Открой файл текущей фазы: `phase-06-performance-session.md`
 2. Найди первую незавершённую задачу (без [x])
 3. Выполни задачу
 4. Отметь [x] в чекбоксе
@@ -21,7 +21,7 @@
 | 2. Focus management & keyboard | `phase-02-focus-and-keyboard.md` | 44 | завершена |
 | 3. Interactive patterns | `phase-03-interactive-patterns.md` | 42 | завершена |
 | 4. Feedback & notifications | `phase-04-feedback-and-notifications.md` | 39 | завершена |
-| 5. Responsive & mobile | `phase-05-responsive-mobile.md` | 38 | не начата |
+| 5. Responsive & mobile | `phase-05-responsive-mobile.md` | 38 | завершена |
 | 6. Performance & session | `phase-06-performance-session.md` | 45 | не начата |
 | 7. i18n & help | `phase-07-i18n-and-help.md` | 41 | не начата |
 
@@ -33,3 +33,4 @@
 | 2026-02-27 | Фаза 2 завершена: focus-trap.js, MutationObserver для модалок, dropdown-keyboard.js, sidebar arrow-keys, help drawer focus trap |
 | 2026-02-27 | Фаза 3 завершена: withButtonLock spinner+aria-busy, sticky table headers, form-guard.js (unsaved changes), scroll-to-top, updateTimestamp, resetModalForm |
 | 2026-02-27 | Фаза 4 завершена: toast warning/info/dismiss/animations/max5, skeleton.js (table/cards/text), friendly HTTP errors, confirmAction dialog |
+| 2026-02-27 | Фаза 5 завершена: sidebar backdrop, full-screen mobile modals, tab-bar scroll fade, checkbox touch targets, filter i18n keys |

@@ -154,6 +154,10 @@ requestAnimationFrame(() => {
 function toggleSidebar() {
     document.getElementById('sidebar').classList.toggle('open');
 }
+// Close sidebar when tapping backdrop on mobile
+document.getElementById('sidebarBackdrop')?.addEventListener('click', () => {
+    document.getElementById('sidebar').classList.remove('open');
+});
 
 // Expand/collapse sidebar (icon-only ↔ full)
 function toggleSidebarExpand() {
@@ -247,6 +251,30 @@ function toggleAccordion(btn) {
         card.dataset.open = 'true';
     }
 }
+
+// Tab-bar scroll fade indicator
+function _initTabBarFade() {
+    document.querySelectorAll('.tab-bar').forEach(bar => {
+        function update() {
+            const { scrollLeft, scrollWidth, clientWidth } = bar;
+            if (scrollWidth <= clientWidth) {
+                bar.classList.add('no-overflow');
+                bar.classList.remove('scrolled-end', 'scrolled-mid');
+            } else {
+                bar.classList.remove('no-overflow');
+                const atEnd = scrollLeft + clientWidth >= scrollWidth - 4;
+                const atStart = scrollLeft <= 4;
+                bar.classList.toggle('scrolled-end', atEnd && !atStart);
+                bar.classList.toggle('scrolled-mid', !atEnd && !atStart);
+            }
+        }
+        bar.addEventListener('scroll', update, { passive: true });
+        // Initial check (may run before content, so also observe)
+        requestAnimationFrame(update);
+        new MutationObserver(update).observe(bar, { childList: true });
+    });
+}
+requestAnimationFrame(_initTabBarFade);
 
 // Expose globals for onclick handlers in HTML
 window._app = { login, logout, showPage, closeModal, toggleSidebar, toggleSidebarExpand, toggleTheme, toggleLang, toggleSidebarGroup, openHelp, closeHelp, toggleAccordion };

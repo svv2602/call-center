@@ -27,6 +27,8 @@ export default {
     'common.skipToContent': 'Перейти к содержимому',
     'common.lastUpdated': 'Обновлено:',
     'common.unsavedChanges': 'У вас есть несохранённые изменения. Покинуть страницу?',
+    'common.filtersActive': '{count} фильтр(ов) активно',
+    'common.resetFilters': 'Сбросить фильтры',
 
     // Accessibility
     'nav.ariaMainNav': 'Главная навигация',
