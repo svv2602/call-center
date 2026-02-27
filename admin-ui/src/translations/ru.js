@@ -3,6 +3,7 @@ export default {
     'common.retry': 'Повторить',
     'common.save': 'Сохранить',
     'common.cancel': 'Отмена',
+    'common.close': 'Закрыть',
     'common.add': 'Добавить',
     'common.create': 'Создать',
     'common.edit': 'Редактировать',

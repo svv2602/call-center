@@ -3,6 +3,7 @@ export default {
     'common.retry': 'Retry',
     'common.save': 'Save',
     'common.cancel': 'Cancel',
+    'common.close': 'Close',
     'common.add': 'Add',
     'common.create': 'Create',
     'common.edit': 'Edit',
