@@ -11,7 +11,25 @@ const _BASE_INTERVAL = 30_000;  // 30s normal refresh
 const _MAX_INTERVAL = 300_000;  // 5min max backoff
 let _currentInterval = _BASE_INTERVAL;
 let _selectedTenantId = '';
+let _selectedPeriod = 'today'; // today | 7d | 30d | all
 let _tenants = [];
+
+function _periodDates() {
+    const today = new Date();
+    const fmt = d => d.toISOString().split('T')[0];
+    const dt = fmt(today);
+    if (_selectedPeriod === 'all') return {};
+    if (_selectedPeriod === '30d') {
+        const d = new Date(today); d.setDate(d.getDate() - 30);
+        return { date_from: fmt(d), date_to: dt };
+    }
+    if (_selectedPeriod === '7d') {
+        const d = new Date(today); d.setDate(d.getDate() - 7);
+        return { date_from: fmt(d), date_to: dt };
+    }
+    // today
+    return { date_from: dt, date_to: dt };
+}
 
 async function _loadTenants() {
     if (!hasPermission('tenants:read')) { _tenants = []; return; }
@@ -26,7 +44,7 @@ async function _loadTenants() {
 function _renderTenantFilter() {
     const container = document.getElementById('dashboardTenantFilter');
     if (!container) return;
-    let html = `<label class="text-sm font-medium text-neutral-600 dark:text-neutral-400 mr-2">${t('dashboard.filterByNetwork')}</label>`;
+    let html = `<label class="text-sm font-medium text-neutral-600 dark:text-neutral-400">${t('dashboard.filterByNetwork')}</label>`;
     html += `<select id="dashboardTenantSelect" class="${tw.selectSm} w-auto" onchange="window._pages.dashboard.onTenantChange(this.value)">`;
     html += `<option value="">${t('dashboard.allNetworks')}</option>`;
     for (const ten of _tenants) {
@@ -37,8 +55,36 @@ function _renderTenantFilter() {
     container.innerHTML = html;
 }
 
+function _renderPeriodFilter() {
+    const container = document.getElementById('dashboardPeriodFilter');
+    if (!container) return;
+    const periods = [
+        { key: 'today', label: t('dashboard.periodToday') },
+        { key: '7d', label: t('dashboard.period7d') },
+        { key: '30d', label: t('dashboard.period30d') },
+        { key: 'all', label: t('dashboard.periodAll') },
+    ];
+    let html = `<label class="text-sm font-medium text-neutral-600 dark:text-neutral-400">${t('dashboard.period')}</label>`;
+    html += '<div class="inline-flex rounded-md border border-neutral-300 dark:border-neutral-700 overflow-hidden">';
+    for (const p of periods) {
+        const active = p.key === _selectedPeriod;
+        const cls = active
+            ? 'bg-blue-600 text-white'
+            : 'bg-white dark:bg-neutral-800 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-700';
+        html += `<button class="px-2.5 py-1 text-xs font-medium transition-colors cursor-pointer ${cls}" onclick="window._pages.dashboard.onPeriodChange('${p.key}')">${p.label}</button>`;
+    }
+    html += '</div>';
+    container.innerHTML = html;
+}
+
 function onTenantChange(tenantId) {
     _selectedTenantId = tenantId;
+    loadDashboard();
+}
+
+function onPeriodChange(period) {
+    _selectedPeriod = period;
+    _renderPeriodFilter();
     loadDashboard();
 }
 
@@ -56,22 +102,39 @@ async function loadDashboard() {
     }
 
     try {
-        const params = _selectedTenantId ? `?tenant_id=${_selectedTenantId}` : '';
-        const data = await api(`/analytics/summary${params}`);
+        const qp = new URLSearchParams();
+        if (_selectedTenantId) qp.set('tenant_id', _selectedTenantId);
+        const dates = _periodDates();
+        if (dates.date_from) qp.set('date_from', dates.date_from);
+        if (dates.date_to) qp.set('date_to', dates.date_to);
+        const qs = qp.toString() ? `?${qp}` : '';
+
+        const data = await api(`/analytics/summary${qs}`);
         const stats = data.daily_stats || [];
-        const latest = stats[0] || {};
-        const total = latest.total_calls || 0;
-        const resolved = latest.resolved_by_bot || 0;
-        const resolvedPct = total > 0 ? (resolved / total * 100).toFixed(1) : '0.0';
 
         _renderTenantFilter();
+        _renderPeriodFilter();
+
+        // Aggregate across all returned days
+        const totalCalls = stats.reduce((s, d) => s + (d.total_calls || 0), 0);
+        const resolved = stats.reduce((s, d) => s + (d.resolved_by_bot || 0), 0);
+        const transferred = stats.reduce((s, d) => s + (d.transferred || 0), 0);
+        const totalCost = stats.reduce((s, d) => s + (parseFloat(d.total_cost_usd) || 0), 0);
+        const qualitySum = stats.reduce((s, d) => s + (d.avg_quality_score || 0), 0);
+        const qualityCount = stats.filter(d => d.avg_quality_score != null).length || 1;
+        const avgQuality = qualitySum / qualityCount;
+        const resolvedPct = totalCalls > 0 ? (resolved / totalCalls * 100).toFixed(1) : '0.0';
+
+        const isToday = _selectedPeriod === 'today';
+        const callsLabel = isToday ? t('dashboard.callsToday') : t('dashboard.calls');
+        const costLabel = isToday ? t('dashboard.costToday') : t('dashboard.cost');
 
         document.getElementById('dashboardStats').innerHTML = `
-            <div class="${tw.card} text-center"><div class="${tw.statValue}">${total}</div><div class="${tw.statLabel}">${t('dashboard.callsToday')}</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">${totalCalls}</div><div class="${tw.statLabel}">${callsLabel}</div></div>
             <div class="${tw.card} text-center"><div class="${tw.statValue}">${resolved}<small class="text-xs text-neutral-500 dark:text-neutral-400"> (${resolvedPct}%)</small></div><div class="${tw.statLabel}">${t('dashboard.resolvedByBot')}</div></div>
-            <div class="${tw.card} text-center"><div class="${tw.statValue}">${latest.transferred || 0}</div><div class="${tw.statLabel}">${t('dashboard.transferred')}</div></div>
-            <div class="${tw.card} text-center"><div class="${tw.statValue}">${(latest.avg_quality_score || 0).toFixed(2)}</div><div class="${tw.statLabel}">${t('dashboard.avgQuality')}</div></div>
-            <div class="${tw.card} text-center"><div class="${tw.statValue}">$${(latest.total_cost_usd || 0).toFixed(2)}</div><div class="${tw.statLabel}">${t('dashboard.costToday')}</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">${transferred}</div><div class="${tw.statLabel}">${t('dashboard.transferred')}</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">${avgQuality.toFixed(2)}</div><div class="${tw.statLabel}">${t('dashboard.avgQuality')}</div></div>
+            <div class="${tw.card} text-center"><div class="${tw.statValue}">$${totalCost.toFixed(2)}</div><div class="${tw.statLabel}">${costLabel}</div></div>
         `;
         updateTimestamp('dashboardLastUpdated');
         // Reset backoff on success
@@ -107,8 +170,14 @@ function _activateGrafana() {
 
 async function exportStatsCSV() {
     try {
-        const params = _selectedTenantId ? `?tenant_id=${_selectedTenantId}` : '';
-        const res = await fetchWithAuth(`/analytics/summary/export${params}`);
+        const qp = new URLSearchParams();
+        if (_selectedTenantId) qp.set('tenant_id', _selectedTenantId);
+        const dates = _periodDates();
+        if (dates.date_from) qp.set('date_from', dates.date_from);
+        if (dates.date_to) qp.set('date_to', dates.date_to);
+        const qs = qp.toString() ? `?${qp}` : '';
+
+        const res = await fetchWithAuth(`/analytics/summary/export${qs}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const blob = await res.blob();
         const disposition = res.headers.get('Content-Disposition') || '';
@@ -122,11 +191,12 @@ async function exportStatsCSV() {
 }
 
 async function downloadPdfReport() {
+    const dates = _periodDates();
+    // PDF always needs a date range — default to last 7 days if "all"
     const today = new Date();
-    const weekAgo = new Date(today);
-    weekAgo.setDate(weekAgo.getDate() - 7);
-    const df = weekAgo.toISOString().split('T')[0];
-    const dt = today.toISOString().split('T')[0];
+    const fmt = d => d.toISOString().split('T')[0];
+    const df = dates.date_from || (() => { const d = new Date(today); d.setDate(d.getDate() - 7); return fmt(d); })();
+    const dt = dates.date_to || fmt(today);
     try {
         const res = await fetchWithAuth(`/analytics/report/pdf?date_from=${df}&date_to=${dt}`);
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -150,6 +220,7 @@ export function init() {
 
         await _loadTenants();
         _renderTenantFilter();
+        _renderPeriodFilter();
         _activateGrafana();
         loadDashboard();
         if (canAnalytics) setRefreshTimer(loadDashboard, 30000);
@@ -158,4 +229,4 @@ export function init() {
 
 // Expose for onclick handlers in HTML
 window._pages = window._pages || {};
-window._pages.dashboard = { loadDashboard, exportStatsCSV, downloadPdfReport, onTenantChange };
+window._pages.dashboard = { loadDashboard, exportStatsCSV, downloadPdfReport, onTenantChange, onPeriodChange };
