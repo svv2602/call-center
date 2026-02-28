@@ -55,6 +55,7 @@ const PAGE_PERMISSIONS = {
     users: 'users:read',
     audit: 'audit:read',
     vehicles: 'vehicles:read',
+    'cost-analysis': 'analytics:read',
     'onec-data': 'onec_data:read',
     'stt-hints': 'stt_hints:read',
     'point-hints': 'point_hints:read',
