@@ -345,63 +345,37 @@ async def get_summary(
     """Aggregated daily statistics from daily_stats table or live from calls."""
     engine = await _get_engine()
 
-    # When tenant_id is provided, aggregate live from calls (daily_stats has no tenant column)
-    if tenant_id:
-        conditions = ["1=1"]
-        params: dict[str, Any] = {"limit": limit, "tenant_id": tenant_id}
-        conditions.append("tenant_id = CAST(:tenant_id AS uuid)")
-
-        if date_from:
-            conditions.append("started_at >= :date_from")
-            params["date_from"] = date_type.fromisoformat(date_from)
-        if date_to:
-            conditions.append("started_at < :date_to_end")
-            params["date_to_end"] = date_type.fromisoformat(date_to) + timedelta(days=1)
-
-        where_clause = " AND ".join(conditions)
-
-        async with engine.begin() as conn:
-            result = await conn.execute(
-                text(f"""
-                    SELECT
-                        DATE(started_at) AS stat_date,
-                        COUNT(*) AS total_calls,
-                        COUNT(*) FILTER (WHERE NOT transferred_to_operator) AS resolved_by_bot,
-                        COUNT(*) FILTER (WHERE transferred_to_operator) AS transferred,
-                        AVG(duration_seconds) AS avg_duration_seconds,
-                        AVG(quality_score) AS avg_quality_score,
-                        SUM(total_cost_usd) AS total_cost_usd
-                    FROM calls
-                    WHERE {where_clause}
-                    GROUP BY DATE(started_at)
-                    ORDER BY stat_date DESC
-                    LIMIT :limit
-                """),
-                params,
-            )
-            stats = [dict(row._mapping) for row in result]
-
-        return {"daily_stats": stats}
-
-    # Default: use daily_stats table
+    # Always aggregate live from calls table (daily_stats may be empty)
     conditions = ["1=1"]
-    params = {"limit": limit}
+    params: dict[str, Any] = {"limit": limit}
+
+    if tenant_id:
+        conditions.append("tenant_id = CAST(:tenant_id AS uuid)")
+        params["tenant_id"] = tenant_id
 
     if date_from:
-        conditions.append("stat_date >= :date_from")
+        conditions.append("started_at >= :date_from")
         params["date_from"] = date_type.fromisoformat(date_from)
     if date_to:
-        conditions.append("stat_date <= :date_to")
-        params["date_to"] = date_type.fromisoformat(date_to)
+        conditions.append("started_at < :date_to_end")
+        params["date_to_end"] = date_type.fromisoformat(date_to) + timedelta(days=1)
 
     where_clause = " AND ".join(conditions)
 
     async with engine.begin() as conn:
         result = await conn.execute(
             text(f"""
-                SELECT *
-                FROM daily_stats
+                SELECT
+                    DATE(started_at) AS stat_date,
+                    COUNT(*) AS total_calls,
+                    COUNT(*) FILTER (WHERE NOT transferred_to_operator) AS resolved_by_bot,
+                    COUNT(*) FILTER (WHERE transferred_to_operator) AS transferred,
+                    AVG(duration_seconds) AS avg_duration_seconds,
+                    AVG(quality_score) AS avg_quality_score,
+                    SUM(total_cost_usd) AS total_cost_usd
+                FROM calls
                 WHERE {where_clause}
+                GROUP BY DATE(started_at)
                 ORDER BY stat_date DESC
                 LIMIT :limit
             """),

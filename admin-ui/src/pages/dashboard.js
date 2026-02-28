@@ -95,8 +95,8 @@ function _activateGrafana() {
         const grafanaBlock = document.getElementById('grafanaBlock');
         const grafanaFrame = document.getElementById('grafanaFrame');
         if (!grafanaBlock || !grafanaFrame) return;
-        const baseUrl = window.location.origin.replace(/:\d+$/, ':3000');
-        const dashPath = '/d/calls-overview/calls-overview?orgId=1&refresh=30s&kiosk';
+        const baseUrl = window.location.origin;
+        const dashPath = '/grafana/d/calls-overview/calls-overview?orgId=1&refresh=30s&kiosk';
         grafanaFrame.onerror = () => { grafanaBlock.style.display = 'none'; };
         grafanaFrame.src = baseUrl + dashPath;
         grafanaBlock.style.display = '';

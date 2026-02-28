@@ -10,6 +10,7 @@ import json
 import logging
 from collections import Counter
 from datetime import date as date_type
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 
@@ -34,14 +35,23 @@ async def _fetch_report_data(
         result = await conn.execute(
             text("""
                 SELECT
-                    stat_date, total_calls, resolved_by_bot, transferred,
-                    avg_duration_seconds, avg_quality_score, total_cost_usd,
-                    transfer_reasons
-                FROM daily_stats
-                WHERE stat_date >= :date_from AND stat_date <= :date_to
+                    DATE(started_at) AS stat_date,
+                    COUNT(*) AS total_calls,
+                    COUNT(*) FILTER (WHERE NOT transferred_to_operator) AS resolved_by_bot,
+                    COUNT(*) FILTER (WHERE transferred_to_operator) AS transferred,
+                    AVG(duration_seconds) AS avg_duration_seconds,
+                    AVG(quality_score) AS avg_quality_score,
+                    SUM(total_cost_usd) AS total_cost_usd,
+                    NULL AS transfer_reasons
+                FROM calls
+                WHERE started_at >= :date_from AND started_at < :date_to_end
+                GROUP BY DATE(started_at)
                 ORDER BY stat_date
             """),
-            {"date_from": date_type.fromisoformat(date_from), "date_to": date_type.fromisoformat(date_to)},
+            {
+                "date_from": date_type.fromisoformat(date_from),
+                "date_to_end": date_type.fromisoformat(date_to) + timedelta(days=1),
+            },
         )
         rows = [dict(row._mapping) for row in result]
 

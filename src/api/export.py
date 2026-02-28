@@ -177,66 +177,42 @@ async def export_summary_csv(
     """Export daily statistics as CSV."""
     engine = await _get_engine()
 
-    # When tenant_id is provided, aggregate from calls table
+    # Always aggregate from calls table (daily_stats may be empty)
+    conditions = ["1=1"]
+    params: dict[str, Any] = {"limit": _MAX_EXPORT_ROWS}
+
     if tenant_id:
-        conditions = ["tenant_id = CAST(:tenant_id AS uuid)"]
-        params: dict[str, Any] = {"tenant_id": tenant_id, "limit": _MAX_EXPORT_ROWS}
-        if date_from:
-            conditions.append("started_at >= :date_from")
-            params["date_from"] = date_type.fromisoformat(date_from)
-        if date_to:
-            conditions.append("started_at < :date_to_end")
-            params["date_to_end"] = date_type.fromisoformat(date_to) + timedelta(days=1)
-        where_clause = " AND ".join(conditions)
+        conditions.append("tenant_id = CAST(:tenant_id AS uuid)")
+        params["tenant_id"] = tenant_id
+    if date_from:
+        conditions.append("started_at >= :date_from")
+        params["date_from"] = date_type.fromisoformat(date_from)
+    if date_to:
+        conditions.append("started_at < :date_to_end")
+        params["date_to_end"] = date_type.fromisoformat(date_to) + timedelta(days=1)
 
-        async with engine.begin() as conn:
-            result = await conn.execute(
-                text(f"""
-                    SELECT
-                        DATE(started_at) AS stat_date,
-                        COUNT(*) AS total_calls,
-                        COUNT(*) FILTER (WHERE NOT transferred_to_operator) AS resolved_by_bot,
-                        COUNT(*) FILTER (WHERE transferred_to_operator) AS transferred,
-                        AVG(duration_seconds) AS avg_duration_seconds,
-                        AVG(quality_score) AS avg_quality_score,
-                        SUM(total_cost_usd) AS total_cost_usd
-                    FROM calls
-                    WHERE {where_clause}
-                    GROUP BY DATE(started_at)
-                    ORDER BY stat_date DESC
-                    LIMIT :limit
-                """),
-                params,
-            )
-            rows_raw = [dict(row._mapping) for row in result]
-    else:
-        conditions = ["1=1"]
-        params = {}
+    where_clause = " AND ".join(conditions)
 
-        if date_from:
-            conditions.append("stat_date >= :date_from")
-            params["date_from"] = date_type.fromisoformat(date_from)
-        if date_to:
-            conditions.append("stat_date <= :date_to")
-            params["date_to"] = date_type.fromisoformat(date_to)
-
-        where_clause = " AND ".join(conditions)
-
-        async with engine.begin() as conn:
-            result = await conn.execute(
-                text(f"""
-                    SELECT
-                        stat_date, total_calls, resolved_by_bot, transferred,
-                        avg_duration_seconds, avg_quality_score, total_cost_usd,
-                        scenario_breakdown
-                    FROM daily_stats
-                    WHERE {where_clause}
-                    ORDER BY stat_date DESC
-                    LIMIT :limit
-                """),
-                {**params, "limit": _MAX_EXPORT_ROWS},
-            )
-            rows_raw = [dict(row._mapping) for row in result]
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(f"""
+                SELECT
+                    DATE(started_at) AS stat_date,
+                    COUNT(*) AS total_calls,
+                    COUNT(*) FILTER (WHERE NOT transferred_to_operator) AS resolved_by_bot,
+                    COUNT(*) FILTER (WHERE transferred_to_operator) AS transferred,
+                    AVG(duration_seconds) AS avg_duration_seconds,
+                    AVG(quality_score) AS avg_quality_score,
+                    SUM(total_cost_usd) AS total_cost_usd
+                FROM calls
+                WHERE {where_clause}
+                GROUP BY DATE(started_at)
+                ORDER BY stat_date DESC
+                LIMIT :limit
+            """),
+            params,
+        )
+        rows_raw = [dict(row._mapping) for row in result]
 
     import json
 
