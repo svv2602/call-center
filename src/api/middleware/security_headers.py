@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from starlette.responses import Response
 
 # CSP allows inline styles/scripts for admin UI (single-page HTML)
+# frame-src 'self' allows embedding Grafana via /grafana/ reverse proxy
 _CSP = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline'; "
@@ -29,7 +30,8 @@ _CSP = (
     "media-src 'self' data:; "
     "font-src 'self'; "
     "connect-src 'self'; "
-    "frame-ancestors 'none'"
+    "frame-src 'self'; "
+    "frame-ancestors 'self'"
 )
 
 
