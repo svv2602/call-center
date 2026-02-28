@@ -8,6 +8,7 @@ import os
 import signal
 import sys
 from datetime import UTC, datetime, timedelta
+from datetime import date as date_type
 from pathlib import Path
 from typing import Any
 
@@ -1344,6 +1345,29 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 "Поверніся до чеклісту і запитай у клієнта відсутні дані.",
             }
 
+        # Server-side validation: booking date must be tomorrow .. +21 days
+        booking_date_str = _resolve_date(kwargs.get("date", ""))
+        if booking_date_str:
+            try:
+                booking_date = date_type.fromisoformat(booking_date_str)
+                today_date = datetime.now(tz=UTC).date()
+                if booking_date <= today_date:
+                    return {
+                        "error": True,
+                        "message": "На сьогодні онлайн-запис недоступний. "
+                        "Запропонуй клієнту запис починаючи з завтрашнього дня, "
+                        "або порадь зателефонувати на шиномонтаж для запису на сьогодні.",
+                    }
+                max_date = today_date + timedelta(days=21)
+                if booking_date > max_date:
+                    return {
+                        "error": True,
+                        "message": "Бронювання доступне лише на найближчі 3 тижні. "
+                        "Запропонуй клієнту обрати дату в межах трьох тижнів.",
+                    }
+            except ValueError:
+                pass
+
         if _soap_client is not None:
             try:
                 result = await _soap_client.book_fitting(
@@ -1606,9 +1630,28 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
     async def _get_fitting_slots(**kwargs: Any) -> Any:
         """Get fitting slots: try SOAP, fallback to Store API."""
         station_id = kwargs.get("station_id", "")
-        today = datetime.now(tz=UTC).date().isoformat()
+        today_date = datetime.now(tz=UTC).date()
+        today = today_date.isoformat()
         date_from = _resolve_date(kwargs.get("date_from", "")) or today
         date_to = _resolve_date(kwargs.get("date_to", "")) or date_from
+
+        # Validate booking date range: tomorrow .. +21 days
+        try:
+            d_from = date_type.fromisoformat(date_from)
+            max_date = today_date + timedelta(days=21)
+            if d_from <= today_date:
+                date_from = (today_date + timedelta(days=1)).isoformat()
+            if d_from > max_date:
+                return {
+                    "station_id": station_id,
+                    "error": "Бронювання доступне лише на найближчі 3 тижні.",
+                    "slots": [],
+                }
+            d_to = date_type.fromisoformat(date_to)
+            if d_to > max_date:
+                date_to = max_date.isoformat()
+        except ValueError:
+            pass
 
         if _soap_client is not None:
             try:
