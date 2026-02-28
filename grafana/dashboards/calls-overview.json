@@ -27,7 +27,7 @@
         },
         "query": "SELECT slug AS __text, id::text AS __value FROM tenants WHERE is_active = true ORDER BY name",
         "includeAll": true,
-        "allValue": "",
+        "allValue": "all",
         "current": {
           "selected": true,
           "text": "All",
@@ -54,7 +54,7 @@
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT DATE_TRUNC('day', c.started_at) AS time, COALESCE(t.name, 'Unknown') AS tenant, COUNT(*) AS calls FROM calls c LEFT JOIN tenants t ON c.tenant_id = t.id WHERE c.started_at BETWEEN $__timeFrom() AND $__timeTo() AND ('$tenant' = '' OR '$tenant' = '$__all' OR c.tenant_id::text = '$tenant') GROUP BY 1, 2 ORDER BY 1",
+          "rawSql": "SELECT DATE_TRUNC('day', c.started_at) AS time, COALESCE(t.name, 'Unknown') AS tenant, COUNT(*) AS calls FROM calls c LEFT JOIN tenants t ON c.tenant_id = t.id WHERE c.started_at BETWEEN $__timeFrom() AND $__timeTo() AND ('${tenant}' = 'all' OR c.tenant_id::text = '${tenant}') GROUP BY 1, 2 ORDER BY 1",
           "format": "time_series"
         }
       ],
@@ -77,7 +77,7 @@
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT COUNT(*) AS total FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND ('$tenant' = '' OR '$tenant' = '$__all' OR tenant_id::text = '$tenant')",
+          "rawSql": "SELECT COUNT(*) AS total FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND ('${tenant}' = 'all' OR tenant_id::text = '${tenant}')",
           "format": "table"
         }
       ],
@@ -104,7 +104,7 @@
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE transferred_to_operator) / NULLIF(COUNT(*), 0), 1) AS pct FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND ('$tenant' = '' OR '$tenant' = '$__all' OR tenant_id::text = '$tenant')",
+          "rawSql": "SELECT ROUND(100.0 * COUNT(*) FILTER (WHERE transferred_to_operator) / NULLIF(COUNT(*), 0), 1) AS pct FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND ('${tenant}' = 'all' OR tenant_id::text = '${tenant}')",
           "format": "table"
         }
       ],
@@ -133,7 +133,7 @@
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT ROUND(AVG(duration_seconds)) AS avg_sec FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND ('$tenant' = '' OR '$tenant' = '$__all' OR tenant_id::text = '$tenant')",
+          "rawSql": "SELECT ROUND(AVG(duration_seconds)) AS avg_sec FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND ('${tenant}' = 'all' OR tenant_id::text = '${tenant}')",
           "format": "table"
         }
       ],
@@ -162,7 +162,7 @@
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT ROUND(AVG(total_cost_usd)::numeric, 3) AS avg_cost FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND total_cost_usd IS NOT NULL AND ('$tenant' = '' OR '$tenant' = '$__all' OR tenant_id::text = '$tenant')",
+          "rawSql": "SELECT ROUND(AVG(total_cost_usd)::numeric, 3) AS avg_cost FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND total_cost_usd IS NOT NULL AND ('${tenant}' = 'all' OR tenant_id::text = '${tenant}')",
           "format": "table"
         }
       ],
@@ -192,7 +192,7 @@
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT quality_score FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND quality_score IS NOT NULL AND ('$tenant' = '' OR '$tenant' = '$__all' OR tenant_id::text = '$tenant')",
+          "rawSql": "SELECT quality_score FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND quality_score IS NOT NULL AND ('${tenant}' = 'all' OR tenant_id::text = '${tenant}')",
           "format": "table"
         }
       ],
@@ -219,7 +219,7 @@
       "targets": [
         {
           "refId": "A",
-          "rawSql": "SELECT COALESCE(scenario, 'unknown') AS scenario, COUNT(*) AS count FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND ('$tenant' = '' OR '$tenant' = '$__all' OR tenant_id::text = '$tenant') GROUP BY scenario ORDER BY count DESC",
+          "rawSql": "SELECT COALESCE(scenario, 'unknown') AS scenario, COUNT(*) AS count FROM calls WHERE started_at BETWEEN $__timeFrom() AND $__timeTo() AND ('${tenant}' = 'all' OR tenant_id::text = '${tenant}') GROUP BY scenario ORDER BY count DESC",
           "format": "table"
         }
       ],
