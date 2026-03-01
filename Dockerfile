@@ -1,5 +1,5 @@
 # ---- Admin UI build stage ----
-FROM node:20-slim AS ui-builder
+FROM node:25-slim AS ui-builder
 
 WORKDIR /ui
 COPY admin-ui/package.json admin-ui/package-lock.json* ./
