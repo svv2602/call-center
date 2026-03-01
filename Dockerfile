@@ -8,7 +8,7 @@ COPY admin-ui/ ./
 RUN npm run build
 
 # ---- Builder stage ----
-FROM python:3.12-slim AS builder
+FROM python:3.14-slim AS builder
 
 WORKDIR /build
 
@@ -24,7 +24,7 @@ RUN python -m venv /build/venv && \
     /build/venv/bin/pip install --no-cache-dir .
 
 # ---- Runtime stage ----
-FROM python:3.12-slim
+FROM python:3.14-slim
 
 # libpq for asyncpg, libgobject/pango/cairo/gdk-pixbuf for WeasyPrint PDF generation
 RUN apt-get update && \
