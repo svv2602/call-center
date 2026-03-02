@@ -142,7 +142,7 @@ def _register_live_tools(
                             raw if isinstance(raw, str) else raw.decode()
                         )
                 except Exception:
-                    pass
+                    logger.warning("get_fitting_stations_live: Redis read failed", exc_info=True)
 
             if all_stations is not None:
                 filtered = all_stations
