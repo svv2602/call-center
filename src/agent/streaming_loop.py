@@ -10,24 +10,36 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from src.agent.agent import MAX_HISTORY_MESSAGES, MAX_TOOL_CALLS_PER_TURN
+from src.agent.history_compressor import summarize_old_messages
+from src.agent.prompts import (
+    SYSTEM_PROMPT,
+    WAIT_AVAILABILITY_POOL,
+    WAIT_DEFAULT_POOL,
+    WAIT_FITTING_POOL,
+    WAIT_FITTING_PRICE_POOL,
+    WAIT_KNOWLEDGE_POOL,
+    WAIT_SEARCH_POOL,
+    WAIT_STATUS_POOL,
+    WAIT_STORAGE_POOL,
+    build_system_prompt_with_context,
+)
+from src.agent.tool_result_compressor import compress_tool_result
 from src.agent.tools import filter_tools_by_state
+from src.core.audio_sender import send_audio_stream
+from src.core.sentence_buffer import buffer_sentences
+from src.llm.models import LLMTask, Usage
+from src.tts.streaming_tts import synthesize_stream
 
 # Per-tool execution timeout (seconds). Prevents a single slow 1C/API call
 # from blocking the entire agent turn. On timeout, tool returns an error
 # message so the LLM can respond gracefully.
 _TOOL_TIMEOUT_SEC = 15
-from src.agent.history_compressor import summarize_old_messages
-from src.agent.prompts import SYSTEM_PROMPT, build_system_prompt_with_context
-from src.agent.tool_result_compressor import compress_tool_result
-from src.core.audio_sender import send_audio_stream
-from src.core.sentence_buffer import buffer_sentences
-from src.llm.models import LLMTask, Usage
-from src.tts.streaming_tts import synthesize_stream
 
 if TYPE_CHECKING:
     from src.agent.agent import ToolRouter
@@ -37,6 +49,32 @@ if TYPE_CHECKING:
     from src.tts.base import TTSEngine
 
 logger = logging.getLogger(__name__)
+
+# Map tool names to contextual wait-phrase pools.
+# When the LLM emits a tool call without preceding text, the streaming
+# loop speaks one of these phrases while the tool executes.
+_TOOL_WAIT_POOLS: dict[str, list[str]] = {
+    "search_tires": WAIT_SEARCH_POOL,
+    "check_availability": WAIT_AVAILABILITY_POOL,
+    "get_order_status": WAIT_STATUS_POOL,
+    "get_fitting_stations": WAIT_FITTING_POOL,
+    "get_fitting_slots": WAIT_FITTING_POOL,
+    "book_fitting": WAIT_FITTING_POOL,
+    "cancel_fitting": WAIT_FITTING_POOL,
+    "get_fitting_price": WAIT_FITTING_PRICE_POOL,
+    "get_customer_bookings": WAIT_FITTING_POOL,
+    "search_knowledge_base": WAIT_KNOWLEDGE_POOL,
+    "find_storage": WAIT_STORAGE_POOL,
+}
+
+
+def _pick_tool_wait_phrase(tool_names: list[str]) -> str:
+    """Choose a contextual wait phrase based on the tool(s) being called."""
+    for name in tool_names:
+        pool = _TOOL_WAIT_POOLS.get(name)
+        if pool:
+            return random.choice(pool)
+    return random.choice(WAIT_DEFAULT_POOL)
 
 
 @dataclass(frozen=True)
@@ -281,7 +319,9 @@ class StreamingAgentLoop:
                 seen_keys.add(dedup_key)
                 unique_tool_calls.append(tc)
 
-            # Execute tool calls in parallel (with per-tool timeout)
+            # Execute tool calls in parallel (with per-tool timeout).
+            # If LLM produced no text before the tool call, speak a contextual
+            # wait-phrase in parallel so the caller doesn't hear silence.
             async def _execute_one_tool(tc: Any) -> dict[str, Any]:
                 try:
                     args = json.loads(tc.arguments_json) if tc.arguments_json else {}
@@ -304,9 +344,33 @@ class StreamingAgentLoop:
                     content = self._pii_vault.mask(content)
                 return {"type": "tool_result", "tool_use_id": tc.id, "content": content}
 
-            tool_results = list(
-                await asyncio.gather(*[_execute_one_tool(tc) for tc in unique_tool_calls])
-            )
+            # Speak wait-phrase if LLM emitted tool calls without any text
+            need_wait_phrase = not result.spoken_text and not interrupted and not disconnected
+            if need_wait_phrase and not self._conn.is_closed:
+                tool_names = [tc.name for tc in unique_tool_calls]
+                wait_phrase = _pick_tool_wait_phrase(tool_names)
+                logger.info("Speaking wait-phrase during tool exec: %r", wait_phrase)
+
+                async def _speak_wait(_phrase: str = wait_phrase) -> None:
+                    try:
+                        tts = self._tts
+                        audio = await tts.synthesize(_phrase)
+                        if not (self._barge_in and self._barge_in.is_set()):
+                            await self._conn.send_audio(audio, cancel_event=self._barge_in)
+                    except Exception:
+                        logger.debug("Wait-phrase speak failed", exc_info=True)
+
+                # Run wait-phrase and tool execution concurrently
+                wait_task = asyncio.create_task(_speak_wait())
+                tool_results = list(
+                    await asyncio.gather(*[_execute_one_tool(tc) for tc in unique_tool_calls])
+                )
+                await wait_task
+                spoken_parts.append(wait_phrase)
+            else:
+                tool_results = list(
+                    await asyncio.gather(*[_execute_one_tool(tc) for tc in unique_tool_calls])
+                )
             tool_calls_made += len(tool_results)
 
             conversation_history.append({"role": "user", "content": tool_results})

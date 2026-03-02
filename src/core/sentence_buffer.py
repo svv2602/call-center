@@ -46,7 +46,7 @@ class SentenceBuffer:
     4. Clause punctuation (,;:) after min_clause_chars (long phrases)
     """
 
-    def __init__(self, min_clause_chars: int = 40) -> None:
+    def __init__(self, min_clause_chars: int = 25) -> None:
         self._buffer = ""
         self._min_clause_chars = min_clause_chars
 
@@ -100,7 +100,7 @@ class SentenceBuffer:
 
 async def buffer_sentences(
     stream: AsyncIterator[StreamEvent],
-    min_clause_chars: int = 40,
+    min_clause_chars: int = 25,
 ) -> AsyncIterator[BufferEvent]:
     """Create SentenceBuffer and process stream."""
     buf = SentenceBuffer(min_clause_chars=min_clause_chars)
