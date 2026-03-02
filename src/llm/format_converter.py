@@ -175,7 +175,7 @@ def openai_response_to_llm_response(
     else:
         stop_reason = "end_turn"
 
-    usage_data = data.get("usage", {})
+    usage_data = data.get("usage") or {}
     usage = Usage(
         input_tokens=usage_data.get("prompt_tokens", 0),
         output_tokens=usage_data.get("completion_tokens", 0),
@@ -198,8 +198,9 @@ def openai_stream_chunk_to_events(
 ) -> list[StreamEvent]:
     """Convert a single OpenAI streaming chunk (SSE ``data:`` JSON) into StreamEvents."""
     events: list[StreamEvent] = []
-    choice = chunk.get("choices", [{}])[0] if chunk.get("choices") else {}
-    delta = choice.get("delta", {})
+    choices = chunk.get("choices") or []
+    choice = choices[0] if choices else {}
+    delta = choice.get("delta") or {}
     finish_reason = choice.get("finish_reason")
 
     # Text delta
@@ -224,7 +225,7 @@ def openai_stream_chunk_to_events(
     if finish_reason is not None:
         fr_map = {"tool_calls": "tool_use", "length": "max_tokens"}
         stop_reason = fr_map.get(finish_reason, "end_turn")
-        usage_data = chunk.get("usage", {})
+        usage_data = chunk.get("usage") or {}
         events.append(
             StreamDone(
                 stop_reason=stop_reason,
