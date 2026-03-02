@@ -151,6 +151,8 @@ def _register_live_tools(
                                     s["landmarks"] = h["landmarks"]
                                 if h.get("description"):
                                     s["description"] = h["description"]
+                                if h.get("phone"):
+                                    s["phone"] = h["phone"]
                 except Exception:
                     pass
             return result
