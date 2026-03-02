@@ -101,7 +101,10 @@ class TestGetConfig:
 
         resp = client.get("/admin/test-phones/config", headers=_auth())
         assert resp.status_code == 200
-        assert resp.json()["phones"] == {"0504874375": "no_history"}
+        # Old string format is normalized to list-of-dicts
+        assert resp.json()["phones"] == {
+            "0504874375": [{"mode": "no_history", "tenant_id": None}]
+        }
 
 
 class TestPutConfig:
@@ -147,7 +150,7 @@ class TestPutConfig:
         )
         data = resp.json()
         assert data["phone"] == "0671234567"
-        assert data["phones"]["0671234567"] == "with_history"
+        assert data["phones"]["0671234567"] == [{"mode": "with_history", "tenant_id": None}]
 
     @patch("src.api.auth.get_settings")
     @patch("src.api.test_phones._get_redis")
@@ -263,4 +266,6 @@ class TestRoundTrip:
             headers=_auth(),
         )
         resp = client.get("/admin/test-phones/config", headers=_auth())
-        assert resp.json()["phones"] == {"0504874375": "no_history"}
+        assert resp.json()["phones"] == {
+            "0504874375": [{"mode": "no_history", "tenant_id": None}]
+        }

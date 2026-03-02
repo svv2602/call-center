@@ -193,6 +193,7 @@ export default {
     'prompts.abTests': 'A/B Tests',
     'prompts.newVersion': '+ New Version',
     'prompts.noVersions': 'No prompt versions found',
+    'prompts.codePromptNote': 'System prompt is loaded from code. Versions below are only used for A/B testing.',
     'prompts.name': 'Name',
     'prompts.active': 'Active',
     'prompts.activeLabel': 'Active',

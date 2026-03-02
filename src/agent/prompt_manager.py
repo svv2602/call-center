@@ -209,20 +209,17 @@ class PromptManager:
     async def delete_version(self, version_id: UUID) -> None:
         """Delete a prompt version.
 
-        Raises ValueError if version is active or used in an A/B test.
+        Raises ValueError if version is used in an active A/B test.
         """
         async with self._engine.begin() as conn:
-            # Check existence and active status
+            # Check existence
             result = await conn.execute(
-                text("SELECT is_active FROM prompt_versions WHERE id = :vid"),
+                text("SELECT id FROM prompt_versions WHERE id = :vid"),
                 {"vid": str(version_id)},
             )
             row = result.first()
             if not row:
                 msg = f"Prompt version {version_id} not found"
-                raise ValueError(msg)
-            if row.is_active:
-                msg = "Cannot delete the active prompt version"
                 raise ValueError(msg)
 
             # Check if used in any A/B test

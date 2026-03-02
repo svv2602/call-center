@@ -765,23 +765,21 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             phrase_hints=phrase_hints,
         )
 
-        # Load DB templates, tool overrides, and active prompt in parallel
+        # Load DB templates and tool overrides in parallel
+        # System prompt always comes from code (assemble_prompt below),
+        # DB prompt_versions are only used for A/B testing.
         templates = None
         tools = None
         system_prompt = None
         prompt_version_name = None
         if _db_engine is not None:
             pm = PromptManager(_db_engine)
-            templates, tools, active_prompt = await asyncio.gather(
+            templates, tools = await asyncio.gather(
                 pm.get_active_templates(),
                 get_tools_with_overrides(_db_engine, redis=_redis),
-                pm.get_active_prompt(),
             )
-            if active_prompt.get("id") is not None:
-                system_prompt = active_prompt["system_prompt"]
-                prompt_version_name = active_prompt["name"]
 
-            # A/B test: may override prompt with assigned variant
+            # A/B test: may override code prompt with assigned variant
             try:
                 from src.agent.ab_testing import ABTestManager
 

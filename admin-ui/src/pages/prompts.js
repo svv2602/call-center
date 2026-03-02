@@ -28,8 +28,8 @@ async function loadPromptVersions(offset) {
             container.innerHTML = `
                 <div class="mb-4">
                     <button class="${tw.btnPrimary}" onclick="window._pages.prompts.showCreatePrompt()">${t('prompts.newVersion')}</button>
-                    <button class="${tw.btnSecondary} ml-2" onclick="window._pages.prompts.resetToDefault()">${t('prompts.resetToDefault')}</button>
                 </div>
+                <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-3">${t('prompts.codePromptNote')}</p>
                 <div class="${tw.emptyState}">${t('prompts.noVersions')}</div>`;
             loadABTests();
             return;
@@ -37,22 +37,20 @@ async function loadPromptVersions(offset) {
         container.innerHTML = `
             <div class="mb-4">
                 <button class="${tw.btnPrimary}" onclick="window._pages.prompts.showCreatePrompt()">${t('prompts.newVersion')}</button>
-                <button class="${tw.btnSecondary} ml-2" onclick="window._pages.prompts.resetToDefault()">${t('prompts.resetToDefault')}</button>
             </div>
-            <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}" id="promptsTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('prompts.name')}</th><th class="${tw.thSortable}" data-sortable>${t('prompts.active')}</th><th class="${tw.thSortable}" data-sortable>${t('prompts.created')}</th><th class="${tw.th}">${t('prompts.action')}</th></tr></thead><tbody>
+            <p class="text-xs text-neutral-500 dark:text-neutral-400 mb-3">${t('prompts.codePromptNote')}</p>
+            <div class="overflow-x-auto min-h-[480px]"><table class="${tw.table}" id="promptsTable"><thead><tr><th class="${tw.thSortable}" data-sortable>${t('prompts.name')}</th><th class="${tw.thSortable}" data-sortable>${t('prompts.created')}</th><th class="${tw.th}">${t('prompts.action')}</th></tr></thead><tbody>
             ${versions.map(v => `
                 <tr class="${tw.trHover}">
                     <td class="${tw.td}" data-label="${t('prompts.name')}"><a href="#" class="text-blue-600 dark:text-blue-400 hover:underline" onclick="event.preventDefault(); window._pages.prompts.viewPrompt('${v.id}')">${escapeHtml(v.name)}</a></td>
-                    <td class="${tw.td}" data-label="${t('prompts.active')}">${v.is_active ? `<span class="${tw.badgeGreen}">${t('prompts.activeLabel')}</span>` : ''}</td>
                     <td class="${tw.td}" data-label="${t('prompts.created')}" data-sort-value="${v.created_at || ''}">${formatDate(v.created_at)}</td>
                     <td class="${tw.tdActions}">
-                        ${!v.is_active ? `<div class="relative inline-block">
+                        <div class="relative inline-block">
                             <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
                             <div class="hidden absolute right-0 z-20 mt-1 w-36 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
-                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.prompts.activatePrompt('${v.id}')">${t('prompts.activateBtn')}</button>
                                 <button class="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer" data-id="${escapeHtml(v.id)}" data-name="${escapeHtml(v.name)}" onclick="window._pages.prompts.deletePrompt(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>
                             </div>
-                        </div>` : ''}
+                        </div>
                     </td>
                 </tr>
             `).join('')}
@@ -105,14 +103,7 @@ async function createPrompt() {
     } catch (e) { showToast(t('prompts.createFailed', {error: e.message}), 'error'); }
 }
 
-async function activatePrompt(id) {
-    if (!confirm(t('prompts.activateConfirm'))) return;
-    try {
-        await api(`/prompts/${id}/activate`, { method: 'PATCH' });
-        showToast(t('prompts.activated'));
-        loadPromptVersions();
-    } catch (e) { showToast(t('prompts.activateFailed', {error: e.message}), 'error'); }
-}
+// activatePrompt removed — prompt always comes from code, DB versions for A/B only
 
 async function viewPrompt(id) {
     try {
@@ -137,22 +128,7 @@ async function loadDefaultPrompt() {
     } catch (e) { showToast(t('prompts.failedToLoad', {error: e.message}), 'error'); }
 }
 
-async function resetToDefault() {
-    if (!confirm(t('prompts.resetConfirm'))) return;
-    try {
-        const data = await api('/prompts/default');
-        const created = await api('/prompts', {
-            method: 'POST',
-            body: JSON.stringify({ name: `${data.name} (reset)`, system_prompt: data.system_prompt }),
-        });
-        const newId = created.version?.id;
-        if (newId) {
-            await api(`/prompts/${newId}/activate`, { method: 'PATCH' });
-        }
-        showToast(t('prompts.resetDone'));
-        loadPromptVersions();
-    } catch (e) { showToast(t('prompts.resetFailed', {error: e.message}), 'error'); }
-}
+// resetToDefault removed — prompt always comes from code
 
 async function deletePrompt(id, name) {
     if (!confirm(t('prompts.deleteConfirm', {name}))) return;
@@ -719,8 +695,8 @@ export function init() {
 
 window._pages = window._pages || {};
 window._pages.prompts = {
-    loadPromptVersions, showCreatePrompt, createPrompt, activatePrompt,
-    viewPrompt, loadDefaultPrompt, resetToDefault, deletePrompt,
+    loadPromptVersions, showCreatePrompt, createPrompt,
+    viewPrompt, loadDefaultPrompt, deletePrompt,
     loadABTests, showCreateABTest, createABTest, stopABTest, deleteABTest, showABReport, exportABReportCSV,
     loadPronunciationRules, savePronunciationRules, resetPronunciationRules,
     loadOptimizerResults, runOptimizer, showOptimizerDetail,

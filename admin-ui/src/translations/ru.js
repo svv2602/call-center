@@ -193,6 +193,7 @@ export default {
     'prompts.abTests': 'A/B-тесты',
     'prompts.newVersion': '+ Новая версия',
     'prompts.noVersions': 'Версии промптов не найдены',
+    'prompts.codePromptNote': 'Системный промпт берётся из кода. Версии ниже используются только для A/B тестирования.',
     'prompts.name': 'Название',
     'prompts.active': 'Активный',
     'prompts.activeLabel': 'Активен',
