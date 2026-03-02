@@ -132,30 +132,62 @@ def _register_live_tools(
         router.register("confirm_order", store_client.confirm_order)
 
         async def _get_fitting_stations_live(city: str = "", **_kw: Any) -> dict[str, Any]:
-            result = await store_client.get_fitting_stations(city)
-            # Merge station hints from Redis
+            # Try Redis cache (populated by 1C SOAP) first, fall back to Store API
+            all_stations = None
             if redis_client is not None:
                 try:
-                    hints_raw = await redis_client.get("fitting:station_hints")
-                    if hints_raw:
-                        hints = json.loads(
-                            hints_raw if isinstance(hints_raw, str) else hints_raw.decode()
+                    raw = await redis_client.get("onec:fitting_stations")
+                    if raw:
+                        all_stations = json.loads(
+                            raw if isinstance(raw, str) else raw.decode()
                         )
-                        for s in result.get("stations", []):
-                            sid = s.get("id", "")
-                            if sid and sid in hints:
-                                h = hints[sid]
-                                if h.get("district"):
-                                    s["district"] = h["district"]
-                                if h.get("landmarks"):
-                                    s["landmarks"] = h["landmarks"]
-                                if h.get("description"):
-                                    s["description"] = h["description"]
-                                if h.get("phone"):
-                                    s["phone"] = h["phone"]
                 except Exception:
                     pass
-            return result
+
+            if all_stations is not None:
+                filtered = all_stations
+                if city:
+                    city_lower = city.lower()
+                    filtered = [
+                        s for s in filtered
+                        if city_lower in s.get("city", "").lower()
+                        or s.get("city", "").lower() in city_lower
+                    ]
+                # Merge hints and build output
+                hints: dict[str, Any] = {}
+                if redis_client is not None:
+                    try:
+                        hints_raw = await redis_client.get("fitting:station_hints")
+                        if hints_raw:
+                            hints = json.loads(
+                                hints_raw if isinstance(hints_raw, str) else hints_raw.decode()
+                            )
+                    except Exception:
+                        pass
+                stations_out = []
+                for s in filtered[:20]:
+                    entry = {
+                        "id": s.get("station_id", s.get("id", "")),
+                        "name": s.get("name", ""),
+                        "city": s.get("city", ""),
+                        "address": s.get("address", ""),
+                    }
+                    sid = entry["id"]
+                    if sid and sid in hints:
+                        h = hints[sid]
+                        if h.get("district"):
+                            entry["district"] = h["district"]
+                        if h.get("landmarks"):
+                            entry["landmarks"] = h["landmarks"]
+                        if h.get("description"):
+                            entry["description"] = h["description"]
+                        if h.get("phone"):
+                            entry["phone"] = h["phone"]
+                    stations_out.append(entry)
+                return {"total": len(filtered), "stations": stations_out}
+
+            # Fallback to Store API
+            return await store_client.get_fitting_stations(city)
 
         router.register("get_fitting_stations", _get_fitting_stations_live)
         router.register("get_fitting_slots", store_client.get_fitting_slots)
