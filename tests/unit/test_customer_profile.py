@@ -163,6 +163,22 @@ class TestCallLoggerProfile:
             assert result["city"] == "Київ"
 
     @pytest.mark.asyncio
+    async def test_get_customer_profile_with_tenant(self, logger: CallLogger) -> None:
+        """Profile lookup with tenant_id uses tenant filter."""
+        mock_row = {"name": "Марія", "city": "Одеса", "vehicles": "[]",
+                    "delivery_address": None, "total_calls": 1, "first_call_at": None}
+        with patch.object(logger, "_fetch_one", new_callable=AsyncMock, return_value=mock_row) as mock_fetch:
+            result = await logger.get_customer_profile(
+                "+380501234567", tenant_id="tid-1"
+            )
+            assert result is not None
+            assert result["name"] == "Марія"
+            # Verify tenant_id was passed in the query params
+            call_args = mock_fetch.call_args
+            assert "tid" in call_args[0][1]
+            assert call_args[0][1]["tid"] == "tid-1"
+
+    @pytest.mark.asyncio
     async def test_update_customer_profile_not_found(self, logger: CallLogger) -> None:
         with patch.object(logger, "_fetch_one", new_callable=AsyncMock, return_value=None):
             result = await logger.update_customer_profile("+380501234567", name="Іван")
@@ -211,3 +227,44 @@ class TestCallLoggerProfile:
             merged = json.loads(params["vehicles"])
             assert len(merged) == 1
             assert merged[0]["brand"] == "Toyota Camry"
+
+    @pytest.mark.asyncio
+    async def test_update_customer_profile_with_tenant(self, logger: CallLogger) -> None:
+        """Update with tenant_id uses tenant filter in lookup."""
+        mock_row = {"id": "test-uuid", "vehicles": "[]"}
+        with (
+            patch.object(logger, "_fetch_one", new_callable=AsyncMock, return_value=mock_row) as mock_fetch,
+            patch.object(logger, "_execute", new_callable=AsyncMock),
+        ):
+            result = await logger.update_customer_profile(
+                "+380501234567", tenant_id="tid-1", name="Тест"
+            )
+            assert result["status"] == "updated"
+            call_args = mock_fetch.call_args
+            assert "tid" in call_args[0][1]
+
+    @pytest.mark.asyncio
+    async def test_upsert_customer_with_tenant_new(self, logger: CallLogger) -> None:
+        """Upsert with tenant_id creates customer with tenant."""
+        with (
+            patch.object(logger, "_fetch_one", new_callable=AsyncMock, return_value=None),
+            patch.object(logger, "_execute", new_callable=AsyncMock) as mock_exec,
+        ):
+            cid = await logger.upsert_customer("+380501234567", tenant_id="tid-1")
+            assert cid  # non-empty UUID
+            call_args = mock_exec.call_args
+            assert "tid" in call_args[0][1]
+            assert call_args[0][1]["tid"] == "tid-1"
+
+    @pytest.mark.asyncio
+    async def test_upsert_customer_with_tenant_existing(self, logger: CallLogger) -> None:
+        """Upsert with tenant_id finds existing customer by phone+tenant."""
+        mock_row = {"id": "existing-uuid"}
+        with (
+            patch.object(logger, "_fetch_one", new_callable=AsyncMock, return_value=mock_row) as mock_fetch,
+            patch.object(logger, "_execute", new_callable=AsyncMock),
+        ):
+            cid = await logger.upsert_customer("+380501234567", tenant_id="tid-1")
+            assert cid == "existing-uuid"
+            call_args = mock_fetch.call_args
+            assert "tid" in call_args[0][1]

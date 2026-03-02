@@ -40,13 +40,14 @@ async def _get_engine() -> AsyncEngine:
 @router.get("")
 async def list_customers(
     search: str = Query("", max_length=200),
+    tenant_id: str = Query("", max_length=36),
     sort_by: str = Query("last_call_at"),
     sort_dir: str = Query("desc", pattern=r"^(asc|desc)$"),
     limit: int = Query(25, ge=1, le=100),
     offset: int = Query(0, ge=0),
     _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
-    """Paginated list of customers with search and sorting."""
+    """Paginated list of customers with search, tenant filter, and sorting."""
     if sort_by not in _SORT_WHITELIST:
         raise HTTPException(
             status_code=400,
@@ -63,16 +64,23 @@ async def list_customers(
         conditions.append("(phone ILIKE :search OR name ILIKE :search)")
         params["search"] = f"%{search.strip()}%"
 
+    if tenant_id.strip():
+        conditions.append("c.tenant_id = CAST(:tenant_id AS uuid)")
+        params["tenant_id"] = tenant_id.strip()
+
     where_clause = " AND ".join(conditions)
-    order_clause = f"{sort_by} {sort_dir} NULLS LAST"
+    order_clause = f"c.{sort_by} {sort_dir} NULLS LAST"
 
     async with engine.begin() as conn:
         result = await conn.execute(
             text(f"""
-                SELECT id, phone, name, city, vehicles, delivery_address,
-                       total_calls, first_call_at, last_call_at,
+                SELECT c.id, c.phone, c.name, c.city, c.vehicles,
+                       c.delivery_address, c.total_calls, c.first_call_at,
+                       c.last_call_at, c.tenant_id,
+                       t.name AS tenant_name,
                        COUNT(*) OVER() AS _total
-                FROM customers
+                FROM customers c
+                LEFT JOIN tenants t ON t.id = c.tenant_id
                 WHERE {where_clause}
                 ORDER BY {order_clause}
                 LIMIT :limit OFFSET :offset
@@ -98,9 +106,13 @@ async def get_customer(
     async with engine.begin() as conn:
         cust_result = await conn.execute(
             text("""
-                SELECT id, phone, name, city, vehicles, delivery_address,
-                       total_calls, first_call_at, last_call_at
-                FROM customers WHERE id = :id
+                SELECT c.id, c.phone, c.name, c.city, c.vehicles,
+                       c.delivery_address, c.total_calls, c.first_call_at,
+                       c.last_call_at, c.tenant_id,
+                       t.name AS tenant_name
+                FROM customers c
+                LEFT JOIN tenants t ON t.id = c.tenant_id
+                WHERE c.id = :id
             """),
             {"id": str(customer_id)},
         )

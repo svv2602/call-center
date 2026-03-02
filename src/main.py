@@ -716,7 +716,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     # Upsert customer (fast indexed lookup, ~5ms)
     if _call_logger is not None and session.caller_id:
         try:
-            session.customer_id = await _call_logger.upsert_customer(session.caller_id)
+            session.customer_id = await _call_logger.upsert_customer(
+                session.caller_id, tenant_id=session.tenant_id
+            )
         except Exception:
             logger.debug("upsert_customer failed", exc_info=True)
 
@@ -856,11 +858,17 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                             raw.decode() if isinstance(raw, bytes) else raw
                         )
                         normalized = normalize_phone_ua(session.caller_id)
-                        if phones.get(normalized) == "no_history":
-                            logger.info(
-                                "Test phone %s: skipping history", session.caller_id
-                            )
-                            return []
+                        entry = phones.get(normalized)
+                        if isinstance(entry, str):
+                            entry = {"mode": entry}  # backward compat
+                        if entry and entry.get("mode") == "no_history":
+                            cfg_tenant = entry.get("tenant_id")
+                            if not cfg_tenant or cfg_tenant == session.tenant_id:
+                                logger.info(
+                                    "Test phone %s: skipping history",
+                                    session.caller_id,
+                                )
+                                return []
                 return await _call_logger.get_caller_history(
                     session.caller_id, tenant_id=session.tenant_id
                 )
@@ -881,7 +889,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             if _call_logger is None or not session.caller_id:
                 return None
             try:
-                return await _call_logger.get_customer_profile(session.caller_id)
+                return await _call_logger.get_customer_profile(
+                    session.caller_id, tenant_id=session.tenant_id
+                )
             except Exception:
                 logger.debug("Customer profile loading failed", exc_info=True)
                 return None
@@ -929,6 +939,10 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         if pron_rules:
             system_prompt = inject_pronunciation_rules(system_prompt, pron_rules)
 
+        # Resolve tenant-specific names early (used in greeting personalization below)
+        tenant_agent_name = tenant.get("agent_name") if tenant else None
+        tenant_network_name = tenant.get("name") if tenant else None
+
         # Apply tenant overrides (tools filter, greeting, prompt suffix)
         if tenant:
             if tenant.get("enabled_tools"):
@@ -953,9 +967,14 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 )
             else:
                 # Tenant custom greeting without name question — prepend name
-                templates["greeting"] = GREETING_TEXT_KNOWN.replace(
-                    "{customer_name}", profile_name
-                )
+                known = GREETING_TEXT_KNOWN.replace("{customer_name}", profile_name)
+                known = known.replace("{agent_name}", tenant_agent_name or "Олена")
+                if tenant_network_name:
+                    known = known.replace("{network_name}", tenant_network_name)
+                else:
+                    known = known.replace("{network_name}, ", "")
+                    known = known.replace("{network_name}", "")
+                templates["greeting"] = known
             logger.info(
                 "Known customer greeting: %s for call %s",
                 profile_name,
@@ -1026,7 +1045,6 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             router.set_execute_hook(_on_tool_execute)
 
         vault = PIIVault()
-        tenant_agent_name = tenant.get("agent_name") if tenant else None
         agent = LLMAgent(
             api_key=settings.anthropic.api_key,
             model=settings.anthropic.model,
@@ -1102,6 +1120,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             streaming_loop=streaming_loop,
             barge_in_event=barge_in_event,
             agent_name=tenant_agent_name,
+            network_name=tenant_network_name,
             call_logger=_call_logger,
             cost_breakdown=cost,
             caller_history=caller_history_text,
@@ -1847,6 +1866,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             return {"status": "unavailable"}
         return await _call_logger.update_customer_profile(
             session.caller_phone,
+            tenant_id=session.tenant_id,
             name=kwargs.get("name"),
             city=kwargs.get("city"),
             vehicles=kwargs.get("vehicles"),

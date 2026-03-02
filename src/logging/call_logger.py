@@ -210,12 +210,19 @@ class CallLogger:
         self,
         phone: str,
         name: str | None = None,
+        tenant_id: str | None = None,
     ) -> str:
-        """Create or update customer by phone. Returns customer_id."""
-        result = await self._fetch_one(
-            "SELECT id FROM customers WHERE phone = :phone",
-            {"phone": phone},
-        )
+        """Create or update customer by phone (+ tenant). Returns customer_id."""
+        if tenant_id:
+            result = await self._fetch_one(
+                "SELECT id FROM customers WHERE phone = :phone AND tenant_id = CAST(:tid AS uuid)",
+                {"phone": phone, "tid": tenant_id},
+            )
+        else:
+            result = await self._fetch_one(
+                "SELECT id FROM customers WHERE phone = :phone",
+                {"phone": phone},
+            )
 
         if result:
             customer_id = result["id"]
@@ -233,18 +240,33 @@ class CallLogger:
 
         customer_id = str(uuid.uuid4())
         now = datetime.now(UTC)
-        await self._execute(
-            """
-            INSERT INTO customers (id, phone, name, total_calls, first_call_at, last_call_at)
-            VALUES (:id, :phone, :name, 1, :now, :now)
-            """,
-            {
-                "id": customer_id,
-                "phone": phone,
-                "name": name,
-                "now": now,
-            },
-        )
+        if tenant_id:
+            await self._execute(
+                """
+                INSERT INTO customers (id, phone, name, tenant_id, total_calls, first_call_at, last_call_at)
+                VALUES (:id, :phone, :name, CAST(:tid AS uuid), 1, :now, :now)
+                """,
+                {
+                    "id": customer_id,
+                    "phone": phone,
+                    "name": name,
+                    "tid": tenant_id,
+                    "now": now,
+                },
+            )
+        else:
+            await self._execute(
+                """
+                INSERT INTO customers (id, phone, name, total_calls, first_call_at, last_call_at)
+                VALUES (:id, :phone, :name, 1, :now, :now)
+                """,
+                {
+                    "id": customer_id,
+                    "phone": phone,
+                    "name": name,
+                    "now": now,
+                },
+            )
         return customer_id
 
     async def get_caller_history(
@@ -300,8 +322,20 @@ class CallLogger:
 
     # --- Customer profile ---
 
-    async def get_customer_profile(self, phone: str) -> dict[str, Any] | None:
-        """Load full customer profile by phone (lifetime data, no day limit)."""
+    async def get_customer_profile(
+        self, phone: str, *, tenant_id: str | None = None
+    ) -> dict[str, Any] | None:
+        """Load full customer profile by phone (+ tenant)."""
+        if tenant_id:
+            return await self._fetch_one(
+                """
+                SELECT name, city, vehicles, delivery_address,
+                       total_calls, first_call_at
+                FROM customers
+                WHERE phone = :phone AND tenant_id = CAST(:tid AS uuid)
+                """,
+                {"phone": phone, "tid": tenant_id},
+            )
         return await self._fetch_one(
             """
             SELECT name, city, vehicles, delivery_address,
@@ -316,6 +350,7 @@ class CallLogger:
         self,
         phone: str,
         *,
+        tenant_id: str | None = None,
         name: str | None = None,
         city: str | None = None,
         vehicles: list[dict[str, Any]] | None = None,
@@ -326,10 +361,16 @@ class CallLogger:
         For vehicles, merges by plate number: updates existing, adds new,
         preserves unlisted.
         """
-        current = await self._fetch_one(
-            "SELECT id, vehicles FROM customers WHERE phone = :phone",
-            {"phone": phone},
-        )
+        if tenant_id:
+            current = await self._fetch_one(
+                "SELECT id, vehicles FROM customers WHERE phone = :phone AND tenant_id = CAST(:tid AS uuid)",
+                {"phone": phone, "tid": tenant_id},
+            )
+        else:
+            current = await self._fetch_one(
+                "SELECT id, vehicles FROM customers WHERE phone = :phone",
+                {"phone": phone},
+            )
         if current is None:
             return {"status": "not_found"}
 
