@@ -20,6 +20,8 @@ from src.agent.history_compressor import summarize_old_messages
 from src.agent.prompts import (
     SYSTEM_PROMPT,
     WAIT_AVAILABILITY_POOL,
+    WAIT_BOOKING_POOL,
+    WAIT_CANCEL_POOL,
     WAIT_DEFAULT_POOL,
     WAIT_FITTING_POOL,
     WAIT_FITTING_PRICE_POOL,
@@ -63,8 +65,8 @@ _TOOL_WAIT_POOLS: dict[str, list[str]] = {
     "get_order_status": WAIT_STATUS_POOL,
     "get_fitting_stations": WAIT_FITTING_POOL,
     "get_fitting_slots": WAIT_FITTING_POOL,
-    "book_fitting": WAIT_FITTING_POOL,
-    "cancel_fitting": WAIT_FITTING_POOL,
+    "book_fitting": WAIT_BOOKING_POOL,
+    "cancel_fitting": WAIT_CANCEL_POOL,
     "get_fitting_price": WAIT_FITTING_PRICE_POOL,
     "get_customer_bookings": WAIT_FITTING_POOL,
     "search_knowledge_base": WAIT_KNOWLEDGE_POOL,
@@ -221,6 +223,7 @@ class StreamingAgentLoop:
         )
 
         spoken_parts: list[str] = []
+        has_llm_text = False  # True when LLM produced real text (not just wait-phrases)
         total_input_tokens = 0
         total_output_tokens = 0
         tool_calls_made = 0
@@ -267,6 +270,7 @@ class StreamingAgentLoop:
             # Accumulate spoken text
             if result.spoken_text:
                 spoken_parts.append(result.spoken_text)
+                has_llm_text = True
 
             # Accumulate usage
             total_input_tokens += result.usage.input_tokens
@@ -305,7 +309,7 @@ class StreamingAgentLoop:
 
             # No tool calls → done (or retry if empty)
             if not result.tool_calls:
-                if not result.spoken_text and not spoken_parts and empty_retries < _MAX_EMPTY_RETRIES:
+                if not result.spoken_text and not has_llm_text and empty_retries < _MAX_EMPTY_RETRIES:
                     empty_retries += 1
                     # On last retry, switch to fallback provider
                     if empty_retries == _MAX_EMPTY_RETRIES and self._provider_override is None:
