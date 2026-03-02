@@ -111,6 +111,10 @@ async def main() -> None:
     if not dsn:
         logger.error("DATABASE_URL not set")
         return
+    # SQLAlchemy DSN uses postgresql+asyncpg://, asyncpg needs postgresql://
+    dsn = dsn.replace("postgresql+asyncpg://", "postgresql://").replace(
+        "postgresql+psycopg://", "postgresql://"
+    )
 
     openai_key = os.environ.get("OPENAI_API_KEY", "")
     if not openai_key:
