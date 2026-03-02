@@ -858,17 +858,25 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                             raw.decode() if isinstance(raw, bytes) else raw
                         )
                         normalized = normalize_phone_ua(session.caller_id)
-                        entry = phones.get(normalized)
-                        if isinstance(entry, str):
-                            entry = {"mode": entry}  # backward compat
-                        if entry and entry.get("mode") == "no_history":
-                            cfg_tenant = entry.get("tenant_id")
-                            if not cfg_tenant or cfg_tenant == session.tenant_id:
-                                logger.info(
-                                    "Test phone %s: skipping history",
-                                    session.caller_id,
-                                )
-                                return []
+                        raw_entry = phones.get(normalized)
+                        if raw_entry is not None:
+                            # Normalize to list (backward compat)
+                            if isinstance(raw_entry, str):
+                                entries = [{"mode": raw_entry}]
+                            elif isinstance(raw_entry, dict):
+                                entries = [raw_entry]
+                            else:
+                                entries = raw_entry
+                            for entry in entries:
+                                if entry.get("mode") == "no_history":
+                                    cfg_tenant = entry.get("tenant_id")
+                                    if not cfg_tenant or cfg_tenant == session.tenant_id:
+                                        logger.info(
+                                            "Test phone %s: skipping history (tenant=%s)",
+                                            session.caller_id,
+                                            cfg_tenant,
+                                        )
+                                        return []
                 return await _call_logger.get_caller_history(
                     session.caller_id, tenant_id=session.tenant_id
                 )

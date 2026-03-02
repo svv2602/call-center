@@ -1,7 +1,18 @@
 """Admin API for test phone number management.
 
-Manage test phone numbers with per-number history mode (with_history / no_history).
-Allows clearing call history for specific phone numbers.
+Manage test phone numbers with per-number, per-tenant history mode
+(with_history / no_history). Allows clearing call history for specific
+phone numbers scoped by tenant.
+
+Redis format (test:phones):
+  {
+    "+380501234567": [
+      {"mode": "no_history", "tenant_id": "bb0e4d02-..."},
+      {"mode": "with_history", "tenant_id": "2e47a882-..."}
+    ]
+  }
+
+Backward compat: old string/dict values are auto-normalized to list on read.
 """
 
 from __future__ import annotations
@@ -62,60 +73,119 @@ class TestPhoneRequest(BaseModel):
         return v
 
 
-def _normalize_entry(value: Any) -> dict[str, Any]:
-    """Normalize a phone entry to dict format (backward compat)."""
+def _normalize_entries(value: Any) -> list[dict[str, Any]]:
+    """Normalize a phone value to list-of-dicts format (backward compat).
+
+    Handles three legacy formats:
+      str  "no_history"         → [{"mode": "no_history", "tenant_id": null}]
+      dict {"mode":..,"tenant_id":..} → [that dict]
+      list [...]                → as-is
+    """
     if isinstance(value, str):
-        return {"mode": value, "tenant_id": None}
-    return value
+        return [{"mode": value, "tenant_id": None}]
+    if isinstance(value, dict):
+        return [value]
+    if isinstance(value, list):
+        return value
+    return [{"mode": "no_history", "tenant_id": None}]
+
+
+def _normalize_all(phones: dict[str, Any]) -> dict[str, list[dict[str, Any]]]:
+    """Normalize entire phones dict."""
+    return {phone: _normalize_entries(v) for phone, v in phones.items()}
+
+
+async def _load_phones(redis: Redis) -> dict[str, list[dict[str, Any]]]:
+    """Load and normalize phones from Redis."""
+    raw = await redis.get(REDIS_KEY)
+    phones = json.loads(raw) if raw else {}
+    return _normalize_all(phones)
+
+
+async def _save_phones(redis: Redis, phones: dict[str, list[dict[str, Any]]]) -> None:
+    """Save phones to Redis."""
+    await redis.set(REDIS_KEY, json.dumps(phones))
 
 
 @router.get("/config")
 async def get_test_phones(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Get test phone numbers configuration."""
     redis = await _get_redis()
-    raw = await redis.get(REDIS_KEY)
-    phones = json.loads(raw) if raw else {}
-    # Normalize to dict format for backward compat
-    normalized = {phone: _normalize_entry(v) for phone, v in phones.items()}
-    return {"phones": normalized}
+    phones = await _load_phones(redis)
+    return {"phones": phones}
 
 
 @router.put("/config")
 async def upsert_test_phone(
     request: TestPhoneRequest, _: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
-    """Add or update a test phone number."""
+    """Add or update a test phone entry for a specific tenant.
+
+    Same phone can have different settings for different tenants.
+    """
     redis = await _get_redis()
-    raw = await redis.get(REDIS_KEY)
-    phones = json.loads(raw) if raw else {}
+    phones = await _load_phones(redis)
 
     normalized = normalize_phone_ua(request.phone)
-    entry = {"mode": request.mode, "tenant_id": request.tenant_id}
-    phones[normalized] = entry
-    await redis.set(REDIS_KEY, json.dumps(phones))
+    new_entry = {"mode": request.mode, "tenant_id": request.tenant_id}
 
-    logger.info("Test phone %s set to mode=%s tenant=%s", normalized, request.mode, request.tenant_id)
-    normalized_phones = {p: _normalize_entry(v) for p, v in phones.items()}
-    return {"phone": normalized, "mode": request.mode, "tenant_id": request.tenant_id, "phones": normalized_phones}
+    entries = phones.get(normalized, [])
+    # Replace existing entry for same tenant_id, or append new
+    replaced = False
+    for i, e in enumerate(entries):
+        if e.get("tenant_id") == request.tenant_id:
+            entries[i] = new_entry
+            replaced = True
+            break
+    if not replaced:
+        entries.append(new_entry)
+
+    phones[normalized] = entries
+    await _save_phones(redis, phones)
+
+    logger.info(
+        "Test phone %s set to mode=%s tenant=%s",
+        normalized, request.mode, request.tenant_id,
+    )
+    return {
+        "phone": normalized,
+        "mode": request.mode,
+        "tenant_id": request.tenant_id,
+        "phones": phones,
+    }
 
 
 @router.delete("/config/{phone}")
-async def delete_test_phone(phone: str, _: dict[str, Any] = _perm_w) -> dict[str, Any]:
-    """Remove a phone number from test config."""
+async def delete_test_phone(
+    phone: str,
+    tenant_id: str | None = Query(None),
+    _: dict[str, Any] = _perm_w,
+) -> dict[str, Any]:
+    """Remove a test phone entry.
+
+    If tenant_id is provided, removes only that tenant's entry.
+    If not provided, removes all entries for the phone.
+    """
     redis = await _get_redis()
-    raw = await redis.get(REDIS_KEY)
-    phones = json.loads(raw) if raw else {}
+    phones = await _load_phones(redis)
 
     normalized = normalize_phone_ua(phone)
     if normalized not in phones:
         raise HTTPException(status_code=404, detail=f"Phone {normalized} not in config")
 
-    del phones[normalized]
-    await redis.set(REDIS_KEY, json.dumps(phones))
+    if tenant_id is not None:
+        # Remove only the entry for this tenant
+        entries = phones[normalized]
+        phones[normalized] = [e for e in entries if e.get("tenant_id") != tenant_id]
+        if not phones[normalized]:
+            del phones[normalized]
+    else:
+        del phones[normalized]
 
-    logger.info("Test phone %s removed", normalized)
-    normalized_phones = {p: _normalize_entry(v) for p, v in phones.items()}
-    return {"removed": normalized, "phones": normalized_phones}
+    await _save_phones(redis, phones)
+
+    logger.info("Test phone %s removed (tenant=%s)", normalized, tenant_id)
+    return {"removed": normalized, "tenant_id": tenant_id, "phones": phones}
 
 
 @router.post("/clear-history/{phone}")

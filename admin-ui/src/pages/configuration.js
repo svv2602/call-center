@@ -912,13 +912,29 @@ async function loadTestPhones() {
     }
 }
 
+function _flattenTestPhones() {
+    // Flatten {phone: [entries]} → [{phone, mode, tenant_id}]
+    const rows = [];
+    for (const [phone, val] of Object.entries(_testPhones)) {
+        const entries = Array.isArray(val) ? val : [val];
+        for (const e of entries) {
+            if (typeof e === 'string') {
+                rows.push({ phone, mode: e, tenant_id: null });
+            } else {
+                rows.push({ phone, mode: e.mode || 'no_history', tenant_id: e.tenant_id || null });
+            }
+        }
+    }
+    return rows;
+}
+
 function renderTestPhones() {
     const container = document.getElementById('testPhonesContainer');
     if (!container) return;
-    const entries = Object.entries(_testPhones);
+    const rows = _flattenTestPhones();
 
     let html = `<div class="space-y-3">`;
-    if (entries.length > 0) {
+    if (rows.length > 0) {
         html += `<table class="w-full text-sm">
             <thead><tr class="text-left text-xs text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-700">
                 <th class="pb-2 font-medium">${t('settings.testPhonesNumber')}</th>
@@ -926,22 +942,21 @@ function renderTestPhones() {
                 <th class="pb-2 font-medium">${t('settings.testPhonesMode')}</th>
                 <th class="pb-2 font-medium">${t('settings.testPhonesActions')}</th>
             </tr></thead><tbody>`;
-        for (const [phone, entry] of entries) {
-            const mode = typeof entry === 'string' ? entry : (entry.mode || 'no_history');
-            const tid = typeof entry === 'string' ? null : (entry.tenant_id || null);
+        for (const row of rows) {
+            const tidAttr = row.tenant_id ? escapeHtml(row.tenant_id) : '';
             html += `<tr class="border-b border-neutral-100 dark:border-neutral-800">
-                <td class="py-2 font-mono text-neutral-900 dark:text-neutral-100">${escapeHtml(phone)}</td>
-                <td class="py-2 text-neutral-600 dark:text-neutral-400">${escapeHtml(_tenantName(tid))}</td>
+                <td class="py-2 font-mono text-neutral-900 dark:text-neutral-100">${escapeHtml(row.phone)}</td>
+                <td class="py-2 text-neutral-600 dark:text-neutral-400">${escapeHtml(_tenantName(row.tenant_id))}</td>
                 <td class="py-2">
-                    <select class="${tw.selectSm}" onchange="window._pages.configuration.updateTestPhoneMode('${escapeHtml(phone)}', this.value)">
-                        <option value="no_history" ${mode === 'no_history' ? 'selected' : ''}>${t('settings.testPhonesModeNoHistory')}</option>
-                        <option value="with_history" ${mode === 'with_history' ? 'selected' : ''}>${t('settings.testPhonesModeWithHistory')}</option>
+                    <select class="${tw.selectSm}" onchange="window._pages.configuration.updateTestPhoneMode('${escapeHtml(row.phone)}', this.value, '${tidAttr}')">
+                        <option value="no_history" ${row.mode === 'no_history' ? 'selected' : ''}>${t('settings.testPhonesModeNoHistory')}</option>
+                        <option value="with_history" ${row.mode === 'with_history' ? 'selected' : ''}>${t('settings.testPhonesModeWithHistory')}</option>
                     </select>
                 </td>
                 <td class="py-2">
                     <div class="flex gap-1">
-                        <button class="${tw.btnSm} text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20" onclick="window._pages.configuration.clearPhoneHistory('${escapeHtml(phone)}')">${t('settings.testPhonesClearHistory')}</button>
-                        <button class="${tw.btnSm} text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20" onclick="window._pages.configuration.removeTestPhone('${escapeHtml(phone)}')">${t('common.delete')}</button>
+                        <button class="${tw.btnSm} text-orange-600 dark:text-orange-400 hover:bg-orange-50 dark:hover:bg-orange-900/20" onclick="window._pages.configuration.clearPhoneHistory('${escapeHtml(row.phone)}', '${tidAttr}')">${t('settings.testPhonesClearHistory')}</button>
+                        <button class="${tw.btnSm} text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20" onclick="window._pages.configuration.removeTestPhone('${escapeHtml(row.phone)}', '${tidAttr}')">${t('common.delete')}</button>
                     </div>
                 </td>
             </tr>`;
@@ -1003,11 +1018,9 @@ async function addTestPhone() {
     }
 }
 
-async function updateTestPhoneMode(phone, mode) {
+async function updateTestPhoneMode(phone, mode, tenantId) {
     try {
-        // Preserve existing tenant_id
-        const existing = _testPhones[phone];
-        const tenant_id = (existing && typeof existing === 'object') ? (existing.tenant_id || null) : null;
+        const tenant_id = tenantId || null;
         const data = await api('/admin/test-phones/config', {
             method: 'PUT',
             body: JSON.stringify({ phone, mode, tenant_id }),
@@ -1019,10 +1032,11 @@ async function updateTestPhoneMode(phone, mode) {
     }
 }
 
-async function removeTestPhone(phone) {
+async function removeTestPhone(phone, tenantId) {
     if (!confirm(t('settings.testPhonesRemoveConfirm', {phone}))) return;
     try {
-        const data = await api(`/admin/test-phones/config/${encodeURIComponent(phone)}`, { method: 'DELETE' });
+        const qs = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
+        const data = await api(`/admin/test-phones/config/${encodeURIComponent(phone)}${qs}`, { method: 'DELETE' });
         _testPhones = data.phones;
         renderTestPhones();
         showToast(t('settings.testPhonesRemoved', {phone}), 'success');
@@ -1031,12 +1045,10 @@ async function removeTestPhone(phone) {
     }
 }
 
-async function clearPhoneHistory(phone) {
+async function clearPhoneHistory(phone, tenantId) {
     if (!confirm(t('settings.testPhonesClearConfirm', {phone}))) return;
     try {
-        const existing = _testPhones[phone];
-        const tid = (existing && typeof existing === 'object') ? (existing.tenant_id || '') : '';
-        const qs = tid ? `?tenant_id=${encodeURIComponent(tid)}` : '';
+        const qs = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
         const data = await api(`/admin/test-phones/clear-history/${encodeURIComponent(phone)}${qs}`, { method: 'POST' });
         showToast(t('settings.testPhonesClearDone', {
             phone: data.phone,
