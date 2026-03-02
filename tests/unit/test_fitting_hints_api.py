@@ -56,6 +56,7 @@ class _FakeConn:
                 "district": params.get("district", ""),
                 "landmarks": params.get("landmarks", ""),
                 "description": params.get("description", ""),
+                "phone": params.get("phone", ""),
             }
             return _FakeResult([], rowcount=1)
 
@@ -76,7 +77,8 @@ class _FakeConn:
             rows = []
             for (pt, pid), hint in self._store.items():
                 if pt == point_type:
-                    rows.append({"point_id": pid, **hint})
+                    row = {"point_id": pid, "phone": "", **hint}
+                    rows.append(row)
             return _FakeResult(rows)
 
         return _FakeResult([])
@@ -188,6 +190,7 @@ class TestGetStationHints:
             "district": "Правий берег",
             "landmarks": "біля Піт Лайн",
             "description": "",
+            "phone": "",
         }
         resp = client.get("/admin/fitting/station-hints", headers=_auth())
         assert resp.status_code == 200
@@ -317,6 +320,7 @@ class TestUpsertStationHint:
             "district": "",
             "landmarks": "",
             "description": "",
+            "phone": "",
         }
 
 
@@ -532,6 +536,7 @@ class TestGetPickupHints:
             "district": "Центр",
             "landmarks": "біля метро Університет",
             "description": "",
+            "phone": "",
         }
         resp = client.get("/admin/fitting/pickup-hints", headers=_auth())
         assert resp.status_code == 200

@@ -41,6 +41,10 @@ from src.tts.streaming_tts import synthesize_stream
 # message so the LLM can respond gracefully.
 _TOOL_TIMEOUT_SEC = 15
 
+# Max retries when LLM returns empty (0 text, 0 tools). On the last retry,
+# automatically switch to a fallback provider.
+_MAX_EMPTY_RETRIES = 2
+
 if TYPE_CHECKING:
     from src.agent.agent import ToolRouter
     from src.core.audio_socket import AudioSocketConnection
@@ -140,6 +144,17 @@ class StreamingAgentLoop:
 
         return get_engine() or self._tts_initial
 
+    def _get_fallback_provider(self) -> str | None:
+        """Return the first fallback provider key for the agent task, or None."""
+        try:
+            chain = self._llm_router._resolve_chain(LLMTask.AGENT, None)
+            # chain[0] is primary, chain[1:] are fallbacks
+            if len(chain) > 1:
+                return chain[1]
+        except Exception:
+            pass
+        return None
+
     async def run_turn(
         self,
         user_text: str,
@@ -213,6 +228,8 @@ class StreamingAgentLoop:
         provider_key = ""
         interrupted = False
         disconnected = False
+        empty_retries = 0
+        current_provider_override = self._provider_override
 
         turn_start = time.monotonic()
 
@@ -226,7 +243,7 @@ class StreamingAgentLoop:
                     system=system,
                     tools=tools,
                     max_tokens=1024,
-                    provider_override=self._provider_override,
+                    provider_override=current_provider_override,
                 )
                 buffered = buffer_sentences(stream)
                 tts_stream = synthesize_stream(buffered, self._tts)
@@ -288,15 +305,31 @@ class StreamingAgentLoop:
 
             # No tool calls → done (or retry if empty)
             if not result.tool_calls:
-                if not result.spoken_text and not spoken_parts and tool_round == 0:
-                    # LLM returned empty on first round — retry once
+                if not result.spoken_text and not spoken_parts and empty_retries < _MAX_EMPTY_RETRIES:
+                    empty_retries += 1
+                    # On last retry, switch to fallback provider
+                    if empty_retries == _MAX_EMPTY_RETRIES and self._provider_override is None:
+                        fallback = self._get_fallback_provider()
+                        if fallback:
+                            current_provider_override = fallback
+                            logger.warning(
+                                "Empty LLM response (retry %d/%d), "
+                                "stop=%s, out_tokens=%d — switching to fallback %s",
+                                empty_retries,
+                                _MAX_EMPTY_RETRIES,
+                                result.stop_reason,
+                                result.usage.output_tokens,
+                                fallback,
+                            )
+                            continue
                     logger.warning(
-                        "Empty LLM response (0 text, 0 tools), "
-                        "stop=%s, out_tokens=%d — retrying",
+                        "Empty LLM response (retry %d/%d), "
+                        "stop=%s, out_tokens=%d — retrying same provider",
+                        empty_retries,
+                        _MAX_EMPTY_RETRIES,
                         result.stop_reason,
                         result.usage.output_tokens,
                     )
-                    tool_round += 1
                     continue
                 break
 
