@@ -56,7 +56,7 @@ async def _load_hints_from_pg(
     """Load all hints for a point_type from PostgreSQL, return as dict."""
     result = await conn.execute(
         text(
-            "SELECT point_id, district, landmarks, description "
+            "SELECT point_id, district, landmarks, description, phone "
             "FROM point_hints WHERE point_type = :point_type"
         ),
         {"point_type": point_type},
@@ -67,6 +67,7 @@ async def _load_hints_from_pg(
             "district": row["district"],
             "landmarks": row["landmarks"],
             "description": row["description"],
+            "phone": row["phone"],
         }
     return hints
 
@@ -88,6 +89,7 @@ class StationHint(BaseModel):
     district: str = ""
     landmarks: str = ""
     description: str = ""
+    phone: str = ""
 
 
 # ── Station Hints ─────────────────────────────────────────
@@ -130,11 +132,11 @@ async def upsert_station_hint(
     async with engine.begin() as conn:
         await conn.execute(
             text(
-                "INSERT INTO point_hints (point_type, point_id, district, landmarks, description) "
-                "VALUES (:point_type, :point_id, :district, :landmarks, :description) "
+                "INSERT INTO point_hints (point_type, point_id, district, landmarks, description, phone) "
+                "VALUES (:point_type, :point_id, :district, :landmarks, :description, :phone) "
                 "ON CONFLICT (point_type, point_id) DO UPDATE SET "
                 "district = EXCLUDED.district, landmarks = EXCLUDED.landmarks, "
-                "description = EXCLUDED.description, updated_at = now()"
+                "description = EXCLUDED.description, phone = EXCLUDED.phone, updated_at = now()"
             ),
             {
                 "point_type": "fitting_station",
@@ -142,6 +144,7 @@ async def upsert_station_hint(
                 "district": hint.district,
                 "landmarks": hint.landmarks,
                 "description": hint.description,
+                "phone": hint.phone,
             },
         )
         hints = await _load_hints_from_pg(conn, "fitting_station")
@@ -296,11 +299,11 @@ async def upsert_pickup_hint(
     async with engine.begin() as conn:
         await conn.execute(
             text(
-                "INSERT INTO point_hints (point_type, point_id, district, landmarks, description) "
-                "VALUES (:point_type, :point_id, :district, :landmarks, :description) "
+                "INSERT INTO point_hints (point_type, point_id, district, landmarks, description, phone) "
+                "VALUES (:point_type, :point_id, :district, :landmarks, :description, :phone) "
                 "ON CONFLICT (point_type, point_id) DO UPDATE SET "
                 "district = EXCLUDED.district, landmarks = EXCLUDED.landmarks, "
-                "description = EXCLUDED.description, updated_at = now()"
+                "description = EXCLUDED.description, phone = EXCLUDED.phone, updated_at = now()"
             ),
             {
                 "point_type": "pickup_point",
@@ -308,6 +311,7 @@ async def upsert_pickup_hint(
                 "district": hint.district,
                 "landmarks": hint.landmarks,
                 "description": hint.description,
+                "phone": hint.phone,
             },
         )
         hints = await _load_hints_from_pg(conn, "pickup_point")

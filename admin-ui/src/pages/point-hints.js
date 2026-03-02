@@ -21,6 +21,7 @@ function openHintModal(type, id, label, hint) {
     document.getElementById('pointHintModalTitle').textContent = t('pointHints.editHint');
     document.getElementById('pointHintModalSubtitle').textContent = label;
     document.getElementById('pointHintDistrict').value = hint.district || '';
+    document.getElementById('pointHintPhone').value = hint.phone || '';
     document.getElementById('pointHintLandmarks').value = hint.landmarks || '';
     document.getElementById('pointHintDescription').value = hint.description || '';
     document.getElementById('pointHintModal').classList.add('show');
@@ -32,11 +33,12 @@ async function saveHintFromModal() {
     const type = document.getElementById('pointHintEditType').value;
     const id = document.getElementById('pointHintEditId').value;
     const district = document.getElementById('pointHintDistrict').value.trim();
+    const phone = document.getElementById('pointHintPhone').value.trim();
     const landmarks = document.getElementById('pointHintLandmarks').value.trim();
     const description = document.getElementById('pointHintDescription').value.trim();
 
     if (type === 'fitting') {
-        if (!district && !landmarks && !description) {
+        if (!district && !landmarks && !description && !phone) {
             if (_stationHints[id]) {
                 await deleteStationHint(id);
             }
@@ -46,9 +48,9 @@ async function saveHintFromModal() {
         try {
             await api(`/admin/fitting/station-hints/${encodeURIComponent(id)}`, {
                 method: 'PUT',
-                body: JSON.stringify({ district, landmarks, description }),
+                body: JSON.stringify({ district, landmarks, description, phone }),
             });
-            _stationHints[id] = { district, landmarks, description };
+            _stationHints[id] = { district, landmarks, description, phone };
             renderStationHints();
             showToast(t('pointHints.saved'), 'success');
             closeModal('pointHintModal');
@@ -56,7 +58,7 @@ async function saveHintFromModal() {
             showToast(t('pointHints.saveFailed', { error: e.message }), 'error');
         }
     } else {
-        if (!district && !landmarks && !description) {
+        if (!district && !landmarks && !description && !phone) {
             if (_pickupHints[id]) {
                 await deletePickupHint(id);
             }
@@ -66,9 +68,9 @@ async function saveHintFromModal() {
         try {
             await api(`/admin/fitting/pickup-hints/${encodeURIComponent(id)}`, {
                 method: 'PUT',
-                body: JSON.stringify({ district, landmarks, description }),
+                body: JSON.stringify({ district, landmarks, description, phone }),
             });
-            _pickupHints[id] = { district, landmarks, description };
+            _pickupHints[id] = { district, landmarks, description, phone };
             renderPickupHints();
             showToast(t('pointHints.saved'), 'success');
             closeModal('pointHintModal');
@@ -152,6 +154,7 @@ function renderStationHints() {
             <th class="${tw.th}">${t('pointHints.name')}</th>
             <th class="${tw.th}">${t('pointHints.address')}</th>
             <th class="${tw.th}">${t('pointHints.district')}</th>
+            <th class="${tw.th}">${t('pointHints.phone')}</th>
             <th class="${tw.th}">${t('pointHints.landmarks')}</th>
             <th class="${tw.th}">${t('pointHints.description')}</th>
             <th class="${tw.th}">${t('pointHints.actions')}</th>
@@ -168,16 +171,18 @@ function renderStationHints() {
         const station = stationsById[sid] || {};
         const hint = _stationHints[sid] || {};
         const district = hint.district || '';
+        const phone = hint.phone || '';
         const landmarks = hint.landmarks || '';
         const description = hint.description || '';
         const name = station.name || '';
         const address = station.address || '';
-        const hasHint = !!(district || landmarks || description);
+        const hasHint = !!(district || landmarks || description || phone);
 
         html += `<tr class="${tw.trHover}">
             <td class="${tw.td}" data-label="${t('pointHints.name')}"><strong>${escapeHtml(name || sid)}</strong><div class="text-[10px] text-neutral-400 font-mono">${escapeHtml(sid)}</div></td>
             <td class="${tw.td}" data-label="${t('pointHints.address')}">${escapeHtml(address)}</td>
             <td class="${tw.td}" data-label="${t('pointHints.district')}">${_hintPreview(district, 30)}</td>
+            <td class="${tw.td}" data-label="${t('pointHints.phone')}">${_hintPreview(phone, 20)}</td>
             <td class="${tw.td}" data-label="${t('pointHints.landmarks')}">${_hintPreview(landmarks, 40)}</td>
             <td class="${tw.td}" data-label="${t('pointHints.description')}">${_hintPreview(description, 40)}</td>
             <td class="${tw.tdActions}" data-label="${t('pointHints.actions')}">
@@ -261,6 +266,7 @@ function renderPickupHints() {
             <th class="${tw.th}">${t('pointHints.address')}</th>
             <th class="${tw.th}">${t('pointHints.city')}</th>
             <th class="${tw.th}">${t('pointHints.district')}</th>
+            <th class="${tw.th}">${t('pointHints.phone')}</th>
             <th class="${tw.th}">${t('pointHints.landmarks')}</th>
             <th class="${tw.th}">${t('pointHints.description')}</th>
             <th class="${tw.th}">${t('pointHints.actions')}</th>
@@ -277,16 +283,18 @@ function renderPickupHints() {
         const point = pointsById[pid] || {};
         const hint = _pickupHints[pid] || {};
         const district = hint.district || '';
+        const phone = hint.phone || '';
         const landmarks = hint.landmarks || '';
         const description = hint.description || '';
         const address = point.address || '';
         const city = point.city || '';
-        const hasHint = !!(district || landmarks || description);
+        const hasHint = !!(district || landmarks || description || phone);
 
         html += `<tr class="${tw.trHover}">
             <td class="${tw.td}" data-label="${t('pointHints.address')}"><strong>${escapeHtml(address || pid)}</strong><div class="text-[10px] text-neutral-400 font-mono">${escapeHtml(pid)}</div></td>
             <td class="${tw.td}" data-label="${t('pointHints.city')}">${escapeHtml(city)}</td>
             <td class="${tw.td}" data-label="${t('pointHints.district')}">${_hintPreview(district, 30)}</td>
+            <td class="${tw.td}" data-label="${t('pointHints.phone')}">${_hintPreview(phone, 20)}</td>
             <td class="${tw.td}" data-label="${t('pointHints.landmarks')}">${_hintPreview(landmarks, 40)}</td>
             <td class="${tw.td}" data-label="${t('pointHints.description')}">${_hintPreview(description, 40)}</td>
             <td class="${tw.tdActions}" data-label="${t('pointHints.actions')}">

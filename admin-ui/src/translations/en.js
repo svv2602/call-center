@@ -605,6 +605,8 @@ export default {
     'pointHints.landmarks': 'Landmarks',
     'pointHints.description': 'Description',
     'pointHints.actions': 'Actions',
+    'pointHints.phone': 'Phone',
+    'pointHints.phonePh': '+380 XX XXX XX XX',
     'pointHints.districtPh': 'Right bank',
     'pointHints.landmarksPh': 'near Pit Line',
     'pointHints.descPh': 'Additional info',

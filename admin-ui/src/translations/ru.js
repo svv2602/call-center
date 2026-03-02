@@ -605,6 +605,8 @@ export default {
     'pointHints.landmarks': 'Ориентиры',
     'pointHints.description': 'Описание',
     'pointHints.actions': 'Действия',
+    'pointHints.phone': 'Телефон',
+    'pointHints.phonePh': '+380 XX XXX XX XX',
     'pointHints.districtPh': 'Правый берег',
     'pointHints.landmarksPh': 'рядом Пит Лайн',
     'pointHints.descPh': 'Доп. информация',

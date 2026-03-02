@@ -1596,6 +1596,8 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                         entry["landmarks"] = h["landmarks"]
                     if h.get("description"):
                         entry["description"] = h["description"]
+                    if h.get("phone"):
+                        entry["phone"] = h["phone"]
                 stations_out.append(entry)
 
             return {
