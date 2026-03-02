@@ -126,8 +126,9 @@ class TestStressMarks:
         assert self.ACCENT not in text, f"Unexpected stress marks in: {text!r}"
 
     def test_greeting_specific_words(self) -> None:
-        assert "Інтернет-магазин" in GREETING_TEXT
-        assert "Олена" in GREETING_TEXT
+        assert "інтернет-магазин" in GREETING_TEXT
+        assert "{agent_name}" in GREETING_TEXT
+        assert "{network_name}" in GREETING_TEXT
         assert "автоматичною" in GREETING_TEXT
 
     def test_farewell_specific_words(self) -> None:
@@ -398,3 +399,63 @@ class TestContextualFarewell:
 
         result = await pipeline._generate_contextual_farewell()
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# 5. Network name in greeting
+# ---------------------------------------------------------------------------
+
+
+class TestNetworkNameGreeting:
+    """Test that network_name is substituted in the greeting."""
+
+    def _make_pipeline(
+        self,
+        session: CallSession,
+        network_name: str | None = None,
+        agent_name: str | None = None,
+    ) -> CallPipeline:
+        conn = AsyncMock()
+        conn.is_closed = False
+        stt = AsyncMock()
+        tts = AsyncMock()
+        agent = AsyncMock()
+        return CallPipeline(
+            conn=conn,
+            stt=stt,
+            tts=tts,
+            agent=agent,
+            session=session,
+            network_name=network_name,
+            agent_name=agent_name,
+        )
+
+    @pytest.mark.asyncio
+    async def test_network_name_substituted(self) -> None:
+        """Network name appears in greeting when provided."""
+        session = CallSession(uuid.uuid4())
+        pipeline = self._make_pipeline(session, network_name="ПроКолесо", agent_name="Олена")
+
+        with patch("src.core.pipeline._time_of_day_greeting", return_value="Добрий день"):
+            await pipeline._play_greeting()
+
+        greeting = session.dialog_history[0].content
+        assert "ПроКолесо" in greeting
+        assert "Олена" in greeting
+        assert "{network_name}" not in greeting
+
+    @pytest.mark.asyncio
+    async def test_no_network_name_clean_text(self) -> None:
+        """Without network_name, no placeholder or trailing comma remains."""
+        session = CallSession(uuid.uuid4())
+        pipeline = self._make_pipeline(session, network_name=None)
+
+        with patch("src.core.pipeline._time_of_day_greeting", return_value="Добрий день"):
+            await pipeline._play_greeting()
+
+        greeting = session.dialog_history[0].content
+        assert "{network_name}" not in greeting
+        assert greeting.startswith("Добрий день!")
+        # No double spaces or leading comma
+        assert ", , " not in greeting
+        assert "  " not in greeting

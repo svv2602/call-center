@@ -220,6 +220,7 @@ class CallPipeline:
         streaming_loop: StreamingAgentLoop | None = None,
         barge_in_event: asyncio.Event | None = None,
         agent_name: str | None = None,
+        network_name: str | None = None,
         call_logger: Any = None,
         cost_breakdown: CostBreakdown | None = None,
         caller_history: str | None = None,
@@ -236,6 +237,7 @@ class CallPipeline:
         self._pattern_search = pattern_search
         self._streaming_loop = streaming_loop
         self._agent_name = agent_name
+        self._network_name = network_name
         self._call_logger = call_logger
         self._cost = cost_breakdown
         self._caller_history = caller_history
@@ -325,6 +327,12 @@ class CallPipeline:
         greeting = self._templates.get("greeting", GREETING_TEXT)
         greeting = greeting.replace("{time_greeting}", _time_of_day_greeting())
         greeting = greeting.replace("{agent_name}", self._agent_name or "Олена")
+        if self._network_name:
+            greeting = greeting.replace("{network_name}", self._network_name)
+        else:
+            # Remove placeholder with surrounding comma+space: "{network_name}, " → ""
+            greeting = greeting.replace("{network_name}, ", "")
+            greeting = greeting.replace("{network_name}", "")
         # Append scenario-specific suffix if IVR intent was resolved
         suffix = _SCENARIO_GREETING_SUFFIX.get(self._session.scenario or "")
         if suffix:

@@ -1275,13 +1275,13 @@ _SYSTEM_PROMPT_TEMPLATE = _MOD_CORE + "\n".join(
 SYSTEM_PROMPT = assemble_prompt(scenario=None, include_pronunciation=True)
 
 GREETING_TEXT = (
-    "{time_greeting}! Інтернет-магазин шин, мене звати Олена. "
+    "{time_greeting}! {network_name}, інтернет-магазин шин, мене звати {agent_name}. "
     "Зверніть увагу, що цей дзвінок обробляється автоматичною системою. "
     "Як можу до вас звертатися?"
 )
 
 GREETING_TEXT_KNOWN = (
-    "{time_greeting}, {customer_name}! Інтернет-магазин шин, мене звати {agent_name}. "
+    "{time_greeting}, {customer_name}! {network_name}, інтернет-магазин шин, мене звати {agent_name}. "
     "Зверніть увагу, що цей дзвінок обробляється автоматичною системою. "
     "Чим можу допомогти?"
 )
