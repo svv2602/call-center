@@ -10,7 +10,7 @@ import json
 import logging
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 from redis.asyncio import Redis
 from sqlalchemy import text
@@ -51,6 +51,7 @@ async def _get_engine() -> AsyncEngine:
 class TestPhoneRequest(BaseModel):
     phone: str
     mode: Literal["with_history", "no_history"] = "no_history"
+    tenant_id: str | None = None
 
     @field_validator("phone")
     @classmethod
@@ -61,13 +62,22 @@ class TestPhoneRequest(BaseModel):
         return v
 
 
+def _normalize_entry(value: Any) -> dict[str, Any]:
+    """Normalize a phone entry to dict format (backward compat)."""
+    if isinstance(value, str):
+        return {"mode": value, "tenant_id": None}
+    return value
+
+
 @router.get("/config")
 async def get_test_phones(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
     """Get test phone numbers configuration."""
     redis = await _get_redis()
     raw = await redis.get(REDIS_KEY)
     phones = json.loads(raw) if raw else {}
-    return {"phones": phones}
+    # Normalize to dict format for backward compat
+    normalized = {phone: _normalize_entry(v) for phone, v in phones.items()}
+    return {"phones": normalized}
 
 
 @router.put("/config")
@@ -80,11 +90,13 @@ async def upsert_test_phone(
     phones = json.loads(raw) if raw else {}
 
     normalized = normalize_phone_ua(request.phone)
-    phones[normalized] = request.mode
+    entry = {"mode": request.mode, "tenant_id": request.tenant_id}
+    phones[normalized] = entry
     await redis.set(REDIS_KEY, json.dumps(phones))
 
-    logger.info("Test phone %s set to mode=%s", normalized, request.mode)
-    return {"phone": normalized, "mode": request.mode, "phones": phones}
+    logger.info("Test phone %s set to mode=%s tenant=%s", normalized, request.mode, request.tenant_id)
+    normalized_phones = {p: _normalize_entry(v) for p, v in phones.items()}
+    return {"phone": normalized, "mode": request.mode, "tenant_id": request.tenant_id, "phones": normalized_phones}
 
 
 @router.delete("/config/{phone}")
@@ -102,62 +114,78 @@ async def delete_test_phone(phone: str, _: dict[str, Any] = _perm_w) -> dict[str
     await redis.set(REDIS_KEY, json.dumps(phones))
 
     logger.info("Test phone %s removed", normalized)
-    return {"removed": normalized, "phones": phones}
+    normalized_phones = {p: _normalize_entry(v) for p, v in phones.items()}
+    return {"removed": normalized, "phones": normalized_phones}
 
 
 @router.post("/clear-history/{phone}")
 async def clear_phone_history(
-    phone: str, _: dict[str, Any] = _perm_w
+    phone: str,
+    tenant_id: str | None = Query(None),
+    _: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Clear all call history for a phone number.
 
     Deletes call_tool_calls, call_turns, calls by caller_id,
     and resets customers.total_calls to 0.
+    If tenant_id is provided, only deletes calls for that tenant.
     """
     normalized = normalize_phone_ua(phone)
     engine = await _get_engine()
 
+    tenant_filter = ""
+    params: dict[str, Any] = {"phone": normalized}
+    if tenant_id:
+        tenant_filter = " AND tenant_id = CAST(:tid AS uuid)"
+        params["tid"] = tenant_id
+
     async with engine.begin() as conn:
         # Delete tool calls for matching calls
         r1 = await conn.execute(
-            text("""
+            text(f"""
                 DELETE FROM call_tool_calls
-                WHERE call_id IN (SELECT id FROM calls WHERE caller_id = :phone)
+                WHERE call_id IN (SELECT id FROM calls WHERE caller_id = :phone{tenant_filter})
             """),
-            {"phone": normalized},
+            params,
         )
         tool_calls_deleted = r1.rowcount
 
         # Delete turns for matching calls
         r2 = await conn.execute(
-            text("""
+            text(f"""
                 DELETE FROM call_turns
-                WHERE call_id IN (SELECT id FROM calls WHERE caller_id = :phone)
+                WHERE call_id IN (SELECT id FROM calls WHERE caller_id = :phone{tenant_filter})
             """),
-            {"phone": normalized},
+            params,
         )
         turns_deleted = r2.rowcount
 
         # Delete calls
         r3 = await conn.execute(
-            text("DELETE FROM calls WHERE caller_id = :phone"),
-            {"phone": normalized},
+            text(f"DELETE FROM calls WHERE caller_id = :phone{tenant_filter}"),
+            params,
         )
         calls_deleted = r3.rowcount
 
-        # Reset customer total_calls
+        # Reset customer total_calls (filter by tenant if provided)
+        customer_tenant_filter = ""
+        customer_params: dict[str, Any] = {"phone": normalized}
+        if tenant_id:
+            customer_tenant_filter = " AND tenant_id = CAST(:tid AS uuid)"
+            customer_params["tid"] = tenant_id
         await conn.execute(
-            text("""
+            text(f"""
                 UPDATE customers SET total_calls = 0,
                     first_call_at = NULL, last_call_at = NULL
-                WHERE phone = :phone
+                WHERE phone = :phone{customer_tenant_filter}
             """),
-            {"phone": normalized},
+            customer_params,
         )
 
     logger.info(
-        "Cleared history for %s: %d calls, %d turns, %d tool_calls",
+        "Cleared history for %s (tenant=%s): %d calls, %d turns, %d tool_calls",
         normalized,
+        tenant_id,
         calls_deleted,
         turns_deleted,
         tool_calls_deleted,

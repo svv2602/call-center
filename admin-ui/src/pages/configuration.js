@@ -10,6 +10,7 @@ let _llmConfig = null;
 let _ttsConfig = null;
 let _taskSchedules = null;
 let _testPhones = {};
+let _tenants = [];
 
 // ═══════════════════════════════════════════════════════════
 //  Hot-reload конфиг
@@ -882,11 +883,27 @@ async function resetSchedules() {
 // ═══════════════════════════════════════════════════════════
 //  Test Phones
 // ═══════════════════════════════════════════════════════════
+async function _loadTenants() {
+    try {
+        const data = await api('/admin/tenants?is_active=true&limit=100');
+        _tenants = data.tenants || [];
+    } catch {
+        _tenants = [];
+    }
+}
+
+function _tenantName(tenantId) {
+    if (!tenantId) return t('settings.testPhonesAllNetworks');
+    const ten = _tenants.find(t => t.id === tenantId);
+    return ten ? ten.name : tenantId.slice(0, 8);
+}
+
 async function loadTestPhones() {
     const container = document.getElementById('testPhonesContainer');
     if (!container) return;
     container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
     try {
+        if (_tenants.length === 0) await _loadTenants();
         const data = await api('/admin/test-phones/config');
         _testPhones = data.phones || {};
         renderTestPhones();
@@ -905,12 +922,16 @@ function renderTestPhones() {
         html += `<table class="w-full text-sm">
             <thead><tr class="text-left text-xs text-neutral-500 dark:text-neutral-400 border-b border-neutral-200 dark:border-neutral-700">
                 <th class="pb-2 font-medium">${t('settings.testPhonesNumber')}</th>
+                <th class="pb-2 font-medium">${t('settings.testPhonesNetwork')}</th>
                 <th class="pb-2 font-medium">${t('settings.testPhonesMode')}</th>
                 <th class="pb-2 font-medium">${t('settings.testPhonesActions')}</th>
             </tr></thead><tbody>`;
-        for (const [phone, mode] of entries) {
+        for (const [phone, entry] of entries) {
+            const mode = typeof entry === 'string' ? entry : (entry.mode || 'no_history');
+            const tid = typeof entry === 'string' ? null : (entry.tenant_id || null);
             html += `<tr class="border-b border-neutral-100 dark:border-neutral-800">
                 <td class="py-2 font-mono text-neutral-900 dark:text-neutral-100">${escapeHtml(phone)}</td>
+                <td class="py-2 text-neutral-600 dark:text-neutral-400">${escapeHtml(_tenantName(tid))}</td>
                 <td class="py-2">
                     <select class="${tw.selectSm}" onchange="window._pages.configuration.updateTestPhoneMode('${escapeHtml(phone)}', this.value)">
                         <option value="no_history" ${mode === 'no_history' ? 'selected' : ''}>${t('settings.testPhonesModeNoHistory')}</option>
@@ -930,11 +951,21 @@ function renderTestPhones() {
         html += `<div class="text-sm text-neutral-400 dark:text-neutral-500 py-2">${t('settings.testPhonesEmpty')}</div>`;
     }
 
+    // Tenant options for dropdown
+    let tenantOptions = `<option value="">${t('settings.testPhonesAllNetworks')}</option>`;
+    for (const ten of _tenants) {
+        tenantOptions += `<option value="${ten.id}">${escapeHtml(ten.name)}</option>`;
+    }
+
     // Add new phone form
     html += `<div class="flex items-end gap-2 pt-2 border-t border-neutral-200 dark:border-neutral-700 mt-2">
         <div>
             <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.testPhonesNumber')}</label>
             <input id="newTestPhone" type="text" placeholder="0501234567" class="${tw.selectSm} w-40 font-mono">
+        </div>
+        <div>
+            <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.testPhonesNetwork')}</label>
+            <select id="newTestPhoneTenant" class="${tw.selectSm}">${tenantOptions}</select>
         </div>
         <div>
             <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.testPhonesMode')}</label>
@@ -953,14 +984,16 @@ function renderTestPhones() {
 async function addTestPhone() {
     const phoneInput = document.getElementById('newTestPhone');
     const modeSelect = document.getElementById('newTestPhoneMode');
+    const tenantSelect = document.getElementById('newTestPhoneTenant');
     const phone = phoneInput?.value?.trim();
     const mode = modeSelect?.value || 'no_history';
+    const tenant_id = tenantSelect?.value || null;
     if (!phone) return;
 
     try {
         const data = await api('/admin/test-phones/config', {
             method: 'PUT',
-            body: JSON.stringify({ phone, mode }),
+            body: JSON.stringify({ phone, mode, tenant_id: tenant_id || null }),
         });
         _testPhones = data.phones;
         renderTestPhones();
@@ -972,9 +1005,12 @@ async function addTestPhone() {
 
 async function updateTestPhoneMode(phone, mode) {
     try {
+        // Preserve existing tenant_id
+        const existing = _testPhones[phone];
+        const tenant_id = (existing && typeof existing === 'object') ? (existing.tenant_id || null) : null;
         const data = await api('/admin/test-phones/config', {
             method: 'PUT',
-            body: JSON.stringify({ phone, mode }),
+            body: JSON.stringify({ phone, mode, tenant_id }),
         });
         _testPhones = data.phones;
         showToast(t('settings.testPhonesModeUpdated', {phone}), 'success');
@@ -998,7 +1034,10 @@ async function removeTestPhone(phone) {
 async function clearPhoneHistory(phone) {
     if (!confirm(t('settings.testPhonesClearConfirm', {phone}))) return;
     try {
-        const data = await api(`/admin/test-phones/clear-history/${encodeURIComponent(phone)}`, { method: 'POST' });
+        const existing = _testPhones[phone];
+        const tid = (existing && typeof existing === 'object') ? (existing.tenant_id || '') : '';
+        const qs = tid ? `?tenant_id=${encodeURIComponent(tid)}` : '';
+        const data = await api(`/admin/test-phones/clear-history/${encodeURIComponent(phone)}${qs}`, { method: 'POST' });
         showToast(t('settings.testPhonesClearDone', {
             phone: data.phone,
             calls: data.calls_deleted,

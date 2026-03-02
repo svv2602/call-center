@@ -579,6 +579,8 @@ export default {
     'settings.testPhonesLoad': 'Загрузить',
     'settings.testPhonesLoadFailed': 'Не удалось загрузить: {error}',
     'settings.testPhonesNumber': 'Номер телефона',
+    'settings.testPhonesNetwork': 'Сеть',
+    'settings.testPhonesAllNetworks': 'Все сети',
     'settings.testPhonesMode': 'Режим',
     'settings.testPhonesActions': 'Действия',
     'settings.testPhonesModeNoHistory': 'Без истории',

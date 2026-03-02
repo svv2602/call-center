@@ -579,6 +579,8 @@ export default {
     'settings.testPhonesLoad': 'Load',
     'settings.testPhonesLoadFailed': 'Failed to load: {error}',
     'settings.testPhonesNumber': 'Phone Number',
+    'settings.testPhonesNetwork': 'Network',
+    'settings.testPhonesAllNetworks': 'All Networks',
     'settings.testPhonesMode': 'Mode',
     'settings.testPhonesActions': 'Actions',
     'settings.testPhonesModeNoHistory': 'No History',
