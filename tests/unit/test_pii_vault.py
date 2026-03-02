@@ -138,6 +138,39 @@ class TestAddressContextNotMasked:
         assert "Добровольців Перший" in result
 
 
+class TestVehicleBrandNotMasked:
+    """Vehicle brand+model pairs must NOT be masked — they are not PII."""
+
+    def test_volkswagen_tiguan_not_masked(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("Volkswagen Tiguan")
+        assert "Volkswagen Tiguan" in result
+        assert "[NAME_" not in result
+
+    def test_toyota_camry_not_masked(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("клієнт має Toyota Camry")
+        assert "Toyota Camry" in result
+
+    def test_hyundai_tucson_not_masked(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("автомобіль Hyundai Tucson, номер 1234")
+        assert "Hyundai Tucson" in result
+
+    def test_vehicle_context_prefix(self) -> None:
+        vault = PIIVault()
+        # Even with unknown brand, automotive context should skip masking
+        result = vault.mask("марка Ліфан Солано")
+        assert "Ліфан Солано" in result
+
+    def test_person_name_still_masked_near_vehicle(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("Volkswagen Tiguan, власник Іван Петренко")
+        assert "Volkswagen Tiguan" in result  # vehicle preserved
+        assert "Іван Петренко" not in result  # person masked
+        assert "[NAME_1]" in result
+
+
 class TestMixedPII:
     def test_mixed_pii(self) -> None:
         vault = PIIVault()

@@ -23,6 +23,30 @@ _ADDRESS_CONTEXT_RE = re.compile(
     re.IGNORECASE,
 )
 
+# Vehicle context — if a name match is preceded by automotive keywords,
+# it's a car brand+model (not PII).
+_VEHICLE_CONTEXT_RE = re.compile(
+    r"(?:автомобіл[ьюяі]|авто|машин[аиіу]|марк[аиіу]|модел[ьюяі]"
+    r"|автомобил[ьюяі]|vehicle|car|brand|model)"
+    r"\s*$",
+    re.IGNORECASE,
+)
+
+# Known vehicle brands — if the first word of a name match is a brand,
+# it's a car (e.g. "Volkswagen Tiguan", "Toyota Camry"), not a person.
+_VEHICLE_BRANDS = frozenset({
+    "Acura", "Alfa", "Aston", "Audi", "Bentley", "BMW", "Buick",
+    "Cadillac", "Changan", "Chery", "Chevrolet", "Chrysler", "Citroen",
+    "Cupra", "Dacia", "Daewoo", "Daihatsu", "Dodge", "Ferrari", "Fiat",
+    "Ford", "Geely", "Genesis", "Great", "Haval", "Honda", "Hummer",
+    "Hyundai", "Infiniti", "Isuzu", "Iveco", "Jaguar", "Jeep", "Kia",
+    "Lada", "Lamborghini", "Lancia", "Land", "Lexus", "Lincoln",
+    "Maserati", "Mazda", "McLaren", "Mercedes", "Mini", "Mitsubishi",
+    "Nissan", "Opel", "Peugeot", "Porsche", "Ravon", "Renault", "Rolls",
+    "Rover", "Saab", "Seat", "Skoda", "Smart", "Ssangyong", "Subaru",
+    "Suzuki", "Tesla", "Toyota", "Volkswagen", "Volvo", "ZAZ",
+})
+
 
 class PIIVault:
     """Reversible PII masking with placeholder ↔ original mapping."""
@@ -70,6 +94,11 @@ class PIIVault:
         # Skip names that appear in address context (street names are not PII)
         prefix = match.string[: match.start()]
         if _ADDRESS_CONTEXT_RE.search(prefix):
+            return raw
+        # Skip vehicle brand+model pairs (not PII)
+        if match.group(1) in _VEHICLE_BRANDS:
+            return raw
+        if _VEHICLE_CONTEXT_RE.search(prefix):
             return raw
         if raw in self._to_placeholder:
             return self._to_placeholder[raw]
