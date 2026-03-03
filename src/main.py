@@ -1386,6 +1386,22 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 "Поверніся до чеклісту і запитай у клієнта відсутні дані.",
             }
 
+        # Server-side validation: station_id must match a previously returned station
+        station_id = kwargs.get("station_id", "")
+        if station_id and session.fitting_station_ids and station_id not in session.fitting_station_ids:
+            known = ", ".join(sorted(session.fitting_station_ids))
+            logger.warning(
+                "book_fitting: LLM used station_id=%s but valid IDs are [%s] for call %s",
+                station_id,
+                known,
+                session.channel_uuid,
+            )
+            return {
+                "error": True,
+                "message": f"Невірний station_id '{station_id}'. "
+                f"Використай station_id з результату get_fitting_stations: {known}",
+            }
+
         # Server-side validation: booking date must be tomorrow .. +21 days
         booking_date_str = _resolve_date(kwargs.get("date", ""))
         if booking_date_str:
@@ -1667,6 +1683,11 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     if h.get("phone"):
                         entry["phone"] = h["phone"]
                 stations_out.append(entry)
+
+            # Track valid station IDs for server-side validation in book_fitting
+            for s_out in stations_out:
+                if s_out.get("id"):
+                    session.fitting_station_ids.add(s_out["id"])
 
             return {
                 "total": len(filtered),

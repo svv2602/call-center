@@ -75,6 +75,7 @@ class CallSession:
         self.order_id: str | None = None
         self.order_draft: dict[str, Any] | None = None
         self.fitting_booked: bool = False
+        self.fitting_station_ids: set[str] = set()  # station IDs from get_fitting_stations
         self.tools_called: set[str] = set()
         self.active_scenarios: set[str] = set()  # accumulated detected scenarios
         self.tenant_id: str | None = None
