@@ -210,12 +210,13 @@ class TestEchoCanceller:
 
     def test_aec_mock_integration(self):
         """Test AEC path with a mocked pyaec module."""
+        # cancel_echo returns list[int16] — quiet signal (amplitude=2)
+        quiet_samples = [2] * (_FRAME_BYTES // 2)
         mock_aec_instance = MagicMock()
-        cleaned_frame = self._make_quiet_frame(amplitude=2)
-        mock_aec_instance.process.return_value = cleaned_frame
+        mock_aec_instance.cancel_echo.return_value = quiet_samples
 
         mock_pyaec = MagicMock()
-        mock_pyaec.EchoCanceller.create.return_value = mock_aec_instance
+        mock_pyaec.Aec.return_value = mock_aec_instance
 
         with patch.dict(sys.modules, {"pyaec": mock_pyaec}):
             config = self._make_config(enabled=True, energy_gate_only=False)
@@ -231,18 +232,20 @@ class TestEchoCanceller:
             near = self._make_loud_frame()
             result = ec.process(near, speaking=True)
 
-            mock_aec_instance.process.assert_called_once()
-            # cleaned_frame has low RMS → gate should suppress
+            mock_aec_instance.cancel_echo.assert_called_once()
+            # cleaned samples have low RMS (2) → gate should suppress
             assert result == _SILENCE_FRAME
 
     def test_aec_mock_loud_output_passes_gate(self):
         """AEC output with sufficient energy passes through energy gate."""
-        loud_cleaned = self._make_loud_frame(amplitude=200)
+        # cancel_echo returns list[int16] — loud signal (amplitude=200)
+        loud_samples = [200] * (_FRAME_BYTES // 2)
+        loud_cleaned = array.array("h", loud_samples).tobytes()
         mock_aec_instance = MagicMock()
-        mock_aec_instance.process.return_value = loud_cleaned
+        mock_aec_instance.cancel_echo.return_value = loud_samples
 
         mock_pyaec = MagicMock()
-        mock_pyaec.EchoCanceller.create.return_value = mock_aec_instance
+        mock_pyaec.Aec.return_value = mock_aec_instance
 
         with patch.dict(sys.modules, {"pyaec": mock_pyaec}):
             config = self._make_config(enabled=True, energy_gate_only=False)

@@ -106,11 +106,9 @@ class EchoCanceller:
 
         if config.enabled and not config.energy_gate_only:
             try:
-                import pyaec
+                from pyaec import Aec
 
-                self._aec = pyaec.EchoCanceller.create(
-                    config.frame_size, config.filter_length, config.sample_rate
-                )
+                self._aec = Aec(config.frame_size, config.filter_length, config.sample_rate)
                 self._available = True
                 logger.info(
                     "AEC initialized: frame_size=%d, filter_length=%d",
@@ -159,7 +157,11 @@ class EchoCanceller:
         if self._available and self._aec is not None:
             far_frame = self._buffer.pop_frame()
             try:
-                result = self._aec.process(near_end_frame, far_frame)
+                # pyaec.Aec.cancel_echo() takes list[int16] and returns list[int16]
+                near_samples = list(array.array("h", near_end_frame))
+                far_samples = list(array.array("h", far_frame))
+                cleaned_samples = self._aec.cancel_echo(near_samples, far_samples)
+                result = array.array("h", cleaned_samples).tobytes()
                 aec_frames_processed.labels(mode="aec").inc()
             except Exception:
                 logger.debug("AEC process error, passing through", exc_info=True)
