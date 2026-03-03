@@ -262,8 +262,14 @@ async def stock_lookup(
             return {"found": False, "error": "Stock cache not populated"}
 
         raw = await redis.hget(stock_key, sku)
+        # 1C SKUs are zero-padded to 11 chars (e.g. "00000064314");
+        # try padding if the user entered a short SKU like "64314"
+        if not raw and sku.isdigit() and len(sku) < 11:
+            sku_padded = sku.zfill(11)
+            raw = await redis.hget(stock_key, sku_padded)
+            if raw:
+                sku = sku_padded
         if not raw:
-            # Try case-insensitive search on first 20 matching keys
             return {"found": False, "sku": sku}
 
         data = json.loads(raw if isinstance(raw, str) else raw.decode())
