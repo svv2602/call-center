@@ -50,6 +50,7 @@ _MAX_EMPTY_RETRIES = 2
 if TYPE_CHECKING:
     from src.agent.agent import ToolRouter
     from src.core.audio_socket import AudioSocketConnection
+    from src.core.echo_canceller import EchoCanceller
     from src.llm.router import LLMRouter
     from src.logging.pii_vault import PIIVault
     from src.tts.base import TTSEngine
@@ -122,6 +123,7 @@ class StreamingAgentLoop:
         promotions_context: str | None = None,
         is_modular: bool = False,
         agent_name: str | None = None,
+        echo_canceller: EchoCanceller | None = None,
     ) -> None:
         self._llm_router = llm_router
         self._tool_router = tool_router
@@ -138,6 +140,7 @@ class StreamingAgentLoop:
         self._promotions_context = promotions_context
         self._is_modular = is_modular
         self._agent_name = agent_name
+        self._echo_canceller = echo_canceller
 
     @property
     def _tts(self) -> TTSEngine:
@@ -255,6 +258,7 @@ class StreamingAgentLoop:
                     self._conn,
                     self._barge_in,
                     turn_start_time=turn_start,
+                    echo_canceller=self._echo_canceller,
                 )
             except Exception:
                 logger.exception("LLM streaming error in round %d", tool_round)
@@ -393,6 +397,8 @@ class StreamingAgentLoop:
                         tts = self._tts
                         audio = await tts.synthesize(_phrase)
                         if not (self._barge_in and self._barge_in.is_set()):
+                            if self._echo_canceller is not None:
+                                self._echo_canceller.record_far_end(audio)
                             await self._conn.send_audio(audio, cancel_event=self._barge_in)
                     except Exception:
                         logger.debug("Wait-phrase speak failed", exc_info=True)

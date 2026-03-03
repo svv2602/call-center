@@ -310,6 +310,26 @@ barge_in_total = Counter(
 )
 
 
+# --- Echo cancellation metrics ---
+
+aec_frames_processed = Counter(
+    "callcenter_aec_frames_processed_total",
+    "AEC frames processed by mode",
+    ["mode"],  # aec, gate, passthrough
+)
+
+aec_frames_suppressed = Counter(
+    "callcenter_aec_frames_suppressed_total",
+    "Frames suppressed by energy gate (replaced with silence)",
+)
+
+aec_processing_us = Histogram(
+    "callcenter_aec_processing_microseconds",
+    "AEC frame processing time in microseconds",
+    buckets=[10, 25, 50, 100, 200, 500, 1000],
+)
+
+
 def get_metrics() -> bytes:
     """Generate Prometheus metrics output."""
     return generate_latest()

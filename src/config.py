@@ -192,6 +192,16 @@ class GeminiSettings(BaseSettings):
     model_config = {"env_prefix": "GEMINI_"}
 
 
+class EchoCancellerSettings(BaseSettings):
+    enabled: bool = False
+    filter_length: int = 2048
+    energy_gate_enabled: bool = True
+    energy_threshold_rms: float = 50.0
+    energy_gate_only: bool = False
+
+    model_config = {"env_prefix": "AEC_"}
+
+
 class ScraperSettings(BaseSettings):
     enabled: bool = False
     base_url: str = "https://prokoleso.ua"
@@ -256,6 +266,7 @@ class Settings(BaseSettings):
     backup: BackupSettings = BackupSettings()
     deepseek: DeepSeekSettings = DeepSeekSettings()
     gemini: GeminiSettings = GeminiSettings()
+    aec: EchoCancellerSettings = EchoCancellerSettings()
     scraper: ScraperSettings = ScraperSettings()
     prometheus_port: int = 8080
 

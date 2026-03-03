@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from src.core.audio_socket import AudioSocketConnection
+    from src.core.echo_canceller import EchoCanceller
     from src.tts.streaming_tts import TTSEvent
 
 logger = logging.getLogger(__name__)
@@ -66,10 +67,12 @@ class StreamingAudioSender:
         conn: AudioSocketConnection,
         barge_in_event: asyncio.Event | None = None,
         turn_start_time: float | None = None,
+        echo_canceller: EchoCanceller | None = None,
     ) -> None:
         self._conn = conn
         self._barge_in = barge_in_event
         self._turn_start_time = turn_start_time
+        self._echo_canceller = echo_canceller
         self._first_audio_sent = False
 
     async def send(self, stream: AsyncIterator[TTSEvent]) -> SendResult:
@@ -91,6 +94,8 @@ class StreamingAudioSender:
                 if self._conn.is_closed:
                     disconnected = True
                     continue
+                if self._echo_canceller is not None:
+                    self._echo_canceller.record_far_end(event.audio)
                 t0 = time.monotonic()
                 was_interrupted = await self._conn.send_audio(
                     event.audio, cancel_event=self._barge_in
@@ -155,7 +160,10 @@ async def send_audio_stream(
     conn: AudioSocketConnection,
     barge_in_event: asyncio.Event | None = None,
     turn_start_time: float | None = None,
+    echo_canceller: EchoCanceller | None = None,
 ) -> SendResult:
     """Convenience wrapper — create sender and consume stream."""
-    sender = StreamingAudioSender(conn, barge_in_event, turn_start_time=turn_start_time)
+    sender = StreamingAudioSender(
+        conn, barge_in_event, turn_start_time=turn_start_time, echo_canceller=echo_canceller
+    )
     return await sender.send(stream)

@@ -1083,6 +1083,20 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         # Single shared barge-in event for the entire call
         barge_in_event = asyncio.Event()
 
+        # Initialize echo canceller (AEC + energy gate)
+        echo_canceller = None
+        if settings.aec.enabled:
+            from src.core.echo_canceller import EchoCanceller, EchoCancellerConfig, FarEndBuffer
+
+            ec_config = EchoCancellerConfig(
+                enabled=settings.aec.enabled,
+                filter_length=settings.aec.filter_length,
+                energy_gate_enabled=settings.aec.energy_gate_enabled,
+                energy_threshold_rms=settings.aec.energy_threshold_rms,
+                energy_gate_only=settings.aec.energy_gate_only,
+            )
+            echo_canceller = EchoCanceller(ec_config, FarEndBuffer())
+
         # Create streaming loop if FF enabled and LLM router available
         streaming_loop = None
         ff = settings.feature_flags
@@ -1103,6 +1117,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 promotions_context=promotions_context,
                 is_modular=is_modular,
                 agent_name=tenant_agent_name,
+                echo_canceller=echo_canceller,
             )
 
         # Run the pipeline (greeting → listen → STT → LLM → TTS loop)
@@ -1132,6 +1147,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             caller_history=caller_history_text,
             storage_context=storage_context_text,
             customer_profile=customer_profile_text,
+            echo_canceller=echo_canceller,
         )
         await pipeline.run()
 

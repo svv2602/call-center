@@ -73,6 +73,9 @@ test = [
 whisper = [
     "faster-whisper>=1.1.0",
 ]
+aec = [
+    "pyaec>=0.1.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["."]

@@ -188,6 +188,7 @@ _FAREWELL_SYSTEM_PROMPT = (
 if TYPE_CHECKING:
     from src.agent.agent import LLMAgent
     from src.agent.streaming_loop import StreamingAgentLoop
+    from src.core.echo_canceller import EchoCanceller
     from src.monitoring.cost_tracker import CostBreakdown
     from src.sandbox.patterns import PatternSearch
     from src.tts.base import TTSEngine
@@ -226,6 +227,7 @@ class CallPipeline:
         caller_history: str | None = None,
         storage_context: str | None = None,
         customer_profile: str | None = None,
+        echo_canceller: EchoCanceller | None = None,
     ) -> None:
         self._conn = conn
         self._stt = stt
@@ -243,6 +245,7 @@ class CallPipeline:
         self._caller_history = caller_history
         self._storage_context = storage_context
         self._customer_profile = customer_profile
+        self._echo_canceller = echo_canceller
         self._turn_counter = 0
         self._llm_history: list[dict[str, Any]] = []  # persistent LLM context for streaming path
         self._speaking = False
@@ -357,7 +360,10 @@ class CallPipeline:
 
             if packet.type == PacketType.AUDIO:
                 t0 = time.monotonic()
-                await self._stt.feed_audio(packet.payload)
+                audio = packet.payload
+                if self._echo_canceller is not None:
+                    audio = self._echo_canceller.process(audio, speaking=self._speaking)
+                await self._stt.feed_audio(audio)
                 audiosocket_to_stt_ms.observe((time.monotonic() - t0) * 1000)
 
             if packet.type == PacketType.ERROR:
@@ -704,6 +710,9 @@ class CallPipeline:
                 logger.info("Barge-in during TTS synthesis: %s", self._session.channel_uuid)
                 return
 
+            if self._echo_canceller is not None:
+                self._echo_canceller.record_far_end(audio)
+
             t0 = time.monotonic()
             interrupted = await self._conn.send_audio(audio, cancel_event=self._barge_in_event)
             tts_delivery_ms.observe((time.monotonic() - t0) * 1000)
@@ -714,6 +723,8 @@ class CallPipeline:
             logger.exception("TTS/send error: %s", self._session.channel_uuid)
         finally:
             self._speaking = False
+            if self._echo_canceller is not None:
+                self._echo_canceller.clear_far_end()
 
     async def _speak_streaming(self, text: str) -> None:
         """Synthesize and send audio sentence by sentence.
@@ -739,6 +750,9 @@ class CallPipeline:
                     logger.info("Barge-in between sentences: %s", self._session.channel_uuid)
                     break
 
+                if self._echo_canceller is not None:
+                    self._echo_canceller.record_far_end(audio_chunk)
+
                 t0 = time.monotonic()
                 interrupted = await self._conn.send_audio(
                     audio_chunk, cancel_event=self._barge_in_event
@@ -752,3 +766,5 @@ class CallPipeline:
             logger.exception("TTS streaming error: %s", self._session.channel_uuid)
         finally:
             self._speaking = False
+            if self._echo_canceller is not None:
+                self._echo_canceller.clear_far_end()
