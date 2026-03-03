@@ -696,6 +696,51 @@ class StoreClient:
 
     # --- 1C / PostgreSQL / Redis helpers (MVP) ---
 
+    @staticmethod
+    def _pick_diverse_tires(rows: list[Any], target: int = 5) -> list[Any]:
+        """Pick tires from different price segments for a balanced overview.
+
+        Selects 1 budget + 1-2 mid-range + 1-2 premium, one per manufacturer,
+        so the customer sees the full price range.
+        """
+        if not rows:
+            return rows
+
+        # Deduplicate by manufacturer (keep cheapest per brand)
+        seen_brands: dict[str, Any] = {}
+        for r in rows:
+            brand = r["brand"]
+            if brand not in seen_brands:
+                seen_brands[brand] = r
+        unique = list(seen_brands.values())
+
+        if len(unique) <= target:
+            return unique
+
+        # Split into 3 price segments
+        prices = sorted(r["price"] for r in unique if r["price"] > 0)
+        if len(prices) < 3:
+            return unique[:target]
+
+        p33 = prices[len(prices) // 3]
+        p66 = prices[2 * len(prices) // 3]
+
+        budget = [r for r in unique if 0 < r["price"] <= p33]
+        mid = [r for r in unique if p33 < r["price"] <= p66]
+        premium = [r for r in unique if r["price"] > p66]
+
+        # Pick from each segment
+        result: list[Any] = []
+        for segment, count in [(budget, 1), (mid, 2), (premium, 2)]:
+            result.extend(segment[:count])
+
+        # Fill remaining slots if a segment was too small
+        remaining = [r for r in unique if r not in result]
+        while len(result) < target and remaining:
+            result.append(remaining.pop(0))
+
+        return sorted(result, key=lambda r: r["price"])
+
     async def _search_tires_db(self, network: str = "", **params: Any) -> dict[str, Any]:
         """Search tires in PostgreSQL catalog (synced from 1C)."""
         from sqlalchemy import text
@@ -744,6 +789,17 @@ class StoreClient:
 
         where_clause = " AND ".join(conditions) if conditions else "1=1"
 
+        # If brand is specified, return up to 5 results sorted by price.
+        # Otherwise, pick diverse results across price segments (budget/mid/premium)
+        # so the customer sees the full range, not just the cheapest Chinese brands.
+        if params.get("brand"):
+            limit = 5
+            order = "s.price ASC NULLS LAST"
+        else:
+            # Fetch more rows to sample from different price segments
+            limit = 50
+            order = "s.price ASC NULLS LAST"
+
         query = text(f"""
             SELECT p.sku AS id, m.manufacturer AS brand, m.name AS model,
                    p.size, m.seasonality AS season,
@@ -753,13 +809,19 @@ class StoreClient:
             JOIN tire_models m ON p.model_id = m.id
             LEFT JOIN tire_stock s ON p.sku = s.sku AND s.trading_network = :network
             WHERE {where_clause}
-            ORDER BY s.price ASC NULLS LAST
-            LIMIT 5
+            ORDER BY {order}
+            LIMIT :result_limit
         """)
+        bind_params["result_limit"] = limit
 
         async with engine.connect() as conn:
             result = await conn.execute(query, bind_params)
-            rows = result.mappings().all()
+            rows = list(result.mappings().all())
+
+        # Diversify: pick tires from different price segments
+        # so the customer sees budget, mid-range, and premium options
+        if not params.get("brand") and len(rows) > 5:
+            rows = self._pick_diverse_tires(rows)
 
         items = [
             {
