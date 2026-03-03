@@ -99,6 +99,18 @@ details[open] .details-chevron { transform: rotate(90deg); }
   .sidebar-backdrop { display: none !important; }
 }
 
+/* === Sidebar nav scroll === */
+.sidebar-nav-scroll {
+  overflow-y: auto;
+  min-height: 0;
+  scrollbar-width: thin;
+  scrollbar-color: rgb(63 63 70) transparent;
+}
+.sidebar-nav-scroll::-webkit-scrollbar { width: 4px; }
+.sidebar-nav-scroll::-webkit-scrollbar-track { background: transparent; }
+.sidebar-nav-scroll::-webkit-scrollbar-thumb { background: rgb(63 63 70); border-radius: 2px; }
+.sidebar-nav-scroll::-webkit-scrollbar-thumb:hover { background: rgb(82 82 91); }
+
 /* === Icon-only sidebar === */
 .nav-item {
   position: relative;
