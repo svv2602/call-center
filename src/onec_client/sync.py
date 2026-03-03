@@ -26,11 +26,14 @@ NETWORKS = ("ProKoleso", "Tshina")
 # Max rows per executemany batch (prevents huge memory/packet spikes)
 _BATCH_SIZE = 1000
 
-# Seasonality normalization: 1C Russian → internal code
+# Seasonality normalization: 1C Russian/Ukrainian → internal code
 SEASON_MAP = {
     "зимняя": "winter",
     "летняя": "summer",
     "всесезонная": "all_season",
+    "зимова": "winter",
+    "літня": "summer",
+    "всесезонна": "all_season",
 }
 
 

@@ -727,8 +727,17 @@ class StoreClient:
             conditions.append("p.diameter = :diameter")
             bind_params["diameter"] = int(params["diameter"])
         if params.get("season"):
-            conditions.append("m.seasonality = :season")
+            # LLM sends English enum (summer/winter/all_season),
+            # but DB may have Ukrainian values from 1C sync
+            _season_to_db = {
+                "summer": "літня",
+                "winter": "зимова",
+                "all_season": "всесезонна",
+            }
+            db_season = _season_to_db.get(params["season"], params["season"])
+            conditions.append("m.seasonality IN (:season, :season_alt)")
             bind_params["season"] = params["season"]
+            bind_params["season_alt"] = db_season
         if params.get("brand"):
             conditions.append("LOWER(m.manufacturer) = LOWER(:brand)")
             bind_params["brand"] = params["brand"]
