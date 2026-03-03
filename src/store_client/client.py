@@ -790,12 +790,16 @@ class StoreClient:
 
         sku = product_id
         if not sku and query:
-            # Try to find SKU by searching
-            search = await self._search_tires_db(brand=query, network=network)
-            items = search.get("items", [])
-            if not items:
-                return {"available": False, "message": "Товар не знайдено"}
-            sku = items[0].get("id", "")
+            # If query is numeric, treat as SKU (LLM sometimes puts article in query)
+            if query.strip().isdigit():
+                sku = query.strip()
+            else:
+                # Try to find SKU by searching
+                search = await self._search_tires_db(brand=query, network=network)
+                items = search.get("items", [])
+                if not items:
+                    return {"available": False, "message": "Товар не знайдено"}
+                sku = items[0].get("id", "")
 
         if not sku:
             return {"available": False, "message": "Потрібен ID товару або запит"}
