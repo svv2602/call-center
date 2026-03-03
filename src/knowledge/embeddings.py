@@ -259,7 +259,12 @@ async def generate_embeddings_inline(article_id: str) -> dict[str, Any]:
             )
 
         if not row:
-            logger.warning("Article %s not found or inactive, skipping embedding", article_id)
+            logger.warning("Article %s not found or inactive, resetting status", article_id)
+            async with pool.acquire() as conn:
+                await conn.execute(
+                    "UPDATE knowledge_articles SET embedding_status = 'pending' WHERE id = $1 AND active = false",
+                    uuid.UUID(article_id),
+                )
             return {"article_id": article_id, "status": "skipped", "reason": "not_found"}
 
         # Update status to processing

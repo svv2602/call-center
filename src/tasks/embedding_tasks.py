@@ -70,8 +70,17 @@ async def _generate_article_embeddings_async(task: Any, article_id: str) -> dict
             row = result.first()
 
         if not row:
-            logger.warning("Article %s not found or inactive, skipping embedding", article_id)
-            return {"article_id": article_id, "error": "not_found"}
+            logger.warning("Article %s not found or inactive, resetting status", article_id)
+            async with engine.begin() as conn:
+                await conn.execute(
+                    text("""
+                        UPDATE knowledge_articles
+                        SET embedding_status = 'pending'
+                        WHERE id = :id AND active = false
+                    """),
+                    {"id": article_id},
+                )
+            return {"article_id": article_id, "status": "skipped", "reason": "not_found"}
 
         # Get embedding config
         api_key = settings.openai.api_key

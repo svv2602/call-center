@@ -96,6 +96,7 @@ class ArticleUpdateRequest(BaseModel):
     active: bool | None = None
     tenant_id: str | None = None
     expires_at: str | None = None
+    embedding_status: str | None = Field(default=None, pattern=r"^(pending|indexed|error|none)$")
 
 
 @router.get("/article-categories")
@@ -432,6 +433,9 @@ async def update_article(
         else:
             updates.append("expires_at = CAST(:expires_at AS timestamptz)")
             params["expires_at"] = request.expires_at
+    if request.embedding_status is not None:
+        updates.append("embedding_status = :embedding_status")
+        params["embedding_status"] = request.embedding_status
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
