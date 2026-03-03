@@ -477,6 +477,8 @@ class CallPipeline:
                     "customer", transcript.text, stt_confidence=transcript.confidence
                 )
                 self._session.transition_to(CallState.SPEAKING)
+                self._speaking = True
+                self._barge_in_event.clear()
                 start = time.monotonic()
                 try:
                     result = await asyncio.wait_for(
@@ -504,6 +506,10 @@ class CallPipeline:
                         self._session.channel_uuid,
                     )
                     result = None
+                finally:
+                    self._speaking = False
+                    if self._echo_canceller is not None:
+                        self._echo_canceller.clear_far_end()
 
                 llm_latency_ms = int((time.monotonic() - start) * 1000)
 
