@@ -1535,7 +1535,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
 
     router.register("get_pickup_points", _get_pickup_points)
 
-    async def _get_fitting_stations(city: str = "", **_kwargs: Any) -> dict[str, Any]:
+    async def _get_fitting_stations(city: str = "", query: str = "", **_kwargs: Any) -> dict[str, Any]:
         cache_key = "onec:fitting_stations"
 
         # 1. Redis cache
@@ -1604,19 +1604,10 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     exc_info=True,
                 )
 
-        # 4. Return from cache/1C with city filter
+        # 4. Return from cache/1C with city/query filter
         if all_stations is not None:
-            filtered = all_stations
-            if city:
-                city_q = _normalize_city(city)
-                filtered = [
-                    s
-                    for s in filtered
-                    if city_q in _normalize_city(s.get("city", ""))
-                    or _normalize_city(s.get("city", "")) in city_q
-                ]
-
-            # Merge station hints from Redis
+            # Load station hints from Redis BEFORE filtering —
+            # query may match hint fields (district, landmarks, description)
             hints: dict[str, Any] = {}
             if _redis:
                 try:
@@ -1627,6 +1618,34 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                         )
                 except Exception:
                     pass
+
+            filtered = all_stations
+            if city:
+                city_q = _normalize_city(city)
+                filtered = [
+                    s
+                    for s in filtered
+                    if city_q in _normalize_city(s.get("city", ""))
+                    or _normalize_city(s.get("city", "")) in city_q
+                ]
+
+            # Query search: match address + hint fields (district, landmarks, description)
+            if query:
+                q = query.lower()
+                query_matched = []
+                for s in filtered:
+                    sid = s.get("station_id", s.get("id", ""))
+                    address = s.get("address", "").lower()
+                    h = hints.get(sid, {})
+                    searchable = " ".join([
+                        address,
+                        h.get("district", ""),
+                        h.get("landmarks", ""),
+                        h.get("description", ""),
+                    ]).lower()
+                    if q in searchable:
+                        query_matched.append(s)
+                filtered = query_matched
 
             stations_out = []
             for s in filtered[:20]:
