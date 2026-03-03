@@ -191,52 +191,81 @@ def openai_response_to_llm_response(
     )
 
 
+class OpenAIStreamParser:
+    """Stateful parser for OpenAI streaming chunks.
+
+    OpenAI sends tool_call ``id`` only in the first chunk; subsequent delta
+    chunks carry only ``index``.  This class tracks the ``index → id`` mapping
+    so that ToolCallDelta events always carry the correct id.
+    """
+
+    def __init__(self, provider: str, model: str) -> None:
+        self._provider = provider
+        self._model = model
+        # index (int) → tool_call id (str)
+        self._index_to_id: dict[int, str] = {}
+
+    def feed(self, chunk: dict[str, Any]) -> list[StreamEvent]:
+        """Convert a single OpenAI SSE chunk into StreamEvents."""
+        events: list[StreamEvent] = []
+        choices = chunk.get("choices") or []
+        choice = choices[0] if choices else {}
+        delta = choice.get("delta") or {}
+        finish_reason = choice.get("finish_reason")
+
+        # Text delta
+        if delta.get("content"):
+            events.append(TextDelta(text=delta["content"]))
+
+        # Tool call deltas
+        for tc_delta in delta.get("tool_calls", []):
+            func = tc_delta.get("function", {})
+            idx = tc_delta.get("index", 0)
+            tc_id = tc_delta.get("id", "")
+
+            # Remember id for this index
+            if tc_id:
+                self._index_to_id[idx] = tc_id
+
+            resolved_id = self._index_to_id.get(idx, tc_id)
+
+            if tc_id and func.get("name"):
+                events.append(ToolCallStart(id=resolved_id, name=func["name"]))
+
+            if "arguments" in func and func["arguments"]:
+                events.append(
+                    ToolCallDelta(
+                        id=resolved_id,
+                        arguments_chunk=func["arguments"],
+                    )
+                )
+
+        # Stream done
+        if finish_reason is not None:
+            fr_map = {"tool_calls": "tool_use", "length": "max_tokens"}
+            stop_reason = fr_map.get(finish_reason, "end_turn")
+            usage_data = chunk.get("usage") or {}
+            events.append(
+                StreamDone(
+                    stop_reason=stop_reason,
+                    provider_key=self._provider,
+                    usage=Usage(
+                        input_tokens=usage_data.get("prompt_tokens", 0),
+                        output_tokens=usage_data.get("completion_tokens", 0),
+                    ),
+                )
+            )
+
+        return events
+
+
 def openai_stream_chunk_to_events(
     chunk: dict[str, Any],
     provider: str,
     model: str,
 ) -> list[StreamEvent]:
-    """Convert a single OpenAI streaming chunk (SSE ``data:`` JSON) into StreamEvents."""
-    events: list[StreamEvent] = []
-    choices = chunk.get("choices") or []
-    choice = choices[0] if choices else {}
-    delta = choice.get("delta") or {}
-    finish_reason = choice.get("finish_reason")
-
-    # Text delta
-    if delta.get("content"):
-        events.append(TextDelta(text=delta["content"]))
-
-    # Tool call deltas
-    for tc_delta in delta.get("tool_calls", []):
-        func = tc_delta.get("function", {})
-        tc_id = tc_delta.get("id", "")
-        if tc_id and func.get("name"):
-            events.append(ToolCallStart(id=tc_id, name=func["name"]))
-        if func.get("arguments"):
-            events.append(
-                ToolCallDelta(
-                    id=tc_id or "",
-                    arguments_chunk=func["arguments"],
-                )
-            )
-
-    # Stream done
-    if finish_reason is not None:
-        fr_map = {"tool_calls": "tool_use", "length": "max_tokens"}
-        stop_reason = fr_map.get(finish_reason, "end_turn")
-        usage_data = chunk.get("usage") or {}
-        events.append(
-            StreamDone(
-                stop_reason=stop_reason,
-                usage=Usage(
-                    input_tokens=usage_data.get("prompt_tokens", 0),
-                    output_tokens=usage_data.get("completion_tokens", 0),
-                ),
-            )
-        )
-
-    return events
+    """Stateless wrapper — kept for backward compatibility with tests."""
+    return OpenAIStreamParser(provider, model).feed(chunk)
 
 
 def llm_response_to_anthropic_blocks(response: LLMResponse) -> list[dict[str, Any]]:

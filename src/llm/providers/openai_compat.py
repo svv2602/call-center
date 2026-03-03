@@ -13,10 +13,10 @@ from typing import TYPE_CHECKING, Any
 import aiohttp
 
 from src.llm.format_converter import (
+    OpenAIStreamParser,
     anthropic_messages_to_openai,
     anthropic_tools_to_openai,
     openai_response_to_llm_response,
-    openai_stream_chunk_to_events,
 )
 from src.llm.providers.base import AbstractProvider
 
@@ -127,6 +127,7 @@ class OpenAICompatProvider(AbstractProvider):
         session = await self._get_session()
         url = f"{self._base_url}/chat/completions"
 
+        parser = OpenAIStreamParser(self._provider_key, self._model)
         async with session.post(url, json=body) as resp:
             if resp.status != 200:
                 error_text = await resp.text()
@@ -141,7 +142,7 @@ class OpenAICompatProvider(AbstractProvider):
                 if payload == "[DONE]":
                     break
                 chunk = json.loads(payload)
-                for event in openai_stream_chunk_to_events(chunk, self._provider_key, self._model):
+                for event in parser.feed(chunk):
                     yield event
 
     async def health_check(self) -> bool:

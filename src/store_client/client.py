@@ -800,6 +800,10 @@ class StoreClient:
         if not sku:
             return {"available": False, "message": "Потрібен ID товару або запит"}
 
+        # 1C SKUs are zero-padded to 11 chars (e.g. "00000064314")
+        if sku.isdigit() and len(sku) < 11:
+            sku = sku.zfill(11)
+
         # 1) Try Redis cache first (fastest)
         stock_data = await self._get_stock_from_redis(sku, network=network)
         if stock_data is not None:
