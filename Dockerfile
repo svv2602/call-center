@@ -21,7 +21,7 @@ COPY pyproject.toml ./
 # Install only production dependencies into /build/venv
 RUN python -m venv /build/venv && \
     /build/venv/bin/pip install --no-cache-dir --upgrade pip && \
-    /build/venv/bin/pip install --no-cache-dir .
+    /build/venv/bin/pip install --no-cache-dir ".[aec]"
 
 # ---- Runtime stage ----
 FROM python:3.12-slim
