@@ -144,6 +144,9 @@ class OpenAICompatProvider(AbstractProvider):
                 chunk = json.loads(payload)
                 for event in parser.feed(chunk):
                     yield event
+            # Flush deferred StreamDone if usage chunk never arrived
+            for event in parser.flush():
+                yield event
 
     async def health_check(self) -> bool:
         try:

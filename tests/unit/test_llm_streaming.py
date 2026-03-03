@@ -9,7 +9,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from aiobreaker import CircuitBreaker
 
-from src.llm.format_converter import openai_stream_chunk_to_events
+from src.llm.format_converter import OpenAIStreamParser, openai_stream_chunk_to_events
 from src.llm.models import (
     LLMResponse,
     LLMTask,
@@ -349,6 +349,111 @@ class TestOpenAIStreamChunkParser:
         chunk: dict[str, Any] = {"id": "chatcmpl-xxx"}
         events = openai_stream_chunk_to_events(chunk, "openai", "gpt-4o")
         assert len(events) == 0
+
+
+class TestOpenAIStreamParserUsage:
+    """OpenAI sends usage in a separate final chunk with choices=[].
+
+    The parser must defer StreamDone until usage arrives.
+    """
+
+    def test_usage_in_separate_chunk(self) -> None:
+        """Simulate real OpenAI streaming: finish_reason and usage in different chunks."""
+        parser = OpenAIStreamParser("openai", "gpt-4.1-mini")
+
+        # Chunk 1: finish_reason, no usage
+        events = parser.feed({
+            "choices": [{"delta": {}, "finish_reason": "stop"}],
+        })
+        assert len(events) == 0  # StreamDone deferred
+
+        # Chunk 2: usage, empty choices
+        events = parser.feed({
+            "choices": [],
+            "usage": {"prompt_tokens": 1500, "completion_tokens": 200},
+        })
+        assert len(events) == 1
+        assert isinstance(events[0], StreamDone)
+        assert events[0].stop_reason == "end_turn"
+        assert events[0].usage.input_tokens == 1500
+        assert events[0].usage.output_tokens == 200
+        assert events[0].provider_key == "openai"
+
+    def test_usage_in_same_chunk_as_finish(self) -> None:
+        """Some providers send usage inline with finish_reason."""
+        parser = OpenAIStreamParser("deepseek", "deepseek-chat")
+        events = parser.feed({
+            "choices": [{"delta": {}, "finish_reason": "stop"}],
+            "usage": {"prompt_tokens": 500, "completion_tokens": 80},
+        })
+        assert len(events) == 1
+        assert isinstance(events[0], StreamDone)
+        assert events[0].usage.input_tokens == 500
+        assert events[0].usage.output_tokens == 80
+
+    def test_flush_emits_deferred_done(self) -> None:
+        """If usage never arrives, flush() emits StreamDone with zero usage."""
+        parser = OpenAIStreamParser("openai", "gpt-4.1-mini")
+        parser.feed({
+            "choices": [{"delta": {}, "finish_reason": "tool_calls"}],
+        })
+        events = parser.flush()
+        assert len(events) == 1
+        assert isinstance(events[0], StreamDone)
+        assert events[0].stop_reason == "tool_use"
+        assert events[0].usage.input_tokens == 0
+
+    def test_flush_noop_after_usage(self) -> None:
+        """After usage is consumed, flush() returns nothing."""
+        parser = OpenAIStreamParser("openai", "gpt-4.1-mini")
+        parser.feed({
+            "choices": [{"delta": {}, "finish_reason": "stop"}],
+        })
+        parser.feed({
+            "choices": [],
+            "usage": {"prompt_tokens": 100, "completion_tokens": 50},
+        })
+        events = parser.flush()
+        assert len(events) == 0
+
+    def test_tool_calls_with_deferred_usage(self) -> None:
+        """Full flow: tool_call start + delta + finish + usage."""
+        parser = OpenAIStreamParser("openai", "gpt-4.1-mini")
+
+        # Tool call start
+        events = parser.feed({
+            "choices": [{"delta": {"tool_calls": [
+                {"index": 0, "id": "call_abc", "function": {"name": "search_tires", "arguments": ""}}
+            ]}, "finish_reason": None}],
+        })
+        assert len(events) == 1
+        assert isinstance(events[0], ToolCallStart)
+
+        # Tool call args
+        events = parser.feed({
+            "choices": [{"delta": {"tool_calls": [
+                {"index": 0, "function": {"arguments": '{"brand":"Firestone"}'}}
+            ]}, "finish_reason": None}],
+        })
+        assert len(events) == 1
+        assert isinstance(events[0], ToolCallDelta)
+        assert events[0].id == "call_abc"  # resolved from index
+
+        # Finish (no usage yet)
+        events = parser.feed({
+            "choices": [{"delta": {}, "finish_reason": "tool_calls"}],
+        })
+        assert len(events) == 0
+
+        # Usage arrives separately
+        events = parser.feed({
+            "choices": [],
+            "usage": {"prompt_tokens": 2000, "completion_tokens": 100},
+        })
+        assert len(events) == 1
+        assert isinstance(events[0], StreamDone)
+        assert events[0].stop_reason == "tool_use"
+        assert events[0].usage.input_tokens == 2000
 
 
 # ---------------------------------------------------------------------------

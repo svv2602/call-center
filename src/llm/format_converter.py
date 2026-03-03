@@ -204,6 +204,9 @@ class OpenAIStreamParser:
         self._model = model
         # index (int) → tool_call id (str)
         self._index_to_id: dict[int, str] = {}
+        # OpenAI with stream_options.include_usage sends usage in a separate
+        # final chunk with choices=[].  We defer StreamDone until that chunk.
+        self._pending_stop_reason: str | None = None
 
     def feed(self, chunk: dict[str, Any]) -> list[StreamEvent]:
         """Convert a single OpenAI SSE chunk into StreamEvents."""
@@ -232,7 +235,7 @@ class OpenAIStreamParser:
             if tc_id and func.get("name"):
                 events.append(ToolCallStart(id=resolved_id, name=func["name"]))
 
-            if "arguments" in func and func["arguments"]:
+            if func.get("arguments"):
                 events.append(
                     ToolCallDelta(
                         id=resolved_id,
@@ -240,14 +243,18 @@ class OpenAIStreamParser:
                     )
                 )
 
-        # Stream done
+        # Save finish_reason — defer StreamDone until usage chunk arrives
         if finish_reason is not None:
             fr_map = {"tool_calls": "tool_use", "length": "max_tokens"}
-            stop_reason = fr_map.get(finish_reason, "end_turn")
-            usage_data = chunk.get("usage") or {}
+            self._pending_stop_reason = fr_map.get(finish_reason, "end_turn")
+
+        # Emit StreamDone when we have both stop_reason and usage data.
+        # OpenAI sends usage in a separate final chunk with choices=[].
+        usage_data = chunk.get("usage")
+        if usage_data and self._pending_stop_reason is not None:
             events.append(
                 StreamDone(
-                    stop_reason=stop_reason,
+                    stop_reason=self._pending_stop_reason,
                     provider_key=self._provider,
                     usage=Usage(
                         input_tokens=usage_data.get("prompt_tokens", 0),
@@ -255,7 +262,22 @@ class OpenAIStreamParser:
                     ),
                 )
             )
+            self._pending_stop_reason = None
 
+        return events
+
+    def flush(self) -> list[StreamEvent]:
+        """Emit deferred StreamDone if usage chunk never arrived."""
+        events: list[StreamEvent] = []
+        if self._pending_stop_reason is not None:
+            events.append(
+                StreamDone(
+                    stop_reason=self._pending_stop_reason,
+                    provider_key=self._provider,
+                    usage=Usage(input_tokens=0, output_tokens=0),
+                )
+            )
+            self._pending_stop_reason = None
         return events
 
 
@@ -265,7 +287,10 @@ def openai_stream_chunk_to_events(
     model: str,
 ) -> list[StreamEvent]:
     """Stateless wrapper — kept for backward compatibility with tests."""
-    return OpenAIStreamParser(provider, model).feed(chunk)
+    parser = OpenAIStreamParser(provider, model)
+    events = parser.feed(chunk)
+    events.extend(parser.flush())
+    return events
 
 
 def llm_response_to_anthropic_blocks(response: LLMResponse) -> list[dict[str, Any]]:

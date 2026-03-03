@@ -1454,11 +1454,25 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
     router.register("update_order_delivery", _update_order_delivery)
     router.register("confirm_order", _confirm_order)
 
-    async def _get_pickup_points(city: str = "") -> dict[str, Any]:
+    async def _get_pickup_points(city: str = "", query: str = "") -> dict[str, Any]:
         network = session.network_id or "ProKoleso"
         cache_key = f"onec:points:{network}"
 
         result: dict[str, Any] | None = None
+
+        def _filter_points(points: list[dict[str, Any]]) -> list[dict[str, Any]]:
+            """Filter points by city and/or address query."""
+            filtered = points
+            if city:
+                filtered = [
+                    p for p in filtered if city.lower() in p.get("city", "").lower()
+                ]
+            if query:
+                q = query.lower()
+                filtered = [
+                    p for p in filtered if q in p.get("address", "").lower()
+                ]
+            return filtered
 
         # 1. Redis cache
         if _redis:
@@ -1466,10 +1480,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 raw = await _redis.get(cache_key)
                 if raw:
                     all_points = json.loads(raw if isinstance(raw, str) else raw.decode())
-                    if city:
-                        all_points = [
-                            p for p in all_points if city.lower() in p.get("city", "").lower()
-                        ]
+                    all_points = _filter_points(all_points)
                     result = {"total": len(all_points), "points": all_points[:15]}
             except Exception:
                 pass
@@ -1490,10 +1501,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 ]
                 if _redis:
                     await _redis.setex(cache_key, 3600, json.dumps(all_points, ensure_ascii=False))
-                if city:
-                    all_points = [
-                        p for p in all_points if city.lower() in p.get("city", "").lower()
-                    ]
+                all_points = _filter_points(all_points)
                 result = {"total": len(all_points), "points": all_points[:15]}
             except Exception:
                 logger.warning("1C pickup points unavailable for %s", network, exc_info=True)
