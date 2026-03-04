@@ -95,6 +95,7 @@ class TurnResult:
     provider_key: str = ""
     interrupted: bool = False
     disconnected: bool = False
+    wait_phrase: str = ""
 
 
 class StreamingAgentLoop:
@@ -231,14 +232,15 @@ class StreamingAgentLoop:
         # Add user message
         conversation_history.append({"role": "user", "content": user_text})
 
-        # Trim history if too long
+        # Compress/summarize old messages to save tokens (BEFORE trim so
+        # early context like customer name / topic is captured in the summary)
+        conversation_history[:] = summarize_old_messages(conversation_history)
+
+        # Safety-net trim: if history is still too long after summarization
         if len(conversation_history) > MAX_HISTORY_MESSAGES:
             conversation_history[:] = (
                 conversation_history[:1] + conversation_history[-(MAX_HISTORY_MESSAGES - 1) :]
             )
-
-        # Compress/summarize old messages to save tokens
-        conversation_history[:] = summarize_old_messages(conversation_history)
 
         # Build system prompt with caller context (mask caller phone)
         masked_phone = caller_phone
@@ -270,6 +272,7 @@ class StreamingAgentLoop:
 
         spoken_parts: list[str] = []
         has_llm_text = False  # True when LLM produced real text (not just wait-phrases)
+        wait_phrase_spoken = ""  # Tracked separately from spoken_parts for quality scoring
         total_input_tokens = 0
         total_output_tokens = 0
         tool_calls_made = 0
@@ -356,7 +359,11 @@ class StreamingAgentLoop:
 
             # No tool calls → done (or retry if empty)
             if not result.tool_calls:
-                if not result.spoken_text and not has_llm_text and empty_retries < _MAX_EMPTY_RETRIES:
+                if (
+                    not result.spoken_text
+                    and not has_llm_text
+                    and empty_retries < _MAX_EMPTY_RETRIES
+                ):
                     empty_retries += 1
                     # On last retry, switch to fallback provider
                     if empty_retries == _MAX_EMPTY_RETRIES and self._provider_override is None:
@@ -419,9 +426,7 @@ class StreamingAgentLoop:
                         timeout=_TOOL_TIMEOUT_SEC,
                     )
                 except TimeoutError:
-                    logger.error(
-                        "Tool %s timed out after %ds", tc.name, _TOOL_TIMEOUT_SEC
-                    )
+                    logger.error("Tool %s timed out after %ds", tc.name, _TOOL_TIMEOUT_SEC)
                     raw = {"error": "Сервіс тимчасово не відповідає, спробуйте ще раз"}
                 content = compress_tool_result(tc.name, raw)
                 if self._pii_vault is not None:
@@ -452,7 +457,7 @@ class StreamingAgentLoop:
                     await asyncio.gather(*[_execute_one_tool(tc) for tc in unique_tool_calls])
                 )
                 await wait_task
-                spoken_parts.append(wait_phrase)
+                wait_phrase_spoken = wait_phrase
             else:
                 tool_results = list(
                     await asyncio.gather(*[_execute_one_tool(tc) for tc in unique_tool_calls])
@@ -489,4 +494,5 @@ class StreamingAgentLoop:
             provider_key=provider_key,
             interrupted=interrupted,
             disconnected=disconnected,
+            wait_phrase=wait_phrase_spoken,
         )

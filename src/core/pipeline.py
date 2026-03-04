@@ -20,6 +20,8 @@ from src.agent.prompts import (
     FAREWELL_TEXT,
     GREETING_TEXT,
     SILENCE_PROMPT_TEXT,
+    SILENCE_TIMEOUT_1_TEXT,
+    SILENCE_TIMEOUT_2_TEXT,
     TRANSFER_TEXT,
     WAIT_ACK_POOL,
     WAIT_AVAILABILITY_POOL,
@@ -38,6 +40,14 @@ from src.stt.base import STTConfig, STTEngine, Transcript
 
 # Max time to wait for LLM agent to produce a response (seconds)
 AGENT_PROCESSING_TIMEOUT_SEC = 30
+
+# Barge-in suppression window after TTS ends (seconds).
+# Prevents echo from speaker triggering false barge-in detection.
+_BARGE_IN_SUPPRESSION_SEC = 0.5
+
+# Window to buffer multiple final transcripts after barge-in (seconds).
+# Multiple STT finals may arrive in quick succession; we merge them into one turn.
+_TRANSCRIPT_BUFFER_SEC = 0.5
 
 # Timeout for contextual farewell LLM call (seconds)
 _FAREWELL_LLM_TIMEOUT_SEC = 3
@@ -90,7 +100,7 @@ def _strip_greeting(text: str) -> str:
     for prefix in _GREETING_PREFIXES:
         if lowered.lower().startswith(prefix):
             # Strip the greeting and any following punctuation/whitespace
-            rest = lowered[len(prefix):].lstrip(" !.,;:—–-")
+            rest = lowered[len(prefix) :].lstrip(" !.,;:—–-")
             if rest:
                 return rest[0].upper() + rest[1:] if rest else ""
             # If only the greeting and nothing else — return as-is
@@ -115,17 +125,43 @@ _wait_counters: dict[int, int] = {}
 # Keywords that indicate a real request (not a simple reply like a name or "yes")
 _ACTION_KEYWORDS: list[str] = [
     # from _WAIT_CONTEXT_PATTERNS
-    "статус", "де замовлення", "де моє",
-    "запис", "записати", "шиномонтаж", "монтаж",
-    "наявність", "є в наявності",
-    "підібрати", "підбери", "пошукай",
+    "статус",
+    "де замовлення",
+    "де моє",
+    "запис",
+    "записати",
+    "шиномонтаж",
+    "монтаж",
+    "наявність",
+    "є в наявності",
+    "підібрати",
+    "підбери",
+    "пошукай",
     # additional action/topic keywords
-    "замовлення", "замовити", "оформити", "заказ",
-    "шини", "шину", "резину", "покришк",
-    "доставк", "оплат", "гаранті", "повернен",
-    "знижк", "акці", "промокод",
-    "перевір", "дізнати", "розкажи", "підкажи", "порад", "порівня",
-    "оператор", "менеджер", "переключи",
+    "замовлення",
+    "замовити",
+    "оформити",
+    "заказ",
+    "шини",
+    "шину",
+    "резину",
+    "покришк",
+    "доставк",
+    "оплат",
+    "гаранті",
+    "повернен",
+    "знижк",
+    "акці",
+    "промокод",
+    "перевір",
+    "дізнати",
+    "розкажи",
+    "підкажи",
+    "порад",
+    "порівня",
+    "оператор",
+    "менеджер",
+    "переключи",
 ]
 
 
@@ -411,6 +447,46 @@ class CallPipeline:
             # Signal queue reader that STT stream has ended
             await self._final_transcript_queue.put(None)
 
+    async def _drain_transcript_buffer(self, first: Transcript) -> Transcript:
+        """Buffer multiple final transcripts arriving in quick succession.
+
+        After a barge-in, STT may emit several finals within a short window.
+        We wait ``_TRANSCRIPT_BUFFER_SEC`` and merge them into a single turn
+        so the LLM receives one coherent user message instead of duplicates.
+        """
+        texts = [first.text]
+        confidences = [first.confidence]
+        language = first.language
+
+        try:
+            while True:
+                next_t = await asyncio.wait_for(
+                    self._get_next_final_transcript(),
+                    timeout=_TRANSCRIPT_BUFFER_SEC,
+                )
+                texts.append(next_t.text)
+                confidences.append(next_t.confidence)
+                if next_t.language:
+                    language = next_t.language
+        except (TimeoutError, asyncio.CancelledError):
+            pass
+
+        if len(texts) > 1:
+            merged_text = " ".join(texts)
+            avg_confidence = sum(confidences) / len(confidences)
+            logger.info(
+                "Merged %d transcripts into one: '%s'",
+                len(texts),
+                merged_text[:50],
+            )
+            return Transcript(
+                text=merged_text,
+                is_final=True,
+                confidence=avg_confidence,
+                language=language,
+            )
+        return first
+
     async def _transcript_processor_loop(self) -> None:
         """Process STT transcripts and drive the LLM → TTS flow."""
         while not self._conn.is_closed:
@@ -430,10 +506,19 @@ class CallPipeline:
                     await self._speak(farewell)
                     break
                 else:
-                    silence_msg = self._templates.get("silence_prompt", SILENCE_PROMPT_TEXT)
+                    # Two-level silence messages:
+                    # 1st timeout (count=1) — gentle reminder
+                    # 2nd timeout (count=2) — direct question before farewell
+                    if self._session.timeout_count <= 1:
+                        silence_msg = SILENCE_TIMEOUT_1_TEXT
+                    else:
+                        silence_msg = SILENCE_TIMEOUT_2_TEXT
                     await self._log_turn("bot", silence_msg)
                     await self._speak(silence_msg)
                     continue
+
+            # Buffer multiple transcripts arriving in quick succession
+            transcript = await self._drain_transcript_buffer(transcript)
 
             # Got a final transcript — reset timeout and track language
             self._session.timeout_count = 0
@@ -469,7 +554,7 @@ class CallPipeline:
                     patterns = await self._pattern_search.search(
                         query=transcript.text,
                         top_k=3,
-                        min_similarity=0.6,
+                        min_similarity=0.72,
                         tenant_id=tid,
                     )
                     pattern_context = await self._pattern_search.format_for_prompt(patterns)
@@ -548,12 +633,13 @@ class CallPipeline:
                     await self._persist_session()
                     logger.info(
                         "Streaming turn completed: call=%s, user='%s', agent='%s', "
-                        "tools=%d, llm=%dms",
+                        "tools=%d, llm=%dms%s",
                         self._session.channel_uuid,
                         transcript.text[:50],
                         result.spoken_text[:50],
                         result.tool_calls_made,
                         llm_latency_ms,
+                        f", wait_phrase='{result.wait_phrase}'" if result.wait_phrase else "",
                     )
                 elif result is not None and (result.interrupted or result.disconnected):
                     # Barge-in or hangup before LLM produced any text — not an error
@@ -762,6 +848,9 @@ class CallPipeline:
             self._speaking = False
             if self._echo_canceller is not None:
                 self._echo_canceller.clear_far_end()
+            # Suppress echo-triggered barge-in for 500ms after TTS ends
+            self._barge_in_event.clear()
+            await asyncio.sleep(_BARGE_IN_SUPPRESSION_SEC)
 
     async def _speak_streaming(self, text: str) -> None:
         """Synthesize and send audio sentence by sentence.
@@ -805,3 +894,6 @@ class CallPipeline:
             self._speaking = False
             if self._echo_canceller is not None:
                 self._echo_canceller.clear_far_end()
+            # Suppress echo-triggered barge-in for 500ms after TTS ends
+            self._barge_in_event.clear()
+            await asyncio.sleep(_BARGE_IN_SUPPRESSION_SEC)

@@ -109,7 +109,9 @@ app = FastAPI(
     version="0.1.0",
 )
 app.include_router(admin_users_router)
-app.include_router(export_router)  # Must be before analytics (both use /analytics prefix, export has /calls/export that conflicts with /calls/{call_id})
+app.include_router(
+    export_router
+)  # Must be before analytics (both use /analytics prefix, export has /calls/export that conflicts with /calls/{call_id})
 app.include_router(analytics_router)
 app.include_router(auth_router)
 app.include_router(customers_router)
@@ -660,7 +662,7 @@ async def _resolve_tenant(
             if row:
                 return dict(row._mapping)
     except Exception:
-        logger.debug("Tenant DB lookup failed", exc_info=True)
+        logger.warning("Tenant DB lookup failed", exc_info=True)
 
     return None
 
@@ -875,9 +877,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                     if raw:
                         from src.utils.phone import normalize_phone_ua
 
-                        phones = json.loads(
-                            raw.decode() if isinstance(raw, bytes) else raw
-                        )
+                        phones = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
                         normalized = normalize_phone_ua(session.caller_id)
                         raw_entry = phones.get(normalized)
                         if raw_entry is not None:
@@ -950,9 +950,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         caller_history_text = format_caller_history(caller_history_raw)
         storage_context_text = format_storage_context(storage_raw)
         customer_profile_text = format_customer_profile(customer_profile_raw)
-        profile_name = (
-            customer_profile_raw.get("name") if customer_profile_raw else None
-        )
+        profile_name = customer_profile_raw.get("name") if customer_profile_raw else None
 
         # Modular prompt assembly: if no DB/A-B prompt, assemble from modules
         is_modular = False
@@ -1437,7 +1435,11 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
 
         # Server-side validation: station_id must match a previously returned station
         station_id = kwargs.get("station_id", "")
-        if station_id and session.fitting_station_ids and station_id not in session.fitting_station_ids:
+        if (
+            station_id
+            and session.fitting_station_ids
+            and station_id not in session.fitting_station_ids
+        ):
             known = ", ".join(sorted(session.fitting_station_ids))
             logger.warning(
                 "book_fitting: LLM used station_id=%s but valid IDs are [%s] for call %s",
@@ -1529,14 +1531,10 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             """Filter points by city and/or address query."""
             filtered = points
             if city:
-                filtered = [
-                    p for p in filtered if city.lower() in p.get("city", "").lower()
-                ]
+                filtered = [p for p in filtered if city.lower() in p.get("city", "").lower()]
             if query:
                 q = query.lower()
-                filtered = [
-                    p for p in filtered if q in p.get("address", "").lower()
-                ]
+                filtered = [p for p in filtered if q in p.get("address", "").lower()]
             return filtered
 
         # 1. Redis cache
@@ -1600,7 +1598,9 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
 
     router.register("get_pickup_points", _get_pickup_points)
 
-    async def _get_fitting_stations(city: str = "", query: str = "", **_kwargs: Any) -> dict[str, Any]:
+    async def _get_fitting_stations(
+        city: str = "", query: str = "", **_kwargs: Any
+    ) -> dict[str, Any]:
         cache_key = "onec:fitting_stations"
 
         # 1. Redis cache
@@ -1627,9 +1627,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 if isinstance(raw_list, list) and raw_list:
                     all_stations = [
                         {
-                            "station_id": s.get(
-                                "StationID", s.get("station_id", s.get("id", ""))
-                            ),
+                            "station_id": s.get("StationID", s.get("station_id", s.get("id", ""))),
                             "name": s.get("StationName", s.get("name", "")),
                             "city": s.get("StationCity", s.get("city", "")),
                             "city_id": s.get("StationCityID", s.get("city_id", "")),
@@ -1702,12 +1700,14 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     sid = s.get("station_id", s.get("id", ""))
                     address = s.get("address", "").lower()
                     h = hints.get(sid, {})
-                    searchable = " ".join([
-                        address,
-                        h.get("district", ""),
-                        h.get("landmarks", ""),
-                        h.get("description", ""),
-                    ]).lower()
+                    searchable = " ".join(
+                        [
+                            address,
+                            h.get("district", ""),
+                            h.get("landmarks", ""),
+                            h.get("description", ""),
+                        ]
+                    ).lower()
                     if q in searchable:
                         query_matched.append(s)
                 filtered = query_matched
@@ -1908,11 +1908,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             if station_id:
                 filtered = [p for p in filtered if p.get("point_id") == station_id]
             if tire_diameter:
-                by_diameter = [
-                    p
-                    for p in filtered
-                    if _matches_diameter(p, tire_diameter)
-                ]
+                by_diameter = [p for p in filtered if _matches_diameter(p, tire_diameter)]
                 if by_diameter:
                     filtered = by_diameter
                 elif filtered:
