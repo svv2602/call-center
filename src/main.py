@@ -2,11 +2,13 @@
 
 import asyncio
 import contextlib
+import hmac
 import json
 import logging
 import os
 import signal
 import sys
+import uuid as uuid_mod
 from datetime import UTC, datetime, timedelta
 from datetime import date as date_type
 from pathlib import Path
@@ -14,7 +16,7 @@ from typing import Any
 
 import aiohttp
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
@@ -374,19 +376,33 @@ async def readiness_check() -> dict[str, object]:
 
 
 @app.post("/internal/caller-id")
-async def store_caller_id(data: dict[str, str]) -> dict[str, str]:
+async def store_caller_id(request: Request, data: dict[str, str]) -> dict[str, str]:
     """Store CallerID and called extension in Redis for a call UUID.
 
     Called by Asterisk dialplan before AudioSocket:
       System(curl -s -X POST http://...:8080/internal/caller-id
         -H 'Content-Type: application/json'
+        -H 'X-Internal-Secret: ${INTERNAL_SECRET}'
         -d '{"uuid":"${CALL_UUID}","number":"${CALLERID(num)}","exten":"${CALLED_EXTEN}"}')
     """
+    # Verify pre-shared secret
+    settings = get_settings()
+    expected_secret = settings.internal_api.secret
+    if expected_secret:
+        provided_secret = request.headers.get("X-Internal-Secret", "")
+        if not hmac.compare_digest(provided_secret, expected_secret):
+            raise HTTPException(status_code=403, detail="Forbidden")
+
     call_uuid = data.get("uuid", "").strip()
     number = data.get("number", "").strip()
     exten = data.get("exten", "").strip()
     if not call_uuid:
         return {"status": "ignored"}
+    # Validate UUID format
+    try:
+        uuid_mod.UUID(call_uuid)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid UUID format")  # noqa: B904
     if _redis is not None:
         if number:
             await _redis.set(f"call:caller:{call_uuid}", number, ex=120)
@@ -396,8 +412,16 @@ async def store_caller_id(data: dict[str, str]) -> dict[str, str]:
 
 
 @app.get("/metrics")
-async def metrics_endpoint() -> Response:
+async def metrics_endpoint(request: Request) -> Response:
     """Prometheus metrics endpoint."""
+    settings = get_settings()
+    expected_token = settings.metrics.bearer_token
+    if expected_token:
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer ") or not hmac.compare_digest(
+            auth_header[7:], expected_token
+        ):
+            raise HTTPException(status_code=403, detail="Forbidden")
     return Response(content=get_metrics(), media_type="text/plain; charset=utf-8")
 
 
@@ -2202,12 +2226,42 @@ async def main() -> None:
         print(f"\n{len(validation.errors)} configuration error(s). Fix them and restart.")
         sys.exit(1)
 
-    # Block startup with default JWT secret when running in Docker (production)
+    # Block startup with default credentials when running in Docker (production)
     _in_docker = Path("/app/venv").exists()
     if _in_docker and settings.admin.jwt_secret == "change-me-in-production":
         print("\u274c ADMIN_JWT_SECRET is set to the insecure default.")
         print("  Set ADMIN_JWT_SECRET to a random string in your .env file.")
         sys.exit(1)
+    if _in_docker and settings.admin.password == "admin":
+        print("\u274c ADMIN_PASSWORD is set to the insecure default 'admin'.")
+        print("  Set ADMIN_PASSWORD to a strong password in your .env file.")
+        sys.exit(1)
+    if _in_docker and settings.store_api.key == "test-store-api-key":
+        print("\u274c STORE_API_KEY is set to the test default 'test-store-api-key'.")
+        print("  Set STORE_API_KEY to a real API key in your .env file.")
+        sys.exit(1)
+    grafana_pw = os.environ.get("GRAFANA_ADMIN_PASSWORD", "admin")
+    if _in_docker and grafana_pw == "admin":
+        print("\u274c GRAFANA_ADMIN_PASSWORD is set to the insecure default 'admin'.")
+        print("  Set GRAFANA_ADMIN_PASSWORD in your .env file.")
+        sys.exit(1)
+    if _in_docker and settings.ari.password == "ari_password":
+        print(
+            "\u26a0\ufe0f  WARNING: ARI_PASSWORD is set to the default 'ari_password'. "
+            "Consider changing it."
+        )
+
+    # Warn about empty internal API secrets
+    if not settings.internal_api.secret:
+        print(
+            "\u26a0\ufe0f  WARNING: INTERNAL_API_SECRET is not set. "
+            "/internal/caller-id is unprotected."
+        )
+    if not settings.metrics.bearer_token:
+        print(
+            "\u26a0\ufe0f  WARNING: METRICS_BEARER_TOKEN is not set. "
+            "/metrics endpoint is unprotected."
+        )
 
     # Configure structured logging
     setup_logging(level=settings.logging.level, format_type=settings.logging.format)

@@ -14,7 +14,7 @@ from typing import Any
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from redis.asyncio import Redis
 
-from src.api.auth import verify_jwt
+from src.api.auth import validate_ws_ticket, verify_jwt
 from src.config import get_settings
 from src.events.publisher import CHANNEL
 from src.monitoring.metrics import (
@@ -91,10 +91,19 @@ async def ensure_subscriber_started() -> None:
 async def websocket_endpoint(websocket: WebSocket) -> None:
     """WebSocket endpoint for admin real-time updates.
 
-    Auth: pass JWT token as query parameter ?token=...
+    Auth: pass one-time ticket as ?ticket=... (preferred)
+    or legacy JWT token as ?token=... (deprecated).
     """
-    token = websocket.query_params.get("token", "")
-    payload = _authenticate(token)
+    # Prefer ticket-based auth (one-time, not logged in URL)
+    ticket = websocket.query_params.get("ticket", "")
+    payload: dict[str, Any] | None = None
+    if ticket:
+        payload = await validate_ws_ticket(ticket)
+    else:
+        # Legacy: JWT in query param (deprecated)
+        token = websocket.query_params.get("token", "")
+        payload = _authenticate(token)
+
     if payload is None:
         await websocket.close(code=4001, reason="Unauthorized")
         return

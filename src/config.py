@@ -202,6 +202,24 @@ class EchoCancellerSettings(BaseSettings):
     model_config = {"env_prefix": "AEC_"}
 
 
+class TrustedProxySettings(BaseSettings):
+    ips: str = "127.0.0.1,172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"
+
+    model_config = {"env_prefix": "TRUSTED_PROXY_"}
+
+
+class InternalAPISettings(BaseSettings):
+    secret: str = ""
+
+    model_config = {"env_prefix": "INTERNAL_API_"}
+
+
+class MetricsSettings(BaseSettings):
+    bearer_token: str = ""
+
+    model_config = {"env_prefix": "METRICS_"}
+
+
 class ScraperSettings(BaseSettings):
     enabled: bool = False
     base_url: str = "https://prokoleso.ua"
@@ -268,6 +286,9 @@ class Settings(BaseSettings):
     gemini: GeminiSettings = GeminiSettings()
     aec: EchoCancellerSettings = EchoCancellerSettings()
     scraper: ScraperSettings = ScraperSettings()
+    internal_api: InternalAPISettings = InternalAPISettings()
+    metrics: MetricsSettings = MetricsSettings()
+    trusted_proxy: TrustedProxySettings = TrustedProxySettings()
     prometheus_port: int = 8080
 
     model_config = {"env_prefix": ""}

@@ -15,6 +15,28 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Maximum length for guidance_note to limit prompt injection surface
+_MAX_GUIDANCE_NOTE_LENGTH = 500
+
+
+def sanitize_guidance_note(note: str) -> str:
+    """Sanitize guidance_note: strip code/markdown blocks and enforce length limit."""
+    import re
+
+    # Strip markdown code blocks (```...```)
+    note = re.sub(r"```[\s\S]*?```", "", note)
+    # Strip inline code (`...`)
+    note = re.sub(r"`[^`]*`", "", note)
+    # Strip markdown headers
+    note = re.sub(r"^#{1,6}\s+", "", note, flags=re.MULTILINE)
+    # Collapse multiple newlines
+    note = re.sub(r"\n{3,}", "\n\n", note)
+    # Truncate to max length
+    note = note.strip()
+    if len(note) > _MAX_GUIDANCE_NOTE_LENGTH:
+        note = note[:_MAX_GUIDANCE_NOTE_LENGTH]
+    return note
+
 
 class PatternSearch:
     """Vector search over conversation patterns using pgvector."""
@@ -90,6 +112,8 @@ async def export_group_to_pattern(
     4. INSERT into conversation_patterns
     5. Mark group as is_exported = true
     """
+    # Sanitize guidance_note to prevent prompt injection
+    guidance_note = sanitize_guidance_note(guidance_note)
     from sqlalchemy import text as sa_text
 
     async with engine.begin() as conn:

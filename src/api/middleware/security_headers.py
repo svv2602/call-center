@@ -20,8 +20,11 @@ if TYPE_CHECKING:
     from starlette.requests import Request
     from starlette.responses import Response
 
-# CSP allows inline styles/scripts for admin UI (single-page HTML)
-# frame-src 'self' allows embedding Grafana via /grafana/ reverse proxy
+# CSP allows inline styles/scripts for admin UI (single-page HTML).
+# NOTE: 'unsafe-inline' is required because Admin UI (Vite SPA) uses inline
+# scripts in index.html. Nonce-based CSP would require server-side HTML
+# rendering to inject nonces, which conflicts with the static SPA architecture.
+# frame-src 'self' allows embedding Grafana via /grafana/ reverse proxy.
 _CSP = (
     "default-src 'self'; "
     "script-src 'self' 'unsafe-inline'; "
@@ -49,7 +52,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["X-XSS-Protection"] = "0"
-        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+        # HSTS only when behind HTTPS (direct or via proxy)
+        proto = request.headers.get("X-Forwarded-Proto", request.url.scheme)
+        if proto == "https":
+            response.headers["Strict-Transport-Security"] = "max-age=31536000"
         response.headers["Content-Security-Policy"] = _CSP
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"

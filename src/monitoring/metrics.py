@@ -244,7 +244,7 @@ jwt_logouts_total = Counter(
 rate_limit_exceeded_total = Counter(
     "callcenter_rate_limit_exceeded_total",
     "Rate limit exceeded count",
-    ["endpoint", "ip"],
+    ["endpoint"],
 )
 
 

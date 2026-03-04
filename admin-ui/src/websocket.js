@@ -10,11 +10,37 @@ export function setWsEventHandler(handler) {
     eventHandler = handler;
 }
 
-export function connectWebSocket() {
+async function _getWsTicket() {
+    /**
+     * Exchange JWT for a one-time WebSocket ticket.
+     * Falls back to legacy token if ticket endpoint fails.
+     */
     const token = getToken();
-    if (!token) return;
+    if (!token) return null;
+    try {
+        const resp = await fetch('/auth/ws-ticket', {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${token}`,
+                'Content-Type': 'application/json',
+            },
+        });
+        if (resp.ok) {
+            const data = await resp.json();
+            return { type: 'ticket', value: data.ticket };
+        }
+    } catch { /* fall through to legacy */ }
+    // Fallback: legacy token in URL (deprecated)
+    return { type: 'token', value: token };
+}
+
+export async function connectWebSocket() {
+    const auth = await _getWsTicket();
+    if (!auth) return;
+
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    const wsUrl = `${proto}//${location.host}/ws?token=${token}`;
+    const param = auth.type === 'ticket' ? `ticket=${auth.value}` : `token=${auth.value}`;
+    const wsUrl = `${proto}//${location.host}/ws?${param}`;
 
     try { ws = new WebSocket(wsUrl); } catch { return; }
 
