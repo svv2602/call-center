@@ -302,6 +302,13 @@ llm_fallbacks_total = Counter(
     ["from_provider", "to_provider", "task"],
 )
 
+# --- Tenant resolution metrics ---
+
+tenant_resolution_fallback_total = Counter(
+    "callcenter_tenant_resolution_fallback_total",
+    "Times tenant resolution fell back to first active tenant",
+)
+
 # --- Barge-in metrics ---
 
 barge_in_total = Counter(

@@ -136,6 +136,7 @@ services:
     depends_on:
       - prometheus
       - postgres
+      - loki
     restart: unless-stopped
     deploy:
       resources:
@@ -210,18 +211,98 @@ services:
     ports:
       - "9093:9093"
     volumes:
-      - ./alertmanager/config.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./alertmanager/config.yml.tmpl:/etc/alertmanager/alertmanager.yml.tmpl:ro
+      - ./alertmanager/entrypoint.sh:/entrypoint.sh:ro
     environment:
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID}
-    command:
-      - "--config.file=/etc/alertmanager/alertmanager.yml"
+      ALERTMANAGER_TELEGRAM_BOT_TOKEN: ${ALERTMANAGER_TELEGRAM_BOT_TOKEN}
+      ALERTMANAGER_TELEGRAM_CHAT_ID: ${ALERTMANAGER_TELEGRAM_CHAT_ID}
+    entrypoint: ["/entrypoint.sh"]
     restart: unless-stopped
     deploy:
       resources:
         limits:
           cpus: "0.5"
           memory: 256M
+
+  loki:
+    image: grafana/loki:latest
+    ports:
+      - "127.0.0.1:3100:3100"
+    volumes:
+      - ./loki/loki-config.yml:/etc/loki/config.yml:ro
+      - loki_data:/loki
+    command: -config.file=/etc/loki/config.yml
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+
+  promtail:
+    image: grafana/promtail:latest
+    volumes:
+      - ./loki/promtail-config.yml:/etc/promtail/config.yml:ro
+      - /var/lib/docker/containers:/var/lib/docker/containers:ro
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: -config.file=/etc/promtail/config.yml
+    depends_on:
+      - loki
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+
+  node-exporter:
+    image: prom/node-exporter:latest
+    ports:
+      - "127.0.0.1:9100:9100"
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/rootfs:ro
+    command:
+      - "--path.procfs=/host/proc"
+      - "--path.sysfs=/host/sys"
+      - "--path.rootfs=/rootfs"
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+  redis-exporter:
+    image: oliver006/redis_exporter:latest
+    ports:
+      - "127.0.0.1:9121:9121"
+    environment:
+      REDIS_ADDR: redis://redis:6379
+    depends_on:
+      - redis
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:latest
+    ports:
+      - "127.0.0.1:9187:9187"
+    environment:
+      DATA_SOURCE_NAME: "postgresql://callcenter:${POSTGRES_PASSWORD}@postgres:5432/callcenter?sslmode=disable"
+    depends_on:
+      - postgres
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
 
   whisper:
     image: onerahmet/openai-whisper-asr-webservice:latest-gpu
@@ -247,4 +328,5 @@ volumes:
   redisdata:
   prometheus_data:
   grafana_data:
+  loki_data:
   backups:

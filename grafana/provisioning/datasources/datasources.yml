@@ -22,3 +22,10 @@ datasources:
       maxIdleConns: 2
       connMaxLifetime: 14400
     editable: false
+
+  - name: Loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    isDefault: false
+    editable: false

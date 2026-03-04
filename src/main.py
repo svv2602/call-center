@@ -89,6 +89,7 @@ from src.monitoring.metrics import (
     fittings_booked_total,
     get_metrics,
     orders_created_total,
+    tenant_resolution_fallback_total,
 )
 from src.onec_client.client import OneCClient
 from src.onec_client.soap import OneCSOAPClient
@@ -657,6 +658,12 @@ async def _resolve_tenant(
                 )
             else:
                 # Fallback: first active tenant
+                tenant_resolution_fallback_total.inc()
+                logger.warning(
+                    "Tenant resolution fallback — no exten/slug for call %s, "
+                    "serving as first active tenant",
+                    channel_uuid,
+                )
                 result = await conn.execute(
                     text(f"""
                         SELECT {tenant_columns}

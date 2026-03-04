@@ -1,40 +1,22 @@
+# Static fallback config — NOT used at runtime.
+# The Docker entrypoint renders config.yml.tmpl → config.yml via envsubst.
+# See config.yml.tmpl for the actual template with Telegram receiver.
+#
+# This file exists only so that `docker compose config` validates cleanly
+# when the entrypoint has not run yet.
+
 global:
   resolve_timeout: 5m
 
 route:
-  group_by: ["alertname", "severity"]
+  group_by: ["alertname"]
   group_wait: 30s
   group_interval: 5m
   repeat_interval: 4h
-  receiver: "telegram"
-
-  routes:
-    - match:
-        severity: critical
-      receiver: "telegram"
-      repeat_interval: 1h
-
-    - match:
-        severity: high
-      receiver: "telegram"
-      repeat_interval: 2h
+  receiver: "blackhole"
 
 receivers:
-  # Telegram alerting — fill in real values and uncomment.
-  # Alertmanager does NOT support ${ENV} substitution in YAML config.
-  - name: "telegram"
+  - name: "blackhole"
     webhook_configs:
       - url: "http://localhost:9099/dev-null"
-        send_resolved: true
-  # To enable Telegram alerts, replace the receiver above with:
-  # - name: "telegram"
-  #   telegram_configs:
-  #     - bot_token: "YOUR_BOT_TOKEN"
-  #       chat_id: 123456789
-  #       parse_mode: "HTML"
-  #       message: |
-  #         <b>{{ .Status | toUpper }}</b>
-  #         <b>Alert:</b> {{ .CommonLabels.alertname }}
-  #         <b>Severity:</b> {{ .CommonLabels.severity }}
-  #         <b>Summary:</b> {{ .CommonAnnotations.summary }}
-  #         <b>Description:</b> {{ .CommonAnnotations.description }}
+        send_resolved: false
