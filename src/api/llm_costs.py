@@ -13,17 +13,15 @@ from uuid import UUID  # noqa: TC003
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.api.auth import require_permission
+from src.api.database import get_engine as _get_engine
 from src.config import get_settings
 from src.monitoring.pricing_cache import invalidate as _invalidate_pricing
 from src.monitoring.pricing_cache import refresh_from_db as _refresh_pricing
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/llm-costs", tags=["llm-costs"])
-
-_engine: AsyncEngine | None = None
 
 _perm_r = Depends(require_permission("analytics:read"))
 _perm_w = Depends(require_permission("llm_config:write"))
@@ -36,14 +34,6 @@ _q_tenant_id = Query(None)
 _q_provider_type = Query(None)
 _q_search = Query(None)
 _q_include_hidden = Query(False)
-
-
-async def _get_engine() -> AsyncEngine:
-    global _engine
-    if _engine is None:
-        settings = get_settings()
-        _engine = create_async_engine(settings.database.url, pool_pre_ping=True)
-    return _engine
 
 
 # --- Pydantic models ---

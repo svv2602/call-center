@@ -11,30 +11,19 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.agent.tools import ALL_TOOLS
 from src.api.auth import require_permission
-from src.config import get_settings
+from src.api.database import get_engine as _get_engine
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/training/tools", tags=["training"])
-
-_engine: AsyncEngine | None = None
 
 _perm_r = Depends(require_permission("training:read"))
 _perm_w = Depends(require_permission("training:write"))
 _perm_d = Depends(require_permission("training:delete"))
 
 _TOOL_NAMES = [t["name"] for t in ALL_TOOLS]
-
-
-async def _get_engine() -> AsyncEngine:
-    global _engine
-    if _engine is None:
-        settings = get_settings()
-        _engine = create_async_engine(settings.database.url, pool_pre_ping=True)
-    return _engine
 
 
 class ToolOverrideRequest(BaseModel):

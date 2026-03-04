@@ -158,53 +158,11 @@ app.add_middleware(SecurityHeadersMiddleware)
 
 @app.on_event("shutdown")
 async def _dispose_api_engines() -> None:
-    """Dispose all module-level SQLAlchemy engines cached by API routers."""
-    from src.api import (
-        admin_users,
-        analytics,
-        auth,
-        customers,
-        export,
-        knowledge,
-        operators,
-        prompts,
-        sandbox,
-        scraper,
-        system,
-        tenants,
-        training_dialogues,
-        training_safety,
-        training_templates,
-        training_tools,
-        vehicles,
-    )
-    from src.api.middleware import audit
+    """Dispose the shared API database engine."""
+    from src.api.database import dispose_engine
 
-    modules = [
-        admin_users,
-        analytics,
-        auth,
-        customers,
-        export,
-        knowledge,
-        operators,
-        prompts,
-        sandbox,
-        scraper,
-        system,
-        tenants,
-        training_dialogues,
-        training_safety,
-        training_templates,
-        training_tools,
-        vehicles,
-        audit,
-    ]
-    for mod in modules:
-        engine = getattr(mod, "_engine", None)
-        if engine is not None:
-            await engine.dispose()
-    logger.info("API router engines disposed")
+    await dispose_engine()
+    logger.info("Shared API database engine disposed")
 
 
 # Admin UI: serve from dist/ (production build) or root (dev with Vite proxy)
@@ -2334,7 +2292,11 @@ async def main() -> None:
             from sqlalchemy.ext.asyncio import create_async_engine
 
             _db_engine = create_async_engine(
-                settings.database.url, pool_size=5, max_overflow=5, pool_pre_ping=True
+                settings.database.url,
+                pool_size=5,
+                max_overflow=10,
+                pool_pre_ping=True,
+                pool_recycle=1800,
             )
             logger.info("Database engine created: %s", settings.database.url.split("@")[-1])
 

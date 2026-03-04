@@ -44,6 +44,8 @@ dependencies = [
     "weasyprint>=62.0",
     "jinja2>=3.1.0",
     "aiosmtplib>=3.0.0",
+    # Cache utilities
+    "cachetools>=5.3.0",
     # Document parsing (knowledge base import)
     "python-multipart>=0.0.12",
     "pypdf>=4.0.0",

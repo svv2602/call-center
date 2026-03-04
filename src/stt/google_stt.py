@@ -54,8 +54,8 @@ class GoogleSTTEngine:
         self._project_id = project_id
         self._client: SpeechAsyncClient | None = None
         self._config: STTConfig | None = None
-        self._audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue()
-        self._transcript_queue: asyncio.Queue[Transcript | None] = asyncio.Queue()
+        self._audio_queue: asyncio.Queue[bytes | None] = asyncio.Queue(maxsize=100)
+        self._transcript_queue: asyncio.Queue[Transcript | None] = asyncio.Queue(maxsize=100)
         self._stream_task: asyncio.Task[None] | None = None
         self._session_start: float = 0.0
         self._running = False
@@ -64,8 +64,8 @@ class GoogleSTTEngine:
         """Start a new recognition stream."""
         self._config = config
         self._client = SpeechAsyncClient()
-        self._audio_queue = asyncio.Queue()
-        self._transcript_queue = asyncio.Queue()
+        self._audio_queue = asyncio.Queue(maxsize=100)
+        self._transcript_queue = asyncio.Queue(maxsize=100)
         self._running = True
         self._session_start = time.monotonic()
         self._stream_task = asyncio.create_task(self._recognition_loop())
@@ -133,7 +133,7 @@ class GoogleSTTEngine:
                 self._stream_task.cancel()
 
         # Start new stream
-        self._audio_queue = asyncio.Queue()
+        self._audio_queue = asyncio.Queue(maxsize=100)
         self._session_start = time.monotonic()
         self._stream_task = asyncio.create_task(self._recognition_loop())
 

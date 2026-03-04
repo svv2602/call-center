@@ -15,15 +15,13 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
 
 from src.api.auth import require_permission
-from src.config import get_settings
+from src.api.database import get_engine as _get_engine
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/stt", tags=["stt-config"])
-
-_engine: Any = None
 
 _perm_r = Depends(require_permission("stt_hints:read"))
 _perm_w = Depends(require_permission("stt_hints:write"))
@@ -33,18 +31,6 @@ async def _get_redis() -> Redis:
     from src.core.redis_client import get_redis_binary
 
     return await get_redis_binary()
-
-
-async def _get_engine() -> Any:
-    global _engine
-    if _engine is None:
-        from sqlalchemy.ext.asyncio import create_async_engine
-
-        settings = get_settings()
-        _engine = create_async_engine(
-            settings.database.url, pool_size=2, max_overflow=2, pool_pre_ping=True
-        )
-    return _engine
 
 
 _LATIN_RE = re.compile(r"^[a-z]+$")

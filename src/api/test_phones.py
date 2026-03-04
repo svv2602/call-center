@@ -24,10 +24,9 @@ from typing import TYPE_CHECKING, Any, Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.api.auth import require_permission
-from src.config import get_settings
+from src.api.database import get_engine as _get_engine
 from src.utils.phone import normalize_phone_ua
 
 if TYPE_CHECKING:
@@ -38,8 +37,6 @@ router = APIRouter(prefix="/admin/test-phones", tags=["test-phones"])
 
 REDIS_KEY = "test:phones"
 
-_engine: AsyncEngine | None = None
-
 _perm_r = Depends(require_permission("configuration:read"))
 _perm_w = Depends(require_permission("configuration:write"))
 
@@ -48,14 +45,6 @@ async def _get_redis() -> Redis:
     from src.core.redis_client import get_redis
 
     return await get_redis()
-
-
-async def _get_engine() -> AsyncEngine:
-    global _engine
-    if _engine is None:
-        settings = get_settings()
-        _engine = create_async_engine(settings.database.url, pool_pre_ping=True)
-    return _engine
 
 
 class TestPhoneRequest(BaseModel):

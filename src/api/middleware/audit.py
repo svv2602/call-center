@@ -10,29 +10,19 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 
 if TYPE_CHECKING:
     from fastapi import Request, Response
 
 from src.api.auth import verify_jwt
+from src.api.database import get_engine as _get_engine
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 _SKIP_PATHS = {"/health", "/health/ready", "/metrics", "/auth/login"}
 _AUDIT_METHODS = {"POST", "PATCH", "PUT", "DELETE"}
-
-_engine: AsyncEngine | None = None
-
-
-async def _get_engine() -> AsyncEngine:
-    global _engine
-    if _engine is None:
-        settings = get_settings()
-        _engine = create_async_engine(settings.database.url, pool_pre_ping=True)
-    return _engine
 
 
 def _extract_resource(path: str) -> tuple[str, str | None]:

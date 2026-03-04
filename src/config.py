@@ -366,6 +366,14 @@ class Settings(BaseSettings):
                 "Установите: export ADMIN_JWT_SECRET=<random-secret>",
             )
 
+        # ONEC_SOAP_TIMEOUT — warn if too high for interactive calls
+        if self.onec.soap_timeout > 30:
+            result.add(
+                "ONEC_SOAP_TIMEOUT",
+                f"таймаут {self.onec.soap_timeout}с слишком большой для интерактивных звонков",
+                "Рекомендуется <= 30с: export ONEC_SOAP_TIMEOUT=30",
+            )
+
         return result
 
 
