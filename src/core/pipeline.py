@@ -100,7 +100,7 @@ def _strip_greeting(text: str) -> str:
     for prefix in _GREETING_PREFIXES:
         if lowered.lower().startswith(prefix):
             # Strip the greeting and any following punctuation/whitespace
-            rest = lowered[len(prefix):].lstrip(" !.,;:—–-")
+            rest = lowered[len(prefix) :].lstrip(" !.,;:—–-")
             if rest:
                 return rest[0].upper() + rest[1:] if rest else ""
             # If only the greeting and nothing else — return as-is
@@ -125,17 +125,43 @@ _wait_counters: dict[int, int] = {}
 # Keywords that indicate a real request (not a simple reply like a name or "yes")
 _ACTION_KEYWORDS: list[str] = [
     # from _WAIT_CONTEXT_PATTERNS
-    "статус", "де замовлення", "де моє",
-    "запис", "записати", "шиномонтаж", "монтаж",
-    "наявність", "є в наявності",
-    "підібрати", "підбери", "пошукай",
+    "статус",
+    "де замовлення",
+    "де моє",
+    "запис",
+    "записати",
+    "шиномонтаж",
+    "монтаж",
+    "наявність",
+    "є в наявності",
+    "підібрати",
+    "підбери",
+    "пошукай",
     # additional action/topic keywords
-    "замовлення", "замовити", "оформити", "заказ",
-    "шини", "шину", "резину", "покришк",
-    "доставк", "оплат", "гаранті", "повернен",
-    "знижк", "акці", "промокод",
-    "перевір", "дізнати", "розкажи", "підкажи", "порад", "порівня",
-    "оператор", "менеджер", "переключи",
+    "замовлення",
+    "замовити",
+    "оформити",
+    "заказ",
+    "шини",
+    "шину",
+    "резину",
+    "покришк",
+    "доставк",
+    "оплат",
+    "гаранті",
+    "повернен",
+    "знижк",
+    "акці",
+    "промокод",
+    "перевір",
+    "дізнати",
+    "розкажи",
+    "підкажи",
+    "порад",
+    "порівня",
+    "оператор",
+    "менеджер",
+    "переключи",
 ]
 
 

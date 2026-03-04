@@ -368,16 +368,16 @@ class LLMAgent:
                         timeout=_TOOL_TIMEOUT_SEC,
                     )
                 except TimeoutError:
-                    logger.error(
-                        "Tool %s timed out after %ds", tu["name"], _TOOL_TIMEOUT_SEC
-                    )
+                    logger.error("Tool %s timed out after %ds", tu["name"], _TOOL_TIMEOUT_SEC)
                     raw = {"error": "Сервіс тимчасово не відповідає, спробуйте ще раз"}
                 content = compress_tool_result(tu["name"], raw)
                 if self._pii_vault is not None:
                     content = self._pii_vault.mask(content)
                 return {"type": "tool_result", "tool_use_id": tu["id"], "content": content}
 
-            tool_results = list(await asyncio.gather(*[_execute_one(tu) for tu in unique_tool_uses]))
+            tool_results = list(
+                await asyncio.gather(*[_execute_one(tu) for tu in unique_tool_uses])
+            )
             tool_call_count += len(tool_results)
 
             conversation_history.append({"role": "user", "content": tool_results})

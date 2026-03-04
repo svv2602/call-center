@@ -316,7 +316,11 @@ class StreamingAgentLoop:
 
             # No tool calls → done (or retry if empty)
             if not result.tool_calls:
-                if not result.spoken_text and not has_llm_text and empty_retries < _MAX_EMPTY_RETRIES:
+                if (
+                    not result.spoken_text
+                    and not has_llm_text
+                    and empty_retries < _MAX_EMPTY_RETRIES
+                ):
                     empty_retries += 1
                     # On last retry, switch to fallback provider
                     if empty_retries == _MAX_EMPTY_RETRIES and self._provider_override is None:
@@ -379,9 +383,7 @@ class StreamingAgentLoop:
                         timeout=_TOOL_TIMEOUT_SEC,
                     )
                 except TimeoutError:
-                    logger.error(
-                        "Tool %s timed out after %ds", tc.name, _TOOL_TIMEOUT_SEC
-                    )
+                    logger.error("Tool %s timed out after %ds", tc.name, _TOOL_TIMEOUT_SEC)
                     raw = {"error": "Сервіс тимчасово не відповідає, спробуйте ще раз"}
                 content = compress_tool_result(tc.name, raw)
                 if self._pii_vault is not None:

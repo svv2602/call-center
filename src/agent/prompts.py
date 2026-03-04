@@ -740,21 +740,49 @@ _MOD_ROUTER = """\
 # Keywords for auto-detecting scenario from customer text (no-IVR mode)
 _SCENARIO_KEYWORDS: dict[str, list[str]] = {
     "fitting": [
-        "монтаж", "шиномонтаж", "запис", "записати", "записатися",
-        "перезувати", "перебувати", "перевзути", "поменять колес",
-        "поменять резин", "переобу",
+        "монтаж",
+        "шиномонтаж",
+        "запис",
+        "записати",
+        "записатися",
+        "перезувати",
+        "перебувати",
+        "перевзути",
+        "поменять колес",
+        "поменять резин",
+        "переобу",
     ],
     "tire_search": [
-        "шини", "шину", "шин ", "підібрати", "розмір", "зимов", "літн",
-        "резину", "резина", "колеса", "покрышк",
+        "шини",
+        "шину",
+        "шин ",
+        "підібрати",
+        "розмір",
+        "зимов",
+        "літн",
+        "резину",
+        "резина",
+        "колеса",
+        "покрышк",
     ],
     "order_status": [
-        "замовлення", "статус", "де замовлення", "де моє", "трек",
-        "відстежити", "заказ",
+        "замовлення",
+        "статус",
+        "де замовлення",
+        "де моє",
+        "трек",
+        "відстежити",
+        "заказ",
     ],
     "consultation": [
-        "питання", "порада", "порівняти", "різниця", "рекомендац",
-        "що краще", "який кращ", "підкажіть",
+        "питання",
+        "порада",
+        "порівняти",
+        "різниця",
+        "рекомендац",
+        "що краще",
+        "який кращ",
+        "підкажіть",
     ],
 }
 
@@ -937,12 +965,8 @@ def format_caller_history(history: list[dict]) -> str | None:
         lines.append("".join(parts))
 
     lines.append("")
-    lines.append(
-        "Враховуй цю історію: не питай повторно те, що клієнт вже робив."
-    )
-    lines.append(
-        "Запропонуй продовжити або допоможи з новим запитом."
-    )
+    lines.append("Враховуй цю історію: не питай повторно те, що клієнт вже робив.")
+    lines.append("Запропонуй продовжити або допоможи з новим запитом.")
 
     return "\n".join(lines)
 
@@ -995,12 +1019,9 @@ def format_customer_profile(profile: dict[str, Any] | None) -> str | None:
         lines.append(f"- Всього дзвінків: {total_calls}")
 
     lines.append("")
+    lines.append("Використовуй ці дані — НЕ питай повторно те, що вже відомо з профілю.")
     lines.append(
-        "Використовуй ці дані — НЕ питай повторно те, що вже відомо з профілю."
-    )
-    lines.append(
-        "Якщо клієнт назвав інше ім'я — вибачся і виклич "
-        "update_customer_profile(name=нове_ім'я)."
+        "Якщо клієнт назвав інше ім'я — вибачся і виклич update_customer_profile(name=нове_ім'я)."
     )
 
     return "\n".join(lines)
@@ -1131,9 +1152,7 @@ def build_system_prompt_with_context(
     # Upgrade from compact router to full scenario modules when scenario
     # is detected mid-call (first turn was compact, now we know the topic).
     if is_modular and scenario and _COMPACT_MARKER in base_prompt:
-        base_prompt = assemble_prompt(
-            scenario=scenario, include_pronunciation=False
-        )
+        base_prompt = assemble_prompt(scenario=scenario, include_pronunciation=False)
         logger.info("Compact→full upgrade: scenario=%s", scenario)
 
     # Topic switching: when customer changes topic mid-call, add modules
