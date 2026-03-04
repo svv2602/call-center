@@ -20,6 +20,8 @@ from src.agent.prompts import (
     FAREWELL_TEXT,
     GREETING_TEXT,
     SILENCE_PROMPT_TEXT,
+    SILENCE_TIMEOUT_1_TEXT,
+    SILENCE_TIMEOUT_2_TEXT,
     TRANSFER_TEXT,
     WAIT_ACK_POOL,
     WAIT_AVAILABILITY_POOL,
@@ -459,7 +461,13 @@ class CallPipeline:
                     await self._speak(farewell)
                     break
                 else:
-                    silence_msg = self._templates.get("silence_prompt", SILENCE_PROMPT_TEXT)
+                    # Two-level silence messages:
+                    # 1st timeout (count=1) — gentle reminder
+                    # 2nd timeout (count=2) — direct question before farewell
+                    if self._session.timeout_count <= 1:
+                        silence_msg = SILENCE_TIMEOUT_1_TEXT
+                    else:
+                        silence_msg = SILENCE_TIMEOUT_2_TEXT
                     await self._log_turn("bot", silence_msg)
                     await self._speak(silence_msg)
                     continue
@@ -577,12 +585,13 @@ class CallPipeline:
                     await self._log_turn("bot", result.spoken_text, llm_latency_ms=llm_latency_ms)
                     logger.info(
                         "Streaming turn completed: call=%s, user='%s', agent='%s', "
-                        "tools=%d, llm=%dms",
+                        "tools=%d, llm=%dms%s",
                         self._session.channel_uuid,
                         transcript.text[:50],
                         result.spoken_text[:50],
                         result.tool_calls_made,
                         llm_latency_ms,
+                        f", wait_phrase='{result.wait_phrase}'" if result.wait_phrase else "",
                     )
                 elif result is not None and (result.interrupted or result.disconnected):
                     # Barge-in or hangup before LLM produced any text — not an error

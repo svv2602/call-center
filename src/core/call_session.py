@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 SESSION_KEY_PREFIX = "call_session"
 SESSION_TTL = 1800  # 30 minutes
 SILENCE_TIMEOUT_SEC = 15
-MAX_TIMEOUTS_BEFORE_HANGUP = 2
+MAX_TIMEOUTS_BEFORE_HANGUP = 3
 
 
 class CallState(enum.StrEnum):

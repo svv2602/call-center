@@ -1303,6 +1303,12 @@ GREETING_TEXT_KNOWN = (
 
 SILENCE_PROMPT_TEXT = "Ви ще на лінії?"
 
+# Two-level silence timeout messages:
+# 1st timeout — gentle reminder (customer may be thinking/distracted)
+SILENCE_TIMEOUT_1_TEXT = "Я на зв'язку. Якщо маєте запитання — я слухаю."
+# 2nd timeout — direct question before farewell
+SILENCE_TIMEOUT_2_TEXT = "Ви ще на лінії?"
+
 FAREWELL_TEXT = "Дякую за дзвінок! До побачення!"
 
 TRANSFER_TEXT = "Зараз з'єдную вас з оператором. Залишайтесь на лінії."

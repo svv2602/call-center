@@ -2,9 +2,9 @@
 
 ## Текущий статус
 - **Последнее обновление:** 2026-03-04
-- **Текущая фаза:** 3
+- **Текущая фаза:** 4
 - **Статус:** в работе
-- **Общий прогресс:** 12/24 задач (50%)
+- **Общий прогресс:** 20/24 задач (83%)
 
 ## Как продолжить работу
 1. Открой текущую фазу (см. таблицу ниже)
@@ -19,7 +19,7 @@
 |------|------|-------|--------|
 | 1. History & Context | `phase-01-history-context.md` | 6 | завершена |
 | 2. Barge-in & Echo | `phase-02-barge-in-echo.md` | 6 | завершена |
-| 3. Silence & Wait | `phase-03-silence-wait.md` | 8 | не начата |
+| 3. Silence & Wait | `phase-03-silence-wait.md` | 8 | завершена |
 | 4. Tenant & Logging | `phase-04-tenant-logging.md` | 4 | не начата |
 
 ## История выполнения
@@ -28,3 +28,4 @@
 | 2026-03-04 | Проект создан |
 | 2026-03-04 | Фаза 1 завершена: summarize before trim, pattern threshold 0.72, tenant fallback warning |
 | 2026-03-04 | Фаза 2 завершена: barge-in suppression 500ms, transcript buffer merge |
+| 2026-03-04 | Фаза 3 завершена: 2-level silence timeout, wait-phrase separated from spoken_text |
