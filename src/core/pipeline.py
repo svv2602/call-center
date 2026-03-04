@@ -39,6 +39,14 @@ from src.stt.base import STTConfig, STTEngine, Transcript
 # Max time to wait for LLM agent to produce a response (seconds)
 AGENT_PROCESSING_TIMEOUT_SEC = 30
 
+# Barge-in suppression window after TTS ends (seconds).
+# Prevents echo from speaker triggering false barge-in detection.
+_BARGE_IN_SUPPRESSION_SEC = 0.5
+
+# Window to buffer multiple final transcripts after barge-in (seconds).
+# Multiple STT finals may arrive in quick succession; we merge them into one turn.
+_TRANSCRIPT_BUFFER_SEC = 0.5
+
 # Timeout for contextual farewell LLM call (seconds)
 _FAREWELL_LLM_TIMEOUT_SEC = 3
 
@@ -393,6 +401,46 @@ class CallPipeline:
             # Signal queue reader that STT stream has ended
             await self._final_transcript_queue.put(None)
 
+    async def _drain_transcript_buffer(self, first: Transcript) -> Transcript:
+        """Buffer multiple final transcripts arriving in quick succession.
+
+        After a barge-in, STT may emit several finals within a short window.
+        We wait ``_TRANSCRIPT_BUFFER_SEC`` and merge them into a single turn
+        so the LLM receives one coherent user message instead of duplicates.
+        """
+        texts = [first.text]
+        confidences = [first.confidence]
+        language = first.language
+
+        try:
+            while True:
+                next_t = await asyncio.wait_for(
+                    self._get_next_final_transcript(),
+                    timeout=_TRANSCRIPT_BUFFER_SEC,
+                )
+                texts.append(next_t.text)
+                confidences.append(next_t.confidence)
+                if next_t.language:
+                    language = next_t.language
+        except (TimeoutError, asyncio.CancelledError):
+            pass
+
+        if len(texts) > 1:
+            merged_text = " ".join(texts)
+            avg_confidence = sum(confidences) / len(confidences)
+            logger.info(
+                "Merged %d transcripts into one: '%s'",
+                len(texts),
+                merged_text[:50],
+            )
+            return Transcript(
+                text=merged_text,
+                is_final=True,
+                confidence=avg_confidence,
+                language=language,
+            )
+        return first
+
     async def _transcript_processor_loop(self) -> None:
         """Process STT transcripts and drive the LLM → TTS flow."""
         while not self._conn.is_closed:
@@ -415,6 +463,9 @@ class CallPipeline:
                     await self._log_turn("bot", silence_msg)
                     await self._speak(silence_msg)
                     continue
+
+            # Buffer multiple transcripts arriving in quick succession
+            transcript = await self._drain_transcript_buffer(transcript)
 
             # Got a final transcript — reset timeout and track language
             self._session.timeout_count = 0
@@ -731,6 +782,9 @@ class CallPipeline:
             self._speaking = False
             if self._echo_canceller is not None:
                 self._echo_canceller.clear_far_end()
+            # Suppress echo-triggered barge-in for 500ms after TTS ends
+            self._barge_in_event.clear()
+            await asyncio.sleep(_BARGE_IN_SUPPRESSION_SEC)
 
     async def _speak_streaming(self, text: str) -> None:
         """Synthesize and send audio sentence by sentence.
@@ -774,3 +828,6 @@ class CallPipeline:
             self._speaking = False
             if self._echo_canceller is not None:
                 self._echo_canceller.clear_far_end()
+            # Suppress echo-triggered barge-in for 500ms after TTS ends
+            self._barge_in_event.clear()
+            await asyncio.sleep(_BARGE_IN_SUPPRESSION_SEC)

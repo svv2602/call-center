@@ -8,8 +8,8 @@
 **Исправление:** После `self._speaking = False` добавить задержку, в течение которой barge-in event игнорируется.
 
 ### Задачи
-- [ ] **2.1** В `src/core/pipeline.py`: в `_speak()` — после `self._speaking = False` (line 731), добавить `self._barge_in_event.clear()` и задержку подавления эха (500мс)
-- [ ] **2.2** В `src/core/pipeline.py`: в `_speak_streaming()` — после `self._speaking = False` (line 774), добавить аналогичную очистку barge-in event
+- [x] **2.1** В `src/core/pipeline.py`: в `_speak()` — после `self._speaking = False` (line 731), добавить `self._barge_in_event.clear()` и задержку подавления эха (500мс)
+- [x] **2.2** В `src/core/pipeline.py`: в `_speak_streaming()` — после `self._speaking = False` (line 774), добавить аналогичную очистку barge-in event
 
 ## Проблема 5: Multiple barge-in transcripts processed separately
 **Файл:** `src/core/pipeline.py` (lines 396-417)
@@ -19,10 +19,10 @@
 **Исправление:** Добавить буферизацию в `_transcript_processor_loop()` — после получения первого транскрипта, подождать 500мс и собрать все накопившиеся.
 
 ### Задачи
-- [ ] **2.3** Добавить метод `_drain_transcript_buffer()` в `CallPipeline` — после получения первого транскрипта, опрашивает очередь 500мс и объединяет тексты
-- [ ] **2.4** В `_transcript_processor_loop()`: заменить прямое использование `transcript` на вызов `_drain_transcript_buffer(transcript)` для объединения множественных транскриптов
-- [ ] **2.5** Объединённый транскрипт: конкатенация через пробел, confidence = средняя, language = от последнего
-- [ ] **2.6** Добавить лог при объединении: `logger.info("Merged %d transcripts into one: '%s'", count, merged_text[:50])`
+- [x] **2.3** Добавить метод `_drain_transcript_buffer()` в `CallPipeline` — после получения первого транскрипта, опрашивает очередь 500мс и объединяет тексты
+- [x] **2.4** В `_transcript_processor_loop()`: заменить прямое использование `transcript` на вызов `_drain_transcript_buffer(transcript)` для объединения множественных транскриптов
+- [x] **2.5** Объединённый транскрипт: конкатенация через пробел, confidence = средняя, language = от последнего
+- [x] **2.6** Добавить лог при объединении: `logger.info("Merged %d transcripts into one: '%s'", count, merged_text[:50])`
 
 ---
 
