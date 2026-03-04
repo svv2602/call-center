@@ -8,6 +8,7 @@ import re
 import xml.sax.saxutils
 from typing import TYPE_CHECKING
 
+from cachetools import LRUCache
 from google.cloud import texttospeech_v1 as texttospeech
 
 from src.agent.prompts import (
@@ -106,7 +107,7 @@ class GoogleTTSEngine:
         self._client: texttospeech.TextToSpeechAsyncClient | None = None
         self._voice: texttospeech.VoiceSelectionParams | None = None
         self._audio_config: texttospeech.AudioConfig | None = None
-        self._cache: dict[str, bytes] = {}
+        self._cache: LRUCache[str, bytes] = LRUCache(maxsize=200)
         self._cache_hits = 0
         self._cache_misses = 0
         self._ssml_supported: bool = True

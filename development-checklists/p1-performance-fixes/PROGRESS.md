@@ -1,5 +1,5 @@
 # Progress
 
-- Current phase: 2
-- Tasks completed: 4 / 16
+- Current phase: 3
+- Tasks completed: 8 / 16
 - Status: IN PROGRESS

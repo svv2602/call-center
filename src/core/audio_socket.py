@@ -5,7 +5,7 @@ Implements the Asterisk AudioSocket protocol:
 
 Packet types:
   0x01 = UUID (channel ID, first packet after connection)
-  0x10 = Audio data (16 kHz, 16-bit signed linear PCM, little-endian)
+  0x10 = Audio data (8 kHz, 16-bit signed linear PCM, little-endian)
   0x00 = Hangup
   0xFF = Error
 """
