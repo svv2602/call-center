@@ -232,7 +232,7 @@ class LLMAgent:
         self.last_provider_key = ""
         self.last_error = None
 
-        while tool_call_count <= MAX_TOOL_CALLS_PER_TURN:
+        while tool_call_count < MAX_TOOL_CALLS_PER_TURN:
             start = time.monotonic()
 
             # Process response content blocks

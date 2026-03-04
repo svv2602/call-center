@@ -16,6 +16,7 @@ import asyncio
 import enum
 import logging
 import struct
+import time
 import uuid
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -128,6 +129,9 @@ class AudioSocketConnection:
         if self._closed:
             return False
 
+        frame_duration = AUDIO_FRAME_DURATION_MS / 1000
+        start_time = time.monotonic()
+        frame_index = 0
         offset = 0
         while offset < len(audio_data):
             if cancel_event is not None and cancel_event.is_set():
@@ -141,8 +145,13 @@ class AudioSocketConnection:
                 self._closed = True
                 return False
             offset += AUDIO_FRAME_BYTES
-            # Pace frames at ~20 ms to match real-time playback
-            await asyncio.sleep(AUDIO_FRAME_DURATION_MS / 1000)
+            frame_index += 1
+            # Monotonic clock-based pacing: sleep until the next frame's
+            # scheduled time to prevent cumulative drift from asyncio.sleep
+            next_time = start_time + frame_index * frame_duration
+            sleep_for = next_time - time.monotonic()
+            if sleep_for > 0:
+                await asyncio.sleep(sleep_for)
 
         return False
 

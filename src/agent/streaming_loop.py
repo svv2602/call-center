@@ -240,7 +240,7 @@ class StreamingAgentLoop:
         turn_start = time.monotonic()
 
         tool_round = 0
-        while tool_round <= self._max_tool_rounds:
+        while tool_round < self._max_tool_rounds:
             # Stream LLM → sentence buffer → TTS → audio sender
             try:
                 stream = self._llm_router.complete_stream(

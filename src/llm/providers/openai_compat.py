@@ -27,7 +27,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=60)
+_REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=35)
 
 
 class OpenAICompatProvider(AbstractProvider):
