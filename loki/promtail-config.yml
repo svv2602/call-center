@@ -1,0 +1,45 @@
+server:
+  http_listen_port: 9080
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://loki:3100/loki/api/v1/push
+
+scrape_configs:
+  - job_name: docker
+    static_configs:
+      - targets:
+          - localhost
+        labels:
+          job: docker
+          __path__: /var/lib/docker/containers/*/*-json.log
+
+    pipeline_stages:
+      # Parse Docker JSON log format
+      - docker: {}
+
+      # Try to parse structured JSON logs from call-processor
+      - match:
+          selector: '{job="docker"}'
+          stages:
+            - json:
+                expressions:
+                  level: level
+                  component: component
+                  call_id: call_id
+                  request_id: request_id
+                  message: message
+
+            - labels:
+                level:
+                component:
+
+            # Make call_id searchable as a label only when present
+            - match:
+                selector: '{job="docker"} |~ "call_id"'
+                stages:
+                  - labels:
+                      call_id:

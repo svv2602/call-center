@@ -235,6 +235,85 @@ groups:
             {{ $value }} rate limit triggers in the last 10 minutes.
             May indicate brute-force attack or misconfigured client.
 
+  - name: infrastructure_alerts
+    rules:
+      # Node: CPU idle < 20% for 5 minutes
+      - alert: NodeHighCPU
+        expr: >
+          100 - (avg by (instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: high
+        annotations:
+          summary: "High CPU usage on {{ $labels.instance }}"
+          description: >
+            CPU usage is {{ $value | humanize }}% on {{ $labels.instance }}.
+            Threshold: 80%.
+
+      # Node: Available memory < 15%
+      - alert: NodeHighMemory
+        expr: >
+          (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) < 0.15
+        for: 5m
+        labels:
+          severity: high
+        annotations:
+          summary: "High memory usage on {{ $labels.instance }}"
+          description: >
+            Available memory is {{ $value | humanizePercentage }} on {{ $labels.instance }}.
+            Threshold: < 15% available.
+
+      # Node: Disk space < 10%
+      - alert: NodeDiskSpaceLow
+        expr: >
+          (node_filesystem_avail_bytes{fstype!~"tmpfs|overlay"} / node_filesystem_size_bytes{fstype!~"tmpfs|overlay"}) < 0.10
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Low disk space on {{ $labels.instance }}:{{ $labels.mountpoint }}"
+          description: >
+            Disk space available is {{ $value | humanizePercentage }} on {{ $labels.mountpoint }}.
+            Threshold: < 10%.
+
+      # Redis: Memory usage > 80% of max
+      - alert: RedisHighMemory
+        expr: >
+          redis_memory_used_bytes / redis_memory_max_bytes > 0.8
+        for: 5m
+        labels:
+          severity: high
+        annotations:
+          summary: "Redis high memory usage"
+          description: >
+            Redis memory usage is {{ $value | humanizePercentage }} of max.
+            Threshold: 80%.
+
+      # PostgreSQL: Active connections > 80
+      - alert: PostgresConnectionsHigh
+        expr: >
+          pg_stat_activity_count > 80
+        for: 2m
+        labels:
+          severity: high
+        annotations:
+          summary: "High PostgreSQL connection count"
+          description: >
+            {{ $value }} active connections. Threshold: 80.
+
+      # Tenant resolution fallback detected
+      - alert: TenantResolutionFallback
+        expr: >
+          increase(callcenter_tenant_resolution_fallback_total[5m]) > 0
+        for: 2m
+        labels:
+          severity: medium
+        annotations:
+          summary: "Tenant resolution falling back to default"
+          description: >
+            Tenant resolution has used fallback {{ $value }} times in the last 5 minutes.
+            Check Redis CALLED_EXTEN keys and Asterisk dialplan.
+
   - name: backup_partition_alerts
     rules:
       # PostgreSQL backup stale: no successful backup in 26 hours

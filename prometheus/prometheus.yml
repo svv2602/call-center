@@ -19,3 +19,15 @@ scrape_configs:
     scrape_interval: 10s
     # Uncomment and set token file when METRICS_BEARER_TOKEN is configured:
     # bearer_token_file: /etc/prometheus/metrics_token
+
+  - job_name: "node-exporter"
+    static_configs:
+      - targets: ["node-exporter:9100"]
+
+  - job_name: "redis-exporter"
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+
+  - job_name: "postgres-exporter"
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
