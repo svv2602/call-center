@@ -27,7 +27,7 @@ class PatternSearch:
         self,
         query: str,
         top_k: int = 3,
-        min_similarity: float = 0.75,
+        min_similarity: float = 0.72,
     ) -> list[dict[str, Any]]:
         """Find similar patterns. Returns both positive and negative."""
         embedding = await self._generator.generate_single(query)

@@ -657,6 +657,9 @@ async def _resolve_tenant(
                 )
             else:
                 # Fallback: first active tenant
+                logger.warning(
+                    "Tenant fallback to first active tenant: call=%s", channel_uuid
+                )
                 result = await conn.execute(
                     text(f"""
                         SELECT {tenant_columns}
@@ -670,7 +673,7 @@ async def _resolve_tenant(
             if row:
                 return dict(row._mapping)
     except Exception:
-        logger.debug("Tenant DB lookup failed", exc_info=True)
+        logger.warning("Tenant DB lookup failed", exc_info=True)
 
     return None
 

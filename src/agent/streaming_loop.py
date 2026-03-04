@@ -188,14 +188,15 @@ class StreamingAgentLoop:
         # Add user message
         conversation_history.append({"role": "user", "content": user_text})
 
-        # Trim history if too long
+        # Compress/summarize old messages to save tokens (BEFORE trim so
+        # early context like customer name / topic is captured in the summary)
+        conversation_history[:] = summarize_old_messages(conversation_history)
+
+        # Safety-net trim: if history is still too long after summarization
         if len(conversation_history) > MAX_HISTORY_MESSAGES:
             conversation_history[:] = (
                 conversation_history[:1] + conversation_history[-(MAX_HISTORY_MESSAGES - 1) :]
             )
-
-        # Compress/summarize old messages to save tokens
-        conversation_history[:] = summarize_old_messages(conversation_history)
 
         # Build system prompt with caller context (mask caller phone)
         masked_phone = caller_phone
