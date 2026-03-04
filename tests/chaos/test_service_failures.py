@@ -47,8 +47,9 @@ async def test_circuit_breaker_open_raises_store_api_error_503() -> None:
     cb_error = _make_circuit_breaker_error()
 
     with (
-        patch(
-            "src.store_client.client._store_breaker.call_async",
+        patch.object(
+            client._breaker,
+            "call_async",
             side_effect=cb_error,
         ),
         pytest.raises(StoreAPIError) as exc_info,

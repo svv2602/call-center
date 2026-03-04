@@ -8,31 +8,28 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
-from redis.asyncio import Redis
 
 from src.api.auth import require_permission
-from src.config import get_settings
 from src.tasks.schedule_utils import REDIS_KEY, TASK_DEFAULTS, load_schedules
+
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/task-schedules", tags=["task-schedules"])
-
-_redis: Redis | None = None
 
 _perm_r = Depends(require_permission("configuration:read"))
 _perm_w = Depends(require_permission("configuration:write"))
 
 
 async def _get_redis() -> Redis:
-    global _redis
-    if _redis is None:
-        settings = get_settings()
-        _redis = Redis.from_url(settings.redis.url, decode_responses=True)
-    return _redis
+    from src.core.redis_client import get_redis
+
+    return await get_redis()
 
 
 class SchedulePatch(BaseModel):

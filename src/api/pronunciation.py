@@ -9,22 +9,21 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel
-from redis.asyncio import Redis
 
 from src.agent.prompts import PRONUNCIATION_RULES
 from src.api.auth import require_permission
-from src.config import get_settings
+
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/agent", tags=["agent"])
 
 REDIS_KEY = "agent:pronunciation_rules"
-
-_redis: Redis | None = None
 
 # Module-level dependency to satisfy B008 lint rule
 _perm_r = Depends(require_permission("pronunciation:read"))
@@ -32,11 +31,9 @@ _perm_w = Depends(require_permission("pronunciation:write"))
 
 
 async def _get_redis() -> Redis:
-    global _redis
-    if _redis is None:
-        settings = get_settings()
-        _redis = Redis.from_url(settings.redis.url, decode_responses=True)
-    return _redis
+    from src.core.redis_client import get_redis
+
+    return await get_redis()
 
 
 class PronunciationRulesPatch(BaseModel):

@@ -18,20 +18,11 @@ logger = logging.getLogger(__name__)
 
 CHANNEL = "callcenter:admin_events"
 
-_redis: Any = None
-
-
 async def _get_redis() -> Any:
-    """Lazily create and cache Redis connection for publishing."""
-    global _redis
-    if _redis is None:
-        from redis.asyncio import Redis
+    """Get shared Redis connection for event publishing."""
+    from src.core.redis_client import get_redis
 
-        from src.config import get_settings
-
-        settings = get_settings()
-        _redis = Redis.from_url(settings.redis.url, decode_responses=True)
-    return _redis
+    return await get_redis()
 
 
 async def publish_event(event_type: str, data: dict[str, Any] | None = None) -> None:

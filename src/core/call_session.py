@@ -145,9 +145,13 @@ class CallSession:
 
     # --- Serialization ---
 
-    def serialize(self) -> str:
-        """Serialize session to JSON string for Redis storage."""
-        data = {
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize session to a dictionary for Redis/JSON storage.
+
+        Serializes all conversation-relevant fields needed for mid-call
+        recovery. Transient fields (audio queues, locks) are NOT included.
+        """
+        return {
             "channel_uuid": str(self.channel_uuid),
             "state": self.state.value,
             "caller_id": self.caller_id,
@@ -162,6 +166,10 @@ class CallSession:
             "transfer_reason": self.transfer_reason,
             "order_id": self.order_id,
             "order_draft": self.order_draft,
+            "fitting_booked": self.fitting_booked,
+            "fitting_station_ids": sorted(self.fitting_station_ids),
+            "tools_called": sorted(self.tools_called),
+            "active_scenarios": sorted(self.active_scenarios),
             "tenant_id": self.tenant_id,
             "tenant_slug": self.tenant_slug,
             "network_id": self.network_id,
@@ -176,12 +184,14 @@ class CallSession:
                 for t in self.dialog_history
             ],
         }
-        return json.dumps(data, ensure_ascii=False)
 
     @classmethod
-    def deserialize(cls, raw: str) -> CallSession:
-        """Deserialize session from a JSON string."""
-        data = json.loads(raw)
+    def from_dict(cls, data: dict[str, Any]) -> CallSession:
+        """Restore a session from a dictionary (e.g. loaded from Redis).
+
+        Reconstructs all fields saved by to_dict(), including sets
+        and nested DialogTurn objects.
+        """
         session = cls(uuid.UUID(data["channel_uuid"]))
         session.state = CallState(data["state"])
         session.caller_id = data.get("caller_id")
@@ -196,6 +206,10 @@ class CallSession:
         session.transfer_reason = data.get("transfer_reason")
         session.order_id = data.get("order_id")
         session.order_draft = data.get("order_draft")
+        session.fitting_booked = data.get("fitting_booked", False)
+        session.fitting_station_ids = set(data.get("fitting_station_ids", []))
+        session.tools_called = set(data.get("tools_called", []))
+        session.active_scenarios = set(data.get("active_scenarios", []))
         session.tenant_id = data.get("tenant_id")
         session.tenant_slug = data.get("tenant_slug")
         session.network_id = data.get("network_id")
@@ -210,6 +224,16 @@ class CallSession:
             for t in data.get("dialog_history", [])
         ]
         return session
+
+    def serialize(self) -> str:
+        """Serialize session to JSON string for Redis storage."""
+        return json.dumps(self.to_dict(), ensure_ascii=False)
+
+    @classmethod
+    def deserialize(cls, raw: str) -> CallSession:
+        """Deserialize session from a JSON string."""
+        data = json.loads(raw)
+        return cls.from_dict(data)
 
 
 # Valid state transitions

@@ -701,8 +701,20 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     CallPipeline which orchestrates the STT → LLM → TTS loop.
     """
     settings = get_settings()
-    session = CallSession(conn.channel_uuid)
     uuid_str = str(conn.channel_uuid)
+
+    # Try to recover a previous session from Redis (crash recovery)
+    session: CallSession | None = None
+    if _redis is not None:
+        try:
+            store = SessionStore(_redis)
+            session = await store.load(conn.channel_uuid)
+            if session is not None:
+                logger.info("Recovered session from Redis for call %s", conn.channel_uuid)
+        except Exception:
+            logger.debug("Session recovery failed for %s", conn.channel_uuid, exc_info=True)
+    if session is None:
+        session = CallSession(conn.channel_uuid)
 
     # Batch Redis lookups (single round-trip) then resolve all in parallel
     exten, caller_from_redis = await _batch_redis_lookups(uuid_str)
@@ -1151,6 +1163,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         llm_call_id_var.set(conn.channel_uuid)
         llm_tenant_id_var.set(session.tenant_id)
 
+        # Session store for mid-call persistence (crash recovery)
+        _session_store = SessionStore(_redis) if _redis is not None else None
+
         pipeline = CallPipeline(
             conn,
             stt,
@@ -1170,6 +1185,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             storage_context=storage_context_text,
             customer_profile=customer_profile_text,
             echo_canceller=echo_canceller,
+            session_store=_session_store,
         )
         await pipeline.run()
 

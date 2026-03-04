@@ -14,6 +14,17 @@ spec:
   minReplicas: 2
   maxReplicas: 10
   metrics:
+    # Primary: scale on active concurrent calls per pod.
+    # Requires Prometheus Adapter (custom.metrics.k8s.io API)
+    # mapping callcenter_active_calls gauge from Prometheus.
+    - type: Pods
+      pods:
+        metric:
+          name: callcenter_active_calls
+        target:
+          type: AverageValue
+          averageValue: "10"  # scale out when >10 concurrent calls per pod
+    # Fallback: CPU and memory as safety nets
     - type: Resource
       resource:
         name: cpu

@@ -188,6 +188,7 @@ _FAREWELL_SYSTEM_PROMPT = (
 if TYPE_CHECKING:
     from src.agent.agent import LLMAgent
     from src.agent.streaming_loop import StreamingAgentLoop
+    from src.core.call_session import SessionStore
     from src.core.echo_canceller import EchoCanceller
     from src.monitoring.cost_tracker import CostBreakdown
     from src.sandbox.patterns import PatternSearch
@@ -228,6 +229,7 @@ class CallPipeline:
         storage_context: str | None = None,
         customer_profile: str | None = None,
         echo_canceller: EchoCanceller | None = None,
+        session_store: SessionStore | None = None,
     ) -> None:
         self._conn = conn
         self._stt = stt
@@ -246,6 +248,7 @@ class CallPipeline:
         self._storage_context = storage_context
         self._customer_profile = customer_profile
         self._echo_canceller = echo_canceller
+        self._session_store = session_store
         self._turn_counter = 0
         self._llm_history: list[dict[str, Any]] = []  # persistent LLM context for streaming path
         self._speaking = False
@@ -282,6 +285,20 @@ class CallPipeline:
             )
         except Exception:
             logger.warning("log_turn failed for call %s", self._session.channel_uuid)
+
+    async def _persist_session(self) -> None:
+        """Save session to Redis for mid-call crash recovery.
+
+        Called after each assistant turn. Latency ~1ms (Redis SET),
+        negligible vs LLM latency. Failures are logged but never
+        propagated — session persistence is best-effort.
+        """
+        if self._session_store is None:
+            return
+        try:
+            await self._session_store.save(self._session)
+        except Exception:
+            logger.warning("session persist failed for call %s", self._session.channel_uuid)
 
     async def run(self) -> None:
         """Run the full call pipeline until hangup or transfer."""
@@ -344,6 +361,7 @@ class CallPipeline:
         await self._speak(greeting)
         self._session.add_assistant_turn(greeting)
         await self._log_turn("bot", greeting)
+        await self._persist_session()
         # Seed LLM history so the model knows the greeting was already spoken
         self._llm_history.append({"role": "assistant", "content": greeting})
 
@@ -408,6 +426,7 @@ class CallPipeline:
                         farewell = self._templates.get("farewell", FAREWELL_TEXT)
                     self._session.add_assistant_turn(farewell)
                     await self._log_turn("bot", farewell)
+                    await self._persist_session()
                     await self._speak(farewell)
                     break
                 else:
@@ -446,10 +465,12 @@ class CallPipeline:
             pattern_context = None
             if self._pattern_search is not None:
                 try:
+                    tid = str(self._session.tenant_id) if self._session.tenant_id else None
                     patterns = await self._pattern_search.search(
                         query=transcript.text,
                         top_k=3,
                         min_similarity=0.6,
+                        tenant_id=tid,
                     )
                     pattern_context = await self._pattern_search.format_for_prompt(patterns)
                     if patterns:
@@ -524,6 +545,7 @@ class CallPipeline:
                 if result is not None and result.spoken_text:
                     self._session.add_assistant_turn(result.spoken_text)
                     await self._log_turn("bot", result.spoken_text, llm_latency_ms=llm_latency_ms)
+                    await self._persist_session()
                     logger.info(
                         "Streaming turn completed: call=%s, user='%s', agent='%s', "
                         "tools=%d, llm=%dms",
@@ -545,6 +567,7 @@ class CallPipeline:
                     fallback = self._templates.get("error", ERROR_TEXT)
                     self._session.add_assistant_turn(fallback)
                     await self._log_turn("bot", fallback)
+                    await self._persist_session()
                     await self._speak(fallback)
             else:
                 # BLOCKING PATH — delay add_user_turn so process_message
@@ -616,6 +639,7 @@ class CallPipeline:
                     response_text = _strip_greeting(response_text)
                     self._session.add_assistant_turn(response_text)
                     await self._log_turn("bot", response_text, llm_latency_ms=llm_latency_ms)
+                    await self._persist_session()
                     await self._speak_streaming(response_text)
                 else:
                     # Never leave the caller in silence — speak an error fallback
@@ -623,6 +647,7 @@ class CallPipeline:
                     fallback = self._templates.get("error", ERROR_TEXT)
                     self._session.add_assistant_turn(fallback)
                     await self._log_turn("bot", fallback)
+                    await self._persist_session()
                     await self._speak(fallback)
 
             # Check if transfer was triggered
@@ -640,6 +665,10 @@ class CallPipeline:
 
         Returns None if the conversation is too short or LLM fails,
         so the caller can fall back to the standard template.
+
+        Uses _llm_history (full context with tool_use/tool_result) instead
+        of session.messages_for_llm (user/assistant text only) so the farewell
+        can reference tool results like order confirmations, booking details, etc.
         """
         # Too short — use default template
         if len(self._session.dialog_history) < _FAREWELL_MIN_TURNS:
@@ -649,8 +678,10 @@ class CallPipeline:
         if self._session.order_id:
             return FAREWELL_ORDER_TEXT
 
-        # LLM fallback: summarise the conversation in a farewell
-        history = self._session.messages_for_llm
+        # Use _llm_history (full context) for better farewell quality.
+        # Falls back to session.messages_for_llm if _llm_history is empty
+        # (shouldn't happen in practice, but safe).
+        history = self._llm_history if self._llm_history else self._session.messages_for_llm
         try:
             response_text, _ = await asyncio.wait_for(
                 self._agent.process_message(

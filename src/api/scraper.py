@@ -8,12 +8,11 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -21,11 +20,13 @@ from src.api.auth import require_permission
 from src.config import get_settings
 from src.llm import get_router
 
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/scraper", tags=["scraper"])
 
 _engine: AsyncEngine | None = None
-_redis: Redis | None = None
 
 # Module-level dependencies to satisfy B008 lint rule
 _perm_r = Depends(require_permission("scraper:read"))
@@ -43,11 +44,9 @@ async def _get_engine() -> AsyncEngine:
 
 
 async def _get_redis() -> Redis:
-    global _redis
-    if _redis is None:
-        settings = get_settings()
-        _redis = Redis.from_url(settings.redis.url, decode_responses=True)
-    return _redis
+    from src.core.redis_client import get_redis
+
+    return await get_redis()
 
 
 class ScraperConfigUpdate(BaseModel):

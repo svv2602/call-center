@@ -41,10 +41,6 @@ _MAX_RETRIES = 2
 _RETRY_DELAYS = [1.0, 2.0]  # exponential backoff
 _RETRYABLE_STATUSES = {429, 503}
 
-# Circuit breaker
-_store_breaker = CircuitBreaker(fail_max=5, timeout_duration=30)
-
-
 class StoreAPIError(Exception):
     """Raised when a Store API call fails."""
 
@@ -58,7 +54,7 @@ class StoreClient:
     """HTTP client for the tire shop Store API.
 
     Features:
-      - Circuit breaker (aiobreaker: fail_max=5, timeout=30s)
+      - Per-instance circuit breaker (aiobreaker: fail_max=5, timeout=30s)
       - Retry with exponential backoff (1s, 2s) for 429/503
       - Request timeout: 5 seconds
       - X-Request-Id header for distributed tracing
@@ -77,6 +73,9 @@ class StoreClient:
         self._api_key = api_key
         self._timeout = aiohttp.ClientTimeout(total=timeout)
         self._session: aiohttp.ClientSession | None = None
+        # Per-instance circuit breaker: each tenant gets its own breaker
+        # so that Store API failure for one tenant doesn't block others
+        self._breaker = CircuitBreaker(fail_max=5, timeout_duration=30)
         # 1C integration (MVP): PostgreSQL catalog + Redis stock cache
         self._db_engine = db_engine
         self._redis = redis
@@ -969,7 +968,7 @@ class StoreClient:
         request_id = str(uuid.uuid4())
 
         try:
-            result: dict[str, Any] = await _store_breaker.call_async(
+            result: dict[str, Any] = await self._breaker.call_async(
                 self._request_with_retry,
                 method,
                 url,

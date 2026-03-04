@@ -27,7 +27,9 @@ metadata:
     app.kubernetes.io/part-of: call-center
     app.kubernetes.io/component: audiosocket
 spec:
-  type: NodePort
+  # ClusterIP (not NodePort) — AudioSocket must not be exposed externally.
+  # Asterisk accesses this via WireGuard VPN or internal LoadBalancer.
+  type: ClusterIP
   selector:
     app.kubernetes.io/name: call-processor
   ports:

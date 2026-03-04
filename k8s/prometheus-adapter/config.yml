@@ -1,0 +1,25 @@
+# Prometheus Adapter configuration for custom HPA metrics.
+#
+# Maps the callcenter_active_calls Prometheus gauge to the
+# custom.metrics.k8s.io API so that HPA can scale on active calls.
+#
+# Deploy: helm install prometheus-adapter prometheus-community/prometheus-adapter \
+#   --namespace monitoring \
+#   --values k8s/prometheus-adapter/config.yml
+#
+# Verify: kubectl get --raw /apis/custom.metrics.k8s.io/v1beta1/namespaces/call-center/pods/*/callcenter_active_calls
+
+prometheus:
+  url: http://prometheus-server.monitoring.svc
+  port: 9090
+
+rules:
+  - seriesQuery: 'callcenter_active_calls{namespace!="",pod!=""}'
+    resources:
+      overrides:
+        namespace: {resource: "namespace"}
+        pod: {resource: "pod"}
+    name:
+      matches: "^(.*)$"
+      as: "${1}"
+    metricsQuery: 'sum(<<.Series>>{<<.LabelMatchers>>}) by (<<.GroupBy>>)'

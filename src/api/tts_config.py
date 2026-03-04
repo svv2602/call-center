@@ -11,21 +11,21 @@ import logging
 import re
 import struct
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, field_validator
-from redis.asyncio import Redis
 
 from src.api.auth import require_permission
 from src.config import get_settings
+
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/tts", tags=["tts-config"])
 
 REDIS_KEY = "tts:config"
-
-_redis: Redis | None = None
 
 _perm_r = Depends(require_permission("configuration:read"))
 _perm_w = Depends(require_permission("configuration:write"))
@@ -49,11 +49,9 @@ KNOWN_VOICES = [
 
 
 async def _get_redis() -> Redis:
-    global _redis
-    if _redis is None:
-        settings = get_settings()
-        _redis = Redis.from_url(settings.redis.url, decode_responses=True)
-    return _redis
+    from src.core.redis_client import get_redis
+
+    return await get_redis()
 
 
 _BREAK_FIELDS = (

@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
 _engine: AsyncEngine | None = None
-_redis: Any = None
 
 _PERMS_CACHE_TTL = 300  # 5 minutes
 
@@ -44,14 +43,10 @@ async def _get_engine() -> AsyncEngine:
 
 
 async def _get_redis() -> Any:
-    """Lazily create and cache Redis connection for rate limiting."""
-    global _redis
-    if _redis is None:
-        from redis.asyncio import Redis
+    """Get shared Redis connection for rate limiting and token blacklist."""
+    from src.core.redis_client import get_redis
 
-        settings = get_settings()
-        _redis = Redis.from_url(settings.redis.url, decode_responses=True)
-    return _redis
+    return await get_redis()
 
 
 async def blacklist_token(jti: str, ttl: int) -> None:

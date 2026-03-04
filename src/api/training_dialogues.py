@@ -7,12 +7,11 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path params
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
-from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -20,11 +19,13 @@ from src.agent.prompt_manager import DIALOGUE_CACHE_REDIS_KEY
 from src.api.auth import require_permission
 from src.config import get_settings
 
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/training/dialogues", tags=["training"])
 
 _engine: AsyncEngine | None = None
-_redis: Redis | None = None
 
 _perm_r = Depends(require_permission("training:read"))
 _perm_w = Depends(require_permission("training:write"))
@@ -51,11 +52,9 @@ async def _get_engine() -> AsyncEngine:
 
 
 async def _get_redis() -> Redis:
-    global _redis
-    if _redis is None:
-        settings = get_settings()
-        _redis = Redis.from_url(settings.redis.url, decode_responses=True)
-    return _redis
+    from src.core.redis_client import get_redis
+
+    return await get_redis()
 
 
 async def _invalidate_dialogue_cache() -> None:
@@ -75,6 +74,7 @@ class DialogueCreateRequest(BaseModel):
     tools_used: list[str] | None = None
     description: str | None = Field(default=None, max_length=2000)
     sort_order: int = Field(default=0, ge=0)
+    tenant_id: UUID | None = None
 
 
 class DialogueUpdateRequest(BaseModel):
@@ -86,6 +86,7 @@ class DialogueUpdateRequest(BaseModel):
     description: str | None = Field(default=None, max_length=2000)
     is_active: bool | None = None
     sort_order: int | None = Field(default=None, ge=0)
+    tenant_id: UUID | None = None
 
 
 @router.get("/")
@@ -93,6 +94,7 @@ async def list_dialogues(
     scenario_type: str | None = Query(None),
     phase: str | None = Query(None),
     is_active: bool | None = Query(None),
+    tenant_id: str | None = Query(None, description="Filter: UUID for specific tenant, 'null' for global only, omit for all"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     _: dict[str, Any] = _perm_r,
@@ -112,6 +114,11 @@ async def list_dialogues(
     if is_active is not None:
         conditions.append("is_active = :is_active")
         params["is_active"] = is_active
+    if tenant_id == "null":
+        conditions.append("tenant_id IS NULL")
+    elif tenant_id:
+        conditions.append("(tenant_id IS NULL OR tenant_id = CAST(:tenant_id AS uuid))")
+        params["tenant_id"] = tenant_id
 
     where_clause = " AND ".join(conditions)
 
@@ -125,7 +132,7 @@ async def list_dialogues(
         result = await conn.execute(
             text(f"""
                 SELECT id, title, scenario_type, phase, tools_used, description,
-                       is_active, sort_order, created_at, updated_at
+                       is_active, sort_order, tenant_id, created_at, updated_at
                 FROM dialogue_examples
                 WHERE {where_clause}
                 ORDER BY sort_order, created_at DESC
@@ -147,7 +154,7 @@ async def get_dialogue(dialogue_id: UUID, _: dict[str, Any] = _perm_r) -> dict[s
         result = await conn.execute(
             text("""
                 SELECT id, title, scenario_type, phase, dialogue, tools_used,
-                       description, is_active, sort_order, created_at, updated_at
+                       description, is_active, sort_order, tenant_id, created_at, updated_at
                 FROM dialogue_examples
                 WHERE id = :id
             """),
@@ -179,9 +186,11 @@ async def create_dialogue(
     async with engine.begin() as conn:
         result = await conn.execute(
             text("""
-                INSERT INTO dialogue_examples (title, scenario_type, phase, dialogue, tools_used, description, sort_order)
-                VALUES (:title, :scenario_type, :phase, :dialogue, :tools_used, :description, :sort_order)
-                RETURNING id, title, scenario_type, phase, is_active, sort_order, created_at
+                INSERT INTO dialogue_examples
+                    (title, scenario_type, phase, dialogue, tools_used, description, sort_order, tenant_id)
+                VALUES (:title, :scenario_type, :phase, :dialogue, :tools_used, :description, :sort_order,
+                        CAST(:tenant_id AS uuid))
+                RETURNING id, title, scenario_type, phase, is_active, sort_order, tenant_id, created_at
             """),
             {
                 "title": request.title,
@@ -191,6 +200,7 @@ async def create_dialogue(
                 "tools_used": request.tools_used,
                 "description": request.description,
                 "sort_order": request.sort_order,
+                "tenant_id": str(request.tenant_id) if request.tenant_id else None,
             },
         )
         row = result.first()
@@ -245,6 +255,9 @@ async def update_dialogue(
     if request.sort_order is not None:
         updates.append("sort_order = :sort_order")
         params["sort_order"] = request.sort_order
+    if "tenant_id" in request.model_fields_set:
+        updates.append("tenant_id = CAST(:tenant_id AS uuid)")
+        params["tenant_id"] = str(request.tenant_id) if request.tenant_id else None
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
@@ -258,7 +271,8 @@ async def update_dialogue(
                 UPDATE dialogue_examples
                 SET {set_clause}
                 WHERE id = :id
-                RETURNING id, title, scenario_type, phase, is_active, sort_order, updated_at
+                RETURNING id, title, scenario_type, phase, is_active, sort_order,
+                          tenant_id, updated_at
             """),
             params,
         )

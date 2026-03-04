@@ -9,21 +9,20 @@ import json
 import logging
 import os
 import time
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from redis.asyncio import Redis
 
 from src.api.auth import require_permission
-from src.config import get_settings
 from src.llm.models import DEFAULT_ROUTING_CONFIG
 from src.llm.router import REDIS_CONFIG_KEY
 
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/llm", tags=["llm-routing"])
-
-_redis: Redis | None = None
 
 # Module-level dependencies to satisfy B008 lint rule
 _perm_r = Depends(require_permission("llm_config:read"))
@@ -31,11 +30,9 @@ _perm_w = Depends(require_permission("llm_config:write"))
 
 
 async def _get_redis() -> Redis:
-    global _redis
-    if _redis is None:
-        settings = get_settings()
-        _redis = Redis.from_url(settings.redis.url, decode_responses=True)
-    return _redis
+    from src.core.redis_client import get_redis
+
+    return await get_redis()
 
 
 class ProviderUpdate(BaseModel):

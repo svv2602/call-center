@@ -137,14 +137,11 @@ async def system_status(
 
     # Redis status
     try:
-        from redis.asyncio import Redis
+        from src.core.redis_client import get_redis
 
-        r = Redis.from_url(settings.redis.url, decode_responses=True)
-        try:
-            info = await r.info("memory")
-            result["redis_used_memory"] = info.get("used_memory_human", "unknown")
-        finally:
-            await r.aclose()
+        r = await get_redis()
+        info = await r.info("memory")
+        result["redis_used_memory"] = info.get("used_memory_human", "unknown")
     except Exception:
         result["redis"] = "unavailable"
 

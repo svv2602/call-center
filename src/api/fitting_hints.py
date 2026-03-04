@@ -10,16 +10,18 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.api.auth import require_permission
 from src.config import get_settings
+
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/fitting", tags=["fitting-hints"])
@@ -27,7 +29,6 @@ router = APIRouter(prefix="/admin/fitting", tags=["fitting-hints"])
 REDIS_KEY = "fitting:station_hints"
 PICKUP_HINTS_KEY = "pickup:point_hints"
 
-_redis: Redis | None = None
 _engine: AsyncEngine | None = None
 
 _perm_r = Depends(require_permission("point_hints:read"))
@@ -35,11 +36,9 @@ _perm_w = Depends(require_permission("point_hints:write"))
 
 
 async def _get_redis() -> Redis:
-    global _redis
-    if _redis is None:
-        settings = get_settings()
-        _redis = Redis.from_url(settings.redis.url, decode_responses=True)
-    return _redis
+    from src.core.redis_client import get_redis
+
+    return await get_redis()
 
 
 async def _get_engine() -> AsyncEngine:

@@ -34,20 +34,11 @@ _ENDPOINT_LIMITS: dict[str, tuple[int, int]] = {
     "/knowledge": (30, 60),  # POST/PATCH/DELETE only
 }
 
-_redis: Any = None
-
-
 async def _get_redis() -> Any:
-    """Lazily create and cache Redis connection."""
-    global _redis
-    if _redis is None:
-        from redis.asyncio import Redis
+    """Get shared Redis connection for rate limiting."""
+    from src.core.redis_client import get_redis
 
-        from src.config import get_settings
-
-        settings = get_settings()
-        _redis = Redis.from_url(settings.redis.url, decode_responses=True)
-    return _redis
+    return await get_redis()
 
 
 async def _check_limit(key: str, limit: int, window: int) -> tuple[bool, int, int]:

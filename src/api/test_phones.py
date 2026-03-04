@@ -19,11 +19,10 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
-from redis.asyncio import Redis
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
@@ -31,12 +30,14 @@ from src.api.auth import require_permission
 from src.config import get_settings
 from src.utils.phone import normalize_phone_ua
 
+if TYPE_CHECKING:
+    from redis.asyncio import Redis
+
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/test-phones", tags=["test-phones"])
 
 REDIS_KEY = "test:phones"
 
-_redis: Redis | None = None
 _engine: AsyncEngine | None = None
 
 _perm_r = Depends(require_permission("configuration:read"))
@@ -44,11 +45,9 @@ _perm_w = Depends(require_permission("configuration:write"))
 
 
 async def _get_redis() -> Redis:
-    global _redis
-    if _redis is None:
-        settings = get_settings()
-        _redis = Redis.from_url(settings.redis.url, decode_responses=True)
-    return _redis
+    from src.core.redis_client import get_redis
+
+    return await get_redis()
 
 
 async def _get_engine() -> AsyncEngine:
