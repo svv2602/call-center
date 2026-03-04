@@ -26,6 +26,7 @@ _SKIP_PATHS = {"/health", "/health/ready", "/metrics"}
 _GLOBAL_LIMIT = int(os.environ.get("RATE_LIMIT_GLOBAL", "100"))  # req/min per IP
 _PER_USER_LIMIT = int(os.environ.get("RATE_LIMIT_PER_USER", "60"))  # req/min per user
 _WINDOW_SECONDS = 60
+_FAIL_CLOSED = os.environ.get("RATE_LIMIT_FAIL_CLOSED", "false").lower() in ("true", "1", "yes")
 
 # Per-endpoint overrides: path prefix -> (limit, window_seconds)
 _ENDPOINT_LIMITS: dict[str, tuple[int, int]] = {
@@ -77,16 +78,43 @@ async def _check_limit(key: str, limit: int, window: int) -> tuple[bool, int, in
 
         return count > limit, remaining, reset_ts
     except Exception:
-        logger.debug("Rate limit check failed, allowing request", exc_info=True)
+        if _FAIL_CLOSED:
+            logger.warning("Rate limit check failed (Redis down), BLOCKING request (fail-closed)")
+            return True, 0, int(time.time()) + window
+        logger.warning("Rate limit check failed (Redis down), allowing request (fail-open)")
         return False, limit, int(time.time()) + window
 
 
+def _is_trusted_proxy(ip: str) -> bool:
+    """Check if IP is in the trusted proxy list."""
+    import ipaddress
+
+    from src.config import get_settings
+
+    settings = get_settings()
+    trusted_raw = settings.trusted_proxy.ips
+    for entry in trusted_raw.split(","):
+        entry = entry.strip()
+        if not entry:
+            continue
+        try:
+            if "/" in entry:
+                if ipaddress.ip_address(ip) in ipaddress.ip_network(entry, strict=False):
+                    return True
+            elif ip == entry:
+                return True
+        except ValueError:
+            continue
+    return False
+
+
 def _get_client_ip(request: Request) -> str:
-    """Extract client IP, respecting X-Forwarded-For behind proxy."""
+    """Extract client IP, respecting X-Forwarded-For only from trusted proxy."""
+    client_host = request.client.host if request.client else "unknown"
     forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
+    if forwarded and _is_trusted_proxy(client_host):
         return forwarded.split(",")[0].strip()
-    return request.client.host if request.client else "unknown"
+    return client_host
 
 
 def _get_user_id(request: Request) -> str | None:
@@ -187,7 +215,8 @@ def _log_rate_limit(ip: str, path: str, user_id: str | None = None) -> None:
     try:
         from src.monitoring.metrics import rate_limit_exceeded_total
 
-        rate_limit_exceeded_total.labels(endpoint=path, ip=ip).inc()
+        rate_limit_exceeded_total.labels(endpoint=path).inc()
     except Exception:
         pass
+    # IP logged here for audit trail (not in Prometheus to avoid PII/cardinality)
     logger.warning("Rate limit exceeded: ip=%s path=%s user=%s", ip, path, user_id or "anonymous")

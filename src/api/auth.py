@@ -10,6 +10,7 @@ import hashlib
 import hmac
 import json
 import logging
+import secrets
 import time
 import uuid
 from base64 import urlsafe_b64decode, urlsafe_b64encode
@@ -110,6 +111,29 @@ async def _log_failed_login(username: str, ip: str) -> None:
             )
     except Exception:
         logger.debug("Failed to log login attempt", exc_info=True)
+
+
+async def _log_successful_login(username: str, ip: str, user_id: str | None = None) -> None:
+    """Log a successful login to the audit log."""
+    try:
+        engine = await _get_engine()
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("""
+                    INSERT INTO admin_audit_log
+                        (user_id, username, action, resource_type, details, ip_address)
+                    VALUES
+                        (:user_id, :username, 'login_success', 'auth', :details, :ip)
+                """),
+                {
+                    "user_id": user_id,
+                    "username": username,
+                    "details": f"Successful login for user '{username}'",
+                    "ip": ip,
+                },
+            )
+    except Exception:
+        logger.debug("Failed to log successful login", exc_info=True)
 
 
 class LoginRequest(BaseModel):
@@ -394,6 +418,7 @@ async def login(login_data: LoginRequest, request: Request) -> dict[str, Any]:
             settings.admin.jwt_secret,
             expires_in=ttl_seconds,
         )
+        await _log_successful_login(db_user["username"], client_ip, db_user["user_id"])
         return {"token": token, "token_type": "bearer", "expires_in": ttl_seconds}
 
     # Fallback to env credentials (constant-time comparison)
@@ -405,6 +430,7 @@ async def login(login_data: LoginRequest, request: Request) -> dict[str, Any]:
             settings.admin.jwt_secret,
             expires_in=ttl_seconds,
         )
+        await _log_successful_login(login_data.username, client_ip)
         return {"token": token, "token_type": "bearer", "expires_in": ttl_seconds}
 
     # Failed login — log and reject
@@ -454,3 +480,45 @@ async def get_me(request: Request) -> dict[str, Any]:
         "role": role,
         "permissions": effective,
     }
+
+
+_WS_TICKET_TTL = 30  # seconds
+
+
+@router.post("/ws-ticket")
+async def create_ws_ticket(request: Request) -> dict[str, str]:
+    """Exchange JWT for a one-time WebSocket ticket.
+
+    The ticket is stored in Redis with a short TTL and can only be used once.
+    This avoids passing JWT in WebSocket URL query parameters.
+    """
+    payload = await require_admin(request)
+    ticket = secrets.token_urlsafe(32)
+
+    r = await _get_redis()
+    ticket_data = json.dumps({"sub": payload.get("sub"), "role": payload.get("role")})
+    await r.setex(f"ws_ticket:{ticket}", _WS_TICKET_TTL, ticket_data)
+
+    return {"ticket": ticket, "expires_in": _WS_TICKET_TTL}
+
+
+async def validate_ws_ticket(ticket: str) -> dict[str, Any] | None:
+    """Validate and consume a one-time WebSocket ticket.
+
+    Returns user payload or None if invalid/expired/already used.
+    """
+    if not ticket:
+        return None
+    try:
+        r = await _get_redis()
+        key = f"ws_ticket:{ticket}"
+        data = await r.get(key)
+        if not data:
+            return None
+        # Delete immediately (one-time use)
+        await r.delete(key)
+        result: dict[str, Any] = json.loads(data)
+        return result
+    except Exception:
+        logger.debug("WebSocket ticket validation failed", exc_info=True)
+        return None

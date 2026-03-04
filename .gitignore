@@ -6,6 +6,8 @@
 secrets/
 *.pem
 *.key
+*.crt
+nginx/ssl/
 gcp-key.json
 gcp-credentials.json
 

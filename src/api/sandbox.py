@@ -91,12 +91,12 @@ class BulkDeleteRequest(BaseModel):
 
 
 class ExportPatternRequest(BaseModel):
-    guidance_note: str = Field(..., min_length=1)
+    guidance_note: str = Field(..., min_length=1, max_length=500)
 
 
 class PatternUpdate(BaseModel):
     intent_label: str | None = None
-    guidance_note: str | None = None
+    guidance_note: str | None = Field(default=None, max_length=500)
     is_active: bool | None = None
     tags: list[str] | None = None
 

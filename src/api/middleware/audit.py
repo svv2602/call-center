@@ -79,7 +79,10 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
         # Extract resource info from path
         resource_type, resource_id = _extract_resource(request.url.path)
-        ip_address = request.client.host if request.client else None
+        # Use trusted-proxy-aware IP extraction (same as rate limiter)
+        from src.api.middleware.rate_limit import _get_client_ip
+
+        ip_address = _get_client_ip(request)
 
         # Write audit log asynchronously (fire and forget)
         try:
