@@ -160,6 +160,49 @@ class StreamingAgentLoop:
             pass
         return None
 
+    async def _request_summary_fallback(
+        self,
+        system: str,
+        conversation_history: list[dict[str, Any]],
+    ) -> str:
+        """Ask LLM to summarize tool results when max tool rounds exhausted.
+
+        Returns a short customer-facing summary or a static fallback.
+        """
+        _summary_timeout_sec = 5
+        _summary_prompt = (
+            "Ти вичерпав ліміт викликів інструментів. "
+            "Підсумуй для клієнта те, що вдалося дізнатися, "
+            "в 1-2 реченнях українською. Не використовуй інструменти."
+        )
+        _fallback_text = (
+            "Перепрошую, мені потрібно трохи більше часу. "
+            "Спробуйте, будь ласка, уточнити ваше питання."
+        )
+
+        summary_history = [*conversation_history, {"role": "user", "content": _summary_prompt}]
+
+        try:
+            llm_resp = await asyncio.wait_for(
+                self._llm_router.complete(
+                    LLMTask.AGENT,
+                    summary_history,
+                    system=system,
+                    tools=[],
+                    max_tokens=256,
+                ),
+                timeout=_summary_timeout_sec,
+            )
+            if llm_resp.text and llm_resp.text.strip():
+                logger.info("Streaming summary fallback produced text")
+                return llm_resp.text.strip()
+        except TimeoutError:
+            logger.warning("Streaming summary fallback timed out (%ds)", _summary_timeout_sec)
+        except Exception:
+            logger.warning("Streaming summary fallback failed", exc_info=True)
+
+        return _fallback_text
+
     async def run_turn(
         self,
         user_text: str,
@@ -422,6 +465,21 @@ class StreamingAgentLoop:
             if tool_round >= self._max_tool_rounds:
                 logger.warning("Max tool rounds reached (%d)", self._max_tool_rounds)
                 break
+
+        # Fallback: if max tool rounds exhausted with no spoken text, ask LLM for summary
+        if not spoken_parts and tool_round >= self._max_tool_rounds:
+            summary = await self._request_summary_fallback(system, conversation_history)
+            if summary:
+                spoken_parts.append(summary)
+                # Synthesize and send the summary audio
+                try:
+                    tts = self._tts
+                    audio = await tts.synthesize(summary)
+                    if self._echo_canceller is not None:
+                        self._echo_canceller.record_far_end(audio)
+                    await self._conn.send_audio(audio, cancel_event=self._barge_in)
+                except Exception:
+                    logger.debug("Summary fallback audio send failed", exc_info=True)
 
         return TurnResult(
             spoken_text=" ".join(spoken_parts),

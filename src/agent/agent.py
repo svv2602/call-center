@@ -387,7 +387,73 @@ class LLMAgent:
                 logger.warning("Max tool calls reached (%d)", MAX_TOOL_CALLS_PER_TURN)
                 break
 
+        # Fallback: if max tool rounds exhausted with no text, ask LLM for summary
+        if not response_text.strip() and tool_call_count >= MAX_TOOL_CALLS_PER_TURN:
+            response_text = await self._request_summary_fallback(
+                system, conversation_history
+            )
+
         return response_text, conversation_history
+
+    async def _request_summary_fallback(
+        self,
+        system: str,
+        conversation_history: list[dict[str, Any]],
+    ) -> str:
+        """Ask LLM to summarize tool results when max tool rounds exhausted.
+
+        Returns a short customer-facing summary or a static fallback.
+        """
+        _SUMMARY_TIMEOUT_SEC = 5  # noqa: N806
+        _SUMMARY_PROMPT = (  # noqa: N806
+            "Ти вичерпав ліміт викликів інструментів. "
+            "Підсумуй для клієнта те, що вдалося дізнатися, "
+            "в 1-2 реченнях українською. Не використовуй інструменти."
+        )
+        _FALLBACK_TEXT = (  # noqa: N806
+            "Перепрошую, мені потрібно трохи більше часу. "
+            "Спробуйте, будь ласка, уточнити ваше питання."
+        )
+
+        summary_history = [*conversation_history, {"role": "user", "content": _SUMMARY_PROMPT}]
+
+        try:
+            if self._llm_router is not None:
+                from src.llm.models import LLMTask
+
+                llm_resp = await asyncio.wait_for(
+                    self._llm_router.complete(
+                        LLMTask.AGENT,
+                        summary_history,
+                        system=system,
+                        tools=[],
+                        max_tokens=256,
+                    ),
+                    timeout=_SUMMARY_TIMEOUT_SEC,
+                )
+                if llm_resp.text and llm_resp.text.strip():
+                    logger.info("Summary fallback produced text via LLM router")
+                    return llm_resp.text.strip()
+            else:
+                resp = await asyncio.wait_for(
+                    self._client.messages.create(
+                        model=self._model,
+                        max_tokens=256,
+                        system=system,
+                        messages=summary_history,
+                    ),
+                    timeout=_SUMMARY_TIMEOUT_SEC,
+                )
+                for block in resp.content:
+                    if hasattr(block, "text") and block.text.strip():
+                        logger.info("Summary fallback produced text via Anthropic")
+                        return block.text.strip()
+        except TimeoutError:
+            logger.warning("Summary fallback LLM timed out (%ds)", _SUMMARY_TIMEOUT_SEC)
+        except Exception:
+            logger.warning("Summary fallback LLM failed", exc_info=True)
+
+        return _FALLBACK_TEXT
 
     @property
     def prompt_version_name(self) -> str:
