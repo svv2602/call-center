@@ -38,7 +38,7 @@ def _format_tire_size(row: Any) -> str:
 
 # Retry config
 _MAX_RETRIES = 2
-_RETRY_DELAYS = [1.0, 2.0]  # exponential backoff
+_RETRY_DELAYS = [0.5, 1.0]  # exponential backoff (short for real-time calls)
 _RETRYABLE_STATUSES = {429, 503}
 
 # Circuit breaker
