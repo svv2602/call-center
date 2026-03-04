@@ -103,6 +103,12 @@ transfers_to_operator_total = Counter(
     ["reason"],
 )
 
+transfer_attempts_total = Counter(
+    "callcenter_transfer_attempts_total",
+    "Transfer attempts to operator queue via ARI",
+    ["result"],  # success, error, unavailable
+)
+
 # --- Business metrics ---
 
 calls_resolved_by_bot_total = Counter(

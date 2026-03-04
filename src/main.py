@@ -237,6 +237,7 @@ _llm_router: Any = None  # LLMRouter when FF_LLM_ROUTING_ENABLED=true
 _asyncpg_pool: Any = None  # asyncpg pool for PatternSearch (pgvector)
 _knowledge_search: Any = None  # KnowledgeSearch (pgvector) for search_knowledge_base tool
 _search_embedding_gen: Any = None  # EmbeddingGenerator shared by KnowledgeSearch
+_ari_client: Any = None  # AsteriskARIClient for operator transfer (shared across calls)
 
 _SENTINEL = object()  # sentinel for optional pre-fetched values
 
@@ -675,6 +676,24 @@ async def _resolve_tenant(
     return None
 
 
+async def _wait_for_hangup(conn: AudioSocketConnection) -> None:
+    """Wait until AudioSocket receives a hangup packet from Asterisk.
+
+    Used after ARI transfer to keep the connection open until Asterisk
+    redirects the channel. The caller should wrap this with asyncio.wait_for()
+    to enforce a timeout.
+    """
+    from src.core.audio_socket import PacketType
+
+    while not conn.is_closed:
+        packet = await conn.read_audio_packet()
+        if packet is None:
+            break
+        if packet.type == PacketType.HANGUP:
+            break
+        # Ignore audio and other packets while waiting
+
+
 async def handle_call(conn: AudioSocketConnection) -> None:
     """Handle a single AudioSocket call from Asterisk.
 
@@ -774,8 +793,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         prompt_version_name = None
         if _db_engine is not None:
             pm = PromptManager(_db_engine)
+            tid = str(session.tenant_id) if session.tenant_id else None
             templates, tools = await asyncio.gather(
-                pm.get_active_templates(),
+                pm.get_active_templates(tenant_id=tid),
                 get_tools_with_overrides(_db_engine, redis=_redis),
             )
 
@@ -808,7 +828,8 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             if _db_engine is None:
                 return {}
             try:
-                return await get_few_shot_examples(_db_engine, _redis)
+                tid = str(session.tenant_id) if session.tenant_id else None
+                return await get_few_shot_examples(_db_engine, _redis, tenant_id=tid)
             except Exception:
                 logger.debug("Few-shot examples loading failed", exc_info=True)
                 return {}
@@ -817,7 +838,8 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             if _db_engine is None:
                 return []
             try:
-                return await get_safety_rules_for_prompt(_db_engine, _redis)
+                tid = str(session.tenant_id) if session.tenant_id else None
+                return await get_safety_rules_for_prompt(_db_engine, _redis, tenant_id=tid)
             except Exception:
                 logger.debug("Safety rules loading failed", exc_info=True)
                 return []
@@ -1150,6 +1172,28 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             echo_canceller=echo_canceller,
         )
         await pipeline.run()
+
+        # After transfer: keep AudioSocket open until Asterisk redirects the channel.
+        # ARI redirect causes Asterisk to send a hangup packet on AudioSocket.
+        # Wait up to 30s for that hangup; if timeout — close anyway.
+        if session.transferred and not conn.is_closed:
+            logger.info(
+                "Transfer in progress — waiting for Asterisk hangup: %s",
+                conn.channel_uuid,
+            )
+            try:
+                await asyncio.wait_for(
+                    _wait_for_hangup(conn), timeout=30
+                )
+                logger.info(
+                    "Asterisk hangup received after transfer: %s",
+                    conn.channel_uuid,
+                )
+            except TimeoutError:
+                logger.warning(
+                    "Hangup timeout (30s) after transfer — closing: %s",
+                    conn.channel_uuid,
+                )
 
     except asyncio.CancelledError:
         logger.info("Call cancelled (shutdown): %s", conn.channel_uuid)
@@ -1958,15 +2002,61 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
     router.register("search_knowledge_base", _search_knowledge)
 
     async def transfer_to_operator(**kwargs: Any) -> dict[str, str]:
-        session.transferred = True
-        session.transfer_reason = str(kwargs.get("reason", ""))
-        logger.warning(
-            "Operator transfer requested for call %s (ARI not configured — "
-            "flag set but no SIP transfer performed)",
-            session.channel_uuid,
-        )
-        await publish_event("call:transferred", {"call_id": str(session.channel_uuid)})
-        return {"status": "transferring", "message": "З'єдную з оператором"}
+        from src.monitoring.metrics import transfer_attempts_total
+
+        reason = str(kwargs.get("reason", ""))
+        session.transfer_reason = reason
+
+        if _ari_client is not None:
+            try:
+                success = await asyncio.wait_for(
+                    _ari_client.transfer_to_queue(str(session.channel_uuid)),
+                    timeout=5,
+                )
+            except TimeoutError:
+                success = False
+                logger.error(
+                    "ARI transfer timeout (5s) for call %s", session.channel_uuid
+                )
+
+            if success:
+                session.transferred = True
+                transfer_attempts_total.labels(result="success").inc()
+                logger.info(
+                    "Operator transfer via ARI succeeded: call=%s, reason=%s",
+                    session.channel_uuid,
+                    reason,
+                )
+                await publish_event(
+                    "call:transferred", {"call_id": str(session.channel_uuid)}
+                )
+                return {"status": "transferring", "message": "З'єдную з оператором"}
+            else:
+                transfer_attempts_total.labels(result="error").inc()
+                logger.error(
+                    "ARI transfer failed for call %s — telling customer operators unavailable",
+                    session.channel_uuid,
+                )
+                return {
+                    "status": "error",
+                    "message": (
+                        "На жаль, зараз оператори недоступні. "
+                        "Залиште, будь ласка, ваш номер — ми передзвонимо."
+                    ),
+                }
+        else:
+            transfer_attempts_total.labels(result="unavailable").inc()
+            logger.warning(
+                "Operator transfer requested for call %s but ARI client not available",
+                session.channel_uuid,
+            )
+            return {
+                "status": "unavailable",
+                "message": (
+                    "На жаль, зараз оператори недоступні. "
+                    "Залиште, будь ласка, ваш номер — ми передзвонимо."
+                ),
+            }
 
     router.register("transfer_to_operator", transfer_to_operator)
 
@@ -2269,6 +2359,25 @@ async def main() -> None:
     await _store_client.open()
     logger.info("StoreClient initialized: %s", settings.store_api.url)
 
+    # Initialize shared ARI client for operator transfers
+    global _ari_client
+    if settings.ari.url:
+        try:
+            from src.core.asterisk_ari import AsteriskARIClient
+
+            _ari_client = AsteriskARIClient(
+                url=settings.ari.url,
+                user=settings.ari.user,
+                password=settings.ari.password,
+            )
+            await _ari_client.open()
+            logger.info("ARI client initialized: %s", settings.ari.url)
+        except Exception:
+            logger.warning("ARI client init failed — operator transfers will be unavailable", exc_info=True)
+            _ari_client = None
+    else:
+        logger.info("ARI not configured (ARI_URL empty) — operator transfers unavailable")
+
     try:
         # Read effective config: Redis (admin UI overrides) merged over env defaults
         from src.api.tts_config import _get_effective_config
@@ -2341,6 +2450,10 @@ async def main() -> None:
 
         set_router(None)
         logger.info("LLM router closed")
+
+    if _ari_client is not None:
+        await _ari_client.close()
+        logger.info("ARI client closed")
 
     if _store_client is not None:
         await _store_client.close()
