@@ -12,29 +12,20 @@ from typing import Any
 
 from fastapi import APIRouter, Depends
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.api.auth import require_permission
+from src.api.database import get_engine as _get_engine
 from src.config import get_settings
 from src.monitoring.metrics import celery_workers_online
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["system"])
 
-_engine: AsyncEngine | None = None
 _start_time = time.time()
 
 # Module-level dependencies to satisfy B008 lint rule
 _perm_r = Depends(require_permission("monitoring:read"))
 _perm_w = Depends(require_permission("configuration:write"))
-
-
-async def _get_engine() -> AsyncEngine:
-    global _engine
-    if _engine is None:
-        settings = get_settings()
-        _engine = create_async_engine(settings.database.url, pool_pre_ping=True)
-    return _engine
 
 
 @router.get("/health/celery")

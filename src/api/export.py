@@ -16,30 +16,18 @@ from typing import Any
 from fastapi import APIRouter, Depends, Query
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.api.auth import require_permission
-from src.config import get_settings
+from src.api.database import get_engine as _get_engine
 from src.logging.pii_sanitizer import sanitize_phone
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/analytics", tags=["analytics"])
 
-_engine: AsyncEngine | None = None
-
 _MAX_EXPORT_ROWS = 10000
 
 # Module-level dependency to satisfy B008 lint rule
 _perm_export = Depends(require_permission("analytics:export"))
-
-
-async def _get_engine() -> AsyncEngine:
-    """Lazily create and cache the async database engine."""
-    global _engine
-    if _engine is None:
-        settings = get_settings()
-        _engine = create_async_engine(settings.database.url, pool_pre_ping=True)
-    return _engine
 
 
 def _csv_streaming_response(

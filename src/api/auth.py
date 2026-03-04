@@ -18,29 +18,20 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
+from src.api.database import get_engine as _get_engine
 from src.api.permissions import ROLE_DEFAULT_PERMISSIONS
 from src.config import get_settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/auth", tags=["auth"])
 
-_engine: AsyncEngine | None = None
 _redis: Any = None
 
 _PERMS_CACHE_TTL = 300  # 5 minutes
 
 _LOGIN_MAX_ATTEMPTS = 5
 _LOGIN_WINDOW_SECONDS = 900  # 15 minutes
-
-
-async def _get_engine() -> AsyncEngine:
-    global _engine
-    if _engine is None:
-        settings = get_settings()
-        _engine = create_async_engine(settings.database.url, pool_pre_ping=True)
-    return _engine
 
 
 async def _get_redis() -> Any:

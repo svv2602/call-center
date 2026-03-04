@@ -10,35 +10,27 @@ import json
 import logging
 from datetime import date as date_type
 from datetime import timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncEngine
 
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.api.auth import invalidate_user_permissions_cache, require_permission
+from src.api.database import get_engine as _get_engine
 from src.api.permissions import ALL_PERMISSIONS
-from src.config import get_settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin", tags=["admin"])
-
-_engine: AsyncEngine | None = None
 
 # Module-level dependencies to satisfy B008 lint rule
 _users_write_dep = Depends(require_permission("users:write"))
 _users_read_dep = Depends(require_permission("users:read"))
 _audit_read_dep = Depends(require_permission("audit:read"))
-
-
-async def _get_engine() -> AsyncEngine:
-    global _engine
-    if _engine is None:
-        settings = get_settings()
-        _engine = create_async_engine(settings.database.url, pool_pre_ping=True)
-    return _engine
 
 
 _VALID_ROLES = ("admin", "analyst", "operator", "content_manager")

@@ -13,15 +13,12 @@ from uuid import UUID  # noqa: TC003 - FastAPI needs UUID at runtime for path pa
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.api.auth import require_permission
-from src.config import get_settings
+from src.api.database import get_engine as _get_engine
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/training/templates", tags=["training"])
-
-_engine: AsyncEngine | None = None
 
 _perm_r = Depends(require_permission("training:read"))
 _perm_w = Depends(require_permission("training:write"))
@@ -36,14 +33,6 @@ TEMPLATE_KEYS = [
     "wait",
     "order_cancelled",
 ]
-
-
-async def _get_engine() -> AsyncEngine:
-    global _engine
-    if _engine is None:
-        settings = get_settings()
-        _engine = create_async_engine(settings.database.url, pool_pre_ping=True)
-    return _engine
 
 
 class TemplateCreateRequest(BaseModel):

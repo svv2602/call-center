@@ -14,10 +14,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from redis.asyncio import Redis
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.agent.prompt_manager import SAFETY_CACHE_REDIS_KEY
 from src.api.auth import require_permission
+from src.api.database import get_engine as _get_engine
 from src.config import get_settings
 from src.llm.helpers import llm_complete
 from src.llm.models import LLMTask
@@ -25,7 +25,6 @@ from src.llm.models import LLMTask
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/training/safety-rules", tags=["training"])
 
-_engine: AsyncEngine | None = None
 _redis: Redis | None = None
 
 _perm_r = Depends(require_permission("training:read"))
@@ -42,14 +41,6 @@ RULE_TYPES = [
     "escalation",
 ]
 SEVERITIES = ["low", "medium", "high", "critical"]
-
-
-async def _get_engine() -> AsyncEngine:
-    global _engine
-    if _engine is None:
-        settings = get_settings()
-        _engine = create_async_engine(settings.database.url, pool_pre_ping=True)
-    return _engine
 
 
 async def _get_redis() -> Redis:
