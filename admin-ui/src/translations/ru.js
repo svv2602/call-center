@@ -533,6 +533,8 @@ export default {
     'settings.ttsSaved': 'Настройки TTS сохранены',
     'settings.ttsSaveFailed': 'Ошибка сохранения TTS: {error}',
     'settings.ttsResetDone': 'Настройки TTS сброшены к умолчаниям',
+    'settings.ttsTestPhrase': 'Тестовая фраза',
+    'settings.ttsTestPhrasePlaceholder': 'Введите фразу для проверки произношения...',
     'settings.ttsTesting': 'Синтез тестовой фразы...',
     'settings.ttsTestSuccess': 'Синтез выполнен ({duration}мс)',
     'settings.ttsTestFailed': 'Ошибка синтеза: {error}',

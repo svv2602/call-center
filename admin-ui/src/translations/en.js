@@ -533,6 +533,8 @@ export default {
     'settings.ttsSaved': 'TTS settings saved',
     'settings.ttsSaveFailed': 'TTS save failed: {error}',
     'settings.ttsResetDone': 'TTS settings reset to defaults',
+    'settings.ttsTestPhrase': 'Test phrase',
+    'settings.ttsTestPhrasePlaceholder': 'Enter a phrase to test pronunciation...',
     'settings.ttsTesting': 'Synthesizing test phrase...',
     'settings.ttsTestSuccess': 'Synthesis completed ({duration}ms)',
     'settings.ttsTestFailed': 'Synthesis failed: {error}',

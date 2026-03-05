@@ -199,8 +199,32 @@ async def update_tts_config(request: TTSConfigPatch, _: dict[str, Any] = _perm_w
     return {"message": "TTS config updated", "config": effective, "source": source}
 
 
+_DEFAULT_TEST_PHRASE = "Привіт! Це тестове повідомлення системи синтезу мовлення."
+_MAX_PHRASE_LENGTH = 500
+
+
+class TTSTestRequest(BaseModel):
+    phrase: str | None = None
+
+    @field_validator("phrase")
+    @classmethod
+    def validate_phrase(cls, v: str | None) -> str | None:
+        if v is not None:
+            v = v.strip()
+            if not v:
+                return None
+            if len(v) > _MAX_PHRASE_LENGTH:
+                raise ValueError(
+                    f"phrase must be at most {_MAX_PHRASE_LENGTH} characters"
+                )
+        return v
+
+
 @router.post("/test")
-async def test_tts(_: dict[str, Any] = _perm_w) -> dict[str, Any]:
+async def test_tts(
+    request: TTSTestRequest | None = None,
+    _: dict[str, Any] = _perm_w,
+) -> dict[str, Any]:
     """Synthesize a test phrase with current config, return base64 WAV audio."""
     from src.tts import get_engine
 
@@ -208,7 +232,9 @@ async def test_tts(_: dict[str, Any] = _perm_w) -> dict[str, Any]:
     if engine is None:
         raise HTTPException(status_code=503, detail="TTS engine not initialized")
 
-    test_phrase = "Привіт! Це тестове повідомлення системи синтезу мовлення."
+    test_phrase = (
+        request.phrase if request and request.phrase else _DEFAULT_TEST_PHRASE
+    )
     start = time.monotonic()
     try:
         pcm = await engine.synthesize(test_phrase)

@@ -662,10 +662,18 @@ function renderTTSConfig(data) {
                 </div>
             </details>
 
-            <div class="flex flex-wrap items-center gap-2 pt-2">
-                <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.configuration.saveTTSConfig()">${t('common.save')}</button>
-                <button class="${tw.btnSm} border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800" onclick="window._pages.configuration.testTTS()">${t('settings.ttsTest')}</button>
-                <button class="${tw.btnSm} text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20" onclick="window._pages.configuration.resetTTSConfig()">${t('settings.ttsReset')}</button>
+            <div class="pt-2 space-y-2">
+                <div>
+                    <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.ttsTestPhrase')}</label>
+                    <input id="ttsTestPhraseInput" type="text" maxlength="500"
+                        placeholder="${t('settings.ttsTestPhrasePlaceholder')}"
+                        class="${tw.selectSm} w-full max-w-lg font-normal">
+                </div>
+                <div class="flex flex-wrap items-center gap-2">
+                    <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.configuration.saveTTSConfig()">${t('common.save')}</button>
+                    <button class="${tw.btnSm} border border-neutral-300 dark:border-neutral-600 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800" onclick="window._pages.configuration.testTTS()">${t('settings.ttsTest')}</button>
+                    <button class="${tw.btnSm} text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20" onclick="window._pages.configuration.resetTTSConfig()">${t('settings.ttsReset')}</button>
+                </div>
             </div>
             <div id="ttsTestResult"></div>
         </div>`;
@@ -708,13 +716,19 @@ async function testTTS() {
     const resultDiv = document.getElementById('ttsTestResult');
     if (resultDiv) resultDiv.innerHTML = `<div class="text-xs text-neutral-500 py-2">${t('settings.ttsTesting')}</div>`;
 
+    const phraseInput = document.getElementById('ttsTestPhraseInput');
+    const phrase = phraseInput?.value?.trim() || null;
+    const body = phrase ? JSON.stringify({ phrase }) : JSON.stringify({});
+
     try {
-        const result = await api('/admin/tts/test', { method: 'POST' });
+        const result = await api('/admin/tts/test', { method: 'POST', body });
         if (result.success && result.audio_base64) {
             if (resultDiv) {
+                const displayPhrase = escapeHtml(result.phrase || '');
                 resultDiv.innerHTML = `
                     <div class="mt-2 p-3 bg-neutral-50 dark:bg-neutral-800 rounded-lg">
-                        <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-2">${t('settings.ttsTestSuccess', {duration: result.duration_ms})}</div>
+                        <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-1">${t('settings.ttsTestSuccess', {duration: result.duration_ms})}</div>
+                        <div class="text-xs text-neutral-600 dark:text-neutral-300 mb-2 italic">${displayPhrase}</div>
                         <audio controls autoplay src="data:audio/wav;base64,${result.audio_base64}" class="w-full max-w-xs"></audio>
                     </div>`;
             }

@@ -341,6 +341,49 @@ class TestPostTest:
         assert data["duration_ms"] >= 0
 
     @pytest.mark.asyncio()
+    async def test_custom_phrase(self, app: Any, mock_redis: AsyncMock) -> None:
+        mock_engine = AsyncMock()
+        mock_engine.synthesize = AsyncMock(return_value=b"\x00\x01" * 100)
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_perm),
+            patch("src.api.tts_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.api.tts_config.get_settings", _env_patch()),
+            patch("src.tts.get_engine", return_value=mock_engine),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.post(
+                    "/admin/tts/test",
+                    json={"phrase": "Зачекайте, будь ласка, шукаю шини."},
+                )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["phrase"] == "Зачекайте, будь ласка, шукаю шини."
+        mock_engine.synthesize.assert_called_once_with(
+            "Зачекайте, будь ласка, шукаю шини."
+        )
+
+    @pytest.mark.asyncio()
+    async def test_empty_phrase_uses_default(self, app: Any, mock_redis: AsyncMock) -> None:
+        mock_engine = AsyncMock()
+        mock_engine.synthesize = AsyncMock(return_value=b"\x00\x01" * 100)
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_perm),
+            patch("src.api.tts_config._get_redis", AsyncMock(return_value=mock_redis)),
+            patch("src.api.tts_config.get_settings", _env_patch()),
+            patch("src.tts.get_engine", return_value=mock_engine),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                response = await ac.post("/admin/tts/test", json={"phrase": "  "})
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["phrase"] == "Привіт! Це тестове повідомлення системи синтезу мовлення."
+
+    @pytest.mark.asyncio()
     async def test_returns_error_on_failure(self, app: Any, mock_redis: AsyncMock) -> None:
         mock_engine = AsyncMock()
         mock_engine.synthesize = AsyncMock(side_effect=RuntimeError("TTS failed"))
