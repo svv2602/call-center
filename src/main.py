@@ -1539,6 +1539,24 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     guid = data_list[0].get("GUID", "") if data_list else ""
                     if guid:
                         fittings_booked_total.inc()
+                        # Auto-update customer profile with vehicle data
+                        vehicle_info = kwargs.get("vehicle_info", "")
+                        auto_num = kwargs.get("auto_number", "")
+                        if _call_logger and session.caller_phone and (vehicle_info or auto_num):
+                            try:
+                                vehicles_update = [{"brand": vehicle_info, "plate": auto_num}]
+                                await _call_logger.update_customer_profile(
+                                    session.caller_phone,
+                                    tenant_id=session.tenant_id,
+                                    vehicles=vehicles_update,
+                                )
+                                logger.info(
+                                    "Auto-updated customer profile after booking: vehicle=%s, plate=%s",
+                                    vehicle_info,
+                                    auto_num,
+                                )
+                            except Exception:
+                                logger.debug("Failed to update customer profile after booking", exc_info=True)
                         return {
                             "booking_id": guid,
                             "status": "confirmed",
