@@ -1735,8 +1735,34 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     pass
 
             filtered = all_stations
-            if city:
-                city_q = _normalize_city(city)
+
+            # Fallback: if city contains spaces and looks like "city + address",
+            # auto-split into city (first word) + query (rest).
+            # LLM sometimes passes "Днепр Запорожское шоссе" as city instead
+            # of city="Днепр" + query="Запорожское шоссе".
+            effective_city = city
+            effective_query = query
+            if city and " " in city.strip() and not query:
+                parts = city.strip().split(None, 1)
+                test_city = _normalize_city(parts[0])
+                test_match = [
+                    s
+                    for s in all_stations
+                    if test_city in _normalize_city(s.get("city", ""))
+                    or _normalize_city(s.get("city", "")) in test_city
+                ]
+                if test_match:
+                    effective_city = parts[0]
+                    effective_query = parts[1]
+                    logger.info(
+                        "get_fitting_stations: auto-split city=%r → city=%r, query=%r",
+                        city,
+                        effective_city,
+                        effective_query,
+                    )
+
+            if effective_city:
+                city_q = _normalize_city(effective_city)
                 filtered = [
                     s
                     for s in filtered
@@ -1745,8 +1771,8 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 ]
 
             # Query search: match address + hint fields (district, landmarks, description)
-            if query:
-                q = query.lower()
+            if effective_query:
+                q = effective_query.lower()
                 query_matched = []
                 for s in filtered:
                     sid = s.get("station_id", s.get("id", ""))
@@ -1763,6 +1789,32 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     if q in searchable:
                         query_matched.append(s)
                 filtered = query_matched
+
+            # Last-resort fallback: if city filter gave 0 results and no query,
+            # try searching the full city string in address/hint fields
+            if not filtered and effective_city and not effective_query:
+                full_q = city.lower()  # original city value
+                for s in all_stations:
+                    sid = s.get("station_id", s.get("id", ""))
+                    address = s.get("address", "").lower()
+                    h = hints.get(sid, {})
+                    searchable = " ".join(
+                        [
+                            s.get("city", ""),
+                            address,
+                            h.get("district", ""),
+                            h.get("landmarks", ""),
+                            h.get("description", ""),
+                        ]
+                    ).lower()
+                    if full_q in searchable:
+                        filtered.append(s)
+                if filtered:
+                    logger.info(
+                        "get_fitting_stations: city=%r fallback to full-text search, found %d",
+                        city,
+                        len(filtered),
+                    )
 
             stations_out = []
             for s in filtered[:20]:
