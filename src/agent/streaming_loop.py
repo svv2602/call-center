@@ -458,8 +458,10 @@ class StreamingAgentLoop:
                     content = self._pii_vault.mask(content)
                 return {"type": "tool_result", "tool_use_id": tc.id, "content": content}
 
-            # Speak wait-phrase if LLM emitted tool calls without any text
-            need_wait_phrase = not result.spoken_text and not interrupted and not disconnected
+            # Speak wait-phrase during tool execution.
+            # Always play when tool calls are present — even if LLM already spoke
+            # text, because tool execution + next LLM round can take 10+ seconds.
+            need_wait_phrase = not interrupted and not disconnected
             if need_wait_phrase and not self._conn.is_closed:
                 tool_names = [tc.name for tc in unique_tool_calls]
                 wait_phrase = _pick_tool_wait_phrase(tool_names)
