@@ -531,11 +531,10 @@ class TestCatalogSyncStatus:
     async def test_returns_timestamp(self, app: Any) -> None:
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=b"2026-02-25T05:30:00+00:00")
-        mock_redis.close = AsyncMock()
 
         with (
             patch("src.api.auth.require_admin", _fake_require_admin),
-            patch("redis.asyncio.from_url", return_value=mock_redis),
+            patch("src.core.redis_client.get_redis", return_value=mock_redis),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 resp = await ac.get("/admin/llm-costs/catalog/sync-status")
@@ -547,11 +546,10 @@ class TestCatalogSyncStatus:
     async def test_returns_null_when_never_synced(self, app: Any) -> None:
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=None)
-        mock_redis.close = AsyncMock()
 
         with (
             patch("src.api.auth.require_admin", _fake_require_admin),
-            patch("redis.asyncio.from_url", return_value=mock_redis),
+            patch("src.core.redis_client.get_redis", return_value=mock_redis),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 resp = await ac.get("/admin/llm-costs/catalog/sync-status")

@@ -158,7 +158,7 @@ class StreamingAgentLoop:
             if len(chain) > 1:
                 return chain[1]
         except Exception:
-            pass
+            logger.debug("Failed to resolve fallback provider chain", exc_info=True)
         return None
 
     async def _request_summary_fallback(

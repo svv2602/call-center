@@ -50,8 +50,15 @@ class PatternSearch:
         query: str,
         top_k: int = 3,
         min_similarity: float = 0.72,
+        tenant_id: str | None = None,
     ) -> list[dict[str, Any]]:
-        """Find similar patterns. Returns both positive and negative."""
+        """Find similar patterns. Returns both positive and negative.
+
+        If tenant_id is provided and the table has a tenant_id column,
+        results are filtered to shared (NULL) + tenant-specific patterns.
+        Currently conversation_patterns has no tenant_id column, so the
+        parameter is accepted but not yet used for filtering.
+        """
         embedding = await self._generator.generate_single(query)
         embedding_str = "[" + ",".join(str(v) for v in embedding) + "]"
 

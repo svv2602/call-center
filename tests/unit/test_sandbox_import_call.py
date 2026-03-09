@@ -130,17 +130,20 @@ class TestImportCallRequestModel:
 class TestImportCallEndpoint:
     @pytest.fixture
     def _patch_engine(self):
-        """Context manager to patch sandbox module engine."""
-        import src.api.sandbox as sandbox_module
+        """Callable fixture to patch sandbox _get_engine."""
+        from unittest.mock import patch
 
-        original = sandbox_module._engine
+        _patcher = None
 
         def _set(engine):
-            sandbox_module._engine = engine
-            return original
+            nonlocal _patcher
+            _patcher = patch("src.api.sandbox._get_engine", return_value=engine)
+            _patcher.start()
 
         yield _set
-        sandbox_module._engine = original
+
+        if _patcher is not None:
+            _patcher.stop()
 
     @pytest.mark.asyncio
     async def test_call_not_found_404(self, _patch_engine) -> None:

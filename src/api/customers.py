@@ -37,13 +37,6 @@ async def list_customers(
     _: dict[str, Any] = _perm_r,
 ) -> dict[str, Any]:
     """Paginated list of customers with search, tenant filter, and sorting."""
-    if sort_by not in _SORT_WHITELIST:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid sort_by: {sort_by}. "
-            f"Allowed: {', '.join(sorted(_SORT_WHITELIST))}",
-        )
-
     engine = await _get_engine()
 
     conditions = ["1=1"]
@@ -58,7 +51,12 @@ async def list_customers(
         params["tenant_id"] = tenant_id.strip()
 
     where_clause = " AND ".join(conditions)
-    order_clause = f"c.{sort_by} {sort_dir} NULLS LAST"
+    # Co-locate whitelist check with interpolation to prevent divergence on refactor
+    if sort_by not in _SORT_WHITELIST:
+        raise HTTPException(status_code=400, detail=f"Invalid sort_by: {sort_by}")
+    safe_sort = sort_by
+    safe_dir = "DESC" if sort_dir.lower() == "desc" else "ASC"
+    order_clause = f"c.{safe_sort} {safe_dir} NULLS LAST"
 
     async with engine.begin() as conn:
         result = await conn.execute(

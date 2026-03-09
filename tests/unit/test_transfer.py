@@ -204,6 +204,7 @@ class TestPipelineTransferBehavior:
             "dialog_history": [],
             "timeout_count": 0,
             "start_time": 0,
+            "started_at": 1709500000.0,
         }
         session = CallSession.from_dict(data)
         assert session.transferred is True

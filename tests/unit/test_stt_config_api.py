@@ -64,7 +64,7 @@ class TestGetPhraseHints:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.get("/admin/stt/phrase-hints")
@@ -92,7 +92,7 @@ class TestGetPhraseHints:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.get("/admin/stt/phrase-hints")
@@ -117,7 +117,7 @@ class TestPatchCustomPhrases:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
             patch("src.stt.phrase_hints.invalidate_cache"),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -135,7 +135,7 @@ class TestPatchCustomPhrases:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.patch(
@@ -150,7 +150,7 @@ class TestPatchCustomPhrases:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.patch(
@@ -168,7 +168,7 @@ class TestPatchCustomPhrases:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
             patch("src.stt.phrase_hints.invalidate_cache"),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -201,7 +201,7 @@ class TestPostRefresh:
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
             patch("src.api.stt_config._get_engine", AsyncMock(return_value=mock_engine)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
             patch("src.stt.phrase_hints.invalidate_cache"),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -223,7 +223,7 @@ class TestPostRefresh:
                 "src.api.stt_config._get_engine",
                 AsyncMock(side_effect=RuntimeError("DB down")),
             ),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.post("/admin/stt/phrase-hints/refresh")
@@ -243,7 +243,7 @@ class TestPostReset:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.post("/admin/stt/phrase-hints/reset")
@@ -275,7 +275,7 @@ class TestGetPhraseHintsExtended:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.get("/admin/stt/phrase-hints")
@@ -298,7 +298,7 @@ class TestPatchBasePhrases:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
             patch("src.stt.phrase_hints.invalidate_cache"),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -317,7 +317,7 @@ class TestPatchBasePhrases:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.patch(
@@ -344,7 +344,7 @@ class TestPostBaseReset:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
             patch("src.stt.phrase_hints.invalidate_cache"),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -366,7 +366,7 @@ class TestGetWordOverrides:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.get("/admin/stt/word-overrides")
@@ -387,7 +387,7 @@ class TestGetWordOverrides:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.get("/admin/stt/word-overrides")
@@ -406,7 +406,7 @@ class TestPatchWordOverrides:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
             patch("src.stt.phrase_hints.invalidate_cache"),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -425,7 +425,7 @@ class TestPatchWordOverrides:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.patch(
@@ -441,7 +441,7 @@ class TestPatchWordOverrides:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.patch(
@@ -456,7 +456,7 @@ class TestPatchWordOverrides:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
             patch("src.stt.phrase_hints.invalidate_cache"),
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
@@ -481,7 +481,7 @@ class TestResetWordOverrides:
         with (
             patch("src.api.auth.require_admin", _fake_require_perm),
             patch("src.api.stt_config._get_redis", AsyncMock(return_value=mock_redis)),
-            patch("src.api.stt_config.get_settings", _settings_patch()),
+
         ):
             async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
                 response = await ac.post("/admin/stt/word-overrides/reset")

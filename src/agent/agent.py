@@ -300,6 +300,14 @@ class LLMAgent:
                     logger.exception("Claude API error: %s", exc)
                     self.last_error = f"Claude API: {exc.status_code} {exc.message}"
                     return ERROR_TEXT, conversation_history
+                except (anthropic.APIConnectionError, anthropic.APITimeoutError) as exc:
+                    logger.exception("Claude API connection/timeout error: %s", exc)
+                    self.last_error = f"Claude API: {type(exc).__name__}"
+                    return ERROR_TEXT, conversation_history
+                except Exception as exc:
+                    logger.exception("Claude API unexpected error: %s", exc)
+                    self.last_error = f"Claude API: {exc}"
+                    return ERROR_TEXT, conversation_history
 
                 latency_ms = int((time.monotonic() - start) * 1000)
                 self.last_input_tokens += response.usage.input_tokens

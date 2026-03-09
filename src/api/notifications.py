@@ -75,8 +75,8 @@ async def update_telegram_config(
     await redis.set(REDIS_KEY, json.dumps(config))
     logger.info("Telegram config updated (chat_id=%s)", config.get("chat_id", ""))
 
-    # Best-effort: regenerate alertmanager config and reload
-    _try_update_alertmanager(config)
+    # Best-effort: regenerate alertmanager config and reload (in thread pool)
+    await _try_update_alertmanager(config)
 
     return {"message": "Telegram config saved"}
 
@@ -121,8 +121,21 @@ async def test_telegram(_: dict[str, Any] = _perm_w) -> dict[str, Any]:
         return {"success": False, "latency_ms": latency_ms, "error": str(exc)[:200]}
 
 
-def _try_update_alertmanager(config: dict[str, str]) -> None:
-    """Best-effort: update alertmanager config file and reload container."""
+async def _try_update_alertmanager(config: dict[str, str]) -> None:
+    """Best-effort: update alertmanager config file and reload container.
+
+    Runs blocking file I/O and subprocess in a thread pool to avoid
+    blocking the asyncio event loop.
+    """
+    import asyncio
+    import functools
+
+    loop = asyncio.get_running_loop()
+    await loop.run_in_executor(None, functools.partial(_sync_update_alertmanager, config))
+
+
+def _sync_update_alertmanager(config: dict[str, str]) -> None:
+    """Synchronous alertmanager config update (runs in thread pool)."""
     import pathlib
     import subprocess
 
@@ -138,8 +151,6 @@ def _try_update_alertmanager(config: dict[str, str]) -> None:
 
     try:
         content = config_path.read_text()
-        # Replace bot_token and chat_id values in YAML
-        # Alertmanager config has: bot_token: 'VALUE' and chat_id: VALUE
         import re
 
         content = re.sub(
@@ -155,7 +166,6 @@ def _try_update_alertmanager(config: dict[str, str]) -> None:
         config_path.write_text(content)
         logger.info("alertmanager/config.yml updated with new Telegram credentials")
 
-        # Try to reload alertmanager container
         subprocess.run(
             ["docker", "kill", "-s", "SIGHUP", "alertmanager"],
             capture_output=True,

@@ -1023,27 +1023,33 @@ async def _scrape_discovery_page_inline(
         )
         existing_urls = {row.url for row in result}
 
-    # Create new children (inherit parent's tenant_id)
+    # Create new children (inherit parent's tenant_id) — batch insert
     parent_tenant_id = str(page["tenant_id"]) if page.get("tenant_id") else None
     new_urls = set(discovered_links) - existing_urls
-    for child_url in new_urls:
+    if new_urls:
+        values_parts = []
+        batch_params: dict[str, Any] = {
+            "interval": interval,
+            "parent_id": source_id,
+            "tenant_id": parent_tenant_id,
+        }
+        for i, child_url in enumerate(new_urls):
+            values_parts.append(
+                f"(:url{i}, 'prokoleso.ua', 'watched_page', 'new',"
+                f" :interval, :url{i}, CAST(:parent_id AS uuid), now(),"
+                f" CAST(:tenant_id AS uuid))"
+            )
+            batch_params[f"url{i}"] = child_url
         async with engine.begin() as conn:
             await conn.execute(
-                text("""
+                text(f"""
                     INSERT INTO knowledge_sources
                         (url, source_site, source_type, status, rescrape_interval_hours,
                          original_title, parent_id, next_scrape_at, tenant_id)
-                    VALUES (:url, 'prokoleso.ua', 'watched_page', 'new',
-                            :interval, :url, CAST(:parent_id AS uuid), now(),
-                            CAST(:tenant_id AS uuid))
+                    VALUES {', '.join(values_parts)}
                     ON CONFLICT (url) DO NOTHING
                 """),
-                {
-                    "url": child_url,
-                    "interval": interval,
-                    "parent_id": source_id,
-                    "tenant_id": parent_tenant_id,
-                },
+                batch_params,
             )
 
     # Remove stale

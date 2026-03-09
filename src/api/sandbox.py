@@ -956,33 +956,36 @@ async def send_message(
             raise RuntimeError(msg)
         agent_turn = dict(agent_row._mapping)
 
-        # Tool calls
+        # Tool calls — batch insert
         tool_calls_saved = []
-        for tc in result.tool_calls:
+        if result.tool_calls:
+            turn_id = str(agent_turn["id"])
+            tc_values = []
+            tc_params: dict[str, Any] = {}
+            for i, tc in enumerate(result.tool_calls):
+                tc_values.append(
+                    f"(:tid{i}, :tn{i}, :ta{i}, :tr{i}, :dm{i}, :im{i})"
+                )
+                tc_params[f"tid{i}"] = turn_id
+                tc_params[f"tn{i}"] = tc.tool_name
+                tc_params[f"ta{i}"] = json.dumps(tc.tool_args)
+                tc_params[f"tr{i}"] = (
+                    json.dumps(tc.tool_result)
+                    if not isinstance(tc.tool_result, str)
+                    else json.dumps({"result": tc.tool_result})
+                )
+                tc_params[f"dm{i}"] = tc.duration_ms
+                tc_params[f"im{i}"] = tc.is_mock
             tc_result = await conn.execute(
-                text("""
+                text(f"""
                     INSERT INTO sandbox_tool_calls
                         (turn_id, tool_name, tool_args, tool_result, duration_ms, is_mock)
-                    VALUES
-                        (:turn_id, :tool_name, :tool_args, :tool_result, :duration_ms, :is_mock)
+                    VALUES {', '.join(tc_values)}
                     RETURNING id, tool_name, tool_args, tool_result, duration_ms, is_mock
                 """),
-                {
-                    "turn_id": str(agent_turn["id"]),
-                    "tool_name": tc.tool_name,
-                    "tool_args": json.dumps(tc.tool_args),
-                    "tool_result": json.dumps(tc.tool_result)
-                    if not isinstance(tc.tool_result, str)
-                    else json.dumps({"result": tc.tool_result}),
-                    "duration_ms": tc.duration_ms,
-                    "is_mock": tc.is_mock,
-                },
+                tc_params,
             )
-            tc_row = tc_result.first()
-            if tc_row is None:
-                msg = "Expected row from INSERT RETURNING"
-                raise RuntimeError(msg)
-            tool_calls_saved.append(dict(tc_row._mapping))
+            tool_calls_saved = [dict(row._mapping) for row in tc_result]
 
         # Update conversation timestamp
         await conn.execute(

@@ -16,7 +16,6 @@ from sqlalchemy import text
 
 from src.api.auth import require_permission
 from src.api.database import get_engine as _get_engine
-from src.config import get_settings
 from src.monitoring.pricing_cache import invalidate as _invalidate_pricing
 from src.monitoring.pricing_cache import refresh_from_db as _refresh_pricing
 
@@ -338,13 +337,11 @@ async def catalog_new_count(_: Any = _perm_r) -> dict[str, Any]:
 @router.get("/catalog/sync-status")
 async def catalog_sync_status(_: Any = _perm_r) -> dict[str, Any]:
     """Get last catalog sync timestamp from Redis."""
-    import redis.asyncio as aioredis
-
-    settings = get_settings()
     try:
-        r = aioredis.from_url(settings.redis.url)
+        from src.core.redis_client import get_redis
+
+        r = await get_redis()
         val = await r.get("llm_pricing:last_sync_at")
-        await r.close()
         return {"last_sync_at": val.decode() if val else None}
     except Exception:
         logger.warning("Failed to read catalog sync status from Redis", exc_info=True)

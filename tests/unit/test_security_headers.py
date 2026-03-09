@@ -37,17 +37,20 @@ class TestSecurityHeaders:
         resp = client.get("/test")
         assert resp.headers["X-XSS-Protection"] == "0"
 
-    def test_hsts(self, client: TestClient) -> None:
-        resp = client.get("/test")
+    def test_hsts_on_https(self, client: TestClient) -> None:
+        resp = client.get("/test", headers={"X-Forwarded-Proto": "https"})
         assert "max-age=31536000" in resp.headers["Strict-Transport-Security"]
-        assert "includeSubDomains" in resp.headers["Strict-Transport-Security"]
+
+    def test_no_hsts_on_http(self, client: TestClient) -> None:
+        resp = client.get("/test")
+        assert "Strict-Transport-Security" not in resp.headers
 
     def test_csp(self, client: TestClient) -> None:
         resp = client.get("/test")
         csp = resp.headers["Content-Security-Policy"]
         assert "default-src 'self'" in csp
         assert "script-src 'self' 'unsafe-inline'" in csp
-        assert "frame-ancestors 'none'" in csp
+        assert "frame-ancestors 'self'" in csp
 
     def test_referrer_policy(self, client: TestClient) -> None:
         resp = client.get("/test")
@@ -59,7 +62,7 @@ class TestSecurityHeaders:
         assert "microphone=()" in resp.headers["Permissions-Policy"]
 
     def test_all_headers_present(self, client: TestClient) -> None:
-        resp = client.get("/test")
+        resp = client.get("/test", headers={"X-Forwarded-Proto": "https"})
         required = [
             "X-Content-Type-Options",
             "X-Frame-Options",

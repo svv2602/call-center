@@ -84,7 +84,13 @@ class TestAlertmanagerConfig:
     """Validate Alertmanager configuration."""
 
     def setup_method(self) -> None:
-        with open("alertmanager/config.yml") as f:
+        # Use the template file (runtime config) — config.yml is a static fallback
+        import os
+
+        tmpl_path = "alertmanager/config.yml.tmpl"
+        fallback_path = "alertmanager/config.yml"
+        path = tmpl_path if os.path.exists(tmpl_path) else fallback_path
+        with open(path) as f:
             self.config = yaml.safe_load(f)
 
     def test_config_loads(self) -> None:

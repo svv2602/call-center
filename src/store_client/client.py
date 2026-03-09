@@ -115,7 +115,10 @@ class StoreClient:
         """
         # MVP: use PostgreSQL catalog if available
         if self._db_engine is not None:
-            return await self._search_tires_db(network=network, **params)
+            try:
+                return await self._search_tires_db(network=network, **params)
+            except Exception:
+                logger.warning("DB tire search failed, falling back to HTTP API", exc_info=True)
 
         # Fallback: HTTP Store API
         if any(k in params for k in ("vehicle_make", "vehicle_model", "vehicle_year")):
@@ -146,7 +149,10 @@ class StoreClient:
         """
         # MVP: use Redis/PostgreSQL if available
         if self._db_engine is not None:
-            return await self._check_availability_1c(product_id, query, network=network)
+            try:
+                return await self._check_availability_1c(product_id, query, network=network)
+            except Exception:
+                logger.warning("DB availability check failed, falling back to HTTP API", exc_info=True)
 
         # Fallback: HTTP Store API
         if not product_id and query:
@@ -909,17 +915,20 @@ class StoreClient:
         if not network:
             network = "ProKoleso"
 
-        key = f"onec:stock:{network}"
-        raw = await self._redis.hget(key, sku)
-        if raw is not None:
-            data = json.loads(raw)
-            return {
-                "available": data["stock"] > 0,
-                "quantity": data["stock"],
-                "price": data["price"],
-                "country": data.get("country", ""),
-                "year": data.get("year_issue", ""),
-            }
+        try:
+            key = f"onec:stock:{network}"
+            raw = await self._redis.hget(key, sku)
+            if raw is not None:
+                data = json.loads(raw)
+                return {
+                    "available": data["stock"] > 0,
+                    "quantity": data["stock"],
+                    "price": data["price"],
+                    "country": data.get("country", ""),
+                    "year": data.get("year_issue", ""),
+                }
+        except Exception:
+            logger.warning("Redis stock lookup failed for sku=%s", sku, exc_info=True)
 
         return None
 

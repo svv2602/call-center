@@ -135,17 +135,12 @@ class TestConversationEndpoints:
         mock_engine = MagicMock()
         mock_engine.begin = mock_begin
 
-        import src.api.sandbox as sandbox_module
+        from unittest.mock import patch
 
-        original_engine = sandbox_module._engine
-        sandbox_module._engine = mock_engine
-
-        try:
+        with patch("src.api.sandbox._get_engine", return_value=mock_engine):
             with pytest.raises(HTTPException) as exc_info:
                 await delete_conversation(uuid4(), {})
             assert exc_info.value.status_code == 404
-        finally:
-            sandbox_module._engine = original_engine
 
     @pytest.mark.asyncio
     async def test_delete_blocked_by_regression_run(self) -> None:
@@ -170,18 +165,13 @@ class TestConversationEndpoints:
         mock_engine = MagicMock()
         mock_engine.begin = mock_begin
 
-        import src.api.sandbox as sandbox_module
+        from unittest.mock import patch
 
-        original_engine = sandbox_module._engine
-        sandbox_module._engine = mock_engine
-
-        try:
+        with patch("src.api.sandbox._get_engine", return_value=mock_engine):
             with pytest.raises(HTTPException) as exc_info:
                 await delete_conversation(uuid4(), {})
             assert exc_info.value.status_code == 409
             assert "regression" in exc_info.value.detail.lower()
-        finally:
-            sandbox_module._engine = original_engine
 
     @pytest.mark.asyncio
     async def test_delete_success(self) -> None:
@@ -209,17 +199,12 @@ class TestConversationEndpoints:
         mock_engine = MagicMock()
         mock_engine.begin = mock_begin
 
-        import src.api.sandbox as sandbox_module
+        from unittest.mock import patch
 
-        original_engine = sandbox_module._engine
-        sandbox_module._engine = mock_engine
-
-        try:
+        with patch("src.api.sandbox._get_engine", return_value=mock_engine):
             result = await delete_conversation(uuid4(), {})
             assert "Test Chat" in result["message"]
             assert mock_conn.execute.call_count == 2
-        finally:
-            sandbox_module._engine = original_engine
 
 
 class TestBulkDelete:
@@ -264,19 +249,14 @@ class TestBulkDelete:
         mock_engine = MagicMock()
         mock_engine.begin = mock_begin
 
-        import src.api.sandbox as sandbox_module
+        from unittest.mock import patch
 
-        original_engine = sandbox_module._engine
-        sandbox_module._engine = mock_engine
-
-        try:
+        with patch("src.api.sandbox._get_engine", return_value=mock_engine):
             req = BulkDeleteRequest(conversation_ids=[cid1, cid2])
             result = await bulk_delete_conversations(req, {})
             assert result["deleted"] == 2
             assert result["skipped"] == 0
             assert result["skipped_ids"] == []
-        finally:
-            sandbox_module._engine = original_engine
 
     @pytest.mark.asyncio
     async def test_bulk_delete_skips_regression_refs(self) -> None:
@@ -306,16 +286,11 @@ class TestBulkDelete:
         mock_engine = MagicMock()
         mock_engine.begin = mock_begin
 
-        import src.api.sandbox as sandbox_module
+        from unittest.mock import patch
 
-        original_engine = sandbox_module._engine
-        sandbox_module._engine = mock_engine
-
-        try:
+        with patch("src.api.sandbox._get_engine", return_value=mock_engine):
             req = BulkDeleteRequest(conversation_ids=[cid1, cid2])
             result = await bulk_delete_conversations(req, {})
             assert result["deleted"] == 1
             assert result["skipped"] == 1
             assert str(cid1) in result["skipped_ids"]
-        finally:
-            sandbox_module._engine = original_engine
