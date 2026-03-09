@@ -349,12 +349,18 @@ class StreamingAgentLoop:
             if assistant_content:
                 conversation_history.append({"role": "assistant", "content": assistant_content})
 
-            # Check interruption/disconnection
+            # Check interruption/disconnection — remove dangling tool_calls from history
             if result.interrupted:
                 interrupted = True
+                if result.tool_calls and assistant_content:
+                    # Remove the assistant message with tool_calls — no tool results will follow.
+                    # Without this, OpenAI API returns 400: "tool_calls must be followed by tool messages"
+                    conversation_history.pop()
                 break
             if result.disconnected:
                 disconnected = True
+                if result.tool_calls and assistant_content:
+                    conversation_history.pop()
                 break
 
             # No tool calls → done (or retry if empty)
