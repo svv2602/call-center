@@ -261,17 +261,13 @@ class OneCClient:
         Returns:
             Dict with {success, data: [{StationID, Data, Time, Customer, GUID, ...}]}.
         """
+        # 1C requires ALL fields — omitting StationID causes server error
         body: dict[str, Any] = {
             "PhoneNumber": _normalize_phone_plus(phone),
+            "StationID": station_id,
+            "Date": _to_datetime(date) if date else "",
+            "Time": _to_1c_time(time) if time else "",
         }
-        # Only add filters if explicitly provided — 1C may return
-        # 'empty JSON' when filtering by station/date returns no match
-        if station_id:
-            body["StationID"] = station_id
-        if date:
-            body["Date"] = _to_datetime(date)
-        if time:
-            body["Time"] = _to_1c_time(time)
         logger.debug("1C ListOfEntries request: %s", body)
 
         result = await self._post(
@@ -288,6 +284,9 @@ class OneCClient:
             )
             fallback_body: dict[str, Any] = {
                 "PhoneNumber": _normalize_phone_plus(phone),
+                "StationID": "",
+                "Date": "",
+                "Time": "",
             }
             result = await self._post(
                 "/Trade/hs/site/TireService/ListOfEntries",
