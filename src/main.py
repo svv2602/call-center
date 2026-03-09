@@ -2015,18 +2015,43 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     str(result)[:500],
                 )
                 raw_bookings = result.get("data", [])
-                bookings = [
-                    {
+
+                # Enrich with station name/city/address from cache
+                stations_map: dict[str, dict[str, str]] = {}
+                if _redis:
+                    try:
+                        raw_stations = await _redis.get("onec:fitting_stations")
+                        if raw_stations:
+                            for s in json.loads(
+                                raw_stations if isinstance(raw_stations, str) else raw_stations.decode()
+                            ):
+                                sid = s.get("station_id", s.get("id", ""))
+                                if sid:
+                                    stations_map[sid] = {
+                                        "station_name": s.get("name", ""),
+                                        "city": s.get("city", ""),
+                                        "address": s.get("address", ""),
+                                    }
+                    except Exception:
+                        pass
+
+                bookings = []
+                for b in raw_bookings:
+                    sid = b.get("StationID", "")
+                    entry: dict[str, Any] = {
                         "booking_id": b.get("GUID", ""),
-                        "station_id": b.get("StationID", ""),
+                        "station_id": sid,
                         "date": b.get("Data", ""),
                         "time": b.get("Time", ""),
                         "period": b.get("Period", ""),
                         "person": b.get("Customer", ""),
                         "auto_number": b.get("AutoNumber", ""),
                     }
-                    for b in raw_bookings
-                ]
+                    # Add human-readable station info
+                    if sid in stations_map:
+                        entry.update(stations_map[sid])
+                    bookings.append(entry)
+
                 return {"total": len(bookings), "bookings": bookings}
             except Exception:
                 logger.warning(
