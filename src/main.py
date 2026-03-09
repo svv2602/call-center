@@ -1504,6 +1504,17 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 pass
 
         if _onec_client is not None:
+            logger.info(
+                "book_fitting params for call %s: name=%s, station=%s, date=%s, "
+                "time=%s, vehicle=%s, auto=%s",
+                session.channel_uuid,
+                kwargs.get("customer_name", ""),
+                kwargs.get("station_id", ""),
+                kwargs.get("date", ""),
+                kwargs.get("time", ""),
+                kwargs.get("vehicle_info", ""),
+                kwargs.get("auto_number", ""),
+            )
             try:
                 result = await _onec_client.book_fitting_rest(
                     person=kwargs.get("customer_name", ""),
