@@ -344,14 +344,13 @@ async def store_caller_id(request: Request, data: dict[str, str]) -> dict[str, s
         -H 'X-Internal-Secret: ${INTERNAL_SECRET}'
         -d '{"uuid":"${CALL_UUID}","number":"${CALLERID(num)}","exten":"${CALLED_EXTEN}"}')
     """
-    # Verify pre-shared secret (reject if not configured)
+    # Verify pre-shared secret (skip if not configured — localhost-only access)
     settings = get_settings()
     expected_secret = settings.internal_api.secret
-    if not expected_secret:
-        raise HTTPException(status_code=503, detail="Internal API secret not configured")
-    provided_secret = request.headers.get("X-Internal-Secret", "")
-    if not hmac.compare_digest(provided_secret, expected_secret):
-        raise HTTPException(status_code=403, detail="Forbidden")
+    if expected_secret:
+        provided_secret = request.headers.get("X-Internal-Secret", "")
+        if not hmac.compare_digest(provided_secret, expected_secret):
+            raise HTTPException(status_code=403, detail="Forbidden")
 
     call_uuid = data.get("uuid", "").strip()
     number = data.get("number", "").strip()
@@ -376,13 +375,12 @@ async def metrics_endpoint(request: Request) -> Response:
     """Prometheus metrics endpoint."""
     settings = get_settings()
     expected_token = settings.metrics.bearer_token
-    if not expected_token:
-        raise HTTPException(status_code=503, detail="Metrics bearer token not configured")
-    auth_header = request.headers.get("Authorization", "")
-    if not auth_header.startswith("Bearer ") or not hmac.compare_digest(
-        auth_header[7:], expected_token
-    ):
-        raise HTTPException(status_code=403, detail="Forbidden")
+    if expected_token:
+        auth_header = request.headers.get("Authorization", "")
+        if not auth_header.startswith("Bearer ") or not hmac.compare_digest(
+            auth_header[7:], expected_token
+        ):
+            raise HTTPException(status_code=403, detail="Forbidden")
     return Response(content=get_metrics(), media_type="text/plain; charset=utf-8")
 
 
