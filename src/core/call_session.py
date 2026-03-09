@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # Session constants
 SESSION_KEY_PREFIX = "call_session"
 SESSION_TTL = 1800  # 30 minutes
-SILENCE_TIMEOUT_SEC = 15
+SILENCE_TIMEOUT_SEC = 25
 MAX_TIMEOUTS_BEFORE_HANGUP = 3
 
 
