@@ -1492,6 +1492,11 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     service_type=kwargs.get("service_type", "tire_change"),
                 )
                 # REST returns {success: true, data: [{GUID: "..."}]}
+                logger.info(
+                    "1C book_fitting response for call %s: %s",
+                    session.channel_uuid,
+                    str(result)[:500],
+                )
                 if result.get("success"):
                     data_list = result.get("data", [])
                     guid = data_list[0].get("GUID", "") if data_list else ""
@@ -1951,6 +1956,16 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 station_id = kwargs.get("station_id", "")
                 result = await _onec_client.get_customer_bookings_rest(
                     phone=phone, station_id=station_id
+                )
+                logger.info(
+                    "1C get_customer_bookings response for call %s: phone=%s, station=%s, "
+                    "success=%s, data_count=%d, raw=%s",
+                    session.channel_uuid,
+                    phone,
+                    station_id,
+                    result.get("success"),
+                    len(result.get("data", [])),
+                    str(result)[:500],
                 )
                 raw_bookings = result.get("data", [])
                 bookings = [
