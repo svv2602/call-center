@@ -1441,18 +1441,30 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             and session.fitting_station_ids
             and station_id not in session.fitting_station_ids
         ):
-            known = ", ".join(sorted(session.fitting_station_ids))
-            logger.warning(
-                "book_fitting: LLM used station_id=%s but valid IDs are [%s] for call %s",
-                station_id,
-                known,
-                session.channel_uuid,
-            )
-            return {
-                "error": True,
-                "message": f"Невірний station_id '{station_id}'. "
-                f"Використай station_id з результату get_fitting_stations: {known}",
-            }
+            known_ids = sorted(session.fitting_station_ids)
+            # Auto-correct if only one valid station
+            if len(known_ids) == 1:
+                logger.warning(
+                    "book_fitting: auto-correcting station_id=%s → %s for call %s",
+                    station_id,
+                    known_ids[0],
+                    session.channel_uuid,
+                )
+                kwargs["station_id"] = known_ids[0]
+                station_id = known_ids[0]
+            else:
+                known = ", ".join(known_ids)
+                logger.warning(
+                    "book_fitting: LLM used station_id=%s but valid IDs are [%s] for call %s",
+                    station_id,
+                    known,
+                    session.channel_uuid,
+                )
+                return {
+                    "error": True,
+                    "message": f"Невірний station_id '{station_id}'. "
+                    f"Використай station_id з результату get_fitting_stations: {known}",
+                }
 
         # Server-side validation: booking date must be tomorrow .. +21 days
         booking_date_str = _resolve_date(kwargs.get("date", ""))
@@ -1735,6 +1747,14 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 if s_out.get("id"):
                     session.fitting_station_ids.add(s_out["id"])
 
+            logger.info(
+                "get_fitting_stations result for call %s: city=%s, found=%d, ids=%s",
+                session.channel_uuid,
+                city,
+                len(stations_out),
+                [s.get("id") for s in stations_out[:5]],
+            )
+
             return {
                 "total": len(filtered),
                 "stations": stations_out,
@@ -1809,6 +1829,19 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                         "period": s.get("Period", ""),
                         "available": count_posts - qty > 0,
                     })
+                avail = [s for s in slots if s.get("available")]
+                logger.info(
+                    "get_fitting_slots for call %s: station=%s, date=%s..%s, "
+                    "total=%d, available=%d, posts=%d, times=%s",
+                    session.channel_uuid,
+                    station_id,
+                    date_from,
+                    date_to,
+                    len(slots),
+                    len(avail),
+                    count_posts,
+                    [s["time"] for s in avail[:10]],
+                )
                 return {"station_id": station_id, "slots": slots}
             except Exception:
                 logger.warning(
