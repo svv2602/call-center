@@ -1834,6 +1834,14 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         today = today_date.isoformat()
         date_from = _resolve_date(kwargs.get("date_from", "")) or today
         date_to = _resolve_date(kwargs.get("date_to", "")) or date_from
+        logger.info(
+            "get_fitting_slots request for call %s: station=%s, date_from=%s, date_to=%s (raw: %s)",
+            session.channel_uuid,
+            station_id,
+            date_from,
+            date_to,
+            kwargs,
+        )
 
         # Validate booking date range: tomorrow .. +21 days
         try:
