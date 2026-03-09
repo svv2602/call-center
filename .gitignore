@@ -47,6 +47,9 @@ logs/
 # Admin UI (Vite)
 admin-ui/node_modules/
 
-# Agent skills (installed via `npx skills add`)
+# Claude Code / Agent skills
 .agents/
-.claude/skills/
+.claude/
+
+# GitHub (not using Actions/Dependabot)
+.github/
