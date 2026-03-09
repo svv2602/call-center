@@ -484,7 +484,7 @@ async def create_ws_ticket(request: Request) -> dict[str, str]:
     ticket_data = json.dumps({"sub": payload.get("sub"), "role": payload.get("role")})
     await r.setex(f"ws_ticket:{ticket}", _WS_TICKET_TTL, ticket_data)
 
-    return {"ticket": ticket, "expires_in": _WS_TICKET_TTL}
+    return {"ticket": ticket, "expires_in": str(_WS_TICKET_TTL)}
 
 
 async def validate_ws_ticket(ticket: str) -> dict[str, Any] | None:

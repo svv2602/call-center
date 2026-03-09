@@ -154,17 +154,18 @@ class PromptManager:
             )
             return [dict(row._mapping) for row in result]
 
-    async def get_active_templates(self) -> dict[str, str]:
+    async def get_active_templates(self, tenant_id: str | None = None) -> dict[str, str]:
         """Get active response templates from DB with random variant selection.
 
         For each template_key, randomly picks one active variant.
+
+        Args:
+            tenant_id: Optional tenant ID (reserved for future per-tenant templates).
 
         Returns:
             Dict mapping template_key → content.
             Falls back to hardcoded constants from prompts.py if DB unavailable.
         """
-        import random
-
         fallback = {
             "greeting": GREETING_TEXT,
             "farewell": FAREWELL_TEXT,
