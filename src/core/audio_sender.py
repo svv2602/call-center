@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio  # noqa: TC003
+import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
@@ -13,7 +13,7 @@ from src.monitoring.metrics import time_to_first_audio_ms, tts_delivery_ms
 from src.tts.streaming_tts import AudioReady
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Awaitable, Callable
 
     from src.core.audio_socket import AudioSocketConnection
     from src.core.echo_canceller import EchoCanceller
@@ -68,12 +68,16 @@ class StreamingAudioSender:
         barge_in_event: asyncio.Event | None = None,
         turn_start_time: float | None = None,
         echo_canceller: EchoCanceller | None = None,
+        filler_callback: Callable[[], Awaitable[None]] | None = None,
+        filler_delay_sec: float = 3.0,
     ) -> None:
         self._conn = conn
         self._barge_in = barge_in_event
         self._turn_start_time = turn_start_time
         self._echo_canceller = echo_canceller
         self._first_audio_sent = False
+        self._filler_callback = filler_callback
+        self._filler_delay_sec = filler_delay_sec
 
     async def send(self, stream: AsyncIterator[TTSEvent]) -> SendResult:
         """Consume entire TTSEvent stream, return result."""
@@ -85,6 +89,24 @@ class StreamingAudioSender:
         stop_reason = "end_turn"
         usage = Usage(0, 0)
         provider_key = ""
+
+        # Filler phrase timer — plays short phrase if LLM is slow to produce audio
+        filler_task: asyncio.Task[None] | None = None
+        if self._filler_callback is not None:
+            async def _filler_timer() -> None:
+                await asyncio.sleep(self._filler_delay_sec)
+                if (
+                    not self._first_audio_sent
+                    and self._filler_callback is not None
+                    and not self._conn.is_closed
+                    and not (self._barge_in and self._barge_in.is_set())
+                ):
+                    try:
+                        await self._filler_callback()
+                    except Exception:
+                        logger.debug("Filler phrase failed", exc_info=True)
+
+            filler_task = asyncio.create_task(_filler_timer())
 
         async for event in stream:
             if isinstance(event, AudioReady):
@@ -107,9 +129,13 @@ class StreamingAudioSender:
                 spoken_parts.append(event.text)
 
                 # Record time-to-first-audio once per turn
-                if not self._first_audio_sent and self._turn_start_time is not None:
-                    ttfa = (time.monotonic() - self._turn_start_time) * 1000
-                    time_to_first_audio_ms.observe(ttfa)
+                if not self._first_audio_sent:
+                    # Cancel filler — real audio arrived
+                    if filler_task is not None and not filler_task.done():
+                        filler_task.cancel()
+                    if self._turn_start_time is not None:
+                        ttfa = (time.monotonic() - self._turn_start_time) * 1000
+                        time_to_first_audio_ms.observe(ttfa)
                     self._first_audio_sent = True
 
             elif isinstance(event, ToolCallStart):
@@ -131,6 +157,10 @@ class StreamingAudioSender:
                 stop_reason = event.stop_reason
                 usage = event.usage
                 provider_key = event.provider_key
+
+        # Cancel filler task if still running
+        if filler_task is not None and not filler_task.done():
+            filler_task.cancel()
 
         # Finalize any pending tool calls that never got a ToolCallEnd event.
         # OpenAI-compatible providers (Gemini) don't emit ToolCallEnd — they
@@ -161,9 +191,16 @@ async def send_audio_stream(
     barge_in_event: asyncio.Event | None = None,
     turn_start_time: float | None = None,
     echo_canceller: EchoCanceller | None = None,
+    filler_callback: Callable[[], Awaitable[None]] | None = None,
+    filler_delay_sec: float = 3.0,
 ) -> SendResult:
     """Convenience wrapper — create sender and consume stream."""
     sender = StreamingAudioSender(
-        conn, barge_in_event, turn_start_time=turn_start_time, echo_canceller=echo_canceller
+        conn,
+        barge_in_event,
+        turn_start_time=turn_start_time,
+        echo_canceller=echo_canceller,
+        filler_callback=filler_callback,
+        filler_delay_sec=filler_delay_sec,
     )
     return await sender.send(stream)

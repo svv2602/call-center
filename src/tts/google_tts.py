@@ -26,6 +26,7 @@ from src.agent.prompts import (
     WAIT_SEARCH_POOL,
     WAIT_STATUS_POOL,
     WAIT_TEXT,
+    WAIT_THINKING_POOL,
 )
 from src.monitoring.metrics import tts_cache_hits_total, tts_cache_misses_total
 from src.tts.base import TTSConfig
@@ -93,6 +94,7 @@ CACHED_PHRASES = [
     *WAIT_STATUS_POOL,
     *WAIT_KNOWLEDGE_POOL,
     *WAIT_DEFAULT_POOL,
+    *WAIT_THINKING_POOL,
 ]
 
 

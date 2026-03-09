@@ -29,6 +29,7 @@ from src.agent.prompts import (
     WAIT_SEARCH_POOL,
     WAIT_STATUS_POOL,
     WAIT_STORAGE_POOL,
+    WAIT_THINKING_POOL,
     build_system_prompt_with_context,
 )
 from src.agent.tool_result_compressor import compress_tool_result
@@ -42,6 +43,9 @@ from src.tts.streaming_tts import synthesize_stream
 # from blocking the entire agent turn. On timeout, tool returns an error
 # message so the LLM can respond gracefully.
 _TOOL_TIMEOUT_SEC = 15
+
+# Delay (seconds) before playing a filler phrase when LLM is slow to respond
+_FILLER_DELAY_SEC = 3.0
 
 # Max retries when LLM returns empty (0 text, 0 tools). On the last retry,
 # automatically switch to a fallback provider.
@@ -142,6 +146,7 @@ class StreamingAgentLoop:
         self._is_modular = is_modular
         self._agent_name = agent_name
         self._echo_canceller = echo_canceller
+        self._thinking_counter = 0
 
     @property
     def _tts(self) -> TTSEngine:
@@ -299,12 +304,32 @@ class StreamingAgentLoop:
                 )
                 buffered = buffer_sentences(stream)
                 tts_stream = synthesize_stream(buffered, self._tts)
+
+                # Build filler callback — speaks a short phrase if LLM is slow
+                async def _speak_thinking_filler() -> None:
+                    phrase = WAIT_THINKING_POOL[self._thinking_counter % len(WAIT_THINKING_POOL)]
+                    self._thinking_counter += 1
+                    logger.info("Speaking thinking filler: %r", phrase)
+                    try:
+                        tts = self._tts
+                        audio = await tts.synthesize(phrase)
+                        if not (self._barge_in and self._barge_in.is_set()):
+                            if self._echo_canceller is not None:
+                                self._echo_canceller.record_far_end(audio)
+                            await self._conn.send_audio(audio, cancel_event=self._barge_in)
+                    except Exception:
+                        logger.debug("Thinking filler speak failed", exc_info=True)
+
+                filler_cb = _speak_thinking_filler if not self._conn.is_closed else None
+
                 result = await send_audio_stream(
                     tts_stream,
                     self._conn,
                     self._barge_in,
                     turn_start_time=turn_start,
                     echo_canceller=self._echo_canceller,
+                    filler_callback=filler_cb,
+                    filler_delay_sec=_FILLER_DELAY_SEC,
                 )
             except Exception:
                 logger.exception("LLM streaming error in round %d", tool_round)
