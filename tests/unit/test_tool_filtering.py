@@ -52,11 +52,12 @@ class TestFilterToolsByState:
         assert "book_fitting" in names
 
     def test_fitting_booked_excludes_booking_tools(self) -> None:
-        """fitting_booked → book_fitting and get_fitting_slots excluded."""
+        """fitting_booked → book_fitting, get_fitting_slots, reserve_fitting_slot excluded."""
         result = filter_tools_by_state(ALL_TOOLS, order_stage=None, fitting_booked=True)
         names = _tool_names(result)
         assert "book_fitting" not in names
         assert "get_fitting_slots" not in names
+        assert "reserve_fitting_slot" not in names
         # Other fitting tools remain
         assert "get_fitting_stations" in names
         assert "get_fitting_price" in names
@@ -94,5 +95,5 @@ class TestFilterToolsByState:
         assert len(result) == len(ALL_TOOLS)
 
     def test_all_tools_count_unchanged(self) -> None:
-        """ALL_TOOLS should have 18 tool definitions."""
-        assert len(ALL_TOOLS) == 18
+        """ALL_TOOLS should have 19 tool definitions."""
+        assert len(ALL_TOOLS) == 19

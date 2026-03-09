@@ -19,13 +19,14 @@ class TestFittingToolsList:
             "cancel_fitting",
             "get_fitting_price",
             "get_customer_bookings",
+            "reserve_fitting_slot",
             "find_storage",
             "search_knowledge_base",
         }
 
     def test_all_tools_is_combined(self) -> None:
         assert ALL_TOOLS == MVP_TOOLS + ORDER_TOOLS + FITTING_TOOLS + PROFILE_TOOLS
-        assert len(ALL_TOOLS) == 18
+        assert len(ALL_TOOLS) == 19
 
     def test_canonical_tool_names(self) -> None:
         """Tool names must match canonical list from 00-overview.md."""
@@ -49,6 +50,7 @@ class TestFittingToolsList:
             "cancel_fitting",
             "get_fitting_price",
             "get_customer_bookings",
+            "reserve_fitting_slot",
             "find_storage",
             "search_knowledge_base",
             # Profile

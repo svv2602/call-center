@@ -458,6 +458,37 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
         },
     },
     {
+        "name": "reserve_fitting_slot",
+        "description": (
+            "Тимчасово забронювати слот на шиномонтаж (без повних даних клієнта). "
+            "Використовуй, коли клієнт обрав час, але ще не назвав ім'я або номер авто — "
+            "щоб слот не зайняли, поки збираєш дані. "
+            "Після збору даних виклич book_fitting для повного запису."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "station_id": {
+                    "type": "string",
+                    "description": "ID точки з результату get_fitting_stations",
+                },
+                "date": {
+                    "type": "string",
+                    "description": "Дата (YYYY-MM-DD)",
+                },
+                "time": {
+                    "type": "string",
+                    "description": "Час (HH:MM)",
+                },
+                "comment": {
+                    "type": "string",
+                    "description": "Коментар (опціонально)",
+                },
+            },
+            "required": ["station_id", "date", "time"],
+        },
+    },
+    {
         "name": "find_storage",
         "description": (
             "Знайти договори зберігання шин клієнта за номером телефону або номером договору. "
@@ -588,7 +619,7 @@ def filter_tools_by_state(
         exclude.update(("create_order_draft", "update_order_delivery", "confirm_order"))
 
     if fitting_booked:
-        exclude.update(("book_fitting", "get_fitting_slots"))
+        exclude.update(("book_fitting", "get_fitting_slots", "reserve_fitting_slot"))
 
     if not exclude:
         return tools
