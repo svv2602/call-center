@@ -263,14 +263,38 @@ class OneCClient:
         """
         body: dict[str, Any] = {
             "PhoneNumber": _normalize_phone_plus(phone),
-            "StationID": station_id,
-            "Date": _to_datetime(date) if date else "",
-            "Time": _to_1c_time(time) if time else "",
         }
-        return await self._post(
+        # Only add filters if explicitly provided — 1C may return
+        # 'empty JSON' when filtering by station/date returns no match
+        if station_id:
+            body["StationID"] = station_id
+        if date:
+            body["Date"] = _to_datetime(date)
+        if time:
+            body["Time"] = _to_1c_time(time)
+        logger.debug("1C ListOfEntries request: %s", body)
+
+        result = await self._post(
             "/Trade/hs/site/TireService/ListOfEntries",
             json_data=body,
         )
+
+        # If filtered query returned empty, retry without station/date/time filter
+        if not result.get("success") and (station_id or date or time):
+            logger.info(
+                "1C ListOfEntries empty with filters (station=%s, date=%s), retrying phone-only",
+                station_id,
+                date,
+            )
+            fallback_body: dict[str, Any] = {
+                "PhoneNumber": _normalize_phone_plus(phone),
+            }
+            result = await self._post(
+                "/Trade/hs/site/TireService/ListOfEntries",
+                json_data=fallback_body,
+            )
+
+        return result
 
     async def reserve_fitting_slot(
         self,
