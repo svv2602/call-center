@@ -347,7 +347,9 @@ class CallPipeline:
             audio_task = asyncio.create_task(self._audio_reader_loop())
 
             # Play greeting while STT is already consuming audio
+            logger.info("Pipeline: starting greeting for %s", self._session.channel_uuid)
             await self._play_greeting()
+            logger.info("Pipeline: greeting done, entering LISTENING for %s", self._session.channel_uuid)
 
             # Main loop
             self._session.transition_to(CallState.LISTENING)
@@ -489,6 +491,7 @@ class CallPipeline:
 
     async def _transcript_processor_loop(self) -> None:
         """Process STT transcripts and drive the LLM → TTS flow."""
+        logger.info("Pipeline: transcript_processor_loop started for %s", self._session.channel_uuid)
         while not self._conn.is_closed:
             # Wait for final transcripts with silence timeout
             transcript = await self._wait_for_final_transcript()
@@ -516,6 +519,8 @@ class CallPipeline:
                     await self._log_turn("bot", silence_msg)
                     await self._speak(silence_msg)
                     continue
+
+            logger.info("Pipeline: got transcript '%s' for %s", transcript.text[:50], self._session.channel_uuid)
 
             # Buffer multiple transcripts arriving in quick succession
             transcript = await self._drain_transcript_buffer(transcript)
@@ -826,7 +831,9 @@ class CallPipeline:
         self._barge_in_event.clear()
 
         try:
+            logger.info("TTS synthesize start (%d chars) for %s", len(text), self._session.channel_uuid)
             audio = await self._tts.synthesize(text)
+            logger.info("TTS synthesize done (%d bytes) for %s", len(audio) if audio else 0, self._session.channel_uuid)
 
             # Check if barge-in was detected during TTS synthesis
             if self._barge_in_event.is_set():
