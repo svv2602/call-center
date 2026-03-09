@@ -13,7 +13,7 @@ from src.monitoring.metrics import time_to_first_audio_ms, tts_delivery_ms
 from src.tts.streaming_tts import AudioReady
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator, Awaitable, Callable
+    from collections.abc import AsyncIterator
 
     from src.core.audio_socket import AudioSocketConnection
     from src.core.echo_canceller import EchoCanceller
@@ -60,6 +60,11 @@ class StreamingAudioSender:
     - ToolCallStart/Delta/End → collects into CollectedToolCall list
     - StreamDone → captures stop_reason + usage
     - Checks barge_in_event and conn.is_closed between sends
+
+    Optional filler phrase: if ``filler_audio`` is provided and the LLM
+    hasn't produced any audio within ``filler_delay_sec``, the filler
+    audio is played to fill the silence gap.  A lock prevents interleaving
+    filler and LLM audio frames on the socket.
     """
 
     def __init__(
@@ -68,7 +73,7 @@ class StreamingAudioSender:
         barge_in_event: asyncio.Event | None = None,
         turn_start_time: float | None = None,
         echo_canceller: EchoCanceller | None = None,
-        filler_callback: Callable[[], Awaitable[None]] | None = None,
+        filler_audio: bytes | None = None,
         filler_delay_sec: float = 3.0,
     ) -> None:
         self._conn = conn
@@ -76,8 +81,18 @@ class StreamingAudioSender:
         self._turn_start_time = turn_start_time
         self._echo_canceller = echo_canceller
         self._first_audio_sent = False
-        self._filler_callback = filler_callback
+        self._filler_audio = filler_audio
         self._filler_delay_sec = filler_delay_sec
+        # Lock prevents concurrent send_audio calls (filler vs LLM audio)
+        self._send_lock = asyncio.Lock()
+
+    async def _send_audio_locked(self, audio: bytes) -> bool:
+        """Send audio through the connection, serialized via lock.
+
+        Returns True if interrupted by barge-in.
+        """
+        async with self._send_lock:
+            return await self._conn.send_audio(audio, cancel_event=self._barge_in)
 
     async def send(self, stream: AsyncIterator[TTSEvent]) -> SendResult:
         """Consume entire TTSEvent stream, return result."""
@@ -90,21 +105,25 @@ class StreamingAudioSender:
         usage = Usage(0, 0)
         provider_key = ""
 
-        # Filler phrase timer — plays short phrase if LLM is slow to produce audio
+        # Filler phrase timer — plays pre-synthesized audio if LLM is slow
         filler_task: asyncio.Task[None] | None = None
-        if self._filler_callback is not None:
+        if self._filler_audio is not None:
+            filler_audio = self._filler_audio
+
             async def _filler_timer() -> None:
                 await asyncio.sleep(self._filler_delay_sec)
                 if (
                     not self._first_audio_sent
-                    and self._filler_callback is not None
                     and not self._conn.is_closed
                     and not (self._barge_in and self._barge_in.is_set())
                 ):
+                    logger.info("Sending thinking filler audio (%d bytes)", len(filler_audio))
                     try:
-                        await self._filler_callback()
+                        if self._echo_canceller is not None:
+                            self._echo_canceller.record_far_end(filler_audio)
+                        await self._send_audio_locked(filler_audio)
                     except Exception:
-                        logger.debug("Filler phrase failed", exc_info=True)
+                        logger.debug("Filler phrase send failed", exc_info=True)
 
             filler_task = asyncio.create_task(_filler_timer())
 
@@ -119,9 +138,7 @@ class StreamingAudioSender:
                 if self._echo_canceller is not None:
                     self._echo_canceller.record_far_end(event.audio)
                 t0 = time.monotonic()
-                was_interrupted = await self._conn.send_audio(
-                    event.audio, cancel_event=self._barge_in
-                )
+                was_interrupted = await self._send_audio_locked(event.audio)
                 tts_delivery_ms.observe((time.monotonic() - t0) * 1000)
                 if was_interrupted:
                     interrupted = True
@@ -191,7 +208,7 @@ async def send_audio_stream(
     barge_in_event: asyncio.Event | None = None,
     turn_start_time: float | None = None,
     echo_canceller: EchoCanceller | None = None,
-    filler_callback: Callable[[], Awaitable[None]] | None = None,
+    filler_audio: bytes | None = None,
     filler_delay_sec: float = 3.0,
 ) -> SendResult:
     """Convenience wrapper — create sender and consume stream."""
@@ -200,7 +217,7 @@ async def send_audio_stream(
         barge_in_event,
         turn_start_time=turn_start_time,
         echo_canceller=echo_canceller,
-        filler_callback=filler_callback,
+        filler_audio=filler_audio,
         filler_delay_sec=filler_delay_sec,
     )
     return await sender.send(stream)

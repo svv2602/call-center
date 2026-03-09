@@ -305,22 +305,16 @@ class StreamingAgentLoop:
                 buffered = buffer_sentences(stream)
                 tts_stream = synthesize_stream(buffered, self._tts)
 
-                # Build filler callback — speaks a short phrase if LLM is slow
-                async def _speak_thinking_filler() -> None:
+                # Pre-synthesize filler audio (from cache — instant)
+                filler_audio: bytes | None = None
+                if not self._conn.is_closed:
                     phrase = WAIT_THINKING_POOL[self._thinking_counter % len(WAIT_THINKING_POOL)]
                     self._thinking_counter += 1
-                    logger.info("Speaking thinking filler: %r", phrase)
                     try:
-                        tts = self._tts
-                        audio = await tts.synthesize(phrase)
-                        if not (self._barge_in and self._barge_in.is_set()):
-                            if self._echo_canceller is not None:
-                                self._echo_canceller.record_far_end(audio)
-                            await self._conn.send_audio(audio, cancel_event=self._barge_in)
+                        filler_audio = await self._tts.synthesize(phrase)
+                        logger.debug("Pre-synthesized thinking filler: %r (%d bytes)", phrase, len(filler_audio))
                     except Exception:
-                        logger.debug("Thinking filler speak failed", exc_info=True)
-
-                filler_cb = _speak_thinking_filler if not self._conn.is_closed else None
+                        logger.debug("Failed to pre-synthesize filler", exc_info=True)
 
                 result = await send_audio_stream(
                     tts_stream,
@@ -328,7 +322,7 @@ class StreamingAgentLoop:
                     self._barge_in,
                     turn_start_time=turn_start,
                     echo_canceller=self._echo_canceller,
-                    filler_callback=filler_cb,
+                    filler_audio=filler_audio,
                     filler_delay_sec=_FILLER_DELAY_SEC,
                 )
             except Exception:
