@@ -1309,11 +1309,25 @@ _CITY_ALIASES: dict[str, str] = {
     "черкаси": "черкаси",
 }
 
+# Russian/Ukrainian case endings to strip for fuzzy city matching
+_CITY_SUFFIXES = ("е", "у", "і", "а", "ом", "ой", "ів", "ам", "ах", "ем")
+
 
 def _normalize_city(name: str) -> str:
-    """Normalize city name: lowercase + resolve aliases."""
+    """Normalize city name: lowercase + resolve aliases + strip case endings.
+
+    Handles Russian case forms like "Харькове", "Киеве", "Днепре".
+    """
     low = name.strip().lower()
-    return _CITY_ALIASES.get(low, low)
+    if low in _CITY_ALIASES:
+        return _CITY_ALIASES[low]
+    # Try stripping common case endings: "харькове" → "харьков"
+    for suffix in sorted(_CITY_SUFFIXES, key=len, reverse=True):
+        if low.endswith(suffix) and len(low) > len(suffix) + 2:
+            stem = low[: -len(suffix)]
+            if stem in _CITY_ALIASES:
+                return _CITY_ALIASES[stem]
+    return low
 
 
 def _build_tool_router(session: CallSession, store_client: StoreClient | None = None) -> ToolRouter:
