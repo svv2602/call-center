@@ -61,14 +61,14 @@ def _compress_order_draft(result: dict[str, Any]) -> str:
 
 
 def _compress_fitting_stations(result: dict[str, Any]) -> str:
-    """Keep id, name, address, working_hours, district, landmarks, description per station."""
+    """Keep id, name, city, address, phone, district, landmarks per station."""
     if "stations" not in result:
         return _compact(result)
     stations = [
         {
             k: v
             for k, v in s.items()
-            if k in ("id", "name", "address", "working_hours", "district", "landmarks", "description")
+            if k in ("id", "name", "city", "address", "phone", "district", "landmarks")
         }
         for s in result["stations"]
     ]
@@ -100,8 +100,8 @@ def _compress_knowledge(result: dict[str, Any]) -> str:
         if "title" in a:
             entry["title"] = a["title"]
         content = a.get("content", "")
-        if len(content) > 500:
-            content = content[:500] + "..."
+        if len(content) > 300:
+            content = content[:300] + "..."
         entry["content"] = content
         articles.append(entry)
     out = {k: v for k, v in result.items() if k != "articles"}

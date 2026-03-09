@@ -87,7 +87,7 @@ class TestCompressToolResult:
         assert "SKU-123" not in result  # product_id stripped from items
         assert "created_at" not in result
 
-    def test_fitting_stations_strips_phone_and_services(self) -> None:
+    def test_fitting_stations_keeps_phone_strips_services(self) -> None:
         data = {
             "stations": [
                 {
@@ -103,9 +103,10 @@ class TestCompressToolResult:
         }
         result = compress_tool_result("get_fitting_stations", data)
         assert "СТО Центр" in result
-        assert "+380441234567" not in result
+        assert "+380441234567" in result  # phone preserved for LLM to tell customer
         assert "Шевченківський" in result  # district is preserved for LLM
         assert "services" not in result
+        assert "working_hours" not in result  # dropped to save tokens
 
     def test_pickup_points_strips_type_keeps_hints(self) -> None:
         data = {
@@ -148,14 +149,14 @@ class TestCompressToolResult:
         assert "..." in result
         assert len(result) < len(str(data))
 
-    def test_knowledge_truncates_at_500(self) -> None:
-        """Knowledge content now truncated at 500 chars (down from 800)."""
-        content_600 = "B" * 600
-        data = {"articles": [{"title": "Test", "content": content_600}]}
+    def test_knowledge_truncates_at_300(self) -> None:
+        """Knowledge content truncated at 300 chars to save tokens."""
+        content_400 = "B" * 400
+        data = {"articles": [{"title": "Test", "content": content_400}]}
         result = compress_tool_result("search_knowledge_base", data)
         assert "..." in result
-        # Should contain first 500 chars + "..."
-        assert "B" * 500 in result
+        # Should contain first 300 chars + "..."
+        assert "B" * 300 in result
 
     def test_knowledge_keeps_short_content(self) -> None:
         data = {

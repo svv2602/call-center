@@ -76,7 +76,7 @@ def compress_history(
 def summarize_old_messages(
     messages: list[dict[str, Any]],
     *,
-    summary_threshold: int = 16,
+    summary_threshold: int = 10,
     keep_recent: int = 10,
 ) -> list[dict[str, Any]]:
     """Summarize old messages when history is long, compress otherwise.

@@ -32,7 +32,7 @@ logger = logging.getLogger(__name__)
 
 # Limits
 MAX_TOOL_CALLS_PER_TURN = 5
-MAX_HISTORY_MESSAGES = 40
+MAX_HISTORY_MESSAGES = 25
 _TOOL_TIMEOUT_SEC = 15  # Per-tool execution timeout
 
 
