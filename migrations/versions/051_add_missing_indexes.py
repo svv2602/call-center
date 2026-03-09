@@ -21,17 +21,17 @@ depends_on: str | Sequence[str] | None = None
 
 def upgrade() -> None:
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_sandbox_conversations_tenant_id
+        CREATE INDEX IF NOT EXISTS ix_sandbox_conversations_tenant_id
             ON sandbox_conversations (tenant_id)
             WHERE tenant_id IS NOT NULL
     """)
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_calls_transferred
+        CREATE INDEX IF NOT EXISTS ix_calls_transferred
             ON calls (transferred_to_operator)
             WHERE transferred_to_operator = true
     """)
     op.execute("""
-        CREATE INDEX CONCURRENTLY IF NOT EXISTS ix_llm_usage_log_tenant_id
+        CREATE INDEX IF NOT EXISTS ix_llm_usage_log_tenant_id
             ON llm_usage_log (tenant_id)
             WHERE tenant_id IS NOT NULL
     """)
