@@ -119,7 +119,7 @@ def mock_redis() -> AsyncMock:
     async def _get(key: str) -> str | None:
         return store.get(key)
 
-    async def _set(key: str, value: str) -> None:
+    async def _set(key: str, value: str, **kwargs: object) -> None:
         store[key] = value
 
     async def _setex(key: str, _ttl: int, value: str) -> None:
@@ -414,15 +414,18 @@ class TestListStations:
     """Test GET /admin/fitting/stations."""
 
     @patch("src.api.auth.get_settings")
+    @patch("src.api.fitting_hints.get_settings")
     @patch("src.api.fitting_hints._get_redis")
     def test_returns_empty_when_no_cache(
         self,
         mock_get_redis: MagicMock,
+        mock_hints_settings: MagicMock,
         mock_settings: MagicMock,
         client: TestClient,
         mock_redis: AsyncMock,
     ) -> None:
         mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        mock_hints_settings.return_value.onec.username = ""
         mock_get_redis.return_value = mock_redis
         resp = client.get("/admin/fitting/stations", headers=_auth())
         assert resp.status_code == 200
@@ -838,18 +841,23 @@ class TestRefreshFittingStations:
         mock_hints_settings.return_value.onec.username = "user"
         mock_hints_settings.return_value.onec.url = "http://1c"
         mock_hints_settings.return_value.onec.password = "pass"
-        mock_hints_settings.return_value.onec.soap_wsdl_path = "/wsdl"
-        mock_hints_settings.return_value.onec.soap_timeout = 30
+        mock_hints_settings.return_value.onec.timeout = 30
         mock_get_redis.return_value = mock_redis
 
-        stations = [
-            {"station_id": "st-1", "name": "Station 1", "city": "Дніпро", "address": "вул. 1"},
-            {"station_id": "st-2", "name": "Station 2", "city": "Київ", "address": "вул. 2"},
-        ]
+        rest_response = {
+            "success": True,
+            "data": [
+                {"StationID": "st-1", "StationName": "Station 1", "StationCity": "Дніпро",
+                 "StationAdress": "вул. 1", "StationCityID": "c1", "StationCountPosts": 2},
+                {"StationID": "st-2", "StationName": "Station 2", "StationCity": "Київ",
+                 "StationAdress": "вул. 2", "StationCityID": "c2", "StationCountPosts": 1},
+            ],
+            "errors": [],
+        }
         mock_client = AsyncMock()
-        mock_client.get_stations.return_value = stations
+        mock_client.get_fitting_stations_rest.return_value = rest_response
 
-        with patch("src.onec_client.soap.OneCSOAPClient", return_value=mock_client):
+        with patch("src.onec_client.client.OneCClient", return_value=mock_client):
             resp = client.post("/admin/fitting/stations/refresh", headers=_auth())
 
         assert resp.status_code == 200
@@ -881,7 +889,7 @@ class TestRefreshFittingStations:
     @patch("src.api.auth.get_settings")
     @patch("src.api.fitting_hints.get_settings")
     @patch("src.api.fitting_hints._get_redis")
-    def test_refresh_stations_soap_error(
+    def test_refresh_stations_rest_error(
         self,
         mock_get_redis: MagicMock,
         mock_hints_settings: MagicMock,
@@ -893,18 +901,17 @@ class TestRefreshFittingStations:
         mock_hints_settings.return_value.onec.username = "user"
         mock_hints_settings.return_value.onec.url = "http://1c"
         mock_hints_settings.return_value.onec.password = "pass"
-        mock_hints_settings.return_value.onec.soap_wsdl_path = "/wsdl"
-        mock_hints_settings.return_value.onec.soap_timeout = 30
+        mock_hints_settings.return_value.onec.timeout = 30
         mock_get_redis.return_value = mock_redis
 
         mock_client = AsyncMock()
-        mock_client.get_stations.side_effect = ConnectionError("SOAP timeout")
+        mock_client.get_fitting_stations_rest.side_effect = ConnectionError("REST timeout")
 
-        with patch("src.onec_client.soap.OneCSOAPClient", return_value=mock_client):
+        with patch("src.onec_client.client.OneCClient", return_value=mock_client):
             resp = client.post("/admin/fitting/stations/refresh", headers=_auth())
 
         assert resp.status_code == 502
-        assert "SOAP" in resp.json()["detail"]
+        assert "REST" in resp.json()["detail"]
 
 
 class TestRefreshPickupPoints:

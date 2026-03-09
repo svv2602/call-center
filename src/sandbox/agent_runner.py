@@ -42,7 +42,6 @@ if TYPE_CHECKING:
     from src.agent.agent import ToolRouter
     from src.llm.router import LLMRouter
     from src.onec_client.client import OneCClient
-    from src.onec_client.soap import OneCSOAPClient
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +94,6 @@ def _register_live_tools(
     knowledge_search: Any = None,
     tenant_id: str = "",
     store_client: Any = None,
-    soap_client: OneCSOAPClient | None = None,
 ) -> None:
     """Override mock handlers with real handlers where available."""
     # Register real knowledge search (pgvector) if available
@@ -298,7 +296,7 @@ def _register_live_tools(
             "Live tool mode: no OneCClient — get_pickup_points, find_storage remain mock"
         )
 
-    if soap_client is not None:
+    if onec_client is not None:
 
         async def _get_station_count_posts(station_id: str) -> int:
             """Look up count_posts from cached stations list (fallback=1)."""
@@ -316,22 +314,30 @@ def _register_live_tools(
                 pass
             return 1
 
-        async def _get_fitting_slots_soap(**kwargs: Any) -> dict[str, Any]:
+        async def _get_fitting_slots_rest(**kwargs: Any) -> dict[str, Any]:
             station_id = kwargs.get("station_id", "")
             today = datetime.now(tz=UTC).date().isoformat()
             date_from = _resolve_date(kwargs.get("date_from", "")) or today
             date_to = _resolve_date(kwargs.get("date_to", "")) or date_from
-            slots = await soap_client.get_station_schedule(
-                date_from=date_from, date_to=date_to, station_id=station_id
+            result = await onec_client.get_station_schedule(
+                station_id=station_id, date_from=date_from, date_to=date_to
             )
+            raw_slots = result.get("data", [])
             count_posts = await _get_station_count_posts(station_id)
-            for slot in slots:
-                qty = slot.pop("quantity", 0)
-                slot["available"] = count_posts - qty > 0
+            slots = []
+            for s in raw_slots:
+                qty = int(s.get("Quantity", 0))
+                slots.append({
+                    "station_id": s.get("StationID", station_id),
+                    "date": s.get("Data", ""),
+                    "time": s.get("Time", ""),
+                    "period": s.get("Period", ""),
+                    "available": count_posts - qty > 0,
+                })
             return {"station_id": station_id, "slots": slots}
 
-        async def _book_fitting_soap(**kwargs: Any) -> dict[str, Any]:
-            return await soap_client.book_fitting(
+        async def _book_fitting_rest(**kwargs: Any) -> dict[str, Any]:
+            result = await onec_client.book_fitting_rest(
                 person=kwargs.get("customer_name", ""),
                 phone=kwargs.get("customer_phone", ""),
                 station_id=kwargs.get("station_id", ""),
@@ -343,29 +349,53 @@ def _register_live_tools(
                 tire_diameter=kwargs.get("tire_diameter", 0),
                 service_type=kwargs.get("service_type", "tire_change"),
             )
+            if result.get("success"):
+                data_list = result.get("data", [])
+                guid = data_list[0].get("GUID", "") if data_list else ""
+                return {"booking_id": guid, "status": "confirmed", "message": "Запис створено"}
+            errors = result.get("errors", [])
+            return {"status": "error", "message": errors[0] if errors else "1С відмовив у записі"}
 
-        async def _cancel_fitting_soap(**kwargs: Any) -> dict[str, Any]:
+        async def _cancel_fitting_rest(**kwargs: Any) -> dict[str, Any]:
             booking_id = kwargs.get("booking_id", "")
-            result = await soap_client.cancel_booking(booking_id)
-            return {
-                "booking_id": booking_id,
-                "status": result.get("status", "cancelled"),
-                "message": result.get("message", "Запис скасовано"),
-            }
+            result = await onec_client.cancel_fitting_rest(booking_id)
+            if result.get("success"):
+                data_list = result.get("data", [])
+                canceled = data_list[0].get("Canceled", False) if data_list else False
+                return {
+                    "booking_id": booking_id,
+                    "status": "cancelled" if canceled else "error",
+                    "message": "Запис скасовано" if canceled else "Не вдалося скасувати",
+                }
+            return {"booking_id": booking_id, "status": "error", "message": "Помилка скасування"}
 
-        async def _get_customer_bookings_soap(**kwargs: Any) -> dict[str, Any]:
+        async def _get_customer_bookings_rest(**kwargs: Any) -> dict[str, Any]:
             phone = kwargs.get("phone", "")
             station_id = kwargs.get("station_id", "")
-            bookings = await soap_client.get_customer_bookings(phone=phone, station_id=station_id)
+            result = await onec_client.get_customer_bookings_rest(
+                phone=phone, station_id=station_id
+            )
+            raw_bookings = result.get("data", [])
+            bookings = [
+                {
+                    "booking_id": b.get("GUID", ""),
+                    "station_id": b.get("StationID", ""),
+                    "date": b.get("Data", ""),
+                    "time": b.get("Time", ""),
+                    "period": b.get("Period", ""),
+                    "person": b.get("Customer", ""),
+                }
+                for b in raw_bookings
+            ]
             return {"total": len(bookings), "bookings": bookings}
 
-        router.register("get_fitting_slots", _get_fitting_slots_soap)
-        router.register("book_fitting", _book_fitting_soap)
-        router.register("cancel_fitting", _cancel_fitting_soap)
-        router.register("get_customer_bookings", _get_customer_bookings_soap)
-        logger.info("Live SOAP tools registered: fitting slots, book, cancel, customer bookings")
+        router.register("get_fitting_slots", _get_fitting_slots_rest)
+        router.register("book_fitting", _book_fitting_rest)
+        router.register("cancel_fitting", _cancel_fitting_rest)
+        router.register("get_customer_bookings", _get_customer_bookings_rest)
+        logger.info("Live REST tools registered: fitting slots, book, cancel, customer bookings")
     else:
-        logger.info("Live tool mode: no OneCSOAPClient — fitting SOAP tools remain mock")
+        logger.info("Live tool mode: no OneCClient — fitting REST tools remain mock")
 
 
 async def create_sandbox_agent(
@@ -382,7 +412,6 @@ async def create_sandbox_agent(
     knowledge_search: Any = None,
     tenant_id: str = "",
     store_client: Any = None,
-    soap_client: OneCSOAPClient | None = None,
 ) -> LLMAgent:
     """Create an LLMAgent configured for sandbox testing.
 
@@ -399,7 +428,6 @@ async def create_sandbox_agent(
         redis_client: Optional Redis client for tool caching.
         tenant: Optional tenant dict with enabled_tools/prompt_suffix.
         knowledge_search: Optional KnowledgeSearch for pgvector-backed search.
-        soap_client: Optional 1C SOAP client for fitting tools.
 
     Returns:
         Configured LLMAgent instance.
@@ -440,7 +468,6 @@ async def create_sandbox_agent(
             knowledge_search=knowledge_search,
             tenant_id=tenant_id,
             store_client=store_client,
-            soap_client=soap_client,
         )
 
     # Modular prompt assembly for sandbox: skip pronunciation (text mode, no TTS)

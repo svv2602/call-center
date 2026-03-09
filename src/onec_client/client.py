@@ -143,9 +143,165 @@ class OneCClient:
     async def get_fitting_stations_rest(self) -> dict[str, Any]:
         """Get fitting stations via REST API.
 
-        GET /Trade/hs/site/TireService/station
+        GET /Trade/hs/site/TireService/Station
         """
-        return await self._get("/Trade/hs/site/TireService/station")
+        return await self._get("/Trade/hs/site/TireService/Station")
+
+    async def get_station_schedule(
+        self,
+        station_id: str,
+        date_from: str,
+        date_to: str,
+    ) -> dict[str, Any]:
+        """Get fitting station schedule (available slots) for a date range.
+
+        GET /Trade/hs/site/TireService/StationSchedule
+
+        Args:
+            station_id: Station ID (e.g. '000000009').
+            date_from: Start date (YYYY-MM-DD or YYYY-MM-DDT...).
+            date_to: End date (YYYY-MM-DD or YYYY-MM-DDT...).
+
+        Returns:
+            Dict with 'data' list of slots: StationID, Data, Time, Period, Quantity.
+        """
+        return await self._get(
+            "/Trade/hs/site/TireService/StationSchedule",
+            params={
+                "StationID": station_id,
+                "DataBig": _to_datetime(date_from),
+                "DataEnd": _to_datetime(date_to),
+            },
+        )
+
+    async def book_fitting_rest(
+        self,
+        person: str,
+        phone: str,
+        station_id: str,
+        date: str,
+        time: str,
+        vehicle_info: str = "",
+        auto_number: str = "",
+        storage_contract: str = "",
+        tire_diameter: int = 0,
+        service_type: str = "tire_change",
+    ) -> dict[str, Any]:
+        """Book a tire fitting appointment.
+
+        POST /Trade/hs/site/TireService/TireRecording
+
+        Args:
+            person: Customer name.
+            phone: Customer phone (+380XXXXXXXXX or 0XXXXXXXXX).
+            station_id: Fitting station ID.
+            date: Appointment date (YYYY-MM-DD).
+            time: Appointment time (HH:MM or HH:MM:SS).
+            vehicle_info: Vehicle description (optional).
+            auto_number: Vehicle license plate (optional).
+            storage_contract: Storage contract number (optional).
+            tire_diameter: Tire diameter in inches (optional).
+            service_type: Service type (tire_change, balancing, full_service).
+
+        Returns:
+            Dict with booking result: {success, data: [{GUID}]}.
+        """
+        comment = _build_comment(vehicle_info, tire_diameter, service_type)
+        body: dict[str, Any] = {
+            "PhoneNumber": _normalize_phone_plus(phone),
+            "StationID": station_id,
+            "Date": _to_datetime(date.split("T")[0]),
+            "Time": _to_1c_time(time),
+            "Person": person,
+            "AutoType": vehicle_info,
+            "AutoNumber": auto_number,
+            "StoreTires": False,
+            "Status": "Записан",
+            "Comment": comment,
+            "NumberContract": storage_contract,
+            "CallBack": False,
+            "ClientMode": 0,
+            "CheckBalance": True,
+        }
+        return await self._post("/Trade/hs/site/TireService/TireRecording", json_data=body)
+
+    async def cancel_fitting_rest(self, guid: str) -> dict[str, Any]:
+        """Cancel a fitting booking.
+
+        POST /Trade/hs/site/TireService/CancelRecord
+
+        Args:
+            guid: Booking GUID to cancel.
+
+        Returns:
+            Dict with {success, data: [{Canceled: true/false}]}.
+        """
+        return await self._post(
+            "/Trade/hs/site/TireService/CancelRecord",
+            json_data={"GUID": guid},
+        )
+
+    async def get_customer_bookings_rest(
+        self,
+        phone: str,
+        station_id: str = "",
+        date: str = "",
+        time: str = "",
+    ) -> dict[str, Any]:
+        """Get existing bookings for a customer.
+
+        POST /Trade/hs/site/TireService/ListOfEntries
+
+        Args:
+            phone: Customer phone (+380XXXXXXXXX).
+            station_id: Optional station ID filter.
+            date: Optional date filter (YYYY-MM-DD).
+            time: Optional time filter (HH:MM).
+
+        Returns:
+            Dict with {success, data: [{StationID, Data, Time, Customer, GUID, ...}]}.
+        """
+        body: dict[str, Any] = {
+            "PhoneNumber": _normalize_phone_plus(phone),
+            "StationID": station_id,
+            "Date": _to_datetime(date) if date else "",
+            "Time": _to_1c_time(time) if time else "",
+        }
+        return await self._post(
+            "/Trade/hs/site/TireService/ListOfEntries",
+            json_data=body,
+        )
+
+    async def reserve_fitting_slot(
+        self,
+        station_id: str,
+        date: str,
+        time: str,
+        comment: str = "",
+    ) -> dict[str, Any]:
+        """Reserve a fitting slot (temporary hold without full customer data).
+
+        POST /Trade/hs/site/TireService/TireBooking
+
+        Args:
+            station_id: Fitting station ID.
+            date: Appointment date (YYYY-MM-DD).
+            time: Appointment time (HH:MM).
+            comment: Optional comment.
+
+        Returns:
+            Dict with {success, data: [{GUID}]}.
+        """
+        body: dict[str, Any] = {
+            "StationID": station_id,
+            "Date": _to_datetime(date.split("T")[0]),
+            "Time": _to_1c_time(time),
+            "Comment": comment,
+        }
+        return await self._post(
+            "/Trade/hs/site/TireService/TireBooking",
+            json_data=body,
+        )
 
     async def find_storage(self, storage_number: str = "", phone: str = "") -> dict[str, Any]:
         """Find tire storage contracts by phone or contract number.
@@ -350,3 +506,62 @@ class OneCClient:
 
             data: dict[str, Any] = json.loads(body_text)
             return data
+
+
+# --- Helpers for TireService REST API ---
+
+
+def _to_datetime(value: str) -> str:
+    """Convert YYYY-MM-DD to YYYY-MM-DDT00:00:00 (1C dateTime format).
+
+    If already contains 'T', return as-is.
+    """
+    if "T" in value:
+        return value
+    return f"{value}T00:00:00"
+
+
+def _to_1c_time(value: str) -> str:
+    """Convert HH:MM or HH:MM:SS to 0001-01-01THH:MM:SS (1C time format).
+
+    If already contains 'T', return as-is.
+    """
+    if "T" in value:
+        return value
+    parts = value.split(":")
+    if len(parts) == 2:
+        value = f"{value}:00"
+    return f"0001-01-01T{value}"
+
+
+def _normalize_phone_plus(phone: str) -> str:
+    """Normalize phone to +380XXXXXXXXX format for 1C REST API.
+
+    Handles: 0XXXXXXXXX, 380XXXXXXXXX, +380XXXXXXXXX, 80XXXXXXXXX.
+    """
+    digits = "".join(c for c in phone if c.isdigit())
+    if digits.startswith("380") and len(digits) == 12:
+        return f"+{digits}"
+    if digits.startswith("80") and len(digits) == 11:
+        return f"+3{digits}"
+    if digits.startswith("0") and len(digits) == 10:
+        return f"+38{digits}"
+    if len(digits) == 9:
+        return f"+380{digits}"
+    return phone  # return as-is if unknown format
+
+
+def _build_comment(vehicle_info: str, tire_diameter: int, service_type: str) -> str:
+    """Build a comment string from optional booking parameters."""
+    parts: list[str] = []
+    if vehicle_info:
+        parts.append(f"Авто: {vehicle_info}")
+    if tire_diameter:
+        parts.append(f"R{tire_diameter}")
+    if service_type and service_type != "tire_change":
+        service_labels = {
+            "balancing": "балансування",
+            "full_service": "повний сервіс",
+        }
+        parts.append(service_labels.get(service_type, service_type))
+    return "; ".join(parts)

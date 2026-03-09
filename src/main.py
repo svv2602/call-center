@@ -94,7 +94,6 @@ from src.monitoring.metrics import (
     tenant_resolution_fallback_total,
 )
 from src.onec_client.client import OneCClient
-from src.onec_client.soap import OneCSOAPClient
 from src.store_client.client import StoreClient
 from src.stt.base import STTConfig
 from src.stt.google_stt import GoogleSTTEngine
@@ -191,7 +190,6 @@ _redis: Redis | None = None
 _store_client: StoreClient | None = None
 _tts_engine: GoogleTTSEngine | None = None
 _onec_client: OneCClient | None = None
-_soap_client: OneCSOAPClient | None = None
 _embedding_task: asyncio.Task | None = None  # type: ignore[type-arg]
 _pricing_task: asyncio.Task | None = None  # type: ignore[type-arg]
 _db_engine: Any = None
@@ -346,13 +344,14 @@ async def store_caller_id(request: Request, data: dict[str, str]) -> dict[str, s
         -H 'X-Internal-Secret: ${INTERNAL_SECRET}'
         -d '{"uuid":"${CALL_UUID}","number":"${CALLERID(num)}","exten":"${CALLED_EXTEN}"}')
     """
-    # Verify pre-shared secret
+    # Verify pre-shared secret (reject if not configured)
     settings = get_settings()
     expected_secret = settings.internal_api.secret
-    if expected_secret:
-        provided_secret = request.headers.get("X-Internal-Secret", "")
-        if not hmac.compare_digest(provided_secret, expected_secret):
-            raise HTTPException(status_code=403, detail="Forbidden")
+    if not expected_secret:
+        raise HTTPException(status_code=503, detail="Internal API secret not configured")
+    provided_secret = request.headers.get("X-Internal-Secret", "")
+    if not hmac.compare_digest(provided_secret, expected_secret):
+        raise HTTPException(status_code=403, detail="Forbidden")
 
     call_uuid = data.get("uuid", "").strip()
     number = data.get("number", "").strip()
@@ -377,12 +376,13 @@ async def metrics_endpoint(request: Request) -> Response:
     """Prometheus metrics endpoint."""
     settings = get_settings()
     expected_token = settings.metrics.bearer_token
-    if expected_token:
-        auth_header = request.headers.get("Authorization", "")
-        if not auth_header.startswith("Bearer ") or not hmac.compare_digest(
-            auth_header[7:], expected_token
-        ):
-            raise HTTPException(status_code=403, detail="Forbidden")
+    if not expected_token:
+        raise HTTPException(status_code=503, detail="Metrics bearer token not configured")
+    auth_header = request.headers.get("Authorization", "")
+    if not auth_header.startswith("Bearer ") or not hmac.compare_digest(
+        auth_header[7:], expected_token
+    ):
+        raise HTTPException(status_code=403, detail="Forbidden")
     return Response(content=get_metrics(), media_type="text/plain; charset=utf-8")
 
 
@@ -745,8 +745,11 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             logger.debug("upsert_customer failed", exc_info=True)
 
     if _redis is not None:
-        store = SessionStore(_redis)
-        await store.save(session)
+        try:
+            store = SessionStore(_redis)
+            await store.save(session)
+        except Exception:
+            logger.warning("Failed to save initial session to Redis", exc_info=True)
 
     active_calls.inc()
     logger.info("Call started: %s", conn.channel_uuid)
@@ -1476,9 +1479,9 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             except ValueError:
                 pass
 
-        if _soap_client is not None:
+        if _onec_client is not None:
             try:
-                result = await _soap_client.book_fitting(
+                result = await _onec_client.book_fitting_rest(
                     person=kwargs.get("customer_name", ""),
                     phone=kwargs.get("customer_phone", ""),
                     station_id=kwargs.get("station_id", ""),
@@ -1490,24 +1493,30 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     tire_diameter=kwargs.get("tire_diameter", 0),
                     service_type=kwargs.get("service_type", "tire_change"),
                 )
-                if result.get("booking_id"):
-                    fittings_booked_total.inc()
-                    return result
-                # SOAP returned error (Result=false or parse failure) — log and
-                # fall through to Store API instead of returning error directly.
+                # REST returns {success: true, data: [{GUID: "..."}]}
+                if result.get("success"):
+                    data_list = result.get("data", [])
+                    guid = data_list[0].get("GUID", "") if data_list else ""
+                    if guid:
+                        fittings_booked_total.inc()
+                        return {
+                            "booking_id": guid,
+                            "status": "confirmed",
+                            "message": "Запис створено",
+                        }
+                # 1C returned success=false or no GUID
+                errors = result.get("errors", [])
+                error_msg = errors[0] if errors else "1С відмовив у записі"
                 logger.warning(
-                    "SOAP book_fitting returned error for call %s: "
-                    "status=%s, message=%s, station=%s, date=%s, time=%s",
+                    "1C REST book_fitting returned error for call %s: %s, station=%s, date=%s",
                     session.channel_uuid,
-                    result.get("status"),
-                    result.get("message", "(no message)"),
+                    error_msg,
                     kwargs.get("station_id"),
                     kwargs.get("date"),
-                    kwargs.get("time"),
                 )
             except Exception:
                 logger.warning(
-                    "SOAP book_fitting exception for call %s, falling back to Store API",
+                    "1C REST book_fitting exception for call %s, falling back to Store API",
                     session.channel_uuid,
                     exc_info=True,
                 )
@@ -1647,27 +1656,12 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                         )
             except Exception:
                 logger.warning(
-                    "REST get_fitting_stations failed for call %s, trying SOAP",
+                    "REST get_fitting_stations failed for call %s, falling back",
                     session.channel_uuid,
                     exc_info=True,
                 )
 
-        # 3. 1C SOAP API (fallback)
-        if all_stations is None and _soap_client is not None:
-            try:
-                all_stations = await _soap_client.get_stations()
-                if _redis and all_stations is not None:
-                    await _redis.setex(
-                        cache_key, 86400, json.dumps(all_stations, ensure_ascii=False)
-                    )
-            except Exception:
-                logger.warning(
-                    "SOAP get_stations failed for call %s, falling back",
-                    session.channel_uuid,
-                    exc_info=True,
-                )
-
-        # 4. Return from cache/1C with city/query filter
+        # 3. Return from cache/1C with city/query filter
         if all_stations is not None:
             # Load station hints from Redis BEFORE filtering —
             # query may match hint fields (district, landmarks, description)
@@ -1793,21 +1787,29 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         except ValueError:
             pass
 
-        if _soap_client is not None:
+        if _onec_client is not None:
             try:
-                slots = await _soap_client.get_station_schedule(
+                result = await _onec_client.get_station_schedule(
+                    station_id=station_id,
                     date_from=date_from,
                     date_to=date_to,
-                    station_id=station_id,
                 )
+                raw_slots = result.get("data", [])
                 count_posts = await _get_station_count_posts(station_id)
-                for slot in slots:
-                    qty = slot.pop("quantity", 0)
-                    slot["available"] = count_posts - qty > 0
+                slots = []
+                for s in raw_slots:
+                    qty = int(s.get("Quantity", 0))
+                    slots.append({
+                        "station_id": s.get("StationID", station_id),
+                        "date": s.get("Data", ""),
+                        "time": s.get("Time", ""),
+                        "period": s.get("Period", ""),
+                        "available": count_posts - qty > 0,
+                    })
                 return {"station_id": station_id, "slots": slots}
             except Exception:
                 logger.warning(
-                    "SOAP get_station_schedule failed for call %s, falling back to Store API",
+                    "1C REST get_station_schedule failed for call %s, falling back to Store API",
                     session.channel_uuid,
                     exc_info=True,
                 )
@@ -1829,19 +1831,28 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
     router.register("book_fitting", _book_fitting_with_metric)
 
     async def _cancel_fitting(**kwargs: Any) -> Any:
-        """Cancel fitting: try SOAP, fallback to Store API."""
-        if _soap_client is not None:
+        """Cancel fitting: try 1C REST, fallback to Store API."""
+        if _onec_client is not None:
             try:
                 booking_id = kwargs.get("booking_id", "")
-                result = await _soap_client.cancel_booking(booking_id)
+                result = await _onec_client.cancel_fitting_rest(booking_id)
+                if result.get("success"):
+                    data_list = result.get("data", [])
+                    canceled = data_list[0].get("Canceled", False) if data_list else False
+                    return {
+                        "booking_id": booking_id,
+                        "status": "cancelled" if canceled else "error",
+                        "message": "Запис скасовано" if canceled else "Не вдалося скасувати",
+                    }
+                errors = result.get("errors", [])
                 return {
                     "booking_id": booking_id,
-                    "status": result.get("status", "cancelled"),
-                    "message": result.get("message", "Запис скасовано"),
+                    "status": "error",
+                    "message": errors[0] if errors else "Помилка скасування",
                 }
             except Exception:
                 logger.warning(
-                    "SOAP cancel_booking failed for call %s, falling back to Store API",
+                    "1C REST cancel_fitting failed for call %s, falling back to Store API",
                     session.channel_uuid,
                     exc_info=True,
                 )
@@ -1935,18 +1946,31 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
     router.register("get_fitting_price", _get_fitting_price)
 
     async def _get_customer_bookings(**kwargs: Any) -> dict[str, Any]:
-        """Get customer bookings from SOAP service."""
-        if _soap_client is not None:
+        """Get customer bookings from 1C REST API."""
+        if _onec_client is not None:
             try:
                 phone = kwargs.get("phone", "")
                 station_id = kwargs.get("station_id", "")
-                bookings = await _soap_client.get_customer_bookings(
+                result = await _onec_client.get_customer_bookings_rest(
                     phone=phone, station_id=station_id
                 )
+                raw_bookings = result.get("data", [])
+                bookings = [
+                    {
+                        "booking_id": b.get("GUID", ""),
+                        "station_id": b.get("StationID", ""),
+                        "date": b.get("Data", ""),
+                        "time": b.get("Time", ""),
+                        "period": b.get("Period", ""),
+                        "person": b.get("Customer", ""),
+                        "auto_number": b.get("AutoNumber", ""),
+                    }
+                    for b in raw_bookings
+                ]
                 return {"total": len(bookings), "bookings": bookings}
             except Exception:
                 logger.warning(
-                    "SOAP get_customer_bookings failed for call %s",
+                    "1C REST get_customer_bookings failed for call %s",
                     session.channel_uuid,
                     exc_info=True,
                 )
@@ -1973,6 +1997,53 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 )
         return {"error": "Сервіс зберігання тимчасово недоступний", "contracts": []}
 
+    async def _reserve_fitting_slot(**kwargs: Any) -> dict[str, Any]:
+        """Reserve a fitting slot temporarily (without full customer data)."""
+        station_id = kwargs.get("station_id", "")
+        if (
+            station_id
+            and session.fitting_station_ids
+            and station_id not in session.fitting_station_ids
+        ):
+            known = ", ".join(sorted(session.fitting_station_ids))
+            return {
+                "error": True,
+                "message": f"Невірний station_id '{station_id}'. "
+                f"Використай station_id з результату get_fitting_stations: {known}",
+            }
+
+        if _onec_client is not None:
+            try:
+                result = await _onec_client.reserve_fitting_slot(
+                    station_id=station_id,
+                    date=kwargs.get("date", ""),
+                    time=kwargs.get("time", ""),
+                    comment=kwargs.get("comment", ""),
+                )
+                if result.get("success"):
+                    data_list = result.get("data", [])
+                    guid = data_list[0].get("GUID", "") if data_list else ""
+                    if guid:
+                        return {
+                            "reservation_id": guid,
+                            "status": "reserved",
+                            "message": "Слот тимчасово заброньовано. "
+                            "Збери дані клієнта та виклич book_fitting для повного запису.",
+                        }
+                errors = result.get("errors", [])
+                return {
+                    "status": "error",
+                    "message": errors[0] if errors else "Не вдалося забронювати слот",
+                }
+            except Exception:
+                logger.warning(
+                    "1C REST reserve_fitting_slot failed for call %s",
+                    session.channel_uuid,
+                    exc_info=True,
+                )
+        return {"error": "Сервіс бронювання тимчасово недоступний"}
+
+    router.register("reserve_fitting_slot", _reserve_fitting_slot)
     router.register("find_storage", _find_storage)
 
     async def _update_customer_profile(**kwargs: Any) -> dict[str, Any]:
@@ -2172,7 +2243,7 @@ async def _periodic_pricing_refresh(interval_minutes: int = 5) -> None:
 async def main() -> None:
     """Main application entry point."""
     global _audio_server, _redis, _store_client, _tts_engine
-    global _onec_client, _soap_client, _embedding_task, _pricing_task
+    global _onec_client, _embedding_task, _pricing_task
     global _db_engine, _llm_router, _asyncpg_pool
     global _knowledge_search, _search_embedding_gen
 
@@ -2305,17 +2376,6 @@ async def main() -> None:
             await _onec_client.open()
             logger.info("OneCClient initialized: %s", settings.onec.url)
 
-            # Initialize SOAP client for tire fitting service
-            _soap_client = OneCSOAPClient(
-                base_url=settings.onec.url,
-                username=settings.onec.username,
-                password=settings.onec.password,
-                wsdl_path=settings.onec.soap_wsdl_path,
-                timeout=settings.onec.soap_timeout,
-            )
-            await _soap_client.open()
-            logger.info("OneCSOAPClient initialized: %s", _soap_client.endpoint_url)
-
             # Catalog sync is delegated to Celery (catalog_full_sync + catalog_incremental_sync)
             logger.info(
                 "Catalog sync delegated to Celery (full daily 05:00, incremental every 5 min)"
@@ -2325,7 +2385,6 @@ async def main() -> None:
                 "1C integration init failed — MVP tools will use fallback HTTP", exc_info=True
             )
             _onec_client = None
-            _soap_client = None
             _db_engine = None
     else:
         logger.info("1C integration not configured (ONEC_USERNAME empty)")
@@ -2479,48 +2538,29 @@ async def main() -> None:
             await _pricing_task
         logger.info("Periodic pricing refresh stopped")
 
+    # Close resources with per-step error suppression to ensure all get cleaned up
+    _shutdown_resources: list[tuple[str, Any, str]] = [
+        ("LLM router", _llm_router, "close"),
+        ("ARI client", _ari_client, "close"),
+        ("StoreClient", _store_client, "close"),
+        ("OneCClient", _onec_client, "close"),
+        ("Search embedding generator", _search_embedding_gen, "close"),
+        ("asyncpg pool", _asyncpg_pool, "close"),
+        ("CallLogger", _call_logger, "close"),
+        ("Database engine", _db_engine, "dispose"),
+        ("Redis", _redis, "aclose"),
+    ]
+    for name, resource, method in _shutdown_resources:
+        if resource is not None:
+            try:
+                await getattr(resource, method)()
+                logger.info("%s closed", name)
+            except Exception:
+                logger.warning("Failed to close %s", name, exc_info=True)
     if _llm_router is not None:
-        await _llm_router.close()
         from src.llm import set_router
 
         set_router(None)
-        logger.info("LLM router closed")
-
-    if _ari_client is not None:
-        await _ari_client.close()
-        logger.info("ARI client closed")
-
-    if _store_client is not None:
-        await _store_client.close()
-        logger.info("StoreClient closed")
-
-    if _onec_client is not None:
-        await _onec_client.close()
-        logger.info("OneCClient closed")
-
-    if _soap_client is not None:
-        await _soap_client.close()
-        logger.info("OneCSOAPClient closed")
-
-    if _search_embedding_gen is not None:
-        await _search_embedding_gen.close()
-        logger.info("Search embedding generator closed")
-
-    if _asyncpg_pool is not None:
-        await _asyncpg_pool.close()
-        logger.info("asyncpg pool closed")
-
-    if _call_logger is not None:
-        await _call_logger.close()
-        logger.info("CallLogger closed")
-
-    if _db_engine is not None:
-        await _db_engine.dispose()
-        logger.info("Database engine disposed")
-
-    if _redis is not None:
-        await _redis.aclose()
-        logger.info("Redis connection closed")
 
     logger.info("Call Center AI stopped")
 

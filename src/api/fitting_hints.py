@@ -65,7 +65,7 @@ async def _sync_hints_to_redis(redis_key: str, hints: dict[str, Any]) -> None:
     """Best-effort sync of full hints dict to Redis cache."""
     try:
         redis = await _get_redis()
-        await redis.set(redis_key, json.dumps(hints, ensure_ascii=False))
+        await redis.set(redis_key, json.dumps(hints, ensure_ascii=False), ex=86400)
     except Exception:
         logger.warning("Redis sync failed for %s", redis_key, exc_info=True)
 
@@ -169,7 +169,7 @@ async def delete_station_hint(
 
 @router.get("/stations")
 async def list_fitting_stations(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
-    """Return fitting stations: Redis cache → 1C SOAP fallback.
+    """Return fitting stations: Redis cache → 1C REST fallback.
 
     Admin UI uses this to display station names/addresses alongside hints.
     If Redis cache is expired, fetches fresh data from 1C and re-caches.
@@ -180,31 +180,45 @@ async def list_fitting_stations(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
         stations = json.loads(raw)
         return {"stations": stations}
 
-    # Cache miss — try fetching from 1C SOAP directly
-    from src.onec_client.soap import OneCSOAPClient
+    # Cache miss — try fetching from 1C REST directly
+    from src.onec_client.client import OneCClient
 
     settings = get_settings()
     if not settings.onec.username:
         return {"stations": []}
 
     try:
-        client = OneCSOAPClient(
+        client = OneCClient(
             base_url=settings.onec.url,
             username=settings.onec.username,
             password=settings.onec.password,
-            wsdl_path=settings.onec.soap_wsdl_path,
-            timeout=settings.onec.soap_timeout,
+            timeout=settings.onec.timeout,
         )
         await client.open()
         try:
-            stations = await client.get_stations()
+            data = await client.get_fitting_stations_rest()
+            raw_list = (
+                data if isinstance(data, list)
+                else data.get("data", data.get("stations", data.get("items", [])))
+            )
+            stations = [
+                {
+                    "station_id": s.get("StationID", s.get("station_id", "")),
+                    "name": s.get("StationName", s.get("name", "")),
+                    "city": s.get("StationCity", s.get("city", "")),
+                    "city_id": s.get("StationCityID", s.get("city_id", "")),
+                    "address": s.get("StationAdress", s.get("StationAddress", s.get("address", ""))),
+                    "count_posts": int(s.get("StationCountPosts", 0)) or None,
+                }
+                for s in (raw_list if isinstance(raw_list, list) else [])
+            ]
         finally:
             await client.close()
         # Re-cache for 1 hour
         await redis.setex(
             "onec:fitting_stations", 3600, json.dumps(stations, ensure_ascii=False)
         )
-        logger.info("Stations cache warmed from 1C SOAP: %d stations", len(stations))
+        logger.info("Stations cache warmed from 1C REST: %d stations", len(stations))
         return {"stations": stations}
     except Exception:
         logger.warning("Failed to fetch stations from 1C for cache warm", exc_info=True)
@@ -213,29 +227,40 @@ async def list_fitting_stations(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
 
 @router.post("/stations/refresh")
 async def refresh_fitting_stations(_: dict[str, Any] = _perm_w) -> dict[str, Any]:
-    """Fetch fitting stations from 1C SOAP and cache in Redis.
-
-    Creates a short-lived SOAP client, calls GetStation, stores in Redis.
-    """
-    from src.onec_client.soap import OneCSOAPClient
+    """Fetch fitting stations from 1C REST and cache in Redis."""
+    from src.onec_client.client import OneCClient
 
     settings = get_settings()
     if not settings.onec.username:
         raise HTTPException(status_code=503, detail="1C credentials not configured")
 
-    client = OneCSOAPClient(
+    client = OneCClient(
         base_url=settings.onec.url,
         username=settings.onec.username,
         password=settings.onec.password,
-        wsdl_path=settings.onec.soap_wsdl_path,
-        timeout=settings.onec.soap_timeout,
+        timeout=settings.onec.timeout,
     )
     try:
         await client.open()
-        stations = await client.get_stations()
+        data = await client.get_fitting_stations_rest()
+        raw_list = (
+            data if isinstance(data, list)
+            else data.get("data", data.get("stations", data.get("items", [])))
+        )
+        stations = [
+            {
+                "station_id": s.get("StationID", s.get("station_id", "")),
+                "name": s.get("StationName", s.get("name", "")),
+                "city": s.get("StationCity", s.get("city", "")),
+                "city_id": s.get("StationCityID", s.get("city_id", "")),
+                "address": s.get("StationAdress", s.get("StationAddress", s.get("address", ""))),
+                "count_posts": int(s.get("StationCountPosts", 0)) or None,
+            }
+            for s in (raw_list if isinstance(raw_list, list) else [])
+        ]
     except Exception as exc:
-        logger.warning("Failed to fetch stations from 1C SOAP: %s", exc)
-        raise HTTPException(status_code=502, detail=f"1C SOAP error: {exc}") from exc
+        logger.warning("Failed to fetch stations from 1C REST: %s", exc)
+        raise HTTPException(status_code=502, detail=f"1C REST error: {exc}") from exc
     finally:
         await client.close()
 

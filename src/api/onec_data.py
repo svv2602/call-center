@@ -136,11 +136,9 @@ async def onec_status() -> dict[str, Any]:
 
         settings = get_settings()
         if settings.onec.username:
-            result["soap_endpoint"] = f"{settings.onec.url}{settings.onec.soap_wsdl_path}"
-            result["soap_timeout"] = settings.onec.soap_timeout
             result["rest_endpoint"] = settings.onec.url
 
-            # SOAP reachability (lightweight check with 3s timeout)
+            # REST reachability (lightweight test endpoint with 3s timeout)
             try:
                 import aiohttp
 
@@ -148,18 +146,15 @@ async def onec_status() -> dict[str, Any]:
                 timeout = aiohttp.ClientTimeout(total=3)
                 async with (
                     aiohttp.ClientSession(timeout=timeout, auth=auth) as sess,
-                    sess.get(
-                        result["soap_endpoint"],
-                        params={"wsdl": ""},
-                    ) as resp,
+                    sess.get(f"{settings.onec.url}/Trade/hs/site/TireService/test") as resp,
                 ):
-                    result["soap_status"] = (
+                    result["rest_status"] = (
                         "reachable" if resp.status < 400 else f"error_{resp.status}"
                     )
             except Exception:
-                result["soap_status"] = "unreachable"
+                result["rest_status"] = "unreachable"
         else:
-            result["soap_status"] = "not_configured"
+            result["rest_status"] = "not_configured"
 
         # AI order counter from Redis
         if redis:
