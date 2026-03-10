@@ -46,7 +46,7 @@ class SentenceBuffer:
     4. Clause punctuation (,;:) after min_clause_chars (long phrases)
     """
 
-    def __init__(self, min_clause_chars: int = 25) -> None:
+    def __init__(self, min_clause_chars: int = 15) -> None:
         self._buffer = ""
         self._min_clause_chars = min_clause_chars
 

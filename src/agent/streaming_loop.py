@@ -45,7 +45,7 @@ from src.tts.streaming_tts import synthesize_stream
 _TOOL_TIMEOUT_SEC = 15
 
 # Delay (seconds) before playing a filler phrase when LLM is slow to respond
-_FILLER_DELAY_SEC = 3.0
+_FILLER_DELAY_SEC = 2.0
 
 # Max retries when LLM returns empty (0 text, 0 tools). On the last retry,
 # automatically switch to a fallback provider.

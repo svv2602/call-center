@@ -53,3 +53,14 @@ admin-ui/node_modules/
 
 # GitHub (not using Actions/Dependabot)
 .github/
+
+# Temp / backup / cache
+*.tmp
+*.bak
+*.sqlite3
+*.pickle
+*.pkl
+.cache/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/

@@ -43,11 +43,11 @@ AGENT_PROCESSING_TIMEOUT_SEC = 30
 
 # Barge-in suppression window after TTS ends (seconds).
 # Prevents echo from speaker triggering false barge-in detection.
-_BARGE_IN_SUPPRESSION_SEC = 0.5
+_BARGE_IN_SUPPRESSION_SEC = 0.3
 
 # Window to buffer multiple final transcripts after barge-in (seconds).
 # Multiple STT finals may arrive in quick succession; we merge them into one turn.
-_TRANSCRIPT_BUFFER_SEC = 0.5
+_TRANSCRIPT_BUFFER_SEC = 0.3
 
 # Timeout for contextual farewell LLM call (seconds)
 _FAREWELL_LLM_TIMEOUT_SEC = 3
