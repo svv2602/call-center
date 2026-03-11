@@ -21,6 +21,7 @@ class GoogleSTTSettings(BaseSettings):
     language_code: str = "uk-UA"
     alternative_languages: str = "ru-RU"
     project_id: str = ""
+    model: str = "latest_long"
 
     model_config = {"env_prefix": "GOOGLE_STT_"}
 

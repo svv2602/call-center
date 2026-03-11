@@ -785,6 +785,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         stt_config = STTConfig(
             language_code=settings.google_stt.language_code,
             alternative_languages=settings.google_stt.alternative_language_list,
+            model=settings.google_stt.model,
             phrase_hints=phrase_hints,
         )
 
