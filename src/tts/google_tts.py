@@ -48,6 +48,13 @@ _COMBINING_ACUTE = "\u0301"
 # Fixes words that the TTS engine reads with incorrect stress or as
 # a single word when they should be two separate words.
 _TTS_SUBSTITUTIONS: list[tuple[re.Pattern[str], str]] = [
+    # Address abbreviations: "пер." → "провулок", "вул." → "вулиця", etc.
+    # Must be before other rules to prevent TTS misreading abbreviations
+    (re.compile(r"\bпер\."), "провулок"),
+    (re.compile(r"\bвул\."), "вулиця"),
+    (re.compile(r"\bпр\."), "проспект"),
+    (re.compile(r"\bб-р\.?(?=\s)"), "бульвар"),
+    (re.compile(r"\bм\.(?=\s)"), "місто"),
     # "Проколесо" / "ПроКолесо" → two words for correct TTS pronunciation
     (re.compile(r"(?i)проколесо"), "Про Колесо"),
     # Tire size format: "205/55 R16" → spoken naturally with pauses
