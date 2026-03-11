@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 
 from google.cloud.speech_v2 import SpeechAsyncClient
 from google.cloud.speech_v2.types import cloud_speech
-from google.protobuf.duration_pb2 import Duration
 
 from src.stt.base import STTConfig, Transcript
 
@@ -181,11 +180,6 @@ class GoogleSTTEngine:
                 config=recognition_config,
                 streaming_features=cloud_speech.StreamingRecognitionFeatures(
                     interim_results=self._config.interim_results,
-                    voice_activity_timeout=cloud_speech.StreamingRecognitionFeatures.VoiceActivityTimeout(
-                        # Faster endpointing: finalize short utterances sooner
-                        speech_end_timeout=Duration(seconds=1, nanos=200000000),  # 1.2s silence → final
-                        speech_start_timeout=Duration(seconds=15),  # 15s to start speaking
-                    ),
                 ),
             )
 
