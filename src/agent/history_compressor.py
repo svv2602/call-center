@@ -102,6 +102,18 @@ def summarize_old_messages(
         return compress_history(messages, keep_recent=keep_recent)
 
     cutoff = len(messages) - keep_recent
+
+    # Ensure cutoff doesn't split a tool_use / tool_result pair.
+    # If the first "recent" message is a user message with tool_result blocks,
+    # its preceding assistant message (with tool_use) got summarized away,
+    # which produces invalid history for OpenAI-compatible providers.
+    # Move cutoff back to include the assistant tool_use message.
+    while cutoff > 0 and _is_tool_result_msg(messages[cutoff]):
+        cutoff -= 1
+
+    if cutoff <= 0:
+        return compress_history(messages, keep_recent=keep_recent)
+
     old_messages = messages[:cutoff]
     recent_messages = messages[cutoff:]
 
@@ -151,6 +163,13 @@ def summarize_old_messages(
     # Build result: summary as first user message + recent messages verbatim
     summary_msg: dict[str, Any] = {"role": "user", "content": summary_text}
     return [summary_msg] + list(recent_messages)
+
+
+def _is_tool_result_msg(msg: dict[str, Any]) -> bool:
+    """Check if a message is a user message containing tool_result blocks."""
+    if msg.get("role") != "user" or not isinstance(msg.get("content"), list):
+        return False
+    return any(block.get("type") == "tool_result" for block in msg["content"])
 
 
 def _truncate(text: str) -> str:
