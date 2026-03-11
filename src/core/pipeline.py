@@ -39,7 +39,7 @@ from src.monitoring.metrics import audiosocket_to_stt_ms, barge_in_total, tts_de
 from src.stt.base import STTConfig, STTEngine, Transcript
 
 # Max time to wait for LLM agent to produce a response (seconds)
-AGENT_PROCESSING_TIMEOUT_SEC = 30
+AGENT_PROCESSING_TIMEOUT_SEC = 45
 
 # Barge-in suppression window after TTS ends (seconds).
 # Prevents echo from speaker triggering false barge-in detection.
