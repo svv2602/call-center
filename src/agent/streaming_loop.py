@@ -37,6 +37,15 @@ from src.agent.tools import filter_tools_by_state
 from src.core.audio_sender import send_audio_stream
 from src.core.sentence_buffer import buffer_sentences
 from src.llm.models import LLMTask, Usage
+from src.monitoring.metrics import (
+    history_compression_mode,
+    history_messages_count,
+    llm_stop_reason_total,
+    system_prompt_chars,
+    tool_call_errors_total,
+    tool_rounds_exhausted_total,
+    tool_rounds_per_turn,
+)
 from src.tts.streaming_tts import synthesize_stream
 
 # Per-tool execution timeout (seconds). Prevents a single slow 1C/API call
@@ -239,7 +248,17 @@ class StreamingAgentLoop:
 
         # Compress/summarize old messages to save tokens (BEFORE trim so
         # early context like customer name / topic is captured in the summary)
+        pre_len = len(conversation_history)
         conversation_history[:] = summarize_old_messages(conversation_history)
+        post_len = len(conversation_history)
+
+        # Record compression mode metric
+        if post_len < pre_len and post_len > 0 and conversation_history[0].get("content", "").startswith("(Резюме"):
+            history_compression_mode.labels(mode="summarize").inc()
+        elif post_len < pre_len:
+            history_compression_mode.labels(mode="compress").inc()
+        else:
+            history_compression_mode.labels(mode="none").inc()
 
         # Safety-net trim: if history is still too long after summarization
         if len(conversation_history) > MAX_HISTORY_MESSAGES:
@@ -269,6 +288,10 @@ class StreamingAgentLoop:
             scenario=scenario,
             active_scenarios=active_scenarios,
         )
+
+        # Record prompt and history metrics
+        system_prompt_chars.observe(len(system))
+        history_messages_count.observe(len(conversation_history))
 
         # Filter tools by conversation state (remove irrelevant tools)
         tools = filter_tools_by_state(
@@ -452,6 +475,7 @@ class StreamingAgentLoop:
                     )
                 except TimeoutError:
                     logger.error("Tool %s timed out after %ds", tc.name, _TOOL_TIMEOUT_SEC)
+                    tool_call_errors_total.labels(tool_name=tc.name, error_type="timeout").inc()
                     raw = {"error": "Сервіс тимчасово не відповідає, спробуйте ще раз"}
                 content = compress_tool_result(tc.name, raw)
                 if self._pii_vault is not None:
@@ -498,8 +522,13 @@ class StreamingAgentLoop:
                 logger.warning("Max tool rounds reached (%d)", self._max_tool_rounds)
                 break
 
+        # Record per-turn metrics
+        tool_rounds_per_turn.observe(tool_round)
+        llm_stop_reason_total.labels(reason=stop_reason).inc()
+
         # Fallback: if max tool rounds exhausted with no spoken text, ask LLM for summary
         if not spoken_parts and tool_round >= self._max_tool_rounds:
+            tool_rounds_exhausted_total.inc()
             summary = await self._request_summary_fallback(system, conversation_history)
             if summary:
                 spoken_parts.append(summary)

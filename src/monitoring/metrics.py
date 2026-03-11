@@ -343,6 +343,50 @@ aec_processing_us = Histogram(
 )
 
 
+# --- Prompt / context metrics ---
+
+system_prompt_chars = Histogram(
+    "callcenter_system_prompt_chars",
+    "System prompt length in characters",
+    buckets=[2000, 4000, 6000, 8000, 10000, 15000, 20000, 30000],
+)
+
+history_messages_count = Histogram(
+    "callcenter_history_messages_count",
+    "Number of messages in conversation history sent to LLM",
+    buckets=[1, 3, 5, 8, 10, 15, 20, 25],
+)
+
+history_compression_mode = Counter(
+    "callcenter_history_compression_mode_total",
+    "History compression mode applied",
+    ["mode"],  # none, compress, summarize
+)
+
+tool_call_errors_total = Counter(
+    "callcenter_tool_call_errors_total",
+    "Tool call errors by tool name and error type",
+    ["tool_name", "error_type"],  # error_type: timeout, exception
+)
+
+tool_rounds_per_turn = Histogram(
+    "callcenter_tool_rounds_per_turn",
+    "Number of tool call rounds per conversation turn",
+    buckets=[0, 1, 2, 3, 4, 5],
+)
+
+tool_rounds_exhausted_total = Counter(
+    "callcenter_tool_rounds_exhausted_total",
+    "Times max tool rounds were exhausted in a turn",
+)
+
+llm_stop_reason_total = Counter(
+    "callcenter_llm_stop_reason_total",
+    "LLM stop reasons",
+    ["reason"],  # end_turn, tool_use, max_tokens, error
+)
+
+
 def get_metrics() -> bytes:
     """Generate Prometheus metrics output."""
     return generate_latest()

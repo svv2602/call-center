@@ -23,6 +23,15 @@ from src.agent.prompts import (
 )
 from src.agent.tool_result_compressor import compress_tool_result
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
+from src.monitoring.metrics import (
+    history_compression_mode,
+    history_messages_count,
+    llm_stop_reason_total,
+    system_prompt_chars,
+    tool_call_errors_total,
+    tool_rounds_exhausted_total,
+    tool_rounds_per_turn,
+)
 
 if TYPE_CHECKING:
     from src.llm.router import LLMRouter
@@ -79,6 +88,7 @@ class ToolRouter:
         except Exception as exc:
             duration_ms = int((time.monotonic() - start) * 1000)
             logger.exception("Tool %s failed after %dms", name, duration_ms)
+            tool_call_errors_total.labels(tool_name=name, error_type="exception").inc()
             if self._on_execute is not None:
                 with contextlib.suppress(Exception):
                     await self._on_execute(name, args, {"error": str(exc)}, duration_ms, False)
@@ -189,7 +199,17 @@ class LLMAgent:
 
         # Compress/summarize old messages to save tokens (BEFORE trim so
         # early context like customer name / topic is captured in the summary)
+        pre_len = len(conversation_history)
         conversation_history[:] = summarize_old_messages(conversation_history)
+        post_len = len(conversation_history)
+
+        # Record compression mode metric
+        if post_len < pre_len and post_len > 0 and conversation_history[0].get("content", "").startswith("(Резюме"):
+            history_compression_mode.labels(mode="summarize").inc()
+        elif post_len < pre_len:
+            history_compression_mode.labels(mode="compress").inc()
+        else:
+            history_compression_mode.labels(mode="none").inc()
 
         # Safety-net trim: if history is still too long after summarization
         if len(conversation_history) > MAX_HISTORY_MESSAGES:
@@ -220,6 +240,10 @@ class LLMAgent:
             active_scenarios=active_scenarios,
         )
 
+        # Record prompt and history metrics
+        system_prompt_chars.observe(len(system))
+        history_messages_count.observe(len(conversation_history))
+
         # Filter tools by conversation state (remove irrelevant tools)
         tools = filter_tools_by_state(
             self._tools, order_stage=order_stage, fitting_booked=fitting_booked
@@ -227,6 +251,7 @@ class LLMAgent:
 
         response_text = ""
         tool_call_count = 0
+        stop_reason = "end_turn"
         self.last_input_tokens = 0
         self.last_output_tokens = 0
         self.last_provider_key = ""
@@ -258,6 +283,7 @@ class LLMAgent:
                     self.last_input_tokens += llm_response.usage.input_tokens
                     self.last_output_tokens += llm_response.usage.output_tokens
                     self.last_provider_key = llm_response.provider
+                    stop_reason = llm_response.stop_reason or "end_turn"
                     logger.info(
                         "LLM response: provider=%s, stop=%s, latency=%dms, tokens_in=%d, tokens_out=%d",
                         llm_response.provider,
@@ -312,6 +338,7 @@ class LLMAgent:
                 latency_ms = int((time.monotonic() - start) * 1000)
                 self.last_input_tokens += response.usage.input_tokens
                 self.last_output_tokens += response.usage.output_tokens
+                stop_reason = response.stop_reason or "end_turn"
                 logger.info(
                     "Claude response: stop=%s, latency=%dms, tokens_in=%d, tokens_out=%d",
                     response.stop_reason,
@@ -377,6 +404,7 @@ class LLMAgent:
                     )
                 except TimeoutError:
                     logger.error("Tool %s timed out after %ds", tu["name"], _TOOL_TIMEOUT_SEC)
+                    tool_call_errors_total.labels(tool_name=tu["name"], error_type="timeout").inc()
                     raw = {"error": "Сервіс тимчасово не відповідає, спробуйте ще раз"}
                 content = compress_tool_result(tu["name"], raw)
                 if self._pii_vault is not None:
@@ -395,8 +423,14 @@ class LLMAgent:
                 logger.warning("Max tool calls reached (%d)", MAX_TOOL_CALLS_PER_TURN)
                 break
 
+        # Record per-turn metrics
+        tool_rounds = tool_call_count  # each round may have multiple parallel calls
+        tool_rounds_per_turn.observe(tool_rounds)
+        llm_stop_reason_total.labels(reason=stop_reason if stop_reason else "end_turn").inc()
+
         # Fallback: if max tool rounds exhausted with no text, ask LLM for summary
         if not response_text.strip() and tool_call_count >= MAX_TOOL_CALLS_PER_TURN:
+            tool_rounds_exhausted_total.inc()
             response_text = await self._request_summary_fallback(
                 system, conversation_history
             )
