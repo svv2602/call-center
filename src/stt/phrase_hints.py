@@ -97,6 +97,43 @@ BASE_TERMS_UK: list[str] = [
     "ранфлєт",
 ]
 
+# Common short customer phrases that STT may miss or misrecognize.
+# Helps with endpointing of brief utterances.
+BASE_CONVERSATIONAL: list[str] = [
+    "так",
+    "ні",
+    "да",
+    "нет",
+    "правильно",
+    "вірно",
+    "добре",
+    "алло",
+    "записуйте",
+    "запишіть",
+    "перенести",
+    "скасувати",
+    "на дев'ять",
+    "на десять",
+    "на одинадцять",
+    "на дванадцять",
+    "на тринадцять",
+    "на чотирнадцять",
+    "на п'ятнадцять",
+    "на шістнадцять",
+    "на ранок",
+    "на обід",
+    "після обіду",
+    "вранці",
+    "завтра",
+    "післязавтра",
+    "на сьогодні",
+    "Добровольців",
+    "Запорізьке шосе",
+    "Донецьке шосе",
+    "Княгині Ольги",
+    "Бориса Кротова",
+]
+
 BASE_STORE_NAMES: list[str] = [
     "ПроКолесо",
     "Твоя Шина",
@@ -112,6 +149,7 @@ def get_base_phrases() -> list[str]:
     for pronunciations in BRAND_PRONUNCIATIONS.values():
         phrases.extend(pronunciations)
     phrases.extend(BASE_TERMS_UK)
+    phrases.extend(BASE_CONVERSATIONAL)
     phrases.extend(BASE_STORE_NAMES)
     return phrases
 
