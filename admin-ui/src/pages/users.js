@@ -18,6 +18,7 @@ const PERMISSION_GROUPS = {
     prompts: ['prompts:read', 'prompts:write', 'prompts:delete'],
     users: ['users:read', 'users:write'],
     audit: ['audit:read'],
+    customers: ['customers:read'],
     tenants: ['tenants:read', 'tenants:write', 'tenants:delete'],
     operators: ['operators:read', 'operators:write'],
     analytics: ['analytics:read', 'analytics:export'],
@@ -34,7 +35,7 @@ const PERMISSION_GROUPS = {
 
 const ROLE_DEFAULTS = {
     admin: ['*'],
-    analyst: ['analytics:read', 'analytics:export', 'knowledge:read', 'training:read', 'prompts:read', 'vehicles:read', 'operators:read'],
+    analyst: ['analytics:read', 'analytics:export', 'customers:read', 'knowledge:read', 'training:read', 'prompts:read', 'vehicles:read', 'operators:read'],
     operator: ['operators:read'],
     content_manager: [
         'sandbox:read', 'sandbox:write', 'sandbox:delete',
