@@ -6,6 +6,7 @@ import hmac
 import json
 import logging
 import os
+import re
 import signal
 import sys
 import uuid as uuid_mod
@@ -1819,6 +1820,63 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                         city,
                         len(filtered),
                     )
+
+            # Self-heal: LLM sometimes calls get_fitting_stations() with empty
+            # params even when the caller named a landmark ("речпорт", "епіцентр").
+            # If we're about to return zero stations, scan the last customer
+            # utterance for a distinctive word (4+ letters) that appears in any
+            # hint field and re-filter with it as query.
+            if not filtered and not effective_query and session.dialog_history:
+                last_user = next(
+                    (t for t in reversed(session.dialog_history) if t.speaker == "user"),
+                    None,
+                )
+                if last_user and last_user.content:
+                    user_words = set(re.findall(r"[а-яёіїєґА-ЯЁІЇЄҐ]{4,}", last_user.content.lower()))
+                    hint_words: set[str] = set()
+                    for h in hints.values():
+                        hint_text = " ".join(
+                            [
+                                h.get("district", ""),
+                                h.get("landmarks", ""),
+                                h.get("description", ""),
+                            ]
+                        ).lower()
+                        hint_words.update(re.findall(r"[а-яёіїєґ]{4,}", hint_text))
+                    matched = user_words & hint_words
+                    if matched:
+                        auto_query = next(iter(matched))
+                        logger.info(
+                            "get_fitting_stations: LLM called empty for call %s, "
+                            "auto-injecting query=%r from user text %r",
+                            session.channel_uuid,
+                            auto_query,
+                            last_user.content[:60],
+                        )
+                        base = filtered if filtered else all_stations
+                        if effective_city:
+                            city_q = _normalize_city(effective_city)
+                            base = [
+                                s
+                                for s in base
+                                if city_q in _normalize_city(s.get("city", ""))
+                                or _normalize_city(s.get("city", "")) in city_q
+                            ]
+                        for s in base:
+                            sid = s.get("station_id", s.get("id", ""))
+                            address = s.get("address", "").lower()
+                            h = hints.get(sid, {})
+                            searchable = " ".join(
+                                [
+                                    address,
+                                    h.get("district", ""),
+                                    h.get("landmarks", ""),
+                                    h.get("description", ""),
+                                ]
+                            ).lower()
+                            if auto_query in searchable:
+                                filtered.append(s)
+                        effective_query = auto_query
 
             stations_out = []
             for s in filtered[:20]:
