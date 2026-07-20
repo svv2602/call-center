@@ -26,6 +26,10 @@ SESSION_KEY_PREFIX = "call_session"
 SESSION_TTL = 1800  # 30 minutes
 SILENCE_TIMEOUT_SEC = 25
 MAX_TIMEOUTS_BEFORE_HANGUP = 3
+# Number of consecutive empty LLM responses before escalating to the
+# operator-transfer template. Below the threshold we ask the caller to
+# repeat with a gentle prompt instead of announcing a transfer.
+MAX_EMPTY_RESPONSES_BEFORE_ESCALATE = 3
 
 
 class CallState(enum.StrEnum):
@@ -68,6 +72,7 @@ class CallSession:
         self.started_at: float = time.time()
         self.dialog_history: list[DialogTurn] = []
         self.timeout_count: int = 0
+        self.empty_response_count: int = 0
         self.detected_language: str = "uk-UA"
         self.scenario: str | None = None
         self.transferred: bool = False
@@ -127,6 +132,15 @@ class CallSession:
         self.timeout_count += 1
         return self.timeout_count >= MAX_TIMEOUTS_BEFORE_HANGUP
 
+    def record_empty_response(self) -> bool:
+        """Record an empty LLM response. Returns True if escalation is due."""
+        self.empty_response_count += 1
+        return self.empty_response_count >= MAX_EMPTY_RESPONSES_BEFORE_ESCALATE
+
+    def reset_empty_response(self) -> None:
+        """Called after a successful LLM turn."""
+        self.empty_response_count = 0
+
     def mark_transfer(self, reason: str) -> None:
         """Mark the call as transferred to an operator."""
         self.transferred = True
@@ -160,6 +174,7 @@ class CallSession:
             "needs_phone_verification": self.needs_phone_verification,
             "started_at": self.started_at,
             "timeout_count": self.timeout_count,
+            "empty_response_count": self.empty_response_count,
             "detected_language": self.detected_language,
             "scenario": self.scenario,
             "transferred": self.transferred,
@@ -200,6 +215,7 @@ class CallSession:
         session.needs_phone_verification = data.get("needs_phone_verification", False)
         session.started_at = data["started_at"]
         session.timeout_count = data.get("timeout_count", 0)
+        session.empty_response_count = data.get("empty_response_count", 0)
         session.detected_language = data.get("detected_language", "uk-UA")
         session.scenario = data.get("scenario")
         session.transferred = data.get("transferred", False)

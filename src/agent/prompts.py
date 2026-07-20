@@ -1291,6 +1291,11 @@ TRANSFER_TEXT = "Зараз з'єдную вас з оператором. Зал
 
 ERROR_TEXT = "Перепрошую, виникла технічна помилка. Спробуйте, будь ласка, зателефонувати ще раз."
 
+# Soft fallback for a transient empty LLM response — a gentle re-ask
+# that does NOT mention an operator transfer. Used until the empty-response
+# counter crosses the escalation threshold (see call_session.MAX_EMPTY_RESPONSES_BEFORE_ESCALATE).
+EMPTY_RESPONSE_SOFT_TEXT = "Перепрошую, не почула. Скажіть, будь ласка, ще раз."
+
 WAIT_TEXT = "Зачекайте, будь ласка, я дивлюся інформацію."
 
 ORDER_CANCELLED_TEXT = "Замовлення скасовано. Чим ще можу допомогти?"

@@ -3,6 +3,7 @@
 import uuid
 
 from src.core.call_session import (
+    MAX_EMPTY_RESPONSES_BEFORE_ESCALATE,
     MAX_TIMEOUTS_BEFORE_HANGUP,
     CallSession,
     CallState,
@@ -107,6 +108,30 @@ class TestCallSessionTimeout:
         session.record_timeout()
         session.add_user_turn("Алло")
         assert session.timeout_count == 0
+
+
+class TestCallSessionEmptyResponse:
+    """Test empty-LLM-response escalation."""
+
+    def test_first_empty_does_not_escalate(self) -> None:
+        session = CallSession(uuid.uuid4())
+        escalate = session.record_empty_response()
+        assert not escalate
+        assert session.empty_response_count == 1
+
+    def test_escalates_after_threshold(self) -> None:
+        session = CallSession(uuid.uuid4())
+        for _ in range(MAX_EMPTY_RESPONSES_BEFORE_ESCALATE - 1):
+            session.record_empty_response()
+        escalate = session.record_empty_response()
+        assert escalate
+
+    def test_reset_after_success(self) -> None:
+        session = CallSession(uuid.uuid4())
+        session.record_empty_response()
+        session.record_empty_response()
+        session.reset_empty_response()
+        assert session.empty_response_count == 0
 
 
 class TestCallSessionTransfer:

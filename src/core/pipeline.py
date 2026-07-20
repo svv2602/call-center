@@ -15,6 +15,7 @@ import zoneinfo
 from typing import TYPE_CHECKING, Any
 
 from src.agent.prompts import (
+    EMPTY_RESPONSE_SOFT_TEXT,
     ERROR_TEXT,
     FAREWELL_ORDER_TEXT,
     FAREWELL_TEXT,
@@ -339,6 +340,27 @@ class CallPipeline:
         except Exception:
             logger.warning("session persist failed for call %s", self._session.channel_uuid)
 
+    def _resolve_empty_response_fallback(self) -> str:
+        """Pick a fallback phrase for an empty LLM response.
+
+        Below the session's escalation threshold, use a gentle re-ask that
+        does NOT mention an operator transfer — most empty responses are
+        transient (network/model hiccup) and the caller shouldn't hear
+        "connecting operator" for a one-off glitch. At or above the
+        threshold, fall through to the standard error template (which does
+        announce a transfer).
+        """
+        escalate = self._session.record_empty_response()
+        logger.warning(
+            "Empty LLM response: call=%s, consecutive=%d, escalate=%s",
+            self._session.channel_uuid,
+            self._session.empty_response_count,
+            escalate,
+        )
+        if escalate:
+            return self._templates.get("error", ERROR_TEXT)
+        return EMPTY_RESPONSE_SOFT_TEXT
+
     async def run(self) -> None:
         """Run the full call pipeline until hangup or transfer."""
         try:
@@ -650,6 +672,7 @@ class CallPipeline:
                     )
 
                 if result is not None and result.spoken_text:
+                    self._session.reset_empty_response()
                     self._session.add_assistant_turn(result.spoken_text)
                     await self._log_turn("bot", result.spoken_text, llm_latency_ms=llm_latency_ms)
                     await self._persist_session()
@@ -671,8 +694,7 @@ class CallPipeline:
                         transcript.text[:50],
                     )
                 else:
-                    logger.warning("Empty streaming response: call=%s", self._session.channel_uuid)
-                    fallback = self._templates.get("error", ERROR_TEXT)
+                    fallback = self._resolve_empty_response_fallback()
                     self._session.add_assistant_turn(fallback)
                     await self._log_turn("bot", fallback)
                     await self._persist_session()
@@ -745,14 +767,14 @@ class CallPipeline:
                 if response_text:
                     # Strip duplicate greeting that LLM may produce
                     response_text = _strip_greeting(response_text)
+                    self._session.reset_empty_response()
                     self._session.add_assistant_turn(response_text)
                     await self._log_turn("bot", response_text, llm_latency_ms=llm_latency_ms)
                     await self._persist_session()
                     await self._speak_streaming(response_text)
                 else:
                     # Never leave the caller in silence — speak an error fallback
-                    logger.warning("Empty agent response: call=%s", self._session.channel_uuid)
-                    fallback = self._templates.get("error", ERROR_TEXT)
+                    fallback = self._resolve_empty_response_fallback()
                     self._session.add_assistant_turn(fallback)
                     await self._log_turn("bot", fallback)
                     await self._persist_session()
