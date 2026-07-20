@@ -75,6 +75,7 @@ class TestPartitionedTables:
         assert "calls" in PARTITIONED_TABLES
         assert "call_turns" in PARTITIONED_TABLES
         assert "call_tool_calls" in PARTITIONED_TABLES
+        assert "llm_usage_log" in PARTITIONED_TABLES
 
     def test_retention_tables_subset(self) -> None:
         for table in RETENTION_TABLES:

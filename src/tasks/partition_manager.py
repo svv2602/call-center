@@ -29,11 +29,12 @@ from src.tasks.celery_app import app
 
 logger = logging.getLogger(__name__)
 
-PARTITIONED_TABLES = ["calls", "call_turns", "call_tool_calls"]
+PARTITIONED_TABLES = ["calls", "call_turns", "call_tool_calls", "llm_usage_log"]
 PARTITION_KEY = {
     "calls": "started_at",
     "call_turns": "created_at",
     "call_tool_calls": "created_at",
+    "llm_usage_log": "created_at",
 }
 MONTHS_AHEAD = 3
 # Drop old partitions for transcription tables only (calls metadata kept longer)
