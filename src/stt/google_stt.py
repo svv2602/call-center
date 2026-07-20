@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 
 from google.cloud.speech_v2 import SpeechAsyncClient
 from google.cloud.speech_v2.types import cloud_speech
+from google.protobuf import duration_pb2
 
 from src.stt.base import STTConfig, Transcript
 
@@ -23,7 +24,6 @@ _SESSION_RESTART_SECONDS = 290  # restart slightly before 5 min limit
 
 # Google STT v2 inline PhraseSet limit
 _MAX_PHRASE_HINTS = 1200
-
 
 
 def _build_adaptation(
@@ -70,9 +70,13 @@ class GoogleSTTEngine:
         self._session_start = time.monotonic()
         self._stream_task = asyncio.create_task(self._recognition_loop())
         logger.info(
-            "STT stream started: lang=%s, alternatives=%s",
+            "STT stream started: lang=%s, alternatives=%s, model=%s, "
+            "endpointing=%s, speech_end_timeout_ms=%d",
             config.language_code,
             config.alternative_languages,
+            config.model,
+            config.endpointing_sensitivity or "default",
+            config.speech_end_timeout_ms,
         )
 
     async def feed_audio(self, chunk: bytes) -> None:
@@ -137,6 +141,47 @@ class GoogleSTTEngine:
         self._session_start = time.monotonic()
         self._stream_task = asyncio.create_task(self._recognition_loop())
 
+    def _build_streaming_features(self) -> cloud_speech.StreamingRecognitionFeatures:
+        """Build StreamingRecognitionFeatures with configurable endpointing.
+
+        Applies ``endpointing_sensitivity`` and ``speech_end_timeout_ms`` when set
+        in STTConfig; both default to "no override" so behavior matches the SDK
+        default when not configured. Unknown sensitivity values are ignored with
+        a warning (safer than crashing the stream).
+        """
+        assert self._config is not None
+
+        kwargs: dict[str, object] = {"interim_results": self._config.interim_results}
+
+        # Endpointing sensitivity: STANDARD/SHORT/SUPERSHORT. SHORT = less aggressive
+        # cutting mid-utterance (better for callers who pause to think).
+        sensitivity_name = (self._config.endpointing_sensitivity or "").strip().upper()
+        if sensitivity_name:
+            enum_cls = cloud_speech.StreamingRecognitionFeatures.EndpointingSensitivity
+            enum_attr = f"ENDPOINTING_SENSITIVITY_{sensitivity_name}"
+            enum_value = getattr(enum_cls, enum_attr, None)
+            if enum_value is not None:
+                kwargs["endpointing_sensitivity"] = enum_value
+            else:
+                logger.warning(
+                    "Unknown endpointing_sensitivity=%r, using SDK default",
+                    sensitivity_name,
+                )
+
+        # speech_end_timeout: extra silence Google waits before closing the utterance.
+        if self._config.speech_end_timeout_ms > 0:
+            ms = self._config.speech_end_timeout_ms
+            kwargs["voice_activity_timeout"] = (
+                cloud_speech.StreamingRecognitionFeatures.VoiceActivityTimeout(
+                    speech_end_timeout=duration_pb2.Duration(
+                        seconds=ms // 1000,
+                        nanos=(ms % 1000) * 1_000_000,
+                    ),
+                )
+            )
+
+        return cloud_speech.StreamingRecognitionFeatures(**kwargs)
+
     def _build_recognition_config(
         self, *, with_adaptation: bool = True
     ) -> cloud_speech.RecognitionConfig:
@@ -178,9 +223,7 @@ class GoogleSTTEngine:
             recognition_config = self._build_recognition_config(with_adaptation=use_adaptation)
             streaming_config = cloud_speech.StreamingRecognitionConfig(
                 config=recognition_config,
-                streaming_features=cloud_speech.StreamingRecognitionFeatures(
-                    interim_results=self._config.interim_results,
-                ),
+                streaming_features=self._build_streaming_features(),
             )
 
             model = recognition_config.model

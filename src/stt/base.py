@@ -39,6 +39,11 @@ class STTConfig:
     model: str = "latest_long"
     enable_punctuation: bool = True
     phrase_hints: tuple[str, ...] = ()
+    # Google STT endpointing tuning. Empty/0 means "use SDK default".
+    endpointing_sensitivity: str = ""
+    speech_end_timeout_ms: int = 0
+    # Pipeline-side buffer for merging fragmented finals. Read by pipeline, not by STT engine.
+    transcript_buffer_sec: float = 1.2
 
 
 @runtime_checkable

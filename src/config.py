@@ -22,6 +22,19 @@ class GoogleSTTSettings(BaseSettings):
     alternative_languages: str = "ru-RU"
     project_id: str = ""
     model: str = "latest_long"
+    # Endpointing: how quickly STT finalizes on pauses.
+    # STANDARD (default) tends to over-fragment mid-utterance pauses.
+    # SHORT is less aggressive; SUPERSHORT more aggressive. Empty = don't set (SDK default).
+    endpointing_sensitivity: str = ""
+    # Extra silence (ms) before Google closes the utterance. 0 = don't set (SDK default).
+    # WARNING: enabling this on model=latest_long broke STT in a prior attempt
+    # (commits 412ee88 → 11d7e1d, 2026-03-11). Test carefully before enabling in prod;
+    # if STT produces zero transcripts, set back to 0.
+    speech_end_timeout_ms: int = 0
+    # Pipeline-side buffer: after first final, wait this long for more finals to arrive
+    # and merge them into one turn. Compensates for aggressive STT endpointing.
+    # Safe to change — does not touch Google's stream config.
+    transcript_buffer_sec: float = 1.2
 
     model_config = {"env_prefix": "GOOGLE_STT_"}
 

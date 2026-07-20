@@ -45,9 +45,12 @@ AGENT_PROCESSING_TIMEOUT_SEC = 45
 # Prevents echo from speaker triggering false barge-in detection.
 _BARGE_IN_SUPPRESSION_SEC = 0.3
 
-# Window to buffer multiple final transcripts after barge-in (seconds).
-# Multiple STT finals may arrive in quick succession; we merge them into one turn.
-_TRANSCRIPT_BUFFER_SEC = 0.3
+# Default window to buffer multiple final transcripts (seconds).
+# Google STT tends to finalize on ~500ms pauses, which fragments mid-utterance
+# ("літніх" / "215" / "65" / "16" as 4 separate finals when the caller dictated
+# a size with brief pauses). We buffer arrivals within this window and merge them.
+# Actual value comes from STTConfig.transcript_buffer_sec; this is a fallback only.
+_TRANSCRIPT_BUFFER_SEC_DEFAULT = 1.2
 
 # Timeout for contextual farewell LLM call (seconds)
 _FAREWELL_LLM_TIMEOUT_SEC = 3
@@ -349,7 +352,9 @@ class CallPipeline:
             # Play greeting while STT is already consuming audio
             logger.info("Pipeline: starting greeting for %s", self._session.channel_uuid)
             await self._play_greeting()
-            logger.info("Pipeline: greeting done, entering LISTENING for %s", self._session.channel_uuid)
+            logger.info(
+                "Pipeline: greeting done, entering LISTENING for %s", self._session.channel_uuid
+            )
 
             # Main loop
             self._session.transition_to(CallState.LISTENING)
@@ -452,19 +457,22 @@ class CallPipeline:
     async def _drain_transcript_buffer(self, first: Transcript) -> Transcript:
         """Buffer multiple final transcripts arriving in quick succession.
 
-        After a barge-in, STT may emit several finals within a short window.
-        We wait ``_TRANSCRIPT_BUFFER_SEC`` and merge them into a single turn
-        so the LLM receives one coherent user message instead of duplicates.
+        Google STT finalizes aggressively on ~500ms pauses, so a single spoken
+        phrase often arrives as several finals. We wait ``transcript_buffer_sec``
+        after each final and merge whatever arrives within that window into a
+        single LLM turn.
         """
+        buffer_sec = self._stt_config.transcript_buffer_sec or _TRANSCRIPT_BUFFER_SEC_DEFAULT
         texts = [first.text]
         confidences = [first.confidence]
         language = first.language
+        start_ts = time.monotonic()
 
         try:
             while True:
                 next_t = await asyncio.wait_for(
                     self._get_next_final_transcript(),
-                    timeout=_TRANSCRIPT_BUFFER_SEC,
+                    timeout=buffer_sec,
                 )
                 texts.append(next_t.text)
                 confidences.append(next_t.confidence)
@@ -476,10 +484,13 @@ class CallPipeline:
         if len(texts) > 1:
             merged_text = " ".join(texts)
             avg_confidence = sum(confidences) / len(confidences)
+            span_ms = (time.monotonic() - start_ts) * 1000
             logger.info(
-                "Merged %d transcripts into one: '%s'",
+                "STT buffer: merged=%d span_ms=%.0f window_sec=%.2f text='%s'",
                 len(texts),
-                merged_text[:50],
+                span_ms,
+                buffer_sec,
+                merged_text[:80],
             )
             return Transcript(
                 text=merged_text,
@@ -491,7 +502,9 @@ class CallPipeline:
 
     async def _transcript_processor_loop(self) -> None:
         """Process STT transcripts and drive the LLM → TTS flow."""
-        logger.info("Pipeline: transcript_processor_loop started for %s", self._session.channel_uuid)
+        logger.info(
+            "Pipeline: transcript_processor_loop started for %s", self._session.channel_uuid
+        )
         while not self._conn.is_closed:
             # Wait for final transcripts with silence timeout
             transcript = await self._wait_for_final_transcript()
@@ -520,7 +533,11 @@ class CallPipeline:
                     await self._speak(silence_msg)
                     continue
 
-            logger.info("Pipeline: got transcript '%s' for %s", transcript.text[:50], self._session.channel_uuid)
+            logger.info(
+                "Pipeline: got transcript '%s' for %s",
+                transcript.text[:50],
+                self._session.channel_uuid,
+            )
 
             # Buffer multiple transcripts arriving in quick succession
             transcript = await self._drain_transcript_buffer(transcript)
@@ -831,9 +848,15 @@ class CallPipeline:
         self._barge_in_event.clear()
 
         try:
-            logger.info("TTS synthesize start (%d chars) for %s", len(text), self._session.channel_uuid)
+            logger.info(
+                "TTS synthesize start (%d chars) for %s", len(text), self._session.channel_uuid
+            )
             audio = await self._tts.synthesize(text)
-            logger.info("TTS synthesize done (%d bytes) for %s", len(audio) if audio else 0, self._session.channel_uuid)
+            logger.info(
+                "TTS synthesize done (%d bytes) for %s",
+                len(audio) if audio else 0,
+                self._session.channel_uuid,
+            )
 
             # Check if barge-in was detected during TTS synthesis
             if self._barge_in_event.is_set():

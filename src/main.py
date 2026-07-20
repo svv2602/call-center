@@ -787,6 +787,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             alternative_languages=settings.google_stt.alternative_language_list,
             model=settings.google_stt.model,
             phrase_hints=phrase_hints,
+            endpointing_sensitivity=settings.google_stt.endpointing_sensitivity,
+            speech_end_timeout_ms=settings.google_stt.speech_end_timeout_ms,
+            transcript_buffer_sec=settings.google_stt.transcript_buffer_sec,
         )
 
         # Load DB templates and tool overrides in parallel
@@ -1187,9 +1190,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 conn.channel_uuid,
             )
             try:
-                await asyncio.wait_for(
-                    _wait_for_hangup(conn), timeout=30
-                )
+                await asyncio.wait_for(_wait_for_hangup(conn), timeout=30)
                 logger.info(
                     "Asterisk hangup received after transfer: %s",
                     conn.channel_uuid,
@@ -1557,7 +1558,9 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                                     auto_num,
                                 )
                             except Exception:
-                                logger.debug("Failed to update customer profile after booking", exc_info=True)
+                                logger.debug(
+                                    "Failed to update customer profile after booking", exc_info=True
+                                )
                         return {
                             "booking_id": guid,
                             "status": "confirmed",
@@ -1926,13 +1929,15 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 slots = []
                 for s in raw_slots:
                     qty = int(s.get("Quantity", 0))
-                    slots.append({
-                        "station_id": s.get("StationID", station_id),
-                        "date": s.get("Data", ""),
-                        "time": s.get("Time", ""),
-                        "period": s.get("Period", ""),
-                        "available": count_posts - qty > 0,
-                    })
+                    slots.append(
+                        {
+                            "station_id": s.get("StationID", station_id),
+                            "date": s.get("Data", ""),
+                            "time": s.get("Time", ""),
+                            "period": s.get("Period", ""),
+                            "available": count_posts - qty > 0,
+                        }
+                    )
                 avail = [s for s in slots if s.get("available")]
                 logger.info(
                     "get_fitting_slots for call %s: station=%s, date=%s..%s, "
@@ -2113,7 +2118,9 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                         raw_stations = await _redis.get("onec:fitting_stations")
                         if raw_stations:
                             for s in json.loads(
-                                raw_stations if isinstance(raw_stations, str) else raw_stations.decode()
+                                raw_stations
+                                if isinstance(raw_stations, str)
+                                else raw_stations.decode()
                             ):
                                 sid = s.get("station_id", s.get("id", ""))
                                 if sid:
@@ -2262,9 +2269,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 )
             except TimeoutError:
                 success = False
-                logger.error(
-                    "ARI transfer timeout (5s) for call %s", session.channel_uuid
-                )
+                logger.error("ARI transfer timeout (5s) for call %s", session.channel_uuid)
 
             if success:
                 session.transferred = True
@@ -2274,9 +2279,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     session.channel_uuid,
                     reason,
                 )
-                await publish_event(
-                    "call:transferred", {"call_id": str(session.channel_uuid)}
-                )
+                await publish_event("call:transferred", {"call_id": str(session.channel_uuid)})
                 return {"status": "transferring", "message": "З'єдную з оператором"}
             else:
                 transfer_attempts_total.labels(result="error").inc()
@@ -2642,7 +2645,9 @@ async def main() -> None:
             await _ari_client.open()
             logger.info("ARI client initialized: %s", settings.ari.url)
         except Exception:
-            logger.warning("ARI client init failed — operator transfers will be unavailable", exc_info=True)
+            logger.warning(
+                "ARI client init failed — operator transfers will be unavailable", exc_info=True
+            )
             _ari_client = None
     else:
         logger.info("ARI not configured (ARI_URL empty) — operator transfers unavailable")
