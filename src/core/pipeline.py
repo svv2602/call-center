@@ -308,6 +308,7 @@ class CallPipeline:
         content: str,
         stt_confidence: float | None = None,
         llm_latency_ms: int | None = None,
+        language: str | None = None,
     ) -> None:
         """Log a turn to the database (fire-and-forget)."""
         if self._call_logger is None:
@@ -322,6 +323,7 @@ class CallPipeline:
                 content=content,
                 stt_confidence=stt_confidence,
                 llm_latency_ms=llm_latency_ms,
+                language=language,
             )
         except Exception:
             logger.warning("log_turn failed for call %s", self._session.channel_uuid)
@@ -624,7 +626,10 @@ class CallPipeline:
                     detected_language=transcript.language,
                 )
                 await self._log_turn(
-                    "customer", transcript.text, stt_confidence=transcript.confidence
+                    "customer",
+                    transcript.text,
+                    stt_confidence=transcript.confidence,
+                    language=transcript.language,
                 )
                 self._session.transition_to(CallState.SPEAKING)
                 self._speaking = True
@@ -753,7 +758,10 @@ class CallPipeline:
                     detected_language=transcript.language,
                 )
                 await self._log_turn(
-                    "customer", transcript.text, stt_confidence=transcript.confidence
+                    "customer",
+                    transcript.text,
+                    stt_confidence=transcript.confidence,
+                    language=transcript.language,
                 )
 
                 logger.info(

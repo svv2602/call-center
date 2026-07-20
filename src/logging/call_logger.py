@@ -146,16 +146,17 @@ class CallLogger:
         stt_latency_ms: int | None = None,
         llm_latency_ms: int | None = None,
         tts_latency_ms: int | None = None,
+        language: str | None = None,
     ) -> None:
         """Log a single dialog turn."""
         await self._execute(
             """
             INSERT INTO call_turns (id, call_id, turn_number, speaker, content,
                                      stt_confidence, stt_latency_ms, llm_latency_ms,
-                                     tts_latency_ms, created_at)
+                                     tts_latency_ms, language, created_at)
             VALUES (:id, :call_id, :turn_number, :speaker, :content,
                     :stt_confidence, :stt_latency_ms, :llm_latency_ms,
-                    :tts_latency_ms, :created_at)
+                    :tts_latency_ms, :language, :created_at)
             """,
             {
                 "id": str(uuid.uuid4()),
@@ -167,6 +168,7 @@ class CallLogger:
                 "stt_latency_ms": stt_latency_ms,
                 "llm_latency_ms": llm_latency_ms,
                 "tts_latency_ms": tts_latency_ms,
+                "language": language,
                 "created_at": datetime.now(UTC),
             },
         )
