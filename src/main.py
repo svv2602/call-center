@@ -1333,6 +1333,30 @@ def _normalize_city(name: str) -> str:
     return low
 
 
+def _query_matches(query: str, searchable: str) -> bool:
+    """Fuzzy match a station-search query against a searchable text blob.
+
+    Falls back to token-prefix matching when substring fails — handles case-
+    ending mismatches like query="Холодного" vs address="Холодногірська",
+    or query="Холодна гора 11" vs address="Холодногірська, 11".
+    """
+    q = query.strip().lower()
+    if not q:
+        return False
+    s = searchable.lower()
+    if q in s:
+        return True
+    query_tokens = [w for w in re.findall(r"[\w']+", q, flags=re.UNICODE) if len(w) >= 4]
+    if not query_tokens:
+        return False
+    text_tokens = re.findall(r"[\w']+", s, flags=re.UNICODE)
+    for qt in query_tokens:
+        prefix = qt[:5]
+        if any(t.startswith(prefix) for t in text_tokens):
+            return True
+    return False
+
+
 def _build_tool_router(session: CallSession, store_client: StoreClient | None = None) -> ToolRouter:
     """Build a ToolRouter with all canonical tools registered."""
     router = ToolRouter()
@@ -1811,11 +1835,10 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
 
             # Query search: match address + hint fields (district, landmarks, description)
             if effective_query:
-                q = effective_query.lower()
                 query_matched = []
                 for s in filtered:
                     sid = s.get("station_id", s.get("id", ""))
-                    address = s.get("address", "").lower()
+                    address = s.get("address", "")
                     h = hints.get(sid, {})
                     searchable = " ".join(
                         [
@@ -1824,18 +1847,17 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                             h.get("landmarks", ""),
                             h.get("description", ""),
                         ]
-                    ).lower()
-                    if q in searchable:
+                    )
+                    if _query_matches(effective_query, searchable):
                         query_matched.append(s)
                 filtered = query_matched
 
             # Last-resort fallback: if city filter gave 0 results and no query,
             # try searching the full city string in address/hint fields
             if not filtered and effective_city and not effective_query:
-                full_q = city.lower()  # original city value
                 for s in all_stations:
                     sid = s.get("station_id", s.get("id", ""))
-                    address = s.get("address", "").lower()
+                    address = s.get("address", "")
                     h = hints.get(sid, {})
                     searchable = " ".join(
                         [
@@ -1845,8 +1867,8 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                             h.get("landmarks", ""),
                             h.get("description", ""),
                         ]
-                    ).lower()
-                    if full_q in searchable:
+                    )
+                    if _query_matches(city, searchable):
                         filtered.append(s)
                 if filtered:
                     logger.info(
