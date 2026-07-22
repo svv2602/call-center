@@ -138,6 +138,58 @@ class TestAddressContextNotMasked:
         assert "Добровольців Перший" in result
 
 
+class TestColloquialAddressNotMasked:
+    """Callers speak addresses without "вул." — prepositions/service words
+    must be recognized as address context. Regression tests for the
+    2026-07-22 incident (call 831bdf44) where "монтаж на Героев Днепра"
+    caused "Героев Днепра" to be masked and then written into customer.name.
+    """
+
+    def test_na_preposition_not_masked(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("монтаж на Героев Днепра")
+        assert "Героев Днепра" in result
+        assert "[NAME_" not in result
+
+    def test_zapyshit_na_not_masked(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("запишіть на Героев Днепра")
+        assert "Героев Днепра" in result
+        assert "[NAME_" not in result
+
+    def test_montazh_word_not_masked(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("монтаж Донецьке шосе")
+        assert "Донецьке шосе" in result
+        assert "[NAME_" not in result
+
+    def test_adresa_word_not_masked(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("адреса Маршала Тимошенка")
+        assert "Маршала Тимошенка" in result
+        assert "[NAME_" not in result
+
+    def test_rayon_word_not_masked(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("район Оболонь Троещина")
+        assert "Оболонь Троещина" in result
+        assert "[NAME_" not in result
+
+    def test_postfix_vulytsia_not_masked(self) -> None:
+        vault = PIIVault()
+        # Common opener: caller says the address first, "вулиця" comes after
+        result = vault.mask("Героїв Дніпра вулиця Черкаси")
+        assert "Героїв Дніпра" in result
+        assert "[NAME_" not in result
+
+    def test_postfix_shose_not_masked(self) -> None:
+        vault = PIIVault()
+        # Two-word street name followed by "шосе"
+        result = vault.mask("Донецьке Захарійовича шосе 69")
+        assert "Донецьке Захарійовича" in result
+        assert "[NAME_" not in result
+
+
 class TestVehicleBrandNotMasked:
     """Vehicle brand+model pairs must NOT be masked — they are not PII."""
 

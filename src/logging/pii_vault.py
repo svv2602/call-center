@@ -18,8 +18,26 @@ _ADDRESS_CONTEXT_RE = re.compile(
     r"(?:вулиц[яіь]|вул\.|провулок|пров\.|проспект|просп\.|бульвар|бульв\."
     r"|площ[аі]|пл\.|набережна|наб\.|шосе|алея|узвіз|тупик"
     r"|улица|ул\.|переулок|пер\.|проезд"
-    r"|Маршала|Генерала|Академіка|Героїв|Гетьмана|імені|ім\.)"
+    r"|Маршала|Генерала|Академіка|Героїв|Гетьмана|імені|ім\."
+    # Colloquial location prefixes — callers say "монтаж на Героев Днепра"
+    # without any formal "вул." marker. If the last word before the name is
+    # a direction preposition or a service word like "монтаж"/"адреса", the
+    # capitalized pair is almost certainly an address, not a person.
+    r"|монтаж|шиномонтаж|адрес[аи]?|станці[яі]"
+    r"|на|у|в|до|біля|поряд|район|мікрорайон|мкр\."
+    r"|на\s+вулиц[юі]|запиш[иі]т?ь\s+на|запис\s+на|записати\s+на)"
     r"\s*$",
+    re.IGNORECASE,
+)
+
+# Address context POSTFIX — if the token right after the capitalized pair is
+# one of these ("Героїв Дніпра вулиця", "Донецьке шосе 69"), the pair is an
+# address, not a name. Complements _ADDRESS_CONTEXT_RE which looks at prefix.
+_ADDRESS_POSTFIX_RE = re.compile(
+    r"^\s*(?:вулиц[яіь]|вул\.|провулок|пров\.|проспект|просп\.|бульвар|бульв\."
+    r"|площ[аі]|пл\.|набережна|наб\.|шосе|алея|узвіз|тупик|район|мікрорайон"
+    r"|улица|ул\.|переулок|пер\.|проезд"
+    r"|\d{1,4}[а-яА-Яa-zA-Z]?(?:\s*[,./]|$))",  # trailing house number like ", 7"
     re.IGNORECASE,
 )
 
@@ -91,14 +109,19 @@ class PIIVault:
 
     def _mask_name(self, match: re.Match[str]) -> str:
         raw = match.group(0)
-        # Skip names that appear in address context (street names are not PII)
         prefix = match.string[: match.start()]
-        if _ADDRESS_CONTEXT_RE.search(prefix):
-            return raw
-        # Skip vehicle brand+model pairs (not PII)
+        suffix = match.string[match.end() :]
+        # Cheap negative filters first — brands and vehicle context.
         if match.group(1) in _VEHICLE_BRANDS:
             return raw
         if _VEHICLE_CONTEXT_RE.search(prefix):
+            return raw
+        # Address context — never mask (public street data). Checks both:
+        #   - what comes BEFORE the pair ("на Героев Днепра", "вул. X Y")
+        #   - what comes AFTER  ("Героїв Дніпра вулиця", "Донецьке шосе 69")
+        if _ADDRESS_CONTEXT_RE.search(prefix):
+            return raw
+        if _ADDRESS_POSTFIX_RE.match(suffix):
             return raw
         if raw in self._to_placeholder:
             return self._to_placeholder[raw]
