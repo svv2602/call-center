@@ -1504,6 +1504,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             }
         station_id = station_id_raw
         kwargs["station_id"] = station_id
+        session.last_fitting_station_id = station_id
 
         # Server-side validation: time must be HH:MM (agent should ask, not invent).
         time_raw = str(kwargs.get("time", "")).strip()
@@ -2146,6 +2147,10 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     for s in avail
                     if _extract_time(s.get("time", ""))
                 ]
+                # Client verbally picked this station — remember it so the LLM's
+                # follow-up confirmation cannot drift to another station's address.
+                if station_id:
+                    session.last_fitting_station_id = station_id
                 return {"station_id": station_id, "slots": slots}
             except Exception:
                 logger.warning(

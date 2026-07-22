@@ -92,6 +92,10 @@ class CallSession:
         # Set of (date, time) slots offered by the last get_fitting_slots call so
         # the pipeline can capture the caller's choice from the LLM confirmation.
         self.fitting_slots_offered: list[dict[str, str]] = []
+        # Station the LLM last acted on via get_fitting_slots / book_fitting —
+        # used to inject the picked station even when fitting_stations_seen has
+        # multiple entries (customer verbally chose one).
+        self.last_fitting_station_id: str | None = None
         self.tools_called: set[str] = set()
         self.active_scenarios: set[str] = set()  # accumulated detected scenarios
         self.tenant_id: str | None = None
@@ -198,6 +202,7 @@ class CallSession:
             "selected_fitting_date": self.selected_fitting_date,
             "selected_fitting_time": self.selected_fitting_time,
             "fitting_slots_offered": self.fitting_slots_offered,
+            "last_fitting_station_id": self.last_fitting_station_id,
             "tools_called": sorted(self.tools_called),
             "active_scenarios": sorted(self.active_scenarios),
             "tenant_id": self.tenant_id,
@@ -243,6 +248,7 @@ class CallSession:
         session.selected_fitting_date = data.get("selected_fitting_date")
         session.selected_fitting_time = data.get("selected_fitting_time")
         session.fitting_slots_offered = list(data.get("fitting_slots_offered", []))
+        session.last_fitting_station_id = data.get("last_fitting_station_id")
         session.tools_called = set(data.get("tools_called", []))
         session.active_scenarios = set(data.get("active_scenarios", []))
         session.tenant_id = data.get("tenant_id")

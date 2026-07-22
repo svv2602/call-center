@@ -623,11 +623,23 @@ class CallPipeline:
             # a different city/address (seen 2026-07-22 with Виктория/Запоріжжя
             # drifting to Київ during a silence gap). Multiple stations = customer
             # is still choosing, no injection.
-            selected_station = (
-                self._session.fitting_stations_seen[0]
-                if len(self._session.fitting_stations_seen) == 1
-                else None
-            )
+            # Priority: (1) the station the LLM last acted on via
+            # get_fitting_slots/book_fitting — that's the client's chosen one,
+            # regardless of how many were shown. (2) fallback: single-station
+            # case. (3) otherwise leave None so the LLM asks the client to pick.
+            selected_station: dict[str, Any] | None = None
+            last_used = self._session.last_fitting_station_id
+            if last_used:
+                selected_station = next(
+                    (
+                        s
+                        for s in self._session.fitting_stations_seen
+                        if s.get("id") == last_used
+                    ),
+                    None,
+                )
+            if selected_station is None and len(self._session.fitting_stations_seen) == 1:
+                selected_station = self._session.fitting_stations_seen[0]
 
             # Anti-hallucination: pin the slot the LLM must use. If the client
             # already picked a specific (date, time) — inject as "selected".
