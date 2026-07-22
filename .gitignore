@@ -51,6 +51,12 @@ admin-ui/node_modules/
 .agents/
 .claude/
 
+# Audit prompts and reports (local only)
+audit/
+
+# Local development checklists / scratch data
+development-checklists/
+
 # GitHub (not using Actions/Dependabot)
 .github/
 
