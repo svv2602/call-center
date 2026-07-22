@@ -46,6 +46,7 @@ logs/
 
 # Admin UI (Vite)
 admin-ui/node_modules/
+admin-ui/dist/
 
 # Claude Code / Agent skills
 .agents/
