@@ -109,8 +109,7 @@ class TestAssemblePrompt:
             assert "Ти — голосовий асистент" in prompt
             assert "ЗАВЖДИ" in prompt
             assert "українською" in prompt
-            assert "Формат відповіді" in prompt
-            assert "Стиль живої розмови" in prompt
+            assert "Стиль і формат відповіді" in prompt
 
     def test_include_pronunciation_true(self) -> None:
         """Pronunciation rules included when include_pronunciation=True."""

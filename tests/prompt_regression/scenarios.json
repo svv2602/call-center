@@ -58,7 +58,7 @@
     "description": "User explicitly asks for an operator — should trigger transfer_to_operator",
     "user_message": "Переключіть на оператора",
     "expected_tool": "transfer_to_operator",
-    "expected_keywords": ["переключи одразу, без додаткових питань", "оператор"],
+    "expected_keywords": ["переключи одразу", "оператор"],
     "unexpected_keywords": [],
     "category": "operator"
   },
@@ -67,7 +67,7 @@
     "description": "User asks an off-topic question — no tool, prompt should forbid making up info",
     "user_message": "Який курс долара?",
     "expected_tool": null,
-    "expected_keywords": ["Не вигадуй інформацію"],
+    "expected_keywords": ["НЕ вигадуй факти"],
     "unexpected_keywords": [],
     "category": "safety"
   },
@@ -103,7 +103,7 @@
     "description": "User asks for operator using different phrasing — should trigger transfer_to_operator",
     "user_message": "Дайте оператора",
     "expected_tool": "transfer_to_operator",
-    "expected_keywords": ["переключи одразу, без додаткових питань"],
+    "expected_keywords": ["переключи одразу"],
     "unexpected_keywords": [],
     "category": "operator"
   }
