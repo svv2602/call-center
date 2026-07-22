@@ -159,6 +159,7 @@ class LLMAgent:
         tools_called: set[str] | None = None,
         scenario: str | None = None,
         active_scenarios: set[str] | None = None,
+        selected_station: dict[str, Any] | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         """Process a user message and return the agent's text response.
 
@@ -238,6 +239,7 @@ class LLMAgent:
             tools_called=tools_called,
             scenario=scenario,
             active_scenarios=active_scenarios,
+            selected_station=selected_station,
         )
 
         # Record prompt and history metrics

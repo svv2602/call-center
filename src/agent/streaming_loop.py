@@ -233,6 +233,7 @@ class StreamingAgentLoop:
         tools_called: set[str] | None = None,
         scenario: str | None = None,
         active_scenarios: set[str] | None = None,
+        selected_station: dict[str, Any] | None = None,
     ) -> TurnResult:
         """Run a full conversation turn with streaming audio output.
 
@@ -287,6 +288,7 @@ class StreamingAgentLoop:
             tools_called=tools_called,
             scenario=scenario,
             active_scenarios=active_scenarios,
+            selected_station=selected_station,
         )
 
         # Record prompt and history metrics

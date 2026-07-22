@@ -1015,6 +1015,7 @@ def build_system_prompt_with_context(
     tools_called: set[str] | None = None,
     scenario: str | None = None,
     active_scenarios: set[str] | None = None,
+    selected_station: dict[str, Any] | None = None,
 ) -> str:
     """Build the final system prompt with all dynamic context injected.
 
@@ -1181,6 +1182,30 @@ def build_system_prompt_with_context(
 
     if pattern_context:
         parts.append(pattern_context)
+
+    if selected_station:
+        sid = selected_station.get("id", "")
+        city = selected_station.get("city", "")
+        address = selected_station.get("address", "")
+        district = selected_station.get("district", "")
+        phone = selected_station.get("phone", "")
+        block = [
+            "\n## 📍 Обрана точка шиномонтажу (використовуй ТІЛЬКИ ці дані, не вигадуй іншу адресу!)",
+            f"- station_id: {sid}",
+        ]
+        if city:
+            block.append(f"- Місто: {city}")
+        if address:
+            block.append(f"- Адреса: {address}")
+        if district:
+            block.append(f"- Район: {district}")
+        if phone:
+            block.append(f"- Телефон: {phone}")
+        block.append(
+            "- ⛔ Якщо клієнт хоче іншу точку — обов'язково спочатку виклич "
+            "get_fitting_stations, а потім говори нову адресу з результату."
+        )
+        parts.append("\n".join(block))
 
     return "\n".join(parts)
 

@@ -618,6 +618,17 @@ class CallPipeline:
             # Compute order stage for stage-aware prompt injection
             order_stage = compute_order_stage(self._session.order_draft, self._session.order_id)
 
+            # If exactly one fitting station has been resolved for this call, inject
+            # its full details into the LLM prompt so the model doesn't hallucinate
+            # a different city/address (seen 2026-07-22 with Виктория/Запоріжжя
+            # drifting to Київ during a silence gap). Multiple stations = customer
+            # is still choosing, no injection.
+            selected_station = (
+                self._session.fitting_stations_seen[0]
+                if len(self._session.fitting_stations_seen) == 1
+                else None
+            )
+
             if self._streaming_loop is not None:
                 # STREAMING PATH — add user turn to session (streaming loop uses separate _llm_history)
                 self._session.add_user_turn(
@@ -651,6 +662,7 @@ class CallPipeline:
                             tools_called=self._session.tools_called,
                             scenario=self._session.scenario,
                             active_scenarios=self._session.active_scenarios,
+                            selected_station=selected_station,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )
@@ -730,6 +742,7 @@ class CallPipeline:
                             tools_called=self._session.tools_called,
                             scenario=self._session.scenario,
                             active_scenarios=self._session.active_scenarios,
+                            selected_station=selected_station,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )

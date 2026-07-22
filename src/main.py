@@ -1933,10 +1933,19 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                         entry["phone"] = h["phone"]
                 stations_out.append(entry)
 
-            # Track valid station IDs for server-side validation in book_fitting
+            # Track valid station IDs for server-side validation in book_fitting,
+            # and cache the full station dicts so we can inject "already picked
+            # station" into the LLM context on subsequent turns (prevents the
+            # model hallucinating a different city/address after silence gaps).
+            existing_ids = {s.get("id") for s in session.fitting_stations_seen}
             for s_out in stations_out:
-                if s_out.get("id"):
-                    session.fitting_station_ids.add(s_out["id"])
+                sid = s_out.get("id")
+                if not sid:
+                    continue
+                session.fitting_station_ids.add(sid)
+                if sid not in existing_ids:
+                    session.fitting_stations_seen.append(s_out)
+                    existing_ids.add(sid)
 
             logger.info(
                 "get_fitting_stations result for call %s: city=%s, found=%d, ids=%s",

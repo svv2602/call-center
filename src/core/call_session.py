@@ -81,6 +81,10 @@ class CallSession:
         self.order_draft: dict[str, Any] | None = None
         self.fitting_booked: bool = False
         self.fitting_station_ids: set[str] = set()  # station IDs from get_fitting_stations
+        # Full station dicts (id, name, city, address, district, phone) seen during
+        # the call — used to inject the picked station into every LLM turn so the
+        # model doesn't hallucinate a different city/address when memory drifts.
+        self.fitting_stations_seen: list[dict[str, Any]] = []
         self.tools_called: set[str] = set()
         self.active_scenarios: set[str] = set()  # accumulated detected scenarios
         self.tenant_id: str | None = None
@@ -183,6 +187,7 @@ class CallSession:
             "order_draft": self.order_draft,
             "fitting_booked": self.fitting_booked,
             "fitting_station_ids": sorted(self.fitting_station_ids),
+            "fitting_stations_seen": self.fitting_stations_seen,
             "tools_called": sorted(self.tools_called),
             "active_scenarios": sorted(self.active_scenarios),
             "tenant_id": self.tenant_id,
@@ -224,6 +229,7 @@ class CallSession:
         session.order_draft = data.get("order_draft")
         session.fitting_booked = data.get("fitting_booked", False)
         session.fitting_station_ids = set(data.get("fitting_station_ids", []))
+        session.fitting_stations_seen = list(data.get("fitting_stations_seen", []))
         session.tools_called = set(data.get("tools_called", []))
         session.active_scenarios = set(data.get("active_scenarios", []))
         session.tenant_id = data.get("tenant_id")
