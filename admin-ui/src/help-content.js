@@ -244,6 +244,8 @@ export const HELP_PAGES = {
             { titleKey: 'help.customers.table.title', contentKey: 'help.customers.table.content' },
             { titleKey: 'help.customers.search.title', contentKey: 'help.customers.search.content' },
             { titleKey: 'help.customers.detail.title', contentKey: 'help.customers.detail.content' },
+            { titleKey: 'help.customers.edit.title', contentKey: 'help.customers.edit.content' },
+            { titleKey: 'help.customers.delete.title', contentKey: 'help.customers.delete.content' },
         ],
         tipsKey: 'help.customers.tips',
     },

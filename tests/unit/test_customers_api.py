@@ -140,9 +140,7 @@ class TestListCustomers:
     def test_invalid_sort_by(self, mock_settings: MagicMock, client: TestClient) -> None:
         mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
 
-        resp = client.get(
-            "/admin/customers?sort_by=invalid_col", headers=_auth_header()
-        )
+        resp = client.get("/admin/customers?sort_by=invalid_col", headers=_auth_header())
 
         assert resp.status_code == 400
         assert "Invalid sort_by" in resp.json()["detail"]
@@ -159,9 +157,7 @@ class TestListCustomers:
         conn.execute = AsyncMock(return_value=result)
         mock_engine_fn.return_value = _patch_engine_with_conn(conn)
 
-        resp = client.get(
-            "/admin/customers?limit=10&offset=20", headers=_auth_header()
-        )
+        resp = client.get("/admin/customers?limit=10&offset=20", headers=_auth_header())
 
         assert resp.status_code == 200
         call_args = conn.execute.call_args
@@ -239,3 +235,141 @@ class TestGetCustomer:
         cid = uuid4()
         resp = client.get(f"/admin/customers/{cid}")
         assert resp.status_code in (401, 403)
+
+
+# ── TestUpdateCustomer ───────────────────────────────────
+
+
+class TestUpdateCustomer:
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.customers._get_engine", new_callable=AsyncMock)
+    def test_patch_fields(
+        self, mock_engine_fn: AsyncMock, mock_settings: MagicMock, client: TestClient
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        cid = uuid4()
+        updated = _customer_row(name="Нове імʼя")
+        updated["id"] = str(cid)
+
+        conn = AsyncMock()
+        update_result = MagicMock()
+        update_result.rowcount = 1
+
+        row = MagicMock()
+        row._mapping = updated
+        select_result = MagicMock()
+        select_result.first.return_value = row
+
+        conn.execute = AsyncMock(side_effect=[update_result, select_result])
+        mock_engine_fn.return_value = _patch_engine_with_conn(conn)
+
+        resp = client.patch(
+            f"/admin/customers/{cid}",
+            headers=_auth_header(),
+            json={"name": "Нове імʼя", "city": "Львів"},
+        )
+
+        assert resp.status_code == 200
+        assert resp.json()["customer"]["name"] == "Нове імʼя"
+        # first call was the UPDATE — inspect SQL params
+        update_call = conn.execute.call_args_list[0]
+        params = update_call[0][1]
+        assert params["name"] == "Нове імʼя"
+        assert params["city"] == "Львів"
+
+    @patch("src.api.auth.get_settings")
+    def test_patch_empty_body(self, mock_settings: MagicMock, client: TestClient) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        cid = uuid4()
+        resp = client.patch(f"/admin/customers/{cid}", headers=_auth_header(), json={})
+        assert resp.status_code == 400
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.customers._get_engine", new_callable=AsyncMock)
+    def test_patch_not_found(
+        self, mock_engine_fn: AsyncMock, mock_settings: MagicMock, client: TestClient
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        cid = uuid4()
+        conn = AsyncMock()
+        update_result = MagicMock()
+        update_result.rowcount = 0
+        conn.execute = AsyncMock(return_value=update_result)
+        mock_engine_fn.return_value = _patch_engine_with_conn(conn)
+
+        resp = client.patch(f"/admin/customers/{cid}", headers=_auth_header(), json={"name": "X"})
+        assert resp.status_code == 404
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.customers._get_engine", new_callable=AsyncMock)
+    def test_patch_unique_violation(
+        self, mock_engine_fn: AsyncMock, mock_settings: MagicMock, client: TestClient
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        cid = uuid4()
+        conn = AsyncMock()
+        conn.execute = AsyncMock(
+            side_effect=Exception("duplicate key value violates unique constraint")
+        )
+        mock_engine_fn.return_value = _patch_engine_with_conn(conn)
+
+        resp = client.patch(
+            f"/admin/customers/{cid}",
+            headers=_auth_header(),
+            json={"phone": "+380501111111"},
+        )
+        assert resp.status_code == 409
+
+
+# ── TestSoftDeleteCustomer ───────────────────────────────
+
+
+class TestSoftDeleteCustomer:
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.customers._get_engine", new_callable=AsyncMock)
+    def test_soft_delete(
+        self, mock_engine_fn: AsyncMock, mock_settings: MagicMock, client: TestClient
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        cid = uuid4()
+        conn = AsyncMock()
+        result = MagicMock()
+        result.rowcount = 1
+        conn.execute = AsyncMock(return_value=result)
+        mock_engine_fn.return_value = _patch_engine_with_conn(conn)
+
+        resp = client.delete(f"/admin/customers/{cid}", headers=_auth_header())
+        assert resp.status_code == 204
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.customers._get_engine", new_callable=AsyncMock)
+    def test_soft_delete_missing(
+        self, mock_engine_fn: AsyncMock, mock_settings: MagicMock, client: TestClient
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        cid = uuid4()
+        conn = AsyncMock()
+        result = MagicMock()
+        result.rowcount = 0
+        conn.execute = AsyncMock(return_value=result)
+        mock_engine_fn.return_value = _patch_engine_with_conn(conn)
+
+        resp = client.delete(f"/admin/customers/{cid}", headers=_auth_header())
+        assert resp.status_code == 404
+
+    @patch("src.api.auth.get_settings")
+    @patch("src.api.customers._get_engine", new_callable=AsyncMock)
+    def test_restore(
+        self, mock_engine_fn: AsyncMock, mock_settings: MagicMock, client: TestClient
+    ) -> None:
+        mock_settings.return_value.admin.jwt_secret = _TEST_SECRET
+        cid = uuid4()
+        conn = AsyncMock()
+        result = MagicMock()
+        result.rowcount = 1
+        conn.execute = AsyncMock(return_value=result)
+        mock_engine_fn.return_value = _patch_engine_with_conn(conn)
+
+        resp = client.post(f"/admin/customers/{cid}/restore", headers=_auth_header())
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "restored"
