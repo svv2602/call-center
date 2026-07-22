@@ -1451,13 +1451,47 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 "Поверніся до чеклісту і запитай у клієнта відсутні дані.",
             }
 
-        # Server-side validation: station_id must match a previously returned station
-        station_id = kwargs.get("station_id", "")
-        if (
-            station_id
-            and session.fitting_station_ids
-            and station_id not in session.fitting_station_ids
-        ):
+        # Server-side validation: station_id must be a numeric 1C id, not the caller's
+        # landmark text ("Оболонь", "Тимошенко"). If the LLM skipped
+        # get_fitting_stations and passed a name, redirect it to the discovery tool.
+        station_id_raw = str(kwargs.get("station_id", "")).strip()
+        if not re.fullmatch(r"\d{6,12}", station_id_raw):
+            logger.warning(
+                "book_fitting: rejected non-numeric station_id=%r for call %s "
+                "(LLM likely skipped get_fitting_stations)",
+                station_id_raw,
+                session.channel_uuid,
+            )
+            return {
+                "error": True,
+                "message": (
+                    f"station_id='{station_id_raw}' виглядає як назва, а не як ідентифікатор "
+                    "точки шиномонтажу. СПОЧАТКУ виклич get_fitting_stations з параметром "
+                    "query або city щоб знайти точку — потім використай поле 'id' з результату."
+                ),
+            }
+        station_id = station_id_raw
+        kwargs["station_id"] = station_id
+
+        # Server-side validation: time must be HH:MM (agent should ask, not invent).
+        time_raw = str(kwargs.get("time", "")).strip()
+        if not re.fullmatch(r"[0-2]?\d:[0-5]\d", time_raw):
+            logger.warning(
+                "book_fitting: rejected invalid time=%r for call %s",
+                time_raw,
+                session.channel_uuid,
+            )
+            return {
+                "error": True,
+                "message": (
+                    f"time='{time_raw}' не є валідним часом. Спочатку виклич "
+                    "get_fitting_slots щоб побачити доступні часи, покажи їх клієнту, "
+                    "дочекайся вибору, а потім передавай час у форматі HH:MM."
+                ),
+            }
+
+        # Cross-check against known stations for this call (belt + suspenders)
+        if session.fitting_station_ids and station_id not in session.fitting_station_ids:
             known_ids = sorted(session.fitting_station_ids)
             # Auto-correct if only one valid station
             if len(known_ids) == 1:
