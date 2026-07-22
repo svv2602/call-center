@@ -1333,6 +1333,14 @@ def _normalize_city(name: str) -> str:
     return low
 
 
+def _extract_time(raw: str) -> str:
+    """Normalize 1C time strings to HH:MM (drops seconds and ISO date prefix)."""
+    if not raw:
+        return ""
+    m = re.search(r"([0-2]?\d:[0-5]\d)(?::[0-5]\d)?$", raw.strip())
+    return m.group(1) if m else ""
+
+
 def _query_matches(query: str, searchable: str) -> bool:
     """Fuzzy match a station-search query against a searchable text blob.
 
@@ -1563,6 +1571,61 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     }
             except ValueError:
                 pass
+
+        # Anti-hallucination: date/time must come from the last get_fitting_slots
+        # response. Prevents drift where LLM confidently says "25 липня" during
+        # confirmation even though the caller picked "4 серпня" 10 turns ago.
+        if session.fitting_slots_offered:
+            offered_dates = {s["date"] for s in session.fitting_slots_offered}
+            offered_times_for_date = {
+                s["time"]
+                for s in session.fitting_slots_offered
+                if s["date"] == booking_date_str
+            }
+            if booking_date_str and booking_date_str not in offered_dates:
+                offered_str = ", ".join(sorted(offered_dates))
+                logger.warning(
+                    "book_fitting: rejected date=%s for call %s — not in offered slots [%s]",
+                    booking_date_str,
+                    session.channel_uuid,
+                    offered_str,
+                )
+                return {
+                    "error": True,
+                    "message": (
+                        f"date='{booking_date_str}' НЕ співпадає з датою, на яку "
+                        f"клієнт обирав слот. Останній get_fitting_slots повернув "
+                        f"слоти на дату {offered_str}. Використай саме цю дату "
+                        "або виклич get_fitting_slots повторно з правильною датою."
+                    ),
+                }
+            if (
+                booking_date_str
+                and time_raw
+                and offered_times_for_date
+                and time_raw not in offered_times_for_date
+            ):
+                times_str = ", ".join(sorted(offered_times_for_date))
+                logger.warning(
+                    "book_fitting: rejected time=%s on date=%s for call %s — "
+                    "not in offered [%s]",
+                    time_raw,
+                    booking_date_str,
+                    session.channel_uuid,
+                    times_str,
+                )
+                return {
+                    "error": True,
+                    "message": (
+                        f"time='{time_raw}' немає у списку доступних слотів на "
+                        f"{booking_date_str}. Доступні часи: {times_str}. "
+                        "Уточни у клієнта який час обрати з цього списку."
+                    ),
+                }
+            # All good — lock in the client's choice.
+            if booking_date_str and time_raw:
+                session.selected_fitting_date = booking_date_str
+                session.selected_fitting_time = time_raw
 
         if _onec_client is not None:
             logger.info(
@@ -2074,6 +2137,15 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     count_posts,
                     [s["time"] for s in avail[:10]],
                 )
+                # Snapshot offered slots for anti-hallucination: LLM cannot invent
+                # a date/time outside of what we returned from 1C.
+                session.selected_fitting_date = date_from
+                session.selected_fitting_time = None  # reset — client hasn't chosen yet
+                session.fitting_slots_offered = [
+                    {"date": date_from, "time": _extract_time(s.get("time", ""))}
+                    for s in avail
+                    if _extract_time(s.get("time", ""))
+                ]
                 return {"station_id": station_id, "slots": slots}
             except Exception:
                 logger.warning(

@@ -1018,6 +1018,8 @@ def build_system_prompt_with_context(
     scenario: str | None = None,
     active_scenarios: set[str] | None = None,
     selected_station: dict[str, Any] | None = None,
+    selected_slot: dict[str, str] | None = None,
+    offered_slots: list[dict[str, str]] | None = None,
 ) -> str:
     """Build the final system prompt with all dynamic context injected.
 
@@ -1208,6 +1210,42 @@ def build_system_prompt_with_context(
             "get_fitting_stations, а потім говори нову адресу з результату."
         )
         parts.append("\n".join(block))
+
+    if selected_slot:
+        sdate = selected_slot.get("date", "")
+        stime = selected_slot.get("time", "")
+        slot_block = [
+            "\n## 📅 Обраний слот шиномонтажу (використовуй ТІЛЬКИ ці дату/час!)",
+        ]
+        if sdate:
+            slot_block.append(f"- Дата: {sdate}")
+        if stime:
+            slot_block.append(f"- Час: {stime}")
+        slot_block.append(
+            "- ⛔ У book_fitting передавай саме ці date/time. НЕ ВИГАДУЙ інші!"
+        )
+        slot_block.append(
+            "- ⛔ У підтвердженні клієнту озвуч саме цю дату/час. "
+            "Якщо клієнт хоче іншу дату — виклич get_fitting_slots ЩЕ РАЗ."
+        )
+        parts.append("\n".join(slot_block))
+    elif offered_slots:
+        dates = sorted({s["date"] for s in offered_slots if s.get("date")})
+        if dates:
+            times_by_date: dict[str, list[str]] = {}
+            for s in offered_slots:
+                d = s.get("date", "")
+                t = s.get("time", "")
+                if d and t:
+                    times_by_date.setdefault(d, []).append(t)
+            slot_block = [
+                "\n## 📅 Запропоновані слоти шиномонтажу (клієнт ще обирає)",
+                "- ⛔ У book_fitting передавай тільки date/time з цього списку!",
+            ]
+            for d in dates:
+                times = ", ".join(sorted(set(times_by_date.get(d, []))))
+                slot_block.append(f"- {d}: {times}")
+            parts.append("\n".join(slot_block))
 
     return "\n".join(parts)
 

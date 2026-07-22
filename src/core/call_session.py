@@ -85,6 +85,13 @@ class CallSession:
         # the call — used to inject the picked station into every LLM turn so the
         # model doesn't hallucinate a different city/address when memory drifts.
         self.fitting_stations_seen: list[dict[str, Any]] = []
+        # Slot picked after get_fitting_slots — used to lock down date/time so the
+        # LLM cannot drift to a different date at book_fitting time.
+        self.selected_fitting_date: str | None = None  # YYYY-MM-DD
+        self.selected_fitting_time: str | None = None  # HH:MM
+        # Set of (date, time) slots offered by the last get_fitting_slots call so
+        # the pipeline can capture the caller's choice from the LLM confirmation.
+        self.fitting_slots_offered: list[dict[str, str]] = []
         self.tools_called: set[str] = set()
         self.active_scenarios: set[str] = set()  # accumulated detected scenarios
         self.tenant_id: str | None = None
@@ -188,6 +195,9 @@ class CallSession:
             "fitting_booked": self.fitting_booked,
             "fitting_station_ids": sorted(self.fitting_station_ids),
             "fitting_stations_seen": self.fitting_stations_seen,
+            "selected_fitting_date": self.selected_fitting_date,
+            "selected_fitting_time": self.selected_fitting_time,
+            "fitting_slots_offered": self.fitting_slots_offered,
             "tools_called": sorted(self.tools_called),
             "active_scenarios": sorted(self.active_scenarios),
             "tenant_id": self.tenant_id,
@@ -230,6 +240,9 @@ class CallSession:
         session.fitting_booked = data.get("fitting_booked", False)
         session.fitting_station_ids = set(data.get("fitting_station_ids", []))
         session.fitting_stations_seen = list(data.get("fitting_stations_seen", []))
+        session.selected_fitting_date = data.get("selected_fitting_date")
+        session.selected_fitting_time = data.get("selected_fitting_time")
+        session.fitting_slots_offered = list(data.get("fitting_slots_offered", []))
         session.tools_called = set(data.get("tools_called", []))
         session.active_scenarios = set(data.get("active_scenarios", []))
         session.tenant_id = data.get("tenant_id")

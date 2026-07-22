@@ -629,6 +629,20 @@ class CallPipeline:
                 else None
             )
 
+            # Anti-hallucination: pin the slot the LLM must use. If the client
+            # already picked a specific (date, time) — inject as "selected".
+            # Otherwise inject the list of dates+times returned by the last
+            # get_fitting_slots call so the LLM can't invent a fresh one.
+            selected_slot: dict[str, str] | None = None
+            offered_slots: list[dict[str, str]] | None = None
+            if self._session.selected_fitting_date and self._session.selected_fitting_time:
+                selected_slot = {
+                    "date": self._session.selected_fitting_date,
+                    "time": self._session.selected_fitting_time,
+                }
+            elif self._session.fitting_slots_offered:
+                offered_slots = list(self._session.fitting_slots_offered)
+
             if self._streaming_loop is not None:
                 # STREAMING PATH — add user turn to session (streaming loop uses separate _llm_history)
                 self._session.add_user_turn(
@@ -663,6 +677,8 @@ class CallPipeline:
                             scenario=self._session.scenario,
                             active_scenarios=self._session.active_scenarios,
                             selected_station=selected_station,
+                            selected_slot=selected_slot,
+                            offered_slots=offered_slots,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )
@@ -743,6 +759,8 @@ class CallPipeline:
                             scenario=self._session.scenario,
                             active_scenarios=self._session.active_scenarios,
                             selected_station=selected_station,
+                            selected_slot=selected_slot,
+                            offered_slots=offered_slots,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )
