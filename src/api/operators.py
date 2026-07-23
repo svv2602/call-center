@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 from datetime import date as date_type
+from datetime import time as time_type
 from datetime import timedelta
 from typing import Any, Literal
 
@@ -102,15 +103,15 @@ async def create_operator(
             result = await conn.execute(
                 text("""
                     INSERT INTO operators (name, extension, skills, shift_start, shift_end)
-                    VALUES (:name, :extension, CAST(:skills AS jsonb), CAST(:shift_start AS time), CAST(:shift_end AS time))
+                    VALUES (:name, :extension, CAST(:skills AS jsonb), :shift_start, :shift_end)
                     RETURNING id, name, extension, is_active, skills, shift_start, shift_end, created_at
                 """),
                 {
                     "name": req.name,
                     "extension": req.extension,
                     "skills": json.dumps(req.skills),
-                    "shift_start": req.shift_start,
-                    "shift_end": req.shift_end,
+                    "shift_start": time_type.fromisoformat(req.shift_start),
+                    "shift_end": time_type.fromisoformat(req.shift_end),
                 },
             )
             row = result.first()
@@ -161,11 +162,11 @@ async def update_operator(
         updates.append("skills = CAST(:skills AS jsonb)")
         params["skills"] = json.dumps(req.skills)
     if req.shift_start is not None:
-        updates.append("shift_start = CAST(:shift_start AS time)")
-        params["shift_start"] = req.shift_start
+        updates.append("shift_start = :shift_start")
+        params["shift_start"] = time_type.fromisoformat(req.shift_start)
     if req.shift_end is not None:
-        updates.append("shift_end = CAST(:shift_end AS time)")
-        params["shift_end"] = req.shift_end
+        updates.append("shift_end = :shift_end")
+        params["shift_end"] = time_type.fromisoformat(req.shift_end)
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
