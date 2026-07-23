@@ -961,10 +961,14 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         # Modular prompt assembly: if no DB/A-B prompt, assemble from modules
         is_modular = False
         if system_prompt is None:
+            tenant_tools_set: set[str] | None = None
+            if tenant and tenant.get("enabled_tools"):
+                tenant_tools_set = set(tenant["enabled_tools"])
             system_prompt = assemble_prompt(
                 scenario=session.scenario,
                 include_pronunciation=False,  # added separately via inject_pronunciation_rules
                 compact=(session.scenario is None),  # lightweight router when no IVR
+                enabled_tools=tenant_tools_set,
             )
             is_modular = True
 

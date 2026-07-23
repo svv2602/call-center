@@ -322,6 +322,32 @@ success=true → «{ім'я}, ви записані. СМС підтвердже
 - Прощання: «{ім'я}, дякуємо за звернення! Всього найкращого!»\
 """
 
+_MOD_FITTING_UNAVAILABLE = """\
+
+## Сценарій: шиномонтаж — послуга НЕДОСТУПНА
+
+⛔ Наш магазин НЕ надає послуги шиномонтажу. Наш профіль — консультація з підбору шин і продаж.
+
+### Що робити, якщо клієнт запитує про монтаж/запис/перезувати/поміняти колеса
+
+1. **Одразу відповідай стисло і чітко:**
+   «На жаль, наш магазин не надає послуги шиномонтажу. Ми займаємось лише продажем шин та консультаціями з їх підбору. Чи можу допомогти з підбором чи замовленням шин?»
+
+2. **Клієнт наполягає, просить допомогти з монтажем, питає куди звернутися, просить телефон, адресу, місто чи іншу інформацію про шиномонтаж:**
+   → «Розумію. Одну секунду, з'єдную вас з оператором.» + одразу виклич transfer_to_operator(reason="fitting_service_unavailable")
+
+### ⛔ ЖОРСТКІ ЗАБОРОНИ (порушення = провал)
+
+- ⛔ НЕ ПИТАЙ місто, район, адресу, дату, час — жодного уточнюючого питання про монтаж.
+- ⛔ НЕ НАЗИВАЙ адреси, телефони, назви станцій шиномонтажу — навіть якщо пам'ятаєш з попередніх дзвінків.
+- ⛔ НЕ ВИКЛИКАЙ інструменти, пов'язані з шиномонтажем (get_fitting_stations, get_fitting_slots, book_fitting, get_fitting_price, get_customer_bookings, cancel_fitting, find_storage).
+- ⛔ ЗАБОРОНЕНІ фрази: «записую вас», «на яку дату записати», «у якому місті вам зручно», «є вільні слоти», «шукаю доступні шиномонтажні центри», «шиномонтаж на вулиці [...]».
+- ⛔ НЕ ВИГАДУЙ і НЕ ГАЛЮЦИНУЙ інформацію про слоти, наявність часу, робочі години станцій — НЕ ГОВОРИ про це взагалі.
+
+### Якщо клієнт після відмови хоче поговорити про шини — продовжуй звичайно
+Підбір, наявність, замовлення шин — доступні. Використовуй відповідні сценарні модулі.\
+"""
+
 _MOD_STORAGE = """\
 
 ## Сценарій: зберігання шин (клієнт дзвонить саме про зберігання)
@@ -741,12 +767,34 @@ SCENARIO_MODULES: dict[str | None, list[str]] = {
 # ---------------------------------------------------------------------------
 
 
+def _modules_for_scenario(
+    scenario: str | None,
+    enabled_tools: set[str] | None,
+) -> list[str] | None:
+    """Return SCENARIO_MODULES[scenario] with fitting swapped for the
+    "unavailable" variant when the tenant lacks the book_fitting tool.
+
+    This prevents the agent from following the full fitting-booking flow
+    (asking for city, date, calling get_fitting_stations, etc.) when the
+    tenant does not actually provide the service.
+    """
+    modules = SCENARIO_MODULES.get(scenario)
+    if modules is None:
+        return None
+    # Only rewrite when the caller explicitly supplied the allow-list.
+    # `None` means "unknown" (e.g. tests, sandbox) → keep original behavior.
+    if enabled_tools is not None and "book_fitting" not in enabled_tools:
+        return [_MOD_FITTING_UNAVAILABLE if m is _MOD_FITTING else m for m in modules]
+    return modules
+
+
 def assemble_prompt(
     scenario: str | None = None,
     *,
     include_pronunciation: bool = True,
     pronunciation_rules: str | None = None,
     compact: bool = False,
+    enabled_tools: set[str] | None = None,
 ) -> str:
     """Assemble system prompt from modules based on IVR scenario.
 
@@ -766,11 +814,16 @@ def assemble_prompt(
     if compact and scenario is None:
         modules = [_MOD_ROUTER]
     else:
-        modules = SCENARIO_MODULES.get(scenario)
+        modules = _modules_for_scenario(scenario, enabled_tools)
         if modules is None:
             # Unknown scenario → fall back to full prompt
             logger.warning("Unknown scenario '%s', using full prompt", scenario)
             modules = _ALL_SCENARIO_MODULES
+            if enabled_tools is not None and "book_fitting" not in enabled_tools:
+                modules = [
+                    _MOD_FITTING_UNAVAILABLE if m is _MOD_FITTING else m
+                    for m in modules
+                ]
 
     parts = [_MOD_CORE]
     parts.extend(modules)
@@ -1034,6 +1087,7 @@ def build_system_prompt_with_context(
     selected_station: dict[str, Any] | None = None,
     selected_slot: dict[str, str] | None = None,
     offered_slots: list[dict[str, str]] | None = None,
+    enabled_tools: set[str] | None = None,
 ) -> str:
     """Build the final system prompt with all dynamic context injected.
 
@@ -1066,19 +1120,24 @@ def build_system_prompt_with_context(
     # Upgrade from compact router to full scenario modules when scenario
     # is detected mid-call (first turn was compact, now we know the topic).
     if is_modular and scenario and _COMPACT_MARKER in base_prompt:
-        base_prompt = assemble_prompt(scenario=scenario, include_pronunciation=False)
+        base_prompt = assemble_prompt(
+            scenario=scenario,
+            include_pronunciation=False,
+            enabled_tools=enabled_tools,
+        )
         logger.info("Compact→full upgrade: scenario=%s", scenario)
 
     # Topic switching: when customer changes topic mid-call, add modules
     # from newly detected scenarios (only add, never remove).
     if is_modular and active_scenarios and scenario:
-        base_modules = set(SCENARIO_MODULES.get(scenario, _ALL_SCENARIO_MODULES))
+        primary_mods = _modules_for_scenario(scenario, enabled_tools) or _ALL_SCENARIO_MODULES
+        base_modules = set(primary_mods)
         extra: list[str] = []
         seen: set[int] = {id(m) for m in base_modules}
         for sc in active_scenarios:
             if sc == scenario:
                 continue
-            for mod in SCENARIO_MODULES.get(sc, []):
+            for mod in _modules_for_scenario(sc, enabled_tools) or []:
                 mod_id = id(mod)
                 if mod_id not in seen:
                     extra.append(mod)

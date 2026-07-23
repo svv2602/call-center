@@ -293,6 +293,7 @@ class StreamingAgentLoop:
             selected_station=selected_station,
             selected_slot=selected_slot,
             offered_slots=offered_slots,
+            enabled_tools={t["name"] for t in (self._tools or [])},
         )
 
         # Record prompt and history metrics
