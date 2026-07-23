@@ -153,8 +153,8 @@ export function init() {
         setRefreshTimer(() => { loadOperators(); loadQueueStatus(); }, 10000);
     });
     document.addEventListener('click', (e) => {
-        if (!e.target.closest('.relative')) {
-            document.querySelectorAll('#page-operators .relative > div:not(.hidden)').forEach(m => m.classList.add('hidden'));
+        if (!e.target.closest('.relative.inline-block')) {
+            document.querySelectorAll('#page-operators .relative.inline-block > div:not(.hidden)').forEach(m => m.classList.add('hidden'));
         }
     });
 }
