@@ -1554,32 +1554,15 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     f"Використай station_id з результату get_fitting_stations: {known}",
                 }
 
-        # Server-side validation: booking date must be tomorrow .. +21 days
         booking_date_str = _resolve_date(kwargs.get("date", ""))
-        if booking_date_str:
-            try:
-                booking_date = date_type.fromisoformat(booking_date_str)
-                today_date = datetime.now(tz=UTC).date()
-                if booking_date <= today_date:
-                    return {
-                        "error": True,
-                        "message": "На сьогодні онлайн-запис недоступний. "
-                        "Запропонуй клієнту запис починаючи з завтрашнього дня, "
-                        "або порадь зателефонувати на шиномонтаж для запису на сьогодні.",
-                    }
-                max_date = today_date + timedelta(days=21)
-                if booking_date > max_date:
-                    return {
-                        "error": True,
-                        "message": "Бронювання доступне лише на найближчі 3 тижні. "
-                        "Запропонуй клієнту обрати дату в межах трьох тижнів.",
-                    }
-            except ValueError:
-                pass
 
-        # Anti-hallucination: date/time must come from the last get_fitting_slots
-        # response. Prevents drift where LLM confidently says "25 липня" during
-        # confirmation even though the caller picked "4 серпня" 10 turns ago.
+        # Anti-hallucination guard #1 (highest priority): date/time must come
+        # from the last get_fitting_slots response. Runs BEFORE the today/max
+        # date guards so that a wrong date (e.g. LLM copies today's date from
+        # the "## Поточна дата" prompt block) is corrected with a message that
+        # tells the LLM *which* date to use. Otherwise LLM sees "На сьогодні
+        # запис недоступний" and asks the client for a new date, forgetting
+        # the one the client already chose (call ca317ad1, 2026-07-23).
         if session.fitting_slots_offered:
             offered_dates = {s["date"] for s in session.fitting_slots_offered}
             offered_times_for_date = {
@@ -1598,10 +1581,11 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 return {
                     "error": True,
                     "message": (
-                        f"date='{booking_date_str}' НЕ співпадає з датою, на яку "
-                        f"клієнт обирав слот. Останній get_fitting_slots повернув "
-                        f"слоти на дату {offered_str}. Використай саме цю дату "
-                        "або виклич get_fitting_slots повторно з правильною датою."
+                        f"⛔ date='{booking_date_str}' — НЕВІРНА дата! "
+                        f"Клієнт обрав слот на {offered_str}. "
+                        f"Виклич book_fitting ЗАРАЗ ЖЕ з date='{offered_str}' "
+                        "та тим самим time, station_id, customer_name і рештою параметрів. "
+                        "Не питай клієнта, не переходь до підтвердження — просто повтори виклик."
                     ),
                 }
             if (
@@ -1622,15 +1606,40 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 return {
                     "error": True,
                     "message": (
-                        f"time='{time_raw}' немає у списку доступних слотів на "
+                        f"⛔ time='{time_raw}' немає у списку доступних слотів на "
                         f"{booking_date_str}. Доступні часи: {times_str}. "
-                        "Уточни у клієнта який час обрати з цього списку."
+                        f"Виклич book_fitting ЩЕ РАЗ з найближчим часом зі списку. "
+                        "Не переходь до підтвердження, не кажи «записую»."
                     ),
                 }
             # All good — lock in the client's choice.
             if booking_date_str and time_raw:
                 session.selected_fitting_date = booking_date_str
                 session.selected_fitting_time = time_raw
+
+        # Anti-hallucination guard #2: booking date must be tomorrow .. +21 days.
+        # Runs AFTER the offered-slots check because offered-slots gives a more
+        # specific corrective message.
+        if booking_date_str:
+            try:
+                booking_date = date_type.fromisoformat(booking_date_str)
+                today_date = datetime.now(tz=UTC).date()
+                if booking_date <= today_date:
+                    return {
+                        "error": True,
+                        "message": "На сьогодні онлайн-запис недоступний. "
+                        "Запропонуй клієнту запис починаючи з завтрашнього дня, "
+                        "або порадь зателефонувати на шиномонтаж для запису на сьогодні.",
+                    }
+                max_date = today_date + timedelta(days=21)
+                if booking_date > max_date:
+                    return {
+                        "error": True,
+                        "message": "Бронювання доступне лише на найближчі 3 тижні. "
+                        "Запропонуй клієнту обрати дату в межах трьох тижнів.",
+                    }
+            except ValueError:
+                pass
 
         if _onec_client is not None:
             logger.info(
