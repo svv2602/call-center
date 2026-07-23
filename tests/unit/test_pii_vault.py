@@ -1,4 +1,10 @@
-"""Unit tests for PIIVault — reversible PII masking."""
+"""Unit tests for PIIVault — reversible PII masking (phones only).
+
+Names are intentionally NOT masked: masking them made LLMs (Gemini 2.5 Flash)
+drift into meta-text about the `[NAME_1]` placeholder and, in the worst
+case, emit raw tool_code pseudo-Python that was spoken to the caller
+(call 43a4b637, 2026-07-23).
+"""
 
 from src.logging.pii_vault import PIIVault
 
@@ -17,28 +23,62 @@ class TestMaskPhone:
         assert "[PHONE_1]" in result
 
 
-class TestMaskName:
-    def test_mask_name(self) -> None:
+class TestNamesNotMasked:
+    """Names pass through unchanged — LLM sees the real name."""
+
+    def test_name_intro_not_masked(self) -> None:
         vault = PIIVault()
         result = vault.mask("Мене звати Іван Петренко")
-        assert "Іван Петренко" not in result
-        assert "[NAME_1]" in result
+        assert "Іван Петренко" in result
+        assert "[NAME_" not in result
 
-    def test_mask_name_preserves_surrounding(self) -> None:
+    def test_name_in_context_not_masked(self) -> None:
         vault = PIIVault()
         result = vault.mask("клієнт Олександр Шевченко замовив")
-        assert "клієнт" in result
-        assert "замовив" in result
-        assert "[NAME_1]" in result
+        assert "Олександр Шевченко" in result
+        assert "[NAME_" not in result
+
+    def test_first_name_only_not_masked(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("Вася Василий")
+        assert "Вася Василий" in result
+        assert "[NAME_" not in result
+
+
+class TestAddressesNotMasked:
+    """Street names must NOT be masked — they are public data."""
+
+    def test_street_with_vulytsia(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("вулиця Бориса Кротова, 24а")
+        assert "Бориса Кротова" in result
+
+    def test_colloquial_address(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("монтаж на Героев Днепра")
+        assert "Героев Днепра" in result
+
+
+class TestVehicleBrandsNotMasked:
+    def test_volkswagen_tiguan(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("Volkswagen Tiguan")
+        assert "Volkswagen Tiguan" in result
+
+    def test_vehicle_owner_name_also_passes_through(self) -> None:
+        vault = PIIVault()
+        result = vault.mask("Volkswagen Tiguan, власник Іван Петренко")
+        assert "Volkswagen Tiguan" in result
+        assert "Іван Петренко" in result
+        assert "[NAME_" not in result
 
 
 class TestRestoreRoundtrip:
-    def test_restore_roundtrip(self) -> None:
+    def test_restore_phone_roundtrip(self) -> None:
         vault = PIIVault()
-        original = "Клієнт +380501234567, Іван Петренко, доставка"
+        original = "Клієнт +380501234567, доставка"
         masked = vault.mask(original)
         assert "+380501234567" not in masked
-        assert "Іван Петренко" not in masked
         restored = vault.restore(masked)
         assert restored == original
 
@@ -48,6 +88,16 @@ class TestRestoreRoundtrip:
         masked = vault.mask(original)
         restored = vault.restore(masked)
         assert restored == original
+
+    def test_text_with_name_and_phone(self) -> None:
+        vault = PIIVault()
+        original = "Іван Петренко, тел. +380501234567"
+        masked = vault.mask(original)
+        # name preserved, phone masked
+        assert "Іван Петренко" in masked
+        assert "+380501234567" not in masked
+        assert "[PHONE_1]" in masked
+        assert vault.restore(masked) == original
 
 
 class TestSamePhoneReusesPlaceholder:
@@ -66,7 +116,7 @@ class TestSamePhoneReusesPlaceholder:
 
 
 class TestRestoreInArgs:
-    def test_restore_in_args(self) -> None:
+    def test_restore_phone_in_args(self) -> None:
         vault = PIIVault()
         vault.mask("+380501234567")
         args = {"phone": "[PHONE_1]", "quantity": 4}
@@ -76,10 +126,10 @@ class TestRestoreInArgs:
 
     def test_restore_in_args_nested(self) -> None:
         vault = PIIVault()
-        vault.mask("Іван Петренко")
-        args = {"customer": {"name": "[NAME_1]", "active": True}}
+        vault.mask("+380501234567")
+        args = {"customer": {"phone": "[PHONE_1]", "active": True}}
         restored = vault.restore_in_args(args)
-        assert restored["customer"]["name"] == "Іван Петренко"
+        assert restored["customer"]["phone"] == "+380501234567"
         assert restored["customer"]["active"] is True
 
     def test_restore_in_args_list(self) -> None:
@@ -89,149 +139,11 @@ class TestRestoreInArgs:
         restored = vault.restore_in_args(args)
         assert restored["phones"] == ["+380501234567", "other"]
 
-
-class TestAddressContextNotMasked:
-    """Street names in addresses must NOT be masked — they are public data."""
-
-    def test_vulytsia_name_not_masked(self) -> None:
+    def test_name_arg_passes_through(self) -> None:
         vault = PIIVault()
-        result = vault.mask("вулиця Бориса Кротова, 24а")
-        assert "Бориса Кротова" in result
-
-    def test_vul_abbreviated_not_masked(self) -> None:
-        vault = PIIVault()
-        result = vault.mask("вул. Маршала Тимошенка, 7")
-        assert "Маршала Тимошенка" in result
-
-    def test_prospekt_not_masked(self) -> None:
-        vault = PIIVault()
-        result = vault.mask("проспект Дмитра Яворницького, 100")
-        assert "Дмитра Яворницького" in result
-
-    def test_shose_not_masked(self) -> None:
-        vault = PIIVault()
-        result = vault.mask("шосе Запорізьке Кротова, 55К")
-        # Single word after шосе — no name match anyway
-        assert "Запорізьке" in result
-
-    def test_json_tool_result_address_not_masked(self) -> None:
-        vault = PIIVault()
-        text = '{"address":"вулиця Бориса Кротова, 24а","customer":"Іван Петренко"}'
-        result = vault.mask(text)
-        assert "Бориса Кротова" in result  # address preserved
-        assert "[NAME_" in result  # customer name masked
-
-    def test_person_name_still_masked(self) -> None:
-        vault = PIIVault()
-        result = vault.mask("Клієнт Бориса Кротова замовив шини")
-        assert "Бориса Кротова" not in result
-        assert "[NAME_1]" in result
-
-    def test_vul_marshala_not_masked(self) -> None:
-        vault = PIIVault()
-        result = vault.mask("вул. Маршала Тимошенка — це адреса")
-        assert "Маршала Тимошенка" in result  # preceded by "вул."
-
-    def test_provulok_not_masked(self) -> None:
-        vault = PIIVault()
-        result = vault.mask("провулок Добровольців Перший, 3")
-        assert "Добровольців Перший" in result
-
-
-class TestColloquialAddressNotMasked:
-    """Callers speak addresses without "вул." — prepositions/service words
-    must be recognized as address context. Regression tests for the
-    2026-07-22 incident (call 831bdf44) where "монтаж на Героев Днепра"
-    caused "Героев Днепра" to be masked and then written into customer.name.
-    """
-
-    def test_na_preposition_not_masked(self) -> None:
-        vault = PIIVault()
-        result = vault.mask("монтаж на Героев Днепра")
-        assert "Героев Днепра" in result
-        assert "[NAME_" not in result
-
-    def test_zapyshit_na_not_masked(self) -> None:
-        vault = PIIVault()
-        result = vault.mask("запишіть на Героев Днепра")
-        assert "Героев Днепра" in result
-        assert "[NAME_" not in result
-
-    def test_montazh_word_not_masked(self) -> None:
-        vault = PIIVault()
-        result = vault.mask("монтаж Донецьке шосе")
-        assert "Донецьке шосе" in result
-        assert "[NAME_" not in result
-
-    def test_adresa_word_not_masked(self) -> None:
-        vault = PIIVault()
-        result = vault.mask("адреса Маршала Тимошенка")
-        assert "Маршала Тимошенка" in result
-        assert "[NAME_" not in result
-
-    def test_rayon_word_not_masked(self) -> None:
-        vault = PIIVault()
-        result = vault.mask("район Оболонь Троещина")
-        assert "Оболонь Троещина" in result
-        assert "[NAME_" not in result
-
-    def test_postfix_vulytsia_not_masked(self) -> None:
-        vault = PIIVault()
-        # Common opener: caller says the address first, "вулиця" comes after
-        result = vault.mask("Героїв Дніпра вулиця Черкаси")
-        assert "Героїв Дніпра" in result
-        assert "[NAME_" not in result
-
-    def test_postfix_shose_not_masked(self) -> None:
-        vault = PIIVault()
-        # Two-word street name followed by "шосе"
-        result = vault.mask("Донецьке Захарійовича шосе 69")
-        assert "Донецьке Захарійовича" in result
-        assert "[NAME_" not in result
-
-
-class TestVehicleBrandNotMasked:
-    """Vehicle brand+model pairs must NOT be masked — they are not PII."""
-
-    def test_volkswagen_tiguan_not_masked(self) -> None:
-        vault = PIIVault()
-        result = vault.mask("Volkswagen Tiguan")
-        assert "Volkswagen Tiguan" in result
-        assert "[NAME_" not in result
-
-    def test_toyota_camry_not_masked(self) -> None:
-        vault = PIIVault()
-        result = vault.mask("клієнт має Toyota Camry")
-        assert "Toyota Camry" in result
-
-    def test_hyundai_tucson_not_masked(self) -> None:
-        vault = PIIVault()
-        result = vault.mask("автомобіль Hyundai Tucson, номер 1234")
-        assert "Hyundai Tucson" in result
-
-    def test_vehicle_context_prefix(self) -> None:
-        vault = PIIVault()
-        # Even with unknown brand, automotive context should skip masking
-        result = vault.mask("марка Ліфан Солано")
-        assert "Ліфан Солано" in result
-
-    def test_person_name_still_masked_near_vehicle(self) -> None:
-        vault = PIIVault()
-        result = vault.mask("Volkswagen Tiguan, власник Іван Петренко")
-        assert "Volkswagen Tiguan" in result  # vehicle preserved
-        assert "Іван Петренко" not in result  # person masked
-        assert "[NAME_1]" in result
-
-
-class TestMixedPII:
-    def test_mixed_pii(self) -> None:
-        vault = PIIVault()
-        text = "Іван Петренко, телефон +380501234567, адреса Київ"
-        masked = vault.mask(text)
-        assert "Іван Петренко" not in masked
-        assert "+380501234567" not in masked
-        assert "Київ" in masked  # not PII (single word)
-        assert "[NAME_1]" in masked
-        assert "[PHONE_1]" in masked
-        restored = vault.restore(masked)
-        assert restored == text
+        vault.mask("Іван Петренко")  # no-op — names not masked
+        args = {"name": "Іван Петренко", "phone": "[PHONE_1]"}
+        vault.mask("+380501234567")
+        restored = vault.restore_in_args(args)
+        assert restored["name"] == "Іван Петренко"
+        assert restored["phone"] == "+380501234567"
