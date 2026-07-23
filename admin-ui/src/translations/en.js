@@ -547,6 +547,7 @@ export default {
     'settings.ttsBreakColon': 'Colon',
     'settings.ttsBreakSemicolon': 'Semicolon',
     'settings.ttsBreakEmDash': 'Em Dash',
+    'settings.ttsChirp3Warning': 'Chirp3-HD voices do not support SSML — break and pitch settings will be ignored by the engine. For pause control use Wavenet or Neural2 voices.',
     // Task Schedules
     'settings.taskSchedules': 'Task Schedules',
     'settings.taskSchedulesDesc': 'Configure background task schedules (catalog sync, STT hints refresh). Changes apply without restart.',

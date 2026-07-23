@@ -547,6 +547,7 @@ export default {
     'settings.ttsBreakColon': 'Двоеточие',
     'settings.ttsBreakSemicolon': 'Точка с запятой',
     'settings.ttsBreakEmDash': 'Тире',
+    'settings.ttsChirp3Warning': 'Голоса Chirp3-HD не поддерживают SSML — настройки пауз и тональности будут проигнорированы движком. Для управления паузами используйте голоса Wavenet или Neural2.',
     // Task Schedules
     'settings.taskSchedules': 'Расписания задач',
     'settings.taskSchedulesDesc': 'Настройка расписаний фоновых задач (синхронизация каталога, обновление STT-подсказок). Изменения применяются без перезапуска.',

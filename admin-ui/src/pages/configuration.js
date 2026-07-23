@@ -624,9 +624,13 @@ function renderTTSConfig(data) {
             </div>
             <div>
                 <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('settings.ttsVoice')}</label>
-                <select id="ttsVoiceSelect" class="${tw.selectSm} w-full max-w-xs">
+                <select id="ttsVoiceSelect" class="${tw.selectSm} w-full max-w-xs"
+                    onchange="window._pages.configuration.applyVoiceCapabilities(this.value)">
                     ${customOption}${voiceOptions}
                 </select>
+                <div id="ttsChirp3Warning" class="hidden mt-2 p-2 text-[11px] rounded border border-amber-300 bg-amber-50 text-amber-800 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200 max-w-lg">
+                    ${t('settings.ttsChirp3Warning')}
+                </div>
             </div>
             <div>
                 <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
@@ -637,7 +641,7 @@ function renderTTSConfig(data) {
                     oninput="document.getElementById('ttsRateValue').textContent = parseFloat(this.value).toFixed(2)">
                 <div class="flex justify-between text-[10px] text-neutral-400 max-w-xs"><span>0.25</span><span>1.0</span><span>4.0</span></div>
             </div>
-            <div>
+            <div id="ttsPitchGroup">
                 <label class="block text-xs font-medium text-neutral-700 dark:text-neutral-300 mb-1">
                     ${t('settings.ttsPitch')}: <span id="ttsPitchValue" class="font-mono">${pitch.toFixed(1)}</span>
                 </label>
@@ -647,7 +651,7 @@ function renderTTSConfig(data) {
                 <div class="flex justify-between text-[10px] text-neutral-400 max-w-xs"><span>-20</span><span>0</span><span>+20</span></div>
             </div>
 
-            <details class="mt-2">
+            <details id="ttsBreaksGroup" class="mt-2">
                 <summary class="cursor-pointer text-xs font-medium text-neutral-700 dark:text-neutral-300 select-none">
                     ${t('settings.ttsBreaksTitle')}
                 </summary>
@@ -677,6 +681,34 @@ function renderTTSConfig(data) {
             </div>
             <div id="ttsTestResult"></div>
         </div>`;
+
+    applyVoiceCapabilities(voiceName);
+}
+
+function _voiceLacksSSML(voiceName) {
+    return typeof voiceName === 'string' && voiceName.startsWith('uk-UA-Chirp3-HD-');
+}
+
+function applyVoiceCapabilities(voiceName) {
+    const lacksSSML = _voiceLacksSSML(voiceName);
+
+    const warning = document.getElementById('ttsChirp3Warning');
+    if (warning) warning.classList.toggle('hidden', !lacksSSML);
+
+    const breakGroup = document.getElementById('ttsBreaksGroup');
+    if (breakGroup) {
+        breakGroup.classList.toggle('opacity-50', lacksSSML);
+        breakGroup.classList.toggle('pointer-events-none', lacksSSML);
+        breakGroup.querySelectorAll('input[type="range"]').forEach(el => { el.disabled = lacksSSML; });
+    }
+
+    const pitchGroup = document.getElementById('ttsPitchGroup');
+    if (pitchGroup) {
+        pitchGroup.classList.toggle('opacity-50', lacksSSML);
+        pitchGroup.classList.toggle('pointer-events-none', lacksSSML);
+        const pitchInput = document.getElementById('ttsPitchRange');
+        if (pitchInput) pitchInput.disabled = lacksSSML;
+    }
 }
 
 async function saveTTSConfig() {
@@ -1091,7 +1123,7 @@ window._pages.configuration = {
     editLLMProvider, saveEditProvider, deleteLLMProvider,
     updateTaskRoute, addFallback, removeFallback, moveFallback, testLLMProvider,
     saveSandboxDefaults,
-    loadTTSConfig, saveTTSConfig, testTTS, resetTTSConfig,
+    loadTTSConfig, saveTTSConfig, testTTS, resetTTSConfig, applyVoiceCapabilities,
     loadTaskSchedules, saveSchedule, runTask, resetSchedules, onFreqChange,
     loadTestPhones, addTestPhone, updateTestPhoneMode, removeTestPhone, clearPhoneHistory,
 };
