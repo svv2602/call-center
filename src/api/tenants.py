@@ -175,7 +175,7 @@ async def get_tenant(tenant_id: UUID, _: dict[str, Any] = _perm_r) -> dict[str, 
             text("""
                 SELECT id, slug, name, network_id, agent_name, greeting,
                        enabled_tools, extensions, prompt_suffix, config,
-                       is_active, created_at, updated_at
+                       working_hours, is_active, created_at, updated_at
                 FROM tenants WHERE id = :id
             """),
             {"id": str(tenant_id)},
