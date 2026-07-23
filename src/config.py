@@ -115,6 +115,23 @@ class ARISettings(BaseSettings):
     model_config = {"env_prefix": "ARI_"}
 
 
+class AMISettings(BaseSettings):
+    """Asterisk Manager Interface — used for blind transfers.
+
+    ARI cannot redirect channels stuck inside a dialplan Application like
+    AudioSocket() (returns 409 "Channel not in Stasis application"). AMI's
+    Redirect action operates below Stasis and can move any channel between
+    dialplan extensions, so it is the escape hatch for operator transfer.
+    """
+
+    host: str = "127.0.0.1"
+    port: int = 5038
+    user: str = ""
+    secret: str = ""
+
+    model_config = {"env_prefix": "AMI_"}
+
+
 class LoggingSettings(BaseSettings):
     level: str = "INFO"
     format: str = "json"
@@ -288,6 +305,7 @@ class Settings(BaseSettings):
     database: DatabaseSettings = DatabaseSettings()
     redis: RedisSettings = RedisSettings()
     ari: ARISettings = ARISettings()
+    ami: AMISettings = AMISettings()
     logging: LoggingSettings = LoggingSettings()
     celery: CelerySettings = CelerySettings()
     quality: QualitySettings = QualitySettings()

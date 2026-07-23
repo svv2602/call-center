@@ -201,7 +201,9 @@ _llm_router: Any = None  # LLMRouter when FF_LLM_ROUTING_ENABLED=true
 _asyncpg_pool: Any = None  # asyncpg pool for PatternSearch (pgvector)
 _knowledge_search: Any = None  # KnowledgeSearch (pgvector) for search_knowledge_base tool
 _search_embedding_gen: Any = None  # EmbeddingGenerator shared by KnowledgeSearch
-_ari_client: Any = None  # AsteriskARIClient for operator transfer (shared across calls)
+_ari_client: Any = None  # AsteriskARIClient (CallerID + channel var lookup)
+_ami_client: Any = None  # AsteriskAMIClient for operator blind transfer (ARI redirect
+# fails with 409 for channels inside Application(AudioSocket) — see asterisk_ami.py)
 
 _SENTINEL = object()  # sentinel for optional pre-fetched values
 
@@ -345,11 +347,13 @@ async def store_caller_id(request: Request, data: dict[str, str]) -> dict[str, s
       System(curl -s -X POST http://...:8080/internal/caller-id
         -H 'Content-Type: application/json'
         -H 'X-Internal-Secret: ${INTERNAL_SECRET}'
-        -d '{"uuid":"${CALL_UUID}","number":"${CALLERID(num)}","exten":"${CALLED_EXTEN}","channel_id":"${CHANNEL(uniqueid)}"}')
+        -d '{"uuid":"${CALL_UUID}","number":"${CALLERID(num)}","exten":"${CALLED_EXTEN}","channel_id":"${CHANNEL(uniqueid)}","channel_name":"${CHANNEL(name)}"}')
 
     ``channel_id`` is the real Asterisk channel unique id (e.g. ``1729754321.42``).
-    AudioSocket UUIDs are not valid Asterisk channel ids, so ARI operations
-    (``transfer_to_operator``) must resolve UUID → channel_id via ``call:channel:{uuid}``.
+    ``channel_name`` is the Asterisk channel name (e.g. ``SIP/trunk1058-00000042``);
+    AMI Redirect (used for operator transfer) requires the *name*, not the uniqueid.
+    AudioSocket UUIDs are not valid Asterisk channel identifiers, so ARI/AMI
+    operations resolve UUID → channel_id/channel_name via ``call:channel*:{uuid}``.
     """
     # Verify pre-shared secret (skip if not configured — localhost-only access)
     settings = get_settings()
@@ -363,6 +367,7 @@ async def store_caller_id(request: Request, data: dict[str, str]) -> dict[str, s
     number = data.get("number", "").strip()
     exten = data.get("exten", "").strip()
     channel_id = data.get("channel_id", "").strip()
+    channel_name = data.get("channel_name", "").strip()
     if not call_uuid:
         return {"status": "ignored"}
     # Validate UUID format
@@ -377,6 +382,8 @@ async def store_caller_id(request: Request, data: dict[str, str]) -> dict[str, s
             await _redis.set(f"call:exten:{call_uuid}", exten, ex=120)
         if channel_id:
             await _redis.set(f"call:channel:{call_uuid}", channel_id, ex=120)
+        if channel_name:
+            await _redis.set(f"call:channel_name:{call_uuid}", channel_name, ex=120)
     return {"status": "ok"}
 
 
@@ -2519,48 +2526,60 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 "next_action": "call create_callback_request after the customer states a phone number",
             }
 
-        if _ari_client is not None:
-            # AudioSocket UUID ≠ Asterisk channel id. Resolve the real channel
-            # id from the Redis mapping populated by the dialplan curl call.
-            asterisk_channel_id: str | None = None
+        if _ami_client is not None:
+            # AMI Redirect needs the channel NAME (e.g. ``SIP/trunk1058-00000042``),
+            # not the AudioSocket UUID and not the uniqueid. Resolve it from the
+            # Redis mapping populated by the dialplan curl call.
+            asterisk_channel_name: str | None = None
             if _redis is not None:
                 try:
-                    raw = await _redis.get(f"call:channel:{session.channel_uuid}")
+                    raw = await _redis.get(f"call:channel_name:{session.channel_uuid}")
                     if raw is not None:
-                        asterisk_channel_id = (
+                        asterisk_channel_name = (
                             raw.decode() if isinstance(raw, bytes) else str(raw)
                         ).strip() or None
-                except Exception:  # pragma: no cover — degrade to UUID fallback
+                except Exception:  # pragma: no cover — degrade to failure
                     logger.debug(
-                        "Redis channel_id lookup failed for %s",
+                        "Redis channel_name lookup failed for %s",
                         session.channel_uuid,
                         exc_info=True,
                     )
-            if asterisk_channel_id is None:
-                logger.warning(
-                    "No Asterisk channel_id mapping for call %s — "
-                    "transfer will likely 404 (dialplan not sending channel_id?)",
+            if asterisk_channel_name is None:
+                transfer_attempts_total.labels(result="error").inc()
+                logger.error(
+                    "No Asterisk channel_name mapping for call %s — "
+                    "dialplan curl missing ${CHANNEL(name)}?",
                     session.channel_uuid,
                 )
+                return {
+                    "status": "error",
+                    "message": (
+                        "На жаль, зараз оператори недоступні. "
+                        "Залиште, будь ласка, ваш номер — ми передзвонимо."
+                    ),
+                }
 
             try:
                 success = await asyncio.wait_for(
-                    _ari_client.transfer_to_queue(
-                        str(session.channel_uuid),
-                        channel_id_override=asterisk_channel_id,
+                    _ami_client.redirect(
+                        channel_name=asterisk_channel_name,
+                        context="transfer-to-operator",
+                        extension="s",
+                        priority=1,
                     ),
-                    timeout=5,
+                    timeout=8,
                 )
             except TimeoutError:
                 success = False
-                logger.error("ARI transfer timeout (5s) for call %s", session.channel_uuid)
+                logger.error("AMI transfer timeout (8s) for call %s", session.channel_uuid)
 
             if success:
                 session.transferred = True
                 transfer_attempts_total.labels(result="success").inc()
                 logger.info(
-                    "Operator transfer via ARI succeeded: call=%s, reason=%s",
+                    "Operator transfer via AMI succeeded: call=%s channel=%s reason=%s",
                     session.channel_uuid,
+                    asterisk_channel_name,
                     reason,
                 )
                 await publish_event("call:transferred", {"call_id": str(session.channel_uuid)})
@@ -2568,8 +2587,10 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             else:
                 transfer_attempts_total.labels(result="error").inc()
                 logger.error(
-                    "ARI transfer failed for call %s — telling customer operators unavailable",
+                    "AMI transfer failed for call %s (channel=%s) — telling customer "
+                    "operators unavailable",
                     session.channel_uuid,
+                    asterisk_channel_name,
                 )
                 return {
                     "status": "error",
@@ -2581,7 +2602,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         else:
             transfer_attempts_total.labels(result="unavailable").inc()
             logger.warning(
-                "Operator transfer requested for call %s but ARI client not available",
+                "Operator transfer requested for call %s but AMI client not available",
                 session.channel_uuid,
             )
             return {
@@ -3005,7 +3026,7 @@ async def main() -> None:
     await _store_client.open()
     logger.info("StoreClient initialized: %s", settings.store_api.url)
 
-    # Initialize shared ARI client for operator transfers
+    # Initialize shared ARI client (CallerID lookup / channel variables).
     global _ari_client
     if settings.ari.url:
         try:
@@ -3019,12 +3040,34 @@ async def main() -> None:
             await _ari_client.open()
             logger.info("ARI client initialized: %s", settings.ari.url)
         except Exception:
-            logger.warning(
-                "ARI client init failed — operator transfers will be unavailable", exc_info=True
-            )
+            logger.warning("ARI client init failed", exc_info=True)
             _ari_client = None
     else:
-        logger.info("ARI not configured (ARI_URL empty) — operator transfers unavailable")
+        logger.info("ARI not configured (ARI_URL empty)")
+
+    # Initialize AMI client — the actual carrier for operator transfers
+    # (ARI cannot redirect channels inside Application(AudioSocket), AMI can).
+    global _ami_client
+    if settings.ami.user and settings.ami.secret:
+        from src.core.asterisk_ami import AsteriskAMIClient
+
+        _ami_client = AsteriskAMIClient(
+            host=settings.ami.host,
+            port=settings.ami.port,
+            user=settings.ami.user,
+            secret=settings.ami.secret,
+        )
+        logger.info(
+            "AMI client configured: %s:%d user=%s",
+            settings.ami.host,
+            settings.ami.port,
+            settings.ami.user,
+        )
+    else:
+        logger.warning(
+            "AMI not configured (AMI_USER/AMI_SECRET empty) — operator transfers "
+            "will fail (ARI cannot redirect from Application(AudioSocket))"
+        )
 
     try:
         # Read effective config: Redis (admin UI overrides) merged over env defaults

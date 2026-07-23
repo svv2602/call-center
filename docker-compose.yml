@@ -24,6 +24,12 @@ services:
       - ARI_URL=${ARI_URL:-http://localhost:8088/ari}
       - ARI_USER=${ARI_USER:-}
       - ARI_PASSWORD=${ARI_PASSWORD:-}
+      # Asterisk AMI — используется для blind transfer оператору
+      # (ARI не может redirect каналы внутри Application(AudioSocket))
+      - AMI_HOST=${AMI_HOST:-172.18.0.1}
+      - AMI_PORT=${AMI_PORT:-5038}
+      - AMI_USER=${AMI_USER:-}
+      - AMI_SECRET=${AMI_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy
