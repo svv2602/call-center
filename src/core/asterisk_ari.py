@@ -5,6 +5,7 @@ Provides CallerID lookup and channel management for the Call Center AI.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 
 import aiohttp
@@ -121,14 +122,20 @@ class AsteriskARIClient:
         context: str = "transfer-to-operator",
         channel_id_override: str | None = None,
     ) -> bool:
-        """Transfer a channel to the operator queue via ARI.
+        """Transfer a channel to the operator queue.
+
+        The channel is inside ``Application(AudioSocket)`` (a blocking dialplan
+        app, not Stasis), so ``POST /channels/{id}/redirect`` returns 409
+        Conflict. Instead we use ``POST /channels/{id}/continue`` which tells
+        Asterisk: exit the current application and resume dialplan at the
+        given ``context,extension,priority``. This works for non-Stasis
+        channels stuck in a dialplan Application.
 
         `channel_uuid` is the AudioSocket UUID (used only for logging).
-        `channel_id_override` — the real Asterisk channel id
-        (``${CHANNEL(uniqueid)}``, e.g. ``1729754321.42``) resolved from the
-        Redis mapping ``call:channel:{uuid}`` populated by the dialplan.
-        AudioSocket UUIDs are not valid Asterisk channel ids, so calling
-        `/channels/{uuid}/redirect` with the UUID always returns 404.
+        `channel_id_override` is the real Asterisk channel id
+        (``${CHANNEL(uniqueid)}``) resolved from Redis mapping
+        ``call:channel:{uuid}`` populated by the dialplan. AudioSocket UUIDs
+        are not valid Asterisk channel ids, so ARI calls with the UUID 404.
 
         Returns True if transfer was initiated successfully.
         """
@@ -138,22 +145,26 @@ class AsteriskARIClient:
         target = channel_id_override or channel_uuid
         try:
             async with self._session.post(
-                f"{self._url}/channels/{target}/redirect",
-                json={"endpoint": f"Local/s@{context}"},
+                f"{self._url}/channels/{target}/continue",
+                params={"context": context, "extension": "s", "priority": "1"},
             ) as resp:
                 if resp.status in (200, 204):
                     logger.info(
-                        "Transfer initiated: uuid=%s channel=%s → %s",
+                        "Transfer initiated: uuid=%s channel=%s → %s,s,1",
                         channel_uuid,
                         target,
                         context,
                     )
                     return True
+                body = ""
+                with contextlib.suppress(Exception):
+                    body = (await resp.text())[:300]
                 logger.warning(
-                    "Transfer failed: status=%d, uuid=%s channel=%s",
+                    "Transfer failed: status=%d, uuid=%s channel=%s body=%s",
                     resp.status,
                     channel_uuid,
                     target,
+                    body,
                 )
                 return False
         except (aiohttp.ClientError, OSError) as exc:

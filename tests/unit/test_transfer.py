@@ -102,8 +102,12 @@ class TestARITransferToQueue:
         )
         assert result is True
         called_url = mock_session.post.call_args[0][0]
-        assert "1729754321.42/redirect" in called_url
+        assert "1729754321.42/continue" in called_url
         assert "e1ed08e0" not in called_url
+        # continue must target the transfer-to-operator context, extension s
+        called_params = mock_session.post.call_args.kwargs.get("params", {})
+        assert called_params.get("context") == "transfer-to-operator"
+        assert called_params.get("extension") == "s"
 
 
 # --- transfer_to_operator tool handler tests ---
