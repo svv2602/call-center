@@ -20,6 +20,7 @@ from sqlalchemy import text
 from src.agent.tools import ALL_TOOLS
 from src.api.auth import require_permission
 from src.api.database import get_engine as _get_engine
+from src.core.working_hours import validate_schema as _validate_working_hours
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/tenants", tags=["tenants"])
@@ -46,6 +47,7 @@ class TenantCreate(BaseModel):
     extensions: list[str] = []
     prompt_suffix: str | None = None
     config: dict[str, Any] = {}
+    working_hours: dict[str, Any] | None = None
     is_active: bool = True
 
 
@@ -58,6 +60,7 @@ class TenantUpdate(BaseModel):
     extensions: list[str] | None = None
     prompt_suffix: str | None = None
     config: dict[str, Any] | None = None
+    working_hours: dict[str, Any] | None = None
     is_active: bool | None = None
 
 
@@ -149,7 +152,7 @@ async def list_tenants(
             text(f"""
                 SELECT id, slug, name, network_id, agent_name, greeting,
                        enabled_tools, extensions, prompt_suffix, config,
-                       is_active, created_at, updated_at
+                       working_hours, is_active, created_at, updated_at
                 FROM tenants
                 WHERE {where_clause}
                 ORDER BY created_at
@@ -191,6 +194,10 @@ async def create_tenant(request: TenantCreate, _: dict[str, Any] = _perm_w) -> d
         _validate_tools(request.enabled_tools)
     if request.extensions:
         _validate_extensions(request.extensions)
+    try:
+        _validate_working_hours(request.working_hours)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"working_hours: {exc}") from exc
 
     engine = await _get_engine()
 
@@ -202,10 +209,12 @@ async def create_tenant(request: TenantCreate, _: dict[str, Any] = _perm_w) -> d
                 text("""
                     INSERT INTO tenants
                         (slug, name, network_id, agent_name, greeting,
-                         enabled_tools, extensions, prompt_suffix, config, is_active)
+                         enabled_tools, extensions, prompt_suffix, config,
+                         working_hours, is_active)
                     VALUES (:slug, :name, :network_id, :agent_name, :greeting,
                             CAST(:enabled_tools AS text[]), CAST(:extensions AS text[]),
-                            :prompt_suffix, CAST(:config AS jsonb), :is_active)
+                            :prompt_suffix, CAST(:config AS jsonb),
+                            CAST(:working_hours AS jsonb), :is_active)
                     RETURNING id
                 """),
                 {
@@ -218,6 +227,11 @@ async def create_tenant(request: TenantCreate, _: dict[str, Any] = _perm_w) -> d
                     "extensions": request.extensions,
                     "prompt_suffix": request.prompt_suffix,
                     "config": json.dumps(request.config),
+                    "working_hours": (
+                        json.dumps(request.working_hours)
+                        if request.working_hours is not None
+                        else None
+                    ),
                     "is_active": request.is_active,
                 },
             )
@@ -243,6 +257,11 @@ async def update_tenant(
         _validate_tools(request.enabled_tools)
     if request.extensions is not None:
         _validate_extensions(request.extensions)
+    if "working_hours" in request.model_fields_set:
+        try:
+            _validate_working_hours(request.working_hours)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"working_hours: {exc}") from exc
 
     engine = await _get_engine()
 
@@ -277,6 +296,12 @@ async def update_tenant(
     if request.config is not None:
         updates.append("config = CAST(:config AS jsonb)")
         params["config"] = json.dumps(request.config)
+
+    if "working_hours" in provided:
+        updates.append("working_hours = CAST(:working_hours AS jsonb)")
+        params["working_hours"] = (
+            json.dumps(request.working_hours) if request.working_hours is not None else None
+        )
 
     if not updates:
         return {"message": "No changes"}

@@ -48,6 +48,7 @@ const PAGE_PERMISSIONS = {
     tools: 'training:read',
     sandbox: 'sandbox:read',
     operators: 'operators:read',
+    callbacks: 'operators:read',
     monitoring: 'monitoring:read',
     configuration: 'configuration:read',
     tenants: 'tenants:read',

@@ -100,7 +100,11 @@ class CallSession:
         self.active_scenarios: set[str] = set()  # accumulated detected scenarios
         self.tenant_id: str | None = None
         self.tenant_slug: str | None = None
+        self.tenant_name: str | None = None
         self.network_id: str | None = None
+        # Tenant working-hours schedule (JSONB from tenants.working_hours).
+        # None = no schedule → treat as 24/7 and never trigger after-hours flow.
+        self.working_hours: dict[str, Any] | None = None
 
     # --- State transitions ---
 
@@ -207,7 +211,9 @@ class CallSession:
             "active_scenarios": sorted(self.active_scenarios),
             "tenant_id": self.tenant_id,
             "tenant_slug": self.tenant_slug,
+            "tenant_name": self.tenant_name,
             "network_id": self.network_id,
+            "working_hours": self.working_hours,
             "dialog_history": [
                 {
                     "speaker": t.speaker,
@@ -253,7 +259,9 @@ class CallSession:
         session.active_scenarios = set(data.get("active_scenarios", []))
         session.tenant_id = data.get("tenant_id")
         session.tenant_slug = data.get("tenant_slug")
+        session.tenant_name = data.get("tenant_name")
         session.network_id = data.get("network_id")
+        session.working_hours = data.get("working_hours")
         session.dialog_history = [
             DialogTurn(
                 speaker=t["speaker"],

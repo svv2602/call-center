@@ -107,6 +107,16 @@ export const HELP_PAGES = {
         ],
         tipsKey: 'help.operators.tips',
     },
+    callbacks: {
+        titleKey: 'help.callbacks.title',
+        overviewKey: 'help.callbacks.overview',
+        sections: [
+            { titleKey: 'help.callbacks.flow.title', contentKey: 'help.callbacks.flow.content' },
+            { titleKey: 'help.callbacks.workflow.title', contentKey: 'help.callbacks.workflow.content' },
+            { titleKey: 'help.callbacks.telegram.title', contentKey: 'help.callbacks.telegram.content' },
+        ],
+        tipsKey: 'help.callbacks.tips',
+    },
     monitoring: {
         titleKey: 'help.monitoring.title',
         overviewKey: 'help.monitoring.overview',
@@ -175,6 +185,7 @@ export const HELP_PAGES = {
             { titleKey: 'help.tenants.creating.title', contentKey: 'help.tenants.creating.content' },
             { titleKey: 'help.tenants.creating.steps', contentKey: 'help.tenants.creating.stepsContent' },
             { titleKey: 'help.tenants.tools.title', contentKey: 'help.tenants.tools.content' },
+            { titleKey: 'help.tenants.workingHours.title', contentKey: 'help.tenants.workingHours.content' },
             { titleKey: 'help.tenants.affects.title', contentKey: 'help.tenants.affects.content' },
         ],
         tipsKey: 'help.tenants.tips',

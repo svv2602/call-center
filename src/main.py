@@ -47,6 +47,7 @@ from src.agent.tool_loader import get_tools_with_overrides
 from src.api.admin_users import router as admin_users_router
 from src.api.analytics import router as analytics_router
 from src.api.auth import router as auth_router
+from src.api.callbacks import router as callbacks_router
 from src.api.customers import router as customers_router
 from src.api.export import router as export_router
 from src.api.fitting_hints import router as fitting_hints_router
@@ -114,6 +115,7 @@ app.include_router(
 )  # Must be before analytics (both use /analytics prefix, export has /calls/export that conflicts with /calls/{call_id})
 app.include_router(analytics_router)
 app.include_router(auth_router)
+app.include_router(callbacks_router)
 app.include_router(customers_router)
 app.include_router(fitting_hints_router)
 app.include_router(knowledge_router)
@@ -570,7 +572,7 @@ async def _resolve_tenant(
 
     tenant_columns = (
         "id, slug, name, network_id, agent_name, greeting, "
-        "enabled_tools, prompt_suffix, config, is_active, extensions"
+        "enabled_tools, prompt_suffix, config, is_active, extensions, working_hours"
     )
 
     # 1. Primary: use pre-fetched exten from Redis pipeline, or read directly
@@ -718,7 +720,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     if tenant:
         session.tenant_id = str(tenant["id"])
         session.tenant_slug = tenant["slug"]
+        session.tenant_name = tenant.get("name")
         session.network_id = tenant.get("network_id")
+        session.working_hours = tenant.get("working_hours")
         logger.info(
             "Tenant resolved: %s (%s) for call %s",
             tenant["slug"],
@@ -984,6 +988,11 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         if tenant:
             if tenant.get("enabled_tools"):
                 allowed = set(tenant["enabled_tools"])
+                # Callback is the natural companion to transfer_to_operator (after-hours
+                # / operator-unavailable flow) — auto-include so tenants don't need to
+                # remember to list it when they enable transfers.
+                if "transfer_to_operator" in allowed:
+                    allowed.add("create_callback_request")
                 if tools:
                     tools = [t for t in tools if t["name"] in allowed]
             if tenant.get("greeting") and templates:
@@ -2469,10 +2478,39 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
     router.register("search_knowledge_base", _search_knowledge)
 
     async def transfer_to_operator(**kwargs: Any) -> dict[str, str]:
+        from src.core.working_hours import (
+            format_hours_for_speech,
+            format_next_open_for_speech,
+            is_open,
+            next_open_time,
+        )
         from src.monitoring.metrics import transfer_attempts_total
 
         reason = str(kwargs.get("reason", ""))
         session.transfer_reason = reason
+
+        # After-hours short-circuit: don't attempt the transfer if the
+        # tenant is closed right now. Ask the LLM to switch to callback flow.
+        if not is_open(session.working_hours):
+            transfer_attempts_total.labels(result="after_hours").inc()
+            when = next_open_time(session.working_hours)
+            hours = format_hours_for_speech(session.working_hours)
+            next_phrase = format_next_open_for_speech(when)
+            message = (
+                f"Наразі кол-центр не працює. Ми працюємо: {hours}. "
+                f"Але я можу записати ваш номер, і оператор зателефонує вам {next_phrase}. "
+                f"Продиктуйте, будь ласка, номер для зворотного дзвінка."
+            ).strip()
+            logger.info(
+                "transfer_to_operator blocked (after hours) for call %s (reason=%s)",
+                session.channel_uuid,
+                reason,
+            )
+            return {
+                "status": "after_hours",
+                "message": message,
+                "next_action": "call create_callback_request after the customer states a phone number",
+            }
 
         if _ari_client is not None:
             try:
@@ -2522,6 +2560,96 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             }
 
     router.register("transfer_to_operator", transfer_to_operator)
+
+    async def create_callback_request(**kwargs: Any) -> dict[str, str]:
+        """Store an after-hours callback request and notify operators via Telegram."""
+        from src.notifications.telegram import send_message as telegram_send
+
+        phone = str(kwargs.get("phone", "")).strip()
+        preferred_time = str(kwargs.get("preferred_time", "")).strip() or None
+        note = str(kwargs.get("note", "")).strip() or None
+        reason = session.transfer_reason or "after_hours"
+
+        if not phone:
+            return {
+                "status": "error",
+                "message": (
+                    "Не почув номер. Продиктуйте, будь ласка, ваш номер телефону, "
+                    "і я запишу заявку на зворотний дзвінок."
+                ),
+            }
+
+        callback_id: str | None = None
+        if _db_engine is not None:
+            try:
+                async with _db_engine.begin() as conn:
+                    result = await conn.execute(
+                        text(
+                            """
+                            INSERT INTO callback_requests
+                                (tenant_id, call_id, phone, preferred_time, note, reason)
+                            VALUES (:tenant_id, :call_id, :phone, :preferred_time, :note, :reason)
+                            RETURNING id
+                            """
+                        ),
+                        {
+                            "tenant_id": session.tenant_id,
+                            "call_id": str(session.channel_uuid),
+                            "phone": phone,
+                            "preferred_time": preferred_time,
+                            "note": note,
+                            "reason": reason,
+                        },
+                    )
+                    row = result.first()
+                    if row is not None:
+                        callback_id = str(row.id)
+            except Exception:
+                logger.exception(
+                    "Failed to save callback_request for call %s", session.channel_uuid
+                )
+                return {
+                    "status": "error",
+                    "message": (
+                        "Перепрошую, виникла технічна затримка. "
+                        "Спробуйте, будь ласка, зателефонувати ще раз у робочі години."
+                    ),
+                }
+
+        # Fire-and-forget Telegram notification (never blocks the tool result)
+        tenant_label = session.tenant_name or session.tenant_slug or "—"
+        parts = [
+            "\U0001f4de <b>Нова заявка на зворотний дзвінок</b>",
+            f"Мережа: {tenant_label}",
+            f"Телефон: <code>{phone}</code>",
+        ]
+        if preferred_time:
+            parts.append(f"Бажаний час: {preferred_time}")
+        if note:
+            parts.append(f"Питання: {note}")
+        parts.append(f"Причина: {reason}")
+        if callback_id:
+            parts.append(f"ID: <code>{callback_id}</code>")
+        _tg_task = asyncio.create_task(telegram_send("\n".join(parts)))
+        _tg_task.add_done_callback(lambda t: t.exception())
+
+        logger.info(
+            "Callback saved: id=%s call=%s phone=%s reason=%s",
+            callback_id,
+            session.channel_uuid,
+            phone,
+            reason,
+        )
+        return {
+            "status": "callback_saved",
+            "callback_id": callback_id or "",
+            "message": (
+                f"Дякую, записав ваш номер {phone}. "
+                "Оператор передзвонить у робочі години. Гарного дня!"
+            ),
+        }
+
+    router.register("create_callback_request", create_callback_request)
 
     # --- Auto-inject CallerID into tool calls that need phone ---
     # Tools use different param names: "customer_phone" or "phone".

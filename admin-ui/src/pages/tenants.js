@@ -29,6 +29,80 @@ async function loadToolNames() {
     }
 }
 
+// ─── Working hours editor ────────────────────────────────────
+
+const _DAY_KEYS = ['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'];
+
+function _dayLabel(key) {
+    return t(`tenants.day_${key}`);
+}
+
+function _renderWorkingHoursRows(workingHours) {
+    // `workingHours` may be null (means 24/7) — in that case seed weekday defaults
+    const wh = workingHours || {};
+    const html = _DAY_KEYS.map(key => {
+        const raw = wh[key];
+        const isClosed = raw === null || raw === undefined;
+        const start = (raw && raw.start) || (['sat', 'sun'].includes(key) ? '10:00' : '09:00');
+        const end = (raw && raw.end) || (['sat', 'sun'].includes(key) ? '16:00' : '18:00');
+        return `
+            <div class="flex items-center gap-2 wh-row" data-day="${key}">
+                <span class="text-xs text-neutral-600 dark:text-neutral-400 w-10">${_dayLabel(key)}</span>
+                <input type="time" class="wh-start text-xs bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-300 dark:border-neutral-600 rounded px-1.5 py-0.5 focus:outline-none focus:border-blue-500 ${isClosed ? 'opacity-40' : ''}" value="${start}" ${isClosed ? 'disabled' : ''}>
+                <span class="text-xs text-neutral-500">–</span>
+                <input type="time" class="wh-end text-xs bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-300 dark:border-neutral-600 rounded px-1.5 py-0.5 focus:outline-none focus:border-blue-500 ${isClosed ? 'opacity-40' : ''}" value="${end}" ${isClosed ? 'disabled' : ''}>
+                <label class="flex items-center gap-1 text-xs cursor-pointer ml-2">
+                    <input type="checkbox" class="wh-closed" ${isClosed ? 'checked' : ''}>
+                    <span data-i18n="tenants.dayClosed">выходной</span>
+                </label>
+            </div>
+        `;
+    }).join('');
+    document.getElementById('tenantWorkingHoursRows').innerHTML = html;
+
+    // Wire checkbox → enable/disable time inputs on that row
+    document.querySelectorAll('#tenantWorkingHoursRows .wh-row').forEach(row => {
+        const cb = row.querySelector('.wh-closed');
+        cb.addEventListener('change', () => {
+            const disabled = cb.checked;
+            row.querySelectorAll('.wh-start, .wh-end').forEach(inp => {
+                inp.disabled = disabled;
+                inp.classList.toggle('opacity-40', disabled);
+            });
+        });
+    });
+}
+
+function fillWorkingHours(workingHours) {
+    const enabled = workingHours !== null && workingHours !== undefined;
+    document.getElementById('tenantWorkingHoursEnabled').checked = enabled;
+    document.getElementById('tenantWorkingHoursBody').classList.toggle('hidden', !enabled);
+    document.getElementById('tenantWorkingHoursTz').value = (workingHours && workingHours.timezone) || 'Europe/Kyiv';
+    _renderWorkingHoursRows(workingHours);
+}
+
+function readWorkingHoursFromForm() {
+    if (!document.getElementById('tenantWorkingHoursEnabled').checked) return null;
+    const tz = document.getElementById('tenantWorkingHoursTz').value.trim() || 'Europe/Kyiv';
+    const out = { timezone: tz };
+    document.querySelectorAll('#tenantWorkingHoursRows .wh-row').forEach(row => {
+        const key = row.dataset.day;
+        const isClosed = row.querySelector('.wh-closed').checked;
+        if (isClosed) {
+            out[key] = null;
+        } else {
+            const start = row.querySelector('.wh-start').value;
+            const end = row.querySelector('.wh-end').value;
+            if (start && end && start < end) {
+                out[key] = { start, end };
+            } else {
+                out[key] = null;
+            }
+        }
+    });
+    return out;
+}
+
 // ─── Load & render tenants ───────────────────────────────────
 
 async function loadTenants(offset) {
@@ -136,6 +210,7 @@ async function showCreateTenant() {
     document.getElementById('tenantConfig').value = '{}';
     document.getElementById('tenantIsActive').checked = true;
     document.getElementById('tenantToolsContainer').innerHTML = renderToolCheckboxes([]);
+    fillWorkingHours(null);
     document.getElementById('tenantModal').classList.add('show');
 }
 
@@ -157,6 +232,7 @@ async function editTenant(id) {
         document.getElementById('tenantConfig').value = JSON.stringify(tn.config || {}, null, 2);
         document.getElementById('tenantIsActive').checked = tn.is_active !== false;
         document.getElementById('tenantToolsContainer').innerHTML = renderToolCheckboxes(tn.enabled_tools || []);
+        fillWorkingHours(tn.working_hours || null);
         document.getElementById('tenantModal').classList.add('show');
     } catch (e) {
         showToast(t('tenants.loadFailed', {error: e.message}), 'error');
@@ -194,7 +270,8 @@ async function saveTenant() {
         return;
     }
 
-    const body = { name, network_id, agent_name, greeting, enabled_tools, extensions, prompt_suffix, config, is_active };
+    const working_hours = readWorkingHoursFromForm();
+    const body = { name, network_id, agent_name, greeting, enabled_tools, extensions, prompt_suffix, config, working_hours, is_active };
     if (!id) body.slug = slug;
 
     try {
@@ -238,8 +315,14 @@ async function deleteTenant(id, name) {
 export function init() {
     registerPageLoader('tenants', () => loadTenants());
     document.addEventListener('click', (e) => {
-        if (!e.target.closest('.relative')) {
-            document.querySelectorAll('#page-tenants .relative > div:not(.hidden)').forEach(m => m.classList.add('hidden'));
+        if (!e.target.closest('.relative.inline-block')) {
+            document.querySelectorAll('#page-tenants .relative.inline-block > div:not(.hidden)').forEach(m => m.classList.add('hidden'));
+        }
+    });
+    // Toggle working-hours block visibility
+    document.addEventListener('change', (e) => {
+        if (e.target && e.target.id === 'tenantWorkingHoursEnabled') {
+            document.getElementById('tenantWorkingHoursBody').classList.toggle('hidden', !e.target.checked);
         }
     });
 }

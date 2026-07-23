@@ -378,7 +378,14 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
                     "description": "ID пов'язаного замовлення (якщо клієнт замовив шини)",
                 },
             },
-            "required": ["station_id", "date", "time", "customer_name", "customer_phone", "auto_number"],
+            "required": [
+                "station_id",
+                "date",
+                "time",
+                "customer_name",
+                "customer_phone",
+                "auto_number",
+            ],
         },
     },
     {
@@ -534,6 +541,49 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
     },
 ]
 
+# Callback tools — used when transfer_to_operator returned status="after_hours"
+CALLBACK_TOOLS: list[dict] = [  # type: ignore[type-arg]
+    {
+        "name": "create_callback_request",
+        "description": (
+            "Зафіксувати заявку на зворотний дзвінок від оператора. "
+            "Викликай ТІЛЬКИ якщо transfer_to_operator повернув status='after_hours' "
+            "або 'error'/'unavailable' і клієнт погодився залишити номер. "
+            "Оператор передзвонить у робочі години."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "phone": {
+                    "type": "string",
+                    "description": (
+                        "Телефон клієнта у форматі +380XXXXXXXXX. "
+                        "Якщо номер визначено автоматично (CallerID) — передавай його; "
+                        "інакше запитай у клієнта і повтори за ним для підтвердження."
+                    ),
+                },
+                "preferred_time": {
+                    "type": "string",
+                    "description": (
+                        "Бажаний час дзвінка у вільній формі, як сказав клієнт "
+                        "(наприклад, 'зранку', 'після 14:00', 'у понеділок'). "
+                        "Якщо клієнт не вказав — пропусти поле."
+                    ),
+                },
+                "note": {
+                    "type": "string",
+                    "description": (
+                        "Короткий підсумок питання клієнта для оператора "
+                        "(1-2 речення, українською)."
+                    ),
+                },
+            },
+            "required": ["phone"],
+        },
+    },
+]
+
+
 # Profile tools
 PROFILE_TOOLS: list[dict] = [  # type: ignore[type-arg]
     {
@@ -586,8 +636,8 @@ PROFILE_TOOLS: list[dict] = [  # type: ignore[type-arg]
     },
 ]
 
-# All tools for the agent (MVP + Orders + Fitting/Knowledge + Profile)
-ALL_TOOLS = MVP_TOOLS + ORDER_TOOLS + FITTING_TOOLS + PROFILE_TOOLS
+# All tools for the agent (MVP + Orders + Fitting/Knowledge + Profile + Callback)
+ALL_TOOLS = MVP_TOOLS + ORDER_TOOLS + FITTING_TOOLS + PROFILE_TOOLS + CALLBACK_TOOLS
 
 
 def filter_tools_by_state(
