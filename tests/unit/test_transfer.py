@@ -78,6 +78,33 @@ class TestARITransferToQueue:
         result = await ari_client.transfer_to_queue("channel-123")
         assert result is False
 
+    @pytest.mark.asyncio
+    async def test_transfer_uses_channel_id_override(
+        self, ari_client: AsteriskARIClient
+    ) -> None:
+        """When channel_id_override is provided, ARI redirect targets it, not the UUID.
+
+        AudioSocket UUID ≠ Asterisk channel id — the dialplan writes the
+        real ``${CHANNEL(uniqueid)}`` into Redis and the handler passes it here.
+        """
+        mock_resp = AsyncMock()
+        mock_resp.status = 204
+        mock_resp.__aenter__ = AsyncMock(return_value=mock_resp)
+        mock_resp.__aexit__ = AsyncMock(return_value=False)
+
+        mock_session = AsyncMock()
+        mock_session.post = MagicMock(return_value=mock_resp)
+        ari_client._session = mock_session
+
+        result = await ari_client.transfer_to_queue(
+            "e1ed08e0-9b99-476a-bfd5-39d0ecc423c6",
+            channel_id_override="1729754321.42",
+        )
+        assert result is True
+        called_url = mock_session.post.call_args[0][0]
+        assert "1729754321.42/redirect" in called_url
+        assert "e1ed08e0" not in called_url
+
 
 # --- transfer_to_operator tool handler tests ---
 

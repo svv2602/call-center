@@ -339,13 +339,17 @@ async def readiness_check() -> dict[str, object]:
 
 @app.post("/internal/caller-id")
 async def store_caller_id(request: Request, data: dict[str, str]) -> dict[str, str]:
-    """Store CallerID and called extension in Redis for a call UUID.
+    """Store CallerID, called extension and Asterisk channel id in Redis for a call UUID.
 
     Called by Asterisk dialplan before AudioSocket:
       System(curl -s -X POST http://...:8080/internal/caller-id
         -H 'Content-Type: application/json'
         -H 'X-Internal-Secret: ${INTERNAL_SECRET}'
-        -d '{"uuid":"${CALL_UUID}","number":"${CALLERID(num)}","exten":"${CALLED_EXTEN}"}')
+        -d '{"uuid":"${CALL_UUID}","number":"${CALLERID(num)}","exten":"${CALLED_EXTEN}","channel_id":"${CHANNEL(uniqueid)}"}')
+
+    ``channel_id`` is the real Asterisk channel unique id (e.g. ``1729754321.42``).
+    AudioSocket UUIDs are not valid Asterisk channel ids, so ARI operations
+    (``transfer_to_operator``) must resolve UUID → channel_id via ``call:channel:{uuid}``.
     """
     # Verify pre-shared secret (skip if not configured — localhost-only access)
     settings = get_settings()
@@ -358,6 +362,7 @@ async def store_caller_id(request: Request, data: dict[str, str]) -> dict[str, s
     call_uuid = data.get("uuid", "").strip()
     number = data.get("number", "").strip()
     exten = data.get("exten", "").strip()
+    channel_id = data.get("channel_id", "").strip()
     if not call_uuid:
         return {"status": "ignored"}
     # Validate UUID format
@@ -370,6 +375,8 @@ async def store_caller_id(request: Request, data: dict[str, str]) -> dict[str, s
             await _redis.set(f"call:caller:{call_uuid}", number, ex=120)
         if exten:
             await _redis.set(f"call:exten:{call_uuid}", exten, ex=120)
+        if channel_id:
+            await _redis.set(f"call:channel:{call_uuid}", channel_id, ex=120)
     return {"status": "ok"}
 
 
@@ -2513,9 +2520,35 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             }
 
         if _ari_client is not None:
+            # AudioSocket UUID ≠ Asterisk channel id. Resolve the real channel
+            # id from the Redis mapping populated by the dialplan curl call.
+            asterisk_channel_id: str | None = None
+            if _redis is not None:
+                try:
+                    raw = await _redis.get(f"call:channel:{session.channel_uuid}")
+                    if raw is not None:
+                        asterisk_channel_id = (
+                            raw.decode() if isinstance(raw, bytes) else str(raw)
+                        ).strip() or None
+                except Exception:  # pragma: no cover — degrade to UUID fallback
+                    logger.debug(
+                        "Redis channel_id lookup failed for %s",
+                        session.channel_uuid,
+                        exc_info=True,
+                    )
+            if asterisk_channel_id is None:
+                logger.warning(
+                    "No Asterisk channel_id mapping for call %s — "
+                    "transfer will likely 404 (dialplan not sending channel_id?)",
+                    session.channel_uuid,
+                )
+
             try:
                 success = await asyncio.wait_for(
-                    _ari_client.transfer_to_queue(str(session.channel_uuid)),
+                    _ari_client.transfer_to_queue(
+                        str(session.channel_uuid),
+                        channel_id_override=asterisk_channel_id,
+                    ),
                     timeout=5,
                 )
             except TimeoutError:

@@ -116,27 +116,44 @@ class AsteriskARIClient:
             return None
 
     async def transfer_to_queue(
-        self, channel_uuid: str, context: str = "transfer-to-operator"
+        self,
+        channel_uuid: str,
+        context: str = "transfer-to-operator",
+        channel_id_override: str | None = None,
     ) -> bool:
         """Transfer a channel to the operator queue via ARI.
+
+        `channel_uuid` is the AudioSocket UUID (used only for logging).
+        `channel_id_override` — the real Asterisk channel id
+        (``${CHANNEL(uniqueid)}``, e.g. ``1729754321.42``) resolved from the
+        Redis mapping ``call:channel:{uuid}`` populated by the dialplan.
+        AudioSocket UUIDs are not valid Asterisk channel ids, so calling
+        `/channels/{uuid}/redirect` with the UUID always returns 404.
 
         Returns True if transfer was initiated successfully.
         """
         if self._session is None:
             return False
 
+        target = channel_id_override or channel_uuid
         try:
             async with self._session.post(
-                f"{self._url}/channels/{channel_uuid}/redirect",
+                f"{self._url}/channels/{target}/redirect",
                 json={"endpoint": f"Local/s@{context}"},
             ) as resp:
                 if resp.status in (200, 204):
-                    logger.info("Transfer initiated: %s → %s", channel_uuid, context)
+                    logger.info(
+                        "Transfer initiated: uuid=%s channel=%s → %s",
+                        channel_uuid,
+                        target,
+                        context,
+                    )
                     return True
                 logger.warning(
-                    "Transfer failed: status=%d, channel=%s",
+                    "Transfer failed: status=%d, uuid=%s channel=%s",
                     resp.status,
                     channel_uuid,
+                    target,
                 )
                 return False
         except (aiohttp.ClientError, OSError) as exc:
