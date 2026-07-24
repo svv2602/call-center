@@ -62,10 +62,16 @@ async def _load_hints_from_pg(
 
 
 async def _sync_hints_to_redis(redis_key: str, hints: dict[str, Any]) -> None:
-    """Best-effort sync of full hints dict to Redis cache."""
+    """Best-effort sync of full hints dict to Redis cache.
+
+    No TTL: hints only change via this admin API (which re-syncs on every
+    mutation), and `_get_fitting_stations` falls back to PG on cache miss.
+    A TTL would create dead windows where the LLM sees only formal addresses
+    and fails to match landmarks like "Победа-6" or "Речпорт".
+    """
     try:
         redis = await _get_redis()
-        await redis.set(redis_key, json.dumps(hints, ensure_ascii=False), ex=86400)
+        await redis.set(redis_key, json.dumps(hints, ensure_ascii=False))
     except Exception:
         logger.warning("Redis sync failed for %s", redis_key, exc_info=True)
 

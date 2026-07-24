@@ -1368,23 +1368,47 @@ def _extract_time(raw: str) -> str:
     return m.group(1) if m else ""
 
 
+_LETTER_FOLD = str.maketrans({
+    # Fold uk↔ru near-equivalents so STT / caller input matches hints
+    # written in either language: "Сич" ↔ "Січ", "Клубе" ↔ "Клубі",
+    # "Победа" ↔ "Побєда", "ёлка" ↔ "елка".
+    "і": "и",
+    "ї": "и",
+    "є": "е",
+    "ґ": "г",
+    "ё": "е",
+    "ъ": "",
+    "ь": "",
+    "'": "",
+    "’": "",
+    "`": "",
+})
+
+
+def _fold(text_in: str) -> str:
+    return text_in.lower().translate(_LETTER_FOLD)
+
+
 def _query_matches(query: str, searchable: str) -> bool:
     """Fuzzy match a station-search query against a searchable text blob.
 
     Falls back to token-prefix matching when substring fails — handles case-
     ending mismatches like query="Холодного" vs address="Холодногірська",
     or query="Холодна гора 11" vs address="Холодногірська, 11".
+
+    Also folds Ukrainian/Russian near-equivalent letters (і↔и, ї↔и, є↔е,
+    ё↔е) so STT quirks ("клуб Сич" vs "Січ") don't kill the match.
     """
-    q = query.strip().lower()
+    q = _fold(query.strip())
     if not q:
         return False
-    s = searchable.lower()
+    s = _fold(searchable)
     if q in s:
         return True
-    query_tokens = [w for w in re.findall(r"[\w']+", q, flags=re.UNICODE) if len(w) >= 4]
+    query_tokens = [w for w in re.findall(r"[\w]+", q, flags=re.UNICODE) if len(w) >= 4]
     if not query_tokens:
         return False
-    text_tokens = re.findall(r"[\w']+", s, flags=re.UNICODE)
+    text_tokens = re.findall(r"[\w]+", s, flags=re.UNICODE)
     for qt in query_tokens:
         prefix = qt[:5]
         if any(t.startswith(prefix) for t in text_tokens):
@@ -1885,7 +1909,10 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         # 3. Return from cache/1C with city/query filter
         if all_stations is not None:
             # Load station hints from Redis BEFORE filtering —
-            # query may match hint fields (district, landmarks, description)
+            # query may match hint fields (district, landmarks, description).
+            # On cache miss fall back to PostgreSQL (source of truth) and
+            # re-warm Redis — a missing cache used to make the bot answer
+            # "не знайшла" for valid landmarks ("Победа-6", "Речпорт", etc.).
             hints: dict[str, Any] = {}
             if _redis:
                 try:
@@ -1896,6 +1923,39 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                         )
                 except Exception:
                     pass
+            if not hints:
+                try:
+                    from src.api.database import get_engine as _get_api_engine
+
+                    engine = await _get_api_engine()
+                    async with engine.begin() as conn:
+                        result = await conn.execute(
+                            text(
+                                "SELECT point_id, district, landmarks, description, phone "
+                                "FROM point_hints WHERE point_type = 'fitting_station'"
+                            )
+                        )
+                        for row in result.mappings():
+                            hints[row["point_id"]] = {
+                                "district": row["district"] or "",
+                                "landmarks": row["landmarks"] or "",
+                                "description": row["description"] or "",
+                                "phone": row["phone"] or "",
+                            }
+                    if _redis and hints:
+                        await _redis.set(
+                            "fitting:station_hints",
+                            json.dumps(hints, ensure_ascii=False),
+                        )
+                        logger.info(
+                            "fitting:station_hints re-warmed from PG (%d entries)",
+                            len(hints),
+                        )
+                except Exception:
+                    logger.warning(
+                        "get_fitting_stations: failed to load hints from PG fallback",
+                        exc_info=True,
+                    )
 
             filtered = all_stations
 
