@@ -168,6 +168,23 @@ export const HELP_PAGES = {
         ],
         tipsKey: 'help.pointHints.tips',
     },
+    'stt-corrections': {
+        titleKey: 'help.sttCorrections.title',
+        overviewKey: 'help.sttCorrections.overview',
+        sections: [
+            { titleKey: 'help.sttCorrections.pipeline.title', contentKey: 'help.sttCorrections.pipeline.content' },
+            { titleKey: 'help.sttCorrections.rule.title', contentKey: 'help.sttCorrections.rule.content' },
+            { titleKey: 'help.sttCorrections.context.title', contentKey: 'help.sttCorrections.context.content' },
+            { titleKey: 'help.sttCorrections.workflow.title', contentKey: 'help.sttCorrections.workflow.content' },
+            { titleKey: 'help.sttCorrections.workflow.steps', contentKey: 'help.sttCorrections.workflow.stepsContent' },
+            { titleKey: 'help.sttCorrections.testing.title', contentKey: 'help.sttCorrections.testing.content' },
+            { titleKey: 'help.sttCorrections.regex.title', contentKey: 'help.sttCorrections.regex.content' },
+            { titleKey: 'help.sttCorrections.regex.examples', contentKey: 'help.sttCorrections.regex.examplesContent' },
+            { titleKey: 'help.sttCorrections.metrics.title', contentKey: 'help.sttCorrections.metrics.content' },
+            { titleKey: 'help.sttCorrections.diff.title', contentKey: 'help.sttCorrections.diff.content' },
+        ],
+        tipsKey: 'help.sttCorrections.tips',
+    },
     notifications: {
         titleKey: 'help.notifications.title',
         overviewKey: 'help.notifications.overview',
