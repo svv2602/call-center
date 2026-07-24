@@ -33,6 +33,7 @@ app = Celery(
         "src.tasks.prompt_optimizer",
         "src.tasks.promo_summary_tasks",
         "src.tasks.pricing_sync",
+        "src.tasks.fitting_prices_tasks",
     ],
 )
 
@@ -61,6 +62,7 @@ app.conf.update(
         "src.tasks.prompt_optimizer.*": {"queue": "quality"},
         "src.tasks.promo_summary_tasks.*": {"queue": "embeddings"},
         "src.tasks.pricing_sync.*": {"queue": "stats"},
+        "src.tasks.fitting_prices_tasks.*": {"queue": "catalog"},
     },
 )
 
@@ -132,6 +134,11 @@ app.conf.beat_schedule = {
     "sync-llm-pricing-catalog": {
         "task": "src.tasks.pricing_sync.sync_llm_pricing_catalog",
         "schedule": crontab(hour=5, minute=30),  # Daily at 05:30 Kyiv time
+    },
+    "refresh-fitting-prices": {
+        "task": "src.tasks.fitting_prices_tasks.refresh_fitting_prices",
+        "schedule": crontab(minute=45),  # Every hour at :45; TTL 2h keeps cache warm
+        "kwargs": {"triggered_by": "beat"},
     },
 }
 

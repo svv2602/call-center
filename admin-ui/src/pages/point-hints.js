@@ -11,6 +11,8 @@ let _stationHints = {};
 let _stationsList = [];
 let _pickupHints = {};
 let _pickupPointsList = [];
+let _fittingPrices = [];
+let _fittingPricesUpdatedAt = null;
 
 // ═══════════════════════════════════════════════════════════
 //  Modal helpers
@@ -91,9 +93,12 @@ function switchTab(tab) {
     });
     document.getElementById('pointHintsContent-fitting').style.display = tab === 'fitting' ? '' : 'none';
     document.getElementById('pointHintsContent-pickup').style.display = tab === 'pickup' ? '' : 'none';
+    const pricesEl = document.getElementById('pointHintsContent-prices');
+    if (pricesEl) pricesEl.style.display = tab === 'prices' ? '' : 'none';
 
     if (tab === 'fitting' && _stationsList.length === 0 && Object.keys(_stationHints).length === 0) loadStationHints();
     if (tab === 'pickup' && _pickupPointsList.length === 0 && Object.keys(_pickupHints).length === 0) loadPickupHints();
+    if (tab === 'prices' && _fittingPrices.length === 0 && !_fittingPricesUpdatedAt) loadFittingPrices();
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -367,6 +372,108 @@ async function refreshPickupPoints() {
 }
 
 // ═══════════════════════════════════════════════════════════
+//  Fitting Prices (tab: prices)
+// ═══════════════════════════════════════════════════════════
+function _formatUpdatedAt(iso) {
+    if (!iso) return t('pointHints.pricesNeverUpdated');
+    try {
+        const d = new Date(iso);
+        return d.toLocaleString();
+    } catch {
+        return iso;
+    }
+}
+
+async function loadFittingPrices() {
+    const container = document.getElementById('pointHintsContent-prices');
+    if (!container) return;
+    container.innerHTML = `<div class="${tw.loadingWrap}"><div class="spinner"></div></div>`;
+    try {
+        const data = await api('/admin/fitting/prices');
+        _fittingPrices = data.prices || [];
+        _fittingPricesUpdatedAt = data.updated_at || null;
+        renderFittingPrices();
+    } catch (e) {
+        container.innerHTML = `<div class="${tw.emptyState}">${t('pointHints.loadFailed', {error: escapeHtml(e.message)})}</div>`;
+    }
+}
+
+function renderFittingPrices() {
+    const container = document.getElementById('pointHintsContent-prices');
+    if (!container) return;
+
+    // Group prices by point_id for readability
+    const byPoint = {};
+    for (const p of _fittingPrices) {
+        const pid = p.point_id || '';
+        if (!byPoint[pid]) byPoint[pid] = [];
+        byPoint[pid].push(p);
+    }
+    const stationNameById = {};
+    for (const s of _stationsList) {
+        const sid = s.station_id || s.id || '';
+        if (sid) stationNameById[sid] = s.name || s.address || sid;
+    }
+
+    const header = `<div class="flex items-center justify-between mb-3 gap-3 flex-wrap">
+        <div class="text-xs text-neutral-500 dark:text-neutral-400">
+            <span>${t('pointHints.pricesUpdatedAt')}: <strong>${escapeHtml(_formatUpdatedAt(_fittingPricesUpdatedAt))}</strong></span>
+            <span class="ml-3">${t('pointHints.pricesTotal', {count: _fittingPrices.length})}</span>
+        </div>
+        <button class="${tw.btnPrimary} ${tw.btnSm}" onclick="window._pages.pointHints.refreshFittingPrices()">${t('pointHints.refreshFromOnec')}</button>
+    </div>`;
+
+    if (_fittingPrices.length === 0) {
+        container.innerHTML = header + `<div class="${tw.emptyState}"><p>${t('pointHints.noPrices')}</p></div>`;
+        return;
+    }
+
+    let html = header;
+    html += `<div class="overflow-x-auto"><table class="${tw.table}">
+        <thead><tr>
+            <th class="${tw.th}">${t('pointHints.pricePoint')}</th>
+            <th class="${tw.th}">${t('pointHints.priceService')}</th>
+            <th class="${tw.th}">${t('pointHints.priceArtikul')}</th>
+            <th class="${tw.th}">${t('pointHints.priceCity')}</th>
+            <th class="${tw.th} text-right">${t('pointHints.priceAmount')}</th>
+        </tr></thead><tbody>`;
+
+    const sortedPids = Object.keys(byPoint).sort((a, b) => {
+        const an = stationNameById[a] || a;
+        const bn = stationNameById[b] || b;
+        return an.localeCompare(bn);
+    });
+
+    for (const pid of sortedPids) {
+        for (const p of byPoint[pid]) {
+            const pointLabel = stationNameById[pid] || pid || '—';
+            html += `<tr class="${tw.trHover}">
+                <td class="${tw.td}" data-label="${t('pointHints.pricePoint')}"><strong>${escapeHtml(pointLabel)}</strong>${pid && stationNameById[pid] ? `<div class="text-[10px] text-neutral-400 font-mono">${escapeHtml(pid)}</div>` : ''}</td>
+                <td class="${tw.td}" data-label="${t('pointHints.priceService')}">${escapeHtml(p.service || p.name || '')}</td>
+                <td class="${tw.td} font-mono text-xs" data-label="${t('pointHints.priceArtikul')}">${escapeHtml(p.artikul || '')}</td>
+                <td class="${tw.td}" data-label="${t('pointHints.priceCity')}">${escapeHtml(p.city || '')}</td>
+                <td class="${tw.td} text-right" data-label="${t('pointHints.priceAmount')}"><strong>${escapeHtml(String(p.price ?? ''))}</strong></td>
+            </tr>`;
+        }
+    }
+    html += '</tbody></table></div>';
+    container.innerHTML = html;
+}
+
+async function refreshFittingPrices() {
+    showToast(t('pointHints.refreshing'), 'info');
+    try {
+        const data = await api('/admin/fitting/prices/refresh', { method: 'POST' });
+        _fittingPrices = data.prices || [];
+        _fittingPricesUpdatedAt = data.updated_at || null;
+        showToast(t('pointHints.refreshed', { count: data.total || 0 }), 'success');
+        renderFittingPrices();
+    } catch (e) {
+        showToast(t('pointHints.refreshFailed', { error: e.message }), 'error');
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
 //  Init
 // ═══════════════════════════════════════════════════════════
 export function init() {
@@ -374,6 +481,8 @@ export function init() {
         _activeTab = 'fitting';
         _stationsList = [];
         _pickupPointsList = [];
+        _fittingPrices = [];
+        _fittingPricesUpdatedAt = null;
         switchTab('fitting');
     });
 }
@@ -383,5 +492,6 @@ window._pages.pointHints = {
     switchTab,
     loadStationHints, editStationHint, deleteStationHint, refreshStations,
     loadPickupHints, editPickupHint, deletePickupHint, refreshPickupPoints,
+    loadFittingPrices, refreshFittingPrices,
     saveHintFromModal,
 };

@@ -444,3 +444,80 @@ async def refresh_pickup_points(_: dict[str, Any] = _perm_w) -> dict[str, Any]:
             all_points.extend(json.loads(raw))
 
     return {"points": all_points, "total": total}
+
+
+# ── Fitting Service Prices ────────────────────────────────────
+#
+# Prices for tire fitting (montage, balancing, etc.) live in 1C. We cache them
+# in Redis and refresh hourly via Celery task `refresh_fitting_prices`. This
+# admin endpoint also allows manual on-demand refresh from the UI.
+
+_PRICES_CACHE_KEY = "onec:fitting_prices"
+_PRICES_UPDATED_AT_KEY = "onec:fitting_prices:updated_at"
+_PRICES_CACHE_TTL = 7200  # 2h — matches Celery task
+
+
+@router.get("/prices")
+async def get_fitting_prices(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
+    """Return currently cached fitting prices + last refresh timestamp."""
+    redis = await _get_redis()
+    prices: list[dict[str, Any]] = []
+    raw = await redis.get(_PRICES_CACHE_KEY)
+    if raw:
+        try:
+            prices = json.loads(raw if isinstance(raw, str) else raw.decode())
+        except Exception:
+            logger.warning("Failed to decode cached fitting prices", exc_info=True)
+
+    updated_at_raw = await redis.get(_PRICES_UPDATED_AT_KEY)
+    updated_at: str | None = None
+    if updated_at_raw:
+        updated_at = (
+            updated_at_raw if isinstance(updated_at_raw, str) else updated_at_raw.decode()
+        )
+
+    return {"prices": prices, "total": len(prices), "updated_at": updated_at}
+
+
+@router.post("/prices/refresh")
+async def refresh_fitting_prices_endpoint(
+    _: dict[str, Any] = _perm_w,
+) -> dict[str, Any]:
+    """Fetch fitting service prices from 1C REST and cache in Redis.
+
+    Runs synchronously so the UI can immediately show the fresh data. The
+    scheduled Celery task performs the same work hourly in the background.
+    """
+    from datetime import UTC, datetime
+
+    from src.onec_client.client import OneCClient
+
+    settings = get_settings()
+    if not settings.onec.username:
+        raise HTTPException(status_code=503, detail="1C credentials not configured")
+
+    client = OneCClient(
+        base_url=settings.onec.url,
+        username=settings.onec.username,
+        password=settings.onec.password,
+        timeout=settings.onec.timeout,
+    )
+    try:
+        await client.open()
+        data = await client.get_fitting_prices()
+        raw = data.get("data", data) if isinstance(data, dict) else data
+        prices = raw if isinstance(raw, list) else []
+    except Exception as exc:
+        logger.warning("Failed to fetch fitting prices from 1C REST: %s", exc)
+        raise HTTPException(status_code=502, detail=f"1C REST error: {exc}") from exc
+    finally:
+        await client.close()
+
+    redis = await _get_redis()
+    updated_at = datetime.now(UTC).isoformat()
+    await redis.setex(
+        _PRICES_CACHE_KEY, _PRICES_CACHE_TTL, json.dumps(prices, ensure_ascii=False)
+    )
+    await redis.set(_PRICES_UPDATED_AT_KEY, updated_at)
+    logger.info("Fitting prices refreshed from 1C: %d items", len(prices))
+    return {"prices": prices, "total": len(prices), "updated_at": updated_at}

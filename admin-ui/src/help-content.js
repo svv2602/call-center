@@ -162,6 +162,7 @@ export const HELP_PAGES = {
         sections: [
             { titleKey: 'help.pointHints.fitting.title', contentKey: 'help.pointHints.fitting.content' },
             { titleKey: 'help.pointHints.pickup.title', contentKey: 'help.pointHints.pickup.content' },
+            { titleKey: 'help.pointHints.prices.title', contentKey: 'help.pointHints.prices.content' },
             { titleKey: 'help.pointHints.steps', contentKey: 'help.pointHints.stepsContent' },
             { titleKey: 'help.pointHints.affects.title', contentKey: 'help.pointHints.affects.content' },
         ],
