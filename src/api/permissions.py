@@ -57,6 +57,8 @@ SYSTEM_PERMISSIONS = [
     "pronunciation:write",
     "stt_hints:read",
     "stt_hints:write",
+    "stt_corrections:read",
+    "stt_corrections:write",
     "point_hints:read",
     "point_hints:write",
 ]
@@ -105,5 +107,6 @@ PERMISSION_GROUPS: dict[str, list[str]] = {
     "vehicles": ["vehicles:read", "vehicles:write"],
     "pronunciation": ["pronunciation:read", "pronunciation:write"],
     "stt_hints": ["stt_hints:read", "stt_hints:write"],
+    "stt_corrections": ["stt_corrections:read", "stt_corrections:write"],
     "point_hints": ["point_hints:read", "point_hints:write"],
 }

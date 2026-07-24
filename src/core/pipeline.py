@@ -207,6 +207,35 @@ def _rotate(pool: list[str]) -> str:
     return phrase
 
 
+# --- STT correction context inference ---
+# Map ``context_hint`` -> keywords that, when found in the bot's last
+# utterance, signal that the client's reply should be interpreted in
+# that context. Used to scope post-STT substitution rules like
+# "N лет → N липня" so they only fire when the bot was asking for a date.
+_CTX_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("date", ("дату", "дата", "число", "коли", "яку дату", "яке число", "на який день")),
+    ("time", ("час", "часу", "о котрій", "який час", "вільний час", "слот")),
+    ("plate", ("держномер", "номер авто", "номер автомобіля", "номер машини", "продиктуйте номер", "назвіть номер автомобіля")),
+    ("city", ("місто", "місті", "у якому місті", "з якого міста")),
+    ("station", ("район", "адрес", "адреса", "адресу", "вулиц", "орієнтир", "поблизу", "де зручніше")),
+    ("phone", ("телефон", "номер телефон")),
+)
+
+
+def _infer_context_hint(bot_utterance: str) -> str | None:
+    """Guess a ``context_hint`` from the bot's most recent utterance.
+
+    Returns the first matching context, or None if nothing recognizable.
+    """
+    if not bot_utterance:
+        return None
+    lowered = bot_utterance.lower()
+    for ctx, keywords in _CTX_KEYWORDS:
+        if any(kw in lowered for kw in keywords):
+            return ctx
+    return None
+
+
 # --- Contextual farewell prompt ---
 
 # --- Scenario-specific greeting suffixes ---
@@ -524,6 +553,65 @@ class CallPipeline:
             )
         return first
 
+    async def _apply_stt_corrections(self, transcript: Transcript) -> Transcript:
+        """Run regex substitutions from Redis on the transcript text.
+
+        No-op if the corrections module fails to load — never let a bad
+        rule break the pipeline. Any applied rules are logged (with the
+        original text preserved in the log line for offline audit) and
+        counted per rule_id for Prometheus.
+        """
+        if not transcript.text:
+            return transcript
+        try:
+            from src.core.redis_client import get_redis
+            from src.monitoring.metrics import stt_corrections_applied_total
+            from src.stt.corrections import apply_corrections
+
+            redis = await get_redis()
+        except Exception:
+            return transcript
+
+        # Infer context_hint from the bot's last utterance (if any).
+        context_hint: str | None = None
+        for turn in reversed(self._session.dialog_history):
+            if turn.speaker == "assistant" and turn.content:
+                context_hint = _infer_context_hint(turn.content)
+                break
+
+        try:
+            new_text, applied = await apply_corrections(
+                redis, transcript.text, context_hint
+            )
+        except Exception:
+            logger.warning(
+                "stt_corrections: apply failed for call %s",
+                self._session.channel_uuid,
+                exc_info=True,
+            )
+            return transcript
+
+        if not applied or new_text == transcript.text:
+            return transcript
+
+        logger.info(
+            "stt_corrections: call=%s ctx=%s rules=%s original=%r → corrected=%r",
+            self._session.channel_uuid,
+            context_hint,
+            applied,
+            transcript.text[:120],
+            new_text[:120],
+        )
+        for rule_id in applied:
+            stt_corrections_applied_total.labels(rule_id=rule_id).inc()
+
+        return Transcript(
+            text=new_text,
+            is_final=transcript.is_final,
+            confidence=transcript.confidence,
+            language=transcript.language,
+        )
+
     async def _transcript_processor_loop(self) -> None:
         """Process STT transcripts and drive the LLM → TTS flow."""
         logger.info(
@@ -565,6 +653,13 @@ class CallPipeline:
 
             # Buffer multiple transcripts arriving in quick succession
             transcript = await self._drain_transcript_buffer(transcript)
+
+            # Post-STT text corrections: apply deterministic regex fixes for
+            # known STT quirks ("N лет"→"N липня", "викторог"→"вівторок", etc.)
+            # BEFORE anything downstream sees the text. Scoped by context_hint
+            # inferred from the bot's last utterance so rules like
+            # "17:25 → 1725" only fire when we were asking for a plate.
+            transcript = await self._apply_stt_corrections(transcript)
 
             # Got a final transcript — reset timeout and track language
             self._session.timeout_count = 0

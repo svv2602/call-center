@@ -386,6 +386,12 @@ llm_stop_reason_total = Counter(
     ["reason"],  # end_turn, tool_use, max_tokens, error
 )
 
+stt_corrections_applied_total = Counter(
+    "callcenter_stt_corrections_applied_total",
+    "Post-STT text corrections applied per rule",
+    ["rule_id"],
+)
+
 
 def get_metrics() -> bytes:
     """Generate Prometheus metrics output."""

@@ -59,6 +59,7 @@ const PAGE_PERMISSIONS = {
     'cost-analysis': 'analytics:read',
     'onec-data': 'onec_data:read',
     'stt-hints': 'stt_hints:read',
+    'stt-corrections': 'stt_corrections:read',
     'point-hints': 'point_hints:read',
 };
 

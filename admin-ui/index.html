@@ -137,6 +137,10 @@
                             <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 18.75a6 6 0 006-6v-1.5m-6 7.5a6 6 0 01-6-6v-1.5m6 7.5v3.75m-3.75 0h7.5M12 15.75a3 3 0 01-3-3V4.5a3 3 0 116 0v8.25a3 3 0 01-3 3z"/></svg>
                             <span data-i18n="nav.sttHints">Подсказки STT</span>
                         </a>
+                        <a href="#" class="nav-flyout-link" data-page="stt-corrections" onclick="window._app.showPage('stt-corrections')">
+                            <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M12 6.75a5.25 5.25 0 016.775-5.025.75.75 0 01.313 1.248l-3.32 3.319c.063.475.276.934.641 1.299.365.365.824.578 1.3.64l3.318-3.319a.75.75 0 011.248.313 5.25 5.25 0 01-5.472 6.756c-1.018-.086-1.87.1-2.309.634L7.344 21.3A3.298 3.298 0 112.7 16.657l8.684-7.151c.533-.44.72-1.291.634-2.309A5.342 5.342 0 0112 6.75z"/></svg>
+                            <span data-i18n="nav.sttCorrections">Коррекции STT</span>
+                        </a>
                         <a href="#" class="nav-flyout-link" data-page="point-hints" onclick="window._app.showPage('point-hints')">
                             <svg class="w-4 h-4 shrink-0" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15 10.5a3 3 0 11-6 0 3 3 0 016 0z"/><path stroke-linecap="round" stroke-linejoin="round" d="M19.5 10.5c0 7.142-7.5 11.25-7.5 11.25S4.5 17.642 4.5 10.5a7.5 7.5 0 1115 0z"/></svg>
                             <span data-i18n="nav.pointHints">Подсказки для точек</span>
@@ -1020,6 +1024,16 @@
                     </div>
                 </div>
                 <div id="sttHintsContent"></div>
+            </div>
+
+            <!-- STT Corrections -->
+            <div id="page-stt-corrections" style="display:none">
+                <div class="text-xs text-neutral-500 dark:text-neutral-400 mb-3"><a href="#/dashboard" class="text-blue-600 dark:text-blue-400 hover:underline">Home</a> / <span data-i18n="nav.system">Система</span> / <span data-i18n="nav.sttCorrections">Коррекции STT</span></div>
+                <div class="flex items-center gap-2 mb-4">
+                    <h1 class="text-lg font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="sttCorrections.title">Коррекции STT</h1>
+                </div>
+                <div class="text-sm text-neutral-500 dark:text-neutral-400 mb-4" data-i18n="sttCorrections.subtitle">Правила regex-замены транскрипта STT до подачи в LLM. Применяются к каждой финальной реплике клиента.</div>
+                <div id="sttCorrectionsContent"></div>
             </div>
 
             <!-- Point Hints -->
