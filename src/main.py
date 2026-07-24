@@ -1370,13 +1370,15 @@ def _extract_time(raw: str) -> str:
 
 _LETTER_FOLD = str.maketrans({
     # Fold uk↔ru near-equivalents so STT / caller input matches hints
-    # written in either language: "Сич" ↔ "Січ", "Клубе" ↔ "Клубі",
-    # "Победа" ↔ "Побєда", "ёлка" ↔ "елка".
+    # written in either language: "Епіцентр"↔"Эпицентр", "Опытное"↔"Опитне",
+    # "Сич"↔"Січ", "Победа"↔"Побєда", "ёлка"↔"елка".
     "і": "и",
     "ї": "и",
     "є": "е",
     "ґ": "г",
     "ё": "е",
+    "э": "е",
+    "ы": "и",
     "ъ": "",
     "ь": "",
     "'": "",
@@ -1392,12 +1394,18 @@ def _fold(text_in: str) -> str:
 def _query_matches(query: str, searchable: str) -> bool:
     """Fuzzy match a station-search query against a searchable text blob.
 
-    Falls back to token-prefix matching when substring fails — handles case-
-    ending mismatches like query="Холодного" vs address="Холодногірська",
-    or query="Холодна гора 11" vs address="Холодногірська, 11".
+    Two-stage:
+      1. Substring match on folded text (fast path for exact landmarks like
+         "Победа-6" in "победа-6 ...").
+      2. Token-prefix match with **AND** semantics — every 4+-char query
+         token must have a matching text token by 5-char prefix. AND avoids
+         false positives such as query="Запорізьке шосе" matching a station
+         with just "шосе" in its address (e.g. Донецьке шосе), or matching
+         city name "Запоріжжя" via the "запор" prefix.
 
     Also folds Ukrainian/Russian near-equivalent letters (і↔и, ї↔и, є↔е,
-    ё↔е) so STT quirks ("клуб Сич" vs "Січ") don't kill the match.
+    ё↔е, э↔е, ы↔и) so "Епіцентр" matches "Эпицентр" and "Опытное" matches
+    "Опитне".
     """
     q = _fold(query.strip())
     if not q:
@@ -1411,9 +1419,9 @@ def _query_matches(query: str, searchable: str) -> bool:
     text_tokens = re.findall(r"[\w]+", s, flags=re.UNICODE)
     for qt in query_tokens:
         prefix = qt[:5]
-        if any(t.startswith(prefix) for t in text_tokens):
-            return True
-    return False
+        if not any(t.startswith(prefix) for t in text_tokens):
+            return False
+    return True
 
 
 def _build_tool_router(session: CallSession, store_client: StoreClient | None = None) -> ToolRouter:
