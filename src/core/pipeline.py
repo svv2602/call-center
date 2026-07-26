@@ -10,6 +10,7 @@ import asyncio
 import contextlib
 import datetime
 import logging
+import re
 import time
 import zoneinfo
 from typing import TYPE_CHECKING, Any
@@ -36,7 +37,12 @@ from src.agent.prompts import (
 )
 from src.core.audio_socket import AudioSocketConnection, PacketType
 from src.core.call_session import SILENCE_TIMEOUT_SEC, CallSession, CallState
-from src.monitoring.metrics import audiosocket_to_stt_ms, barge_in_total, tts_delivery_ms
+from src.monitoring.metrics import (
+    audiosocket_to_stt_ms,
+    barge_in_total,
+    bot_filler_stripped_total,
+    tts_delivery_ms,
+)
 from src.stt.base import STTConfig, STTEngine, Transcript
 
 # Max time to wait for LLM agent to produce a response (seconds)
@@ -110,6 +116,89 @@ def _strip_greeting(text: str) -> str:
             # If only the greeting and nothing else — return as-is
             return text
     return text
+
+
+# --- Strip filler sentences before TTS ---
+# Openers that indicate a filler sentence duplicating pipeline's wait-message
+# or padding output before/after a tool result. Matched case-insensitively at
+# the start of each sentence (after stripping punctuation/quotes).
+_FILLER_SENTENCE_OPENERS = (
+    "зараз перевірю",
+    "зараз уточню",
+    "тоді перевірю",
+    "тоді уточню",
+    "перевіряю",
+    "уточнюю",
+    "дивлюся",
+    "секундочку",
+    "хвилинку",
+    "хвилиночку",
+    "чекайте, будь ласка",
+    "чекайте будь ласка",
+    "почекайте, будь ласка",
+    "почекайте будь ласка",
+    "будь ласка, чекайте",
+    "будь ласка чекайте",
+    "будь ласка, почекайте",
+    "хвилинку, будь ласка",
+    "секундочку, будь ласка",
+)
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+_LEAD_STRIP = " —–-«\"'*_"
+
+
+def _strip_filler(text: str) -> tuple[str, list[tuple[str, str]]]:
+    """Strip filler sentences that pad LLM output before/after tool calls.
+
+    Removes:
+      - Sentences starting with filler openers ("Зараз перевірю…", "Чекайте,
+        будь ласка", "Секундочку" тощо) — the pipeline speaks a wait phrase
+        itself, so the LLM should not repeat it.
+      - Double confirmation openers: if a sentence starts with "Зрозуміла,
+        обираємо…" AND the next sentence starts with "Отже," — drop the
+        first (they say the same thing).
+
+    Returns (cleaned_text, stripped) where stripped is a list of
+    (pattern_label, snippet) tuples for metrics/logging.
+    """
+    if not text or not text.strip():
+        return text, []
+    sentences = _SENTENCE_SPLIT_RE.split(text.strip())
+    stripped: list[tuple[str, str]] = []
+    kept: list[str] = []
+    for sent in sentences:
+        s = sent.strip()
+        if not s:
+            continue
+        s_low = s.lower().lstrip(_LEAD_STRIP)
+        opener_hit: str | None = None
+        for opener in _FILLER_SENTENCE_OPENERS:
+            if s_low.startswith(opener):
+                opener_hit = opener
+                break
+        if opener_hit:
+            stripped.append((f"opener:{opener_hit}", s))
+            continue
+        kept.append(s)
+
+    # Second pass: collapse "Зрозуміла, обираємо X" + "Отже, X…"
+    collapsed: list[str] = []
+    i = 0
+    while i < len(kept):
+        cur = kept[i]
+        cur_low = cur.lower().lstrip(_LEAD_STRIP)
+        if i + 1 < len(kept):
+            nxt_low = kept[i + 1].lower().lstrip(_LEAD_STRIP)
+            if cur_low.startswith("зрозуміла") and nxt_low.startswith("отже"):
+                stripped.append(("double_confirm", cur))
+                i += 1
+                continue
+        collapsed.append(cur)
+        i += 1
+
+    cleaned = " ".join(collapsed).strip()
+    return cleaned, stripped
 
 
 # --- Contextual wait-phrase selection with rotation ---
@@ -913,6 +1002,22 @@ class CallPipeline:
                 if response_text:
                     # Strip duplicate greeting that LLM may produce
                     response_text = _strip_greeting(response_text)
+                    # Strip filler sentences ("Зараз перевірю...", "Чекайте,
+                    # будь ласка", "Зрозуміла... Отже...") that pad LLM output.
+                    cleaned, stripped = _strip_filler(response_text)
+                    if stripped:
+                        logger.info(
+                            "Stripped %d filler sentence(s) from bot reply "
+                            "for %s: %s",
+                            len(stripped),
+                            self._session.channel_uuid,
+                            [pattern for pattern, _snippet in stripped],
+                        )
+                        for pattern, _snippet in stripped:
+                            bot_filler_stripped_total.labels(pattern=pattern).inc()
+                        # Fall back to original if stripping emptied the text
+                        # (defensive: never send empty text to TTS).
+                        response_text = cleaned or response_text
                     self._session.reset_empty_response()
                     self._session.add_assistant_turn(response_text)
                     await self._log_turn("bot", response_text, llm_latency_ms=llm_latency_ms)

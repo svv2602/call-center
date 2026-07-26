@@ -392,6 +392,12 @@ stt_corrections_applied_total = Counter(
     ["rule_id"],
 )
 
+bot_filler_stripped_total = Counter(
+    "callcenter_bot_filler_stripped_total",
+    "Filler sentences stripped from bot response before TTS",
+    ["pattern"],  # e.g. "opener:зараз перевірю", "double_confirm"
+)
+
 
 def get_metrics() -> bytes:
     """Generate Prometheus metrics output."""
