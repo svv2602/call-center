@@ -19,6 +19,37 @@ const CANONICAL_TOOLS = [
     'get_fitting_slots', 'book_fitting', 'search_knowledge_base',
 ];
 
+// ─── Provider override dropdown ──────────────────────────────────────────
+// Cache the list of enabled providers so we don't refetch on every dialog open.
+let _providersCache = null;
+
+async function loadProvidersForOverride() {
+    if (_providersCache !== null) return _providersCache;
+    try {
+        const data = await api('/admin/llm/providers');
+        // Only include enabled providers with a working API key
+        _providersCache = (data.providers || [])
+            .filter(p => p.enabled && p.api_key_set)
+            .map(p => ({ key: p.key, model: p.model }));
+    } catch {
+        _providersCache = [];
+    }
+    return _providersCache;
+}
+
+async function populateProviderOverrideSelect(currentValue) {
+    const sel = document.getElementById('tenantAgentProviderOverride');
+    if (!sel) return;
+    const providers = await loadProvidersForOverride();
+    // Rebuild: keep the leading "default" option, then add all providers
+    const defaultLabel = t('tenants.agentProviderDefault');
+    sel.innerHTML = `<option value="">${defaultLabel}</option>` +
+        providers.map(p =>
+            `<option value="${p.key}">${p.key} (${p.model})</option>`
+        ).join('');
+    sel.value = currentValue || '';
+}
+
 async function loadToolNames() {
     if (_allTools.length > 0) return;
     try {
@@ -211,6 +242,7 @@ async function showCreateTenant() {
     document.getElementById('tenantIsActive').checked = true;
     document.getElementById('tenantToolsContainer').innerHTML = renderToolCheckboxes([]);
     fillWorkingHours(null);
+    await populateProviderOverrideSelect('');
     document.getElementById('tenantModal').classList.add('show');
 }
 
@@ -229,10 +261,17 @@ async function editTenant(id) {
         document.getElementById('tenantAgentName').value = tn.agent_name || 'Олена';
         document.getElementById('tenantGreeting').value = tn.greeting || '';
         document.getElementById('tenantPromptSuffix').value = tn.prompt_suffix || '';
-        document.getElementById('tenantConfig').value = JSON.stringify(tn.config || {}, null, 2);
+        // Split config: extract agent_provider_override into its dedicated
+        // dropdown, keep the rest in the raw-JSON textarea for advanced use.
+        const cfg = tn.config || {};
+        const providerOverride = cfg.agent_provider_override || '';
+        const restCfg = { ...cfg };
+        delete restCfg.agent_provider_override;
+        document.getElementById('tenantConfig').value = JSON.stringify(restCfg, null, 2);
         document.getElementById('tenantIsActive').checked = tn.is_active !== false;
         document.getElementById('tenantToolsContainer').innerHTML = renderToolCheckboxes(tn.enabled_tools || []);
         fillWorkingHours(tn.working_hours || null);
+        await populateProviderOverrideSelect(providerOverride);
         document.getElementById('tenantModal').classList.add('show');
     } catch (e) {
         showToast(t('tenants.loadFailed', {error: e.message}), 'error');
@@ -255,6 +294,14 @@ async function saveTenant() {
     } catch {
         showToast(t('tenants.invalidConfigJson'), 'error');
         return;
+    }
+    // Merge the provider-override dropdown into config. Empty value = remove
+    // the key so the tenant falls back to normal task routing.
+    const providerOverride = document.getElementById('tenantAgentProviderOverride').value.trim();
+    if (providerOverride) {
+        config.agent_provider_override = providerOverride;
+    } else {
+        delete config.agent_provider_override;
     }
 
     const enabled_tools = Array.from(document.querySelectorAll('.tenant-tool-cb:checked')).map(cb => cb.value);

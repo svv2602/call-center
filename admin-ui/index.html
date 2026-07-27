@@ -1227,9 +1227,19 @@
                             <label class="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1" data-i18n="tenants.promptSuffix">Суффикс промпта</label>
                             <textarea id="tenantPromptSuffix" rows="2" class="w-full text-sm bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-300 dark:border-neutral-600 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500"></textarea>
                         </div>
-                        <div>
-                            <label class="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1" data-i18n="tenants.config">Конфигурация (JSON)</label>
-                            <textarea id="tenantConfig" rows="3" class="w-full text-sm font-mono bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-300 dark:border-neutral-600 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500">{}</textarea>
+                        <div class="border-t border-neutral-200 dark:border-neutral-700 pt-3 space-y-2">
+                            <div>
+                                <label class="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1" data-i18n="tenants.agentProviderOverride">LLM провайдер (A/B тест агента)</label>
+                                <select id="tenantAgentProviderOverride" class="w-full text-sm bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-300 dark:border-neutral-600 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500">
+                                    <option value="" data-i18n="tenants.agentProviderDefault">— По умолчанию (task routing) —</option>
+                                </select>
+                                <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5" data-i18n="tenants.agentProviderOverrideHint">Все звонки этого тенанта пойдут в выбранный провайдер минуя обычную маршрутизацию (для A/B тестирования моделей).</p>
+                            </div>
+                            <div>
+                                <label class="block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1" data-i18n="tenants.config">Прочая конфигурация (JSON)</label>
+                                <textarea id="tenantConfig" rows="3" class="w-full text-sm font-mono bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-300 dark:border-neutral-600 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500">{}</textarea>
+                                <p class="text-xs text-neutral-500 dark:text-neutral-400 mt-0.5" data-i18n="tenants.configHint">store_api_url, store_api_key и другие ключи. Не редактируйте agent_provider_override здесь — используйте поле выше.</p>
+                            </div>
                         </div>
                         <div class="border-t border-neutral-200 dark:border-neutral-700 pt-3">
                             <div class="flex items-center justify-between mb-2">
