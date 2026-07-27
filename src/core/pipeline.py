@@ -702,6 +702,33 @@ class CallPipeline:
         for rule_id in applied:
             stt_corrections_applied_total.labels(rule_id=rule_id).inc()
 
+        # Ukrainian numeral-word → digit conversion, scoped to plate/phone
+        # so we don't rewrite dates ("двадцять восьме липня") or amounts
+        # ("сто гривень"). Runs AFTER Redis regex rules so STT garbage
+        # tokens («начать»/«натязь») get dropped first, leaving a clean
+        # sequence of numeral words + digits for the parser.
+        if context_hint in ("plate", "phone"):
+            try:
+                from src.stt.numeral_parser import words_to_digits
+
+                converted, n = words_to_digits(new_text)
+                if n > 0 and converted != new_text:
+                    logger.info(
+                        "numeral_parser: call=%s ctx=%s runs=%d %r → %r",
+                        self._session.channel_uuid,
+                        context_hint,
+                        n,
+                        new_text[:120],
+                        converted[:120],
+                    )
+                    new_text = converted
+            except Exception:
+                logger.warning(
+                    "numeral_parser: failed for call %s",
+                    self._session.channel_uuid,
+                    exc_info=True,
+                )
+
         return Transcript(
             text=new_text,
             is_final=transcript.is_final,
