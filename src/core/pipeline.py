@@ -302,7 +302,15 @@ def _rotate(pool: list[str]) -> str:
 # that context. Used to scope post-STT substitution rules like
 # "N лет → N липня" so they only fire when the bot was asking for a date.
 _CTX_KEYWORDS: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("date", ("дату", "дата", "число", "коли", "яку дату", "яке число", "на який день")),
+    # Weekdays included so that when the bot re-asks about a specific day
+    # ("Ви маєте на увазі вівторок?"), the follow-up user utterance is
+    # STT-corrected in the `date` context (fixes "28 лет"→"28 липня",
+    # "викторах"→"вівторок" seen in call f14886d6 turns 5-7).
+    ("date", (
+        "дату", "дата", "число", "коли", "яку дату", "яке число", "на який день",
+        "понеділок", "вівторок", "середу", "середа", "четвер",
+        "п'ятницю", "пʼятницю", "пятницю", "суботу", "неділю",
+    )),
     ("time", ("час", "часу", "о котрій", "який час", "вільний час", "слот")),
     ("plate", ("держномер", "номер авто", "номер автомобіля", "номер машини", "продиктуйте номер", "назвіть номер автомобіля")),
     ("city", ("місто", "місті", "у якому місті", "з якого міста")),

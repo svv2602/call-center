@@ -41,6 +41,10 @@ class ProviderUpdate(BaseModel):
     type: str | None = None
     api_key_env: str | None = None
     base_url: str | None = None
+    # reasoning_effort: "minimal" | "low" | "medium" | "high" — used by
+    # GPT-5 / o1 / o3 series. Auto-defaults to "minimal" for gpt-5-* if
+    # not set here. Explicit value overrides the auto-default.
+    reasoning_effort: str | None = None
 
 
 class TaskRouteUpdate(BaseModel):
@@ -107,6 +111,12 @@ async def update_llm_config(request: ConfigPatch, _: dict[str, Any] = _perm_w) -
                 config["providers"][key]["api_key_env"] = update.api_key_env
             if update.base_url is not None:
                 config["providers"][key]["base_url"] = update.base_url
+            if update.reasoning_effort is not None:
+                # Empty string → remove the key (fall back to auto-default).
+                if update.reasoning_effort == "":
+                    config["providers"][key].pop("reasoning_effort", None)
+                else:
+                    config["providers"][key]["reasoning_effort"] = update.reasoning_effort
 
     if request.tasks:
         if "tasks" not in config:
