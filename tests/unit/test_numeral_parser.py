@@ -197,6 +197,49 @@ class TestNumeralRunEdgeCases:
         # f07e5d27 turn 8)
         assert words_to_digits("нуль два дев'ять чотири")[0] == "0294"
 
-    def test_leading_zero_preserved(self) -> None:
-        # Plate «0294» via words: keep leading zero.
-        assert words_to_digits("нуль два дев'ять чотири")[0] == "0294"
+
+class TestLeadingZeros:
+    """Plate numbers that start with 0 — real telco caller-input shape."""
+
+    def test_zero_two_eleven_ua(self) -> None:
+        # «нуль два одинадцять» → 0-2-11 → "0211"
+        assert words_to_digits("нуль два одинадцять")[0] == "0211"
+
+    def test_zero_two_eleven_ru(self) -> None:
+        # RU-speaking caller: «ноль два одиннадцать» — RU numerals
+        # resolved via _RU_NUMERALS defensive layer.
+        assert words_to_digits("ноль два одиннадцать")[0] == "0211"
+
+    def test_bare_digit_leading_zero_preserved(self) -> None:
+        # Already-normalized plate "0294" from previous turn must survive
+        # a re-pass through the parser — leading zero must not be dropped.
+        assert words_to_digits("0294")[0] == "0294"
+
+    def test_two_zeros_start(self) -> None:
+        assert words_to_digits("нуль нуль два дев'ять чотири")[0] == "00294"
+
+    def test_zero_between_digits(self) -> None:
+        # «два нуль два» → "202"
+        assert words_to_digits("два нуль два")[0] == "202"
+
+    def test_digit_zero_plus_words(self) -> None:
+        # Mixed: digit "0" then numeral words
+        assert words_to_digits("0 два одинадцять")[0] == "0211"
+
+
+class TestRussianNumeralsDefensive:
+    """RU numerals go through _RU_NUMERALS defense layer even if Redis
+    rules don't fire (rule disabled, hybrid form STT-produced)."""
+
+    def test_ru_eleven_via_defense(self) -> None:
+        assert words_to_digits("одиннадцать")[0] == "11"
+
+    def test_ru_twelve(self) -> None:
+        assert words_to_digits("двенадцать")[0] == "12"
+
+    def test_ru_twenty(self) -> None:
+        assert words_to_digits("двадцать")[0] == "20"
+
+    def test_hybrid_double_n_uk_ending(self) -> None:
+        # STT produces «одиннадцять» (RU double-n + UA -ять ending)
+        assert words_to_digits("одиннадцять")[0] == "11"

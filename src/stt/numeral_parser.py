@@ -152,6 +152,47 @@ _HUNDREDS: dict[str, int] = {
 }
 
 
+# Russian numeral spellings — Redis RU→UA correction rules normally
+# handle these, but STT sometimes emits hybrid forms («одиннадцять»
+# — RU double-n + UA -ять ending) that no rule catches. Also acts
+# as a safety net when a rule is disabled or removed.
+_RU_NUMERALS: dict[str, int] = {
+    # 10
+    "десять": 10,  # same as UA — no-op mapping
+    # 11–19 (RU forms) + hybrid variants (double n, either -ать/-ять)
+    "одиннадцать": 11, "одиннадцять": 11, "одинадцать": 11,
+    "двенадцать": 12, "двенадцять": 12,
+    "тринадцать": 13,  # UA form already in _TEENS
+    "четырнадцать": 14, "четырнадцять": 14,
+    "пятнадцать": 15, "пятнадцять": 15,
+    "шестнадцать": 16, "шестнадцять": 16,
+    "семнадцать": 17, "семнадцять": 17,
+    "восемнадцать": 18, "восемнадцять": 18,
+    "девятнадцать": 19, "девятнадцять": 19,
+    # 20
+    "двадцать": 20,
+    # 30
+    "тридцать": 30,
+    # 40 same in both (сорок)
+    # 50–90 — RU forms
+    "пятьдесят": 50, "пятдесят": 50,  # written with ь or without
+    "шестьдесят": 60,
+    "семьдесят": 70,
+    "восемьдесят": 80,
+    # 90 same (девяносто variants already in _TENS)
+    # RU units (as spoken by Russian-speaking callers)
+    "один": 1,  # already in _UNITS but repeat for symmetry
+    "два": 2,
+    "три": 3,
+    "четыре": 4, "четырех": 4,
+    "пять": 5, "пяти": 5,
+    "шесть": 6, "шести": 6,
+    "семь": 7,
+    "восемь": 8, "восьмь": 8,
+    "девять": 9,
+}
+
+
 def _lookup(word: str) -> int | None:
     """Return digit value for a numeral word, or None if not a numeral.
 
@@ -161,6 +202,12 @@ def _lookup(word: str) -> int | None:
     run («два» + "11" spoken as one utterance → "211").
     """
     w = word.lower()
+    # Also check Russian numeral spellings as a defensive layer — Redis
+    # RU→UA rules cover the common cases but hybrids like «одиннадцять»
+    # (RU double-n + UA -ять ending) still leak through, and we want the
+    # parser to be resilient.
+    if w in _RU_NUMERALS:
+        return _RU_NUMERALS[w]
     if w in _UNITS:
         return _UNITS[w]
     if w in _TEENS:
@@ -200,20 +247,16 @@ def words_to_digits(text: str) -> tuple[str, int]:
 
     tokens = _TOKEN_RE.findall(text)
     result: list[str] = []
-    # Accumulator for a run of numeral values.
-    run: list[int] = []
+    # Accumulator for a run: each entry is (int_value, display_string).
+    # Digit tokens keep their original spelling so leading zeros survive
+    # ("0294" stays "0294" instead of becoming 294 → "294"). Numeral
+    # words use str(int_value), which never has a leading zero.
+    run: list[tuple[int, str]] = []
     # Was any word-form (not just bare digits) contributing to this run?
     # If the whole run was already digits, emitting the same digit string
-    # is a passthrough and shouldn't count as a "replacement" — otherwise
-    # every plate number the LLM has already normalized would spuriously
-    # bump the counter.
+    # is a passthrough and shouldn't count as a "replacement".
     run_has_word = False
     replacements = 0
-    # Whitespace that separated the last numeral in ``run`` from the
-    # upcoming token — held so we can restore it when the run terminates
-    # against a non-numeral token («два одинадцять і сім» must keep the
-    # space around «і»), and discarded when the run continues into
-    # another numeral («два» + " " + «одинадцять» → "211").
     pending_ws = ""
 
     def _flush() -> None:
@@ -238,8 +281,10 @@ def words_to_digits(text: str) -> tuple[str, int]:
         val = _lookup(tok)
         if val is not None:
             pending_ws = ""
-            run.append(val)
-            if not tok.isdigit():
+            if tok.isdigit():
+                run.append((val, tok))
+            else:
+                run.append((val, str(val)))
                 run_has_word = True
         else:
             _flush()
@@ -252,8 +297,8 @@ def words_to_digits(text: str) -> tuple[str, int]:
     return "".join(result), replacements
 
 
-def _combine_run(values: list[int]) -> str:
-    """Merge a run of numeral values into a single digit string.
+def _combine_run(values: list[tuple[int, str]]) -> str:
+    """Merge a run of (int, display_str) tuples into a single digit string.
 
     Rules:
       * Greedily fold each value's successors into its trailing-zero
@@ -261,25 +306,28 @@ def _combine_run(values: list[int]) -> str:
         accumulator and fits in the zero region. Handles cascading
         composition: «двісті двадцять п'ять» = 200 + 20 + 5 = 225.
       * A value that doesn't fit terminates the current accumulator
-        and starts a new one — its digits are concatenated to the
-        emitted parts («два одинадцять» → "2" | "11" → "211").
+        and starts a new one — its display string is appended verbatim
+        («два одинадцять» → "2" | "11" → "211").
+      * Once we combine values additively, the combined value's display
+        is str(int_sum) — leading zeros only survive on standalone tokens
+        that never enter an additive fold.
     """
     if not values:
         return ""
-    parts: list[int] = []
+    parts: list[str] = []
     i = 0
     while i < len(values):
-        v = values[i]
+        v_int, v_str = values[i]
         while i + 1 < len(values):
-            nxt = values[i + 1]
-            v_str = str(v)
+            nxt_int, _ = values[i + 1]
             trailing_zeros = len(v_str) - len(v_str.rstrip("0"))
-            if trailing_zeros == 0 or nxt >= v:
+            if trailing_zeros == 0 or nxt_int >= v_int:
                 break
-            if len(str(nxt)) > trailing_zeros:
+            if len(str(nxt_int)) > trailing_zeros:
                 break
-            v = v + nxt
+            v_int = v_int + nxt_int
+            v_str = str(v_int)
             i += 1
-        parts.append(v)
+        parts.append(v_str)
         i += 1
-    return "".join(str(p) for p in parts)
+    return "".join(parts)
