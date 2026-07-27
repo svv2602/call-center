@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
@@ -17,6 +18,41 @@ if TYPE_CHECKING:
     from src.tts.base import TTSEngine
 
 logger = logging.getLogger(__name__)
+
+
+# ─── ISO date → Ukrainian "N місяць" normalization ─────────────────────────
+# Testers 2026-07-27: bot uses YYYY-MM-DD in final confirmation
+# ("перевіримо: 2026-07-31 о 17:00, ..."). Prompt tells the LLM to speak
+# "N місяць" but a stubborn ISO string still leaks through. This is the
+# last-mile safety net — a pure text substitution just before TTS.
+_UKR_MONTHS_GEN: dict[int, str] = {
+    1: "січня", 2: "лютого", 3: "березня", 4: "квітня", 5: "травня", 6: "червня",
+    7: "липня", 8: "серпня", 9: "вересня", 10: "жовтня", 11: "листопада", 12: "грудня",
+}
+_ISO_DATE_RE = re.compile(r"\b(\d{4})-(\d{2})-(\d{2})\b")
+
+
+def _normalize_iso_dates(text: str) -> str:
+    """Replace `YYYY-MM-DD` with `D місяця` (year dropped if it equals
+    current year, kept otherwise). Handles malformed dates gracefully.
+    """
+    import datetime
+
+    current_year = datetime.datetime.now().year
+
+    def _sub(m: re.Match[str]) -> str:
+        year, month, day = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        if month not in _UKR_MONTHS_GEN or not (1 <= day <= 31):
+            return m.group(0)
+        day_str = str(day)  # drop leading zero
+        month_name = _UKR_MONTHS_GEN[month]
+        # Include year only when it differs from the current year — tests
+        # explicitly asked for year to be omitted by default.
+        if year == current_year:
+            return f"{day_str} {month_name}"
+        return f"{day_str} {month_name} {year} року"
+
+    return _ISO_DATE_RE.sub(_sub, text)
 
 
 @dataclass(frozen=True)
@@ -59,9 +95,12 @@ class StreamingTTSSynthesizer:
 
         async for event in stream:  # type: ignore[assignment]
             if isinstance(event, SentenceReady):
+                # Normalize ISO dates (YYYY-MM-DD → "N місяця") — testers
+                # explicitly asked to always speak the Ukrainian form.
+                normalized = _normalize_iso_dates(event.text)
                 # Launch new task FIRST so it runs while we await the old one
-                new_task = asyncio.create_task(self._tts.synthesize(event.text))
-                new_text = event.text
+                new_task = asyncio.create_task(self._tts.synthesize(normalized))
+                new_text = normalized
 
                 # Now await previous task (new synthesis runs in parallel)
                 if pending_task is not None:
@@ -103,8 +142,9 @@ class StreamingTTSSynthesizer:
         """Sequential (no-prefetch) processing path."""
         async for event in stream:
             if isinstance(event, SentenceReady):
-                audio = await self._tts.synthesize(event.text)
-                yield AudioReady(audio=audio, text=event.text)
+                normalized = _normalize_iso_dates(event.text)
+                audio = await self._tts.synthesize(normalized)
+                yield AudioReady(audio=audio, text=normalized)
             else:
                 yield event
 
