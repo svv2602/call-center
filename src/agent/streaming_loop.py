@@ -56,6 +56,10 @@ _TOOL_TIMEOUT_SEC = 15
 # Delay (seconds) before playing a filler phrase when LLM is slow to respond
 _FILLER_DELAY_SEC = 2.0
 
+# Hard cap on TTS pre-synthesis for the filler phrase. If TTS API is hung,
+# never block run_turn on it — proceed without filler.
+_FILLER_PRESYNTH_TIMEOUT_SEC = 1.5
+
 # Max retries when LLM returns empty (0 text, 0 tools). On the last retry,
 # automatically switch to a fallback provider.
 _MAX_EMPTY_RETRIES = 2
@@ -335,14 +339,29 @@ class StreamingAgentLoop:
                 buffered = buffer_sentences(stream)
                 tts_stream = synthesize_stream(buffered, self._tts)
 
-                # Pre-synthesize filler audio (from cache — instant)
+                # Pre-synthesize filler audio (usually cache-hit; capped by
+                # _FILLER_PRESYNTH_TIMEOUT_SEC so a hung TTS API never blocks
+                # the whole turn — we just skip filler for this round).
                 filler_audio: bytes | None = None
                 if not self._conn.is_closed:
                     phrase = WAIT_THINKING_POOL[self._thinking_counter % len(WAIT_THINKING_POOL)]
                     self._thinking_counter += 1
                     try:
-                        filler_audio = await self._tts.synthesize(phrase)
-                        logger.debug("Pre-synthesized thinking filler: %r (%d bytes)", phrase, len(filler_audio))
+                        filler_audio = await asyncio.wait_for(
+                            self._tts.synthesize(phrase),
+                            timeout=_FILLER_PRESYNTH_TIMEOUT_SEC,
+                        )
+                        logger.debug(
+                            "Pre-synthesized thinking filler: %r (%d bytes)",
+                            phrase,
+                            len(filler_audio),
+                        )
+                    except TimeoutError:
+                        logger.warning(
+                            "Pre-synthesize filler timed out after %.1fs — "
+                            "skipping filler for this turn",
+                            _FILLER_PRESYNTH_TIMEOUT_SEC,
+                        )
                     except Exception:
                         logger.debug("Failed to pre-synthesize filler", exc_info=True)
 

@@ -75,6 +75,7 @@ class StreamingAudioSender:
         echo_canceller: EchoCanceller | None = None,
         filler_audio: bytes | None = None,
         filler_delay_sec: float = 3.0,
+        filler_repeat_sec: float = 8.0,
     ) -> None:
         self._conn = conn
         self._barge_in = barge_in_event
@@ -83,6 +84,7 @@ class StreamingAudioSender:
         self._first_audio_sent = False
         self._filler_audio = filler_audio
         self._filler_delay_sec = filler_delay_sec
+        self._filler_repeat_sec = filler_repeat_sec
         # Lock prevents concurrent send_audio calls (filler vs LLM audio)
         self._send_lock = asyncio.Lock()
 
@@ -105,27 +107,40 @@ class StreamingAudioSender:
         usage = Usage(0, 0)
         provider_key = ""
 
-        # Filler phrase timer — plays pre-synthesized audio if LLM is slow
+        # Filler phrase loop — plays pre-synthesized audio at intervals if
+        # the LLM is slow. Fires first after filler_delay_sec, then repeats
+        # every filler_repeat_sec until real audio arrives or the call ends.
+        # Real 43s-silence incident (call 189c2af4, 2026-07-27): the LLM
+        # took >40s and only one filler played, leaving the caller in
+        # silence until they hung up. Repeat filler prevents that.
         filler_task: asyncio.Task[None] | None = None
         if self._filler_audio is not None:
             filler_audio = self._filler_audio
 
-            async def _filler_timer() -> None:
+            async def _filler_loop() -> None:
                 await asyncio.sleep(self._filler_delay_sec)
-                if (
+                count = 0
+                while (
                     not self._first_audio_sent
                     and not self._conn.is_closed
                     and not (self._barge_in and self._barge_in.is_set())
                 ):
-                    logger.info("Sending thinking filler audio (%d bytes)", len(filler_audio))
+                    count += 1
+                    logger.info(
+                        "Sending thinking filler audio #%d (%d bytes) — LLM still silent",
+                        count,
+                        len(filler_audio),
+                    )
                     try:
                         if self._echo_canceller is not None:
                             self._echo_canceller.record_far_end(filler_audio)
                         await self._send_audio_locked(filler_audio)
                     except Exception:
                         logger.debug("Filler phrase send failed", exc_info=True)
+                        break
+                    await asyncio.sleep(self._filler_repeat_sec)
 
-            filler_task = asyncio.create_task(_filler_timer())
+            filler_task = asyncio.create_task(_filler_loop())
 
         async for event in stream:
             if isinstance(event, AudioReady):
@@ -210,6 +225,7 @@ async def send_audio_stream(
     echo_canceller: EchoCanceller | None = None,
     filler_audio: bytes | None = None,
     filler_delay_sec: float = 3.0,
+    filler_repeat_sec: float = 8.0,
 ) -> SendResult:
     """Convenience wrapper — create sender and consume stream."""
     sender = StreamingAudioSender(
@@ -219,5 +235,6 @@ async def send_audio_stream(
         echo_canceller=echo_canceller,
         filler_audio=filler_audio,
         filler_delay_sec=filler_delay_sec,
+        filler_repeat_sec=filler_repeat_sec,
     )
     return await sender.send(stream)

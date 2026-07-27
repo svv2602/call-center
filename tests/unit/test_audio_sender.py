@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import time
-from collections.abc import AsyncIterator
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from unittest.mock import patch
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
 
 import pytest
 
@@ -440,3 +442,109 @@ class TestTimeToFirstAudio:
         with patch("src.core.audio_sender.time_to_first_audio_ms") as mock_metric:
             await sender.send(stream)
             mock_metric.observe.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Filler audio — plays when LLM is slow, repeats until real audio arrives
+# ---------------------------------------------------------------------------
+
+
+async def _delayed_events(delay_sec: float, *items: Any) -> AsyncIterator:
+    """Yield items only after `delay_sec` elapses — simulates slow LLM."""
+    await asyncio.sleep(delay_sec)
+    for item in items:
+        yield item
+
+
+class TestFillerAudio:
+    @pytest.mark.asyncio
+    async def test_no_filler_when_llm_fast(self) -> None:
+        """Filler doesn't fire if real audio arrives before filler_delay."""
+        conn = MockAudioSocketConnection()
+        sender = StreamingAudioSender(
+            conn,
+            filler_audio=b"\xff" * 10,
+            filler_delay_sec=0.2,
+            filler_repeat_sec=0.2,
+        )
+        stream = _events(
+            AudioReady(audio=b"\x01", text="Швидко!"),
+            StreamDone(stop_reason="end_turn", usage=Usage(1, 1)),
+        )
+        await sender.send(stream)
+        # Only the real audio, no filler
+        assert conn.sent_chunks == [b"\x01"]
+
+    @pytest.mark.asyncio
+    async def test_filler_fires_once_when_llm_medium(self) -> None:
+        """One filler fires while waiting, then real audio arrives."""
+        conn = MockAudioSocketConnection()
+        sender = StreamingAudioSender(
+            conn,
+            filler_audio=b"\xff" * 10,
+            filler_delay_sec=0.1,
+            filler_repeat_sec=1.0,  # long — no second filler expected
+        )
+        # LLM produces audio 0.3s after start
+        stream = _delayed_events(
+            0.3,
+            AudioReady(audio=b"\x01", text="Готово"),
+            StreamDone(stop_reason="end_turn", usage=Usage(1, 1)),
+        )
+        await sender.send(stream)
+        # First chunk is filler, second is real audio
+        assert len(conn.sent_chunks) == 2
+        assert conn.sent_chunks[0] == b"\xff" * 10
+        assert conn.sent_chunks[1] == b"\x01"
+
+    @pytest.mark.asyncio
+    async def test_filler_repeats_while_llm_silent(self) -> None:
+        """Filler fires multiple times when LLM is very slow.
+
+        Regression for the 43s-silence incident (call 189c2af4, 2026-07-27):
+        the old one-shot filler left the caller in silence for the entire
+        LLM stall. New behavior: repeat every filler_repeat_sec.
+        """
+        conn = MockAudioSocketConnection()
+        sender = StreamingAudioSender(
+            conn,
+            filler_audio=b"\xff" * 10,
+            filler_delay_sec=0.1,
+            filler_repeat_sec=0.15,
+        )
+        # LLM stays silent for 0.5s → expect ~3 filler plays
+        stream = _delayed_events(
+            0.5,
+            AudioReady(audio=b"\x01", text="Нарешті"),
+            StreamDone(stop_reason="end_turn", usage=Usage(1, 1)),
+        )
+        await sender.send(stream)
+        # 3 fillers + 1 real audio (allow +/- 1 for timing jitter)
+        assert len(conn.sent_chunks) >= 3
+        assert conn.sent_chunks[-1] == b"\x01"
+        # All non-final chunks are filler
+        for chunk in conn.sent_chunks[:-1]:
+            assert chunk == b"\xff" * 10
+
+    @pytest.mark.asyncio
+    async def test_filler_stops_on_barge_in(self) -> None:
+        """Barge-in mid-wait cancels filler loop cleanly."""
+        conn = MockAudioSocketConnection()
+        barge_in = asyncio.Event()
+        sender = StreamingAudioSender(
+            conn,
+            barge_in_event=barge_in,
+            filler_audio=b"\xff" * 10,
+            filler_delay_sec=0.1,
+            filler_repeat_sec=0.1,
+        )
+
+        async def _late_barge_stream() -> AsyncIterator:
+            # Let one filler fire, then set barge_in
+            await asyncio.sleep(0.25)
+            barge_in.set()
+            yield StreamDone(stop_reason="end_turn", usage=Usage(0, 0))
+
+        await sender.send(_late_barge_stream())
+        # Should have played 1-2 fillers before barge-in cancels the loop
+        assert 1 <= len(conn.sent_chunks) <= 3

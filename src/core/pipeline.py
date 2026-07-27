@@ -901,16 +901,32 @@ class CallPipeline:
                     )
 
                 if result is not None and result.spoken_text:
+                    # Strip filler for DB log / session history consistency.
+                    # Audio was already streamed to caller, so this only
+                    # cleans the recorded turn — LLM's own history (kept in
+                    # streaming loop's _llm_history) is unaffected.
+                    cleaned, stripped = _strip_filler(result.spoken_text)
+                    if stripped:
+                        logger.info(
+                            "Stripped %d filler sentence(s) from streaming "
+                            "bot reply for %s: %s",
+                            len(stripped),
+                            self._session.channel_uuid,
+                            [pattern for pattern, _snippet in stripped],
+                        )
+                        for pattern, _snippet in stripped:
+                            bot_filler_stripped_total.labels(pattern=pattern).inc()
+                    logged_text = cleaned or result.spoken_text
                     self._session.reset_empty_response()
-                    self._session.add_assistant_turn(result.spoken_text)
-                    await self._log_turn("bot", result.spoken_text, llm_latency_ms=llm_latency_ms)
+                    self._session.add_assistant_turn(logged_text)
+                    await self._log_turn("bot", logged_text, llm_latency_ms=llm_latency_ms)
                     await self._persist_session()
                     logger.info(
                         "Streaming turn completed: call=%s, user='%s', agent='%s', "
                         "tools=%d, llm=%dms%s",
                         self._session.channel_uuid,
                         transcript.text[:50],
-                        result.spoken_text[:50],
+                        logged_text[:50],
                         result.tool_calls_made,
                         llm_latency_ms,
                         f", wait_phrase='{result.wait_phrase}'" if result.wait_phrase else "",
