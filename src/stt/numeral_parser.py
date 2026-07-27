@@ -325,6 +325,11 @@ def _combine_run(values: list[tuple[int, str]]) -> str:
                 break
             if len(str(nxt_int)) > trailing_zeros:
                 break
+            # Never fold an explicit zero — customer speaking «двадцять
+            # ноль три» means the plate is 2003, not 23. Only «двадцять
+            # три» (adjacent tens+units) should fold.
+            if nxt_int == 0:
+                break
             v_int = v_int + nxt_int
             v_str = str(v_int)
             i += 1

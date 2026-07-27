@@ -227,6 +227,44 @@ class TestLeadingZeros:
         assert words_to_digits("0 два одинадцять")[0] == "0211"
 
 
+class TestZeroInMiddle:
+    """An explicit «нуль»/«ноль» between numerals means the caller is
+    literally spelling out digit positions — never fold zero into the
+    trailing-zero region of a preceding tens/hundreds number."""
+
+    def test_thirteen_zero_three(self) -> None:
+        # Real customer readout: «тринадцять ноль три» = plate 1303
+        assert words_to_digits("тринадцять ноль три")[0] == "1303"
+
+    def test_ru_thirteen_zero_three(self) -> None:
+        assert words_to_digits("тринадцать ноль три")[0] == "1303"
+
+    def test_twenty_zero_three_not_23(self) -> None:
+        # «двадцять ноль три» = 2003, NOT 23 (which would be «двадцять три»).
+        # The intervening «ноль» blocks the tens-units fold.
+        assert words_to_digits("двадцять ноль три")[0] == "2003"
+
+    def test_hundred_zero_five_literal(self) -> None:
+        # «сто ноль п'ять» — «сто» contributes its 3 digits (1,0,0),
+        # then explicit 0, then 5 → "10005". Callers who mean 105 would
+        # say «сто п'ять»; those who mean 1005 would say «десять нуль
+        # п'ять» or «один нуль нуль п'ять».
+        assert words_to_digits("сто ноль п'ять")[0] == "10005"
+
+    def test_ten_zero_five_1005(self) -> None:
+        # «десять нуль п'ять» = 1005 (10-0-5, plate readout convention)
+        assert words_to_digits("десять нуль п'ять")[0] == "1005"
+
+    def test_digit_by_digit_1005(self) -> None:
+        # «один нуль нуль п'ять» spelled literally
+        assert words_to_digits("один нуль нуль п'ять")[0] == "1005"
+
+    def test_normal_compound_still_folds(self) -> None:
+        # No zero → normal arithmetic fold still works.
+        assert words_to_digits("двадцять один")[0] == "21"
+        assert words_to_digits("сто одинадцять")[0] == "111"
+
+
 class TestRussianNumeralsDefensive:
     """RU numerals go through _RU_NUMERALS defense layer even if Redis
     rules don't fire (rule disabled, hybrid form STT-produced)."""
