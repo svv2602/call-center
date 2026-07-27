@@ -42,6 +42,7 @@ class OpenAICompatProvider(AbstractProvider):
         model: str,
         base_url: str,
         provider_key: str = "",
+        reasoning_effort: str | None = None,
     ) -> None:
         self._api_key = api_key
         self._model = model
@@ -51,11 +52,26 @@ class OpenAICompatProvider(AbstractProvider):
         # Newer OpenAI models (gpt-5, o1, o3) require max_completion_tokens
         # instead of the deprecated max_tokens parameter.
         self._use_max_completion_tokens = "api.openai.com" in self._base_url
+        # Reasoning effort control for GPT-5 / o1 / o3 series. When set, the
+        # model spends fewer "internal reasoning" tokens before producing
+        # visible output — critical for voice-agent latency where reasoning
+        # tokens don't stream. Default: auto-select "minimal" for gpt-5-* to
+        # keep time-to-first-audio comparable to gpt-4.1-mini. Set explicitly
+        # via provider config to override ("minimal" | "low" | "medium" | "high").
+        if reasoning_effort is None and model.startswith("gpt-5"):
+            reasoning_effort = "minimal"
+        self._reasoning_effort = reasoning_effort
 
     def _max_tokens_param(self, value: int) -> dict[str, int]:
         """Return the correct max tokens parameter for the API."""
         key = "max_completion_tokens" if self._use_max_completion_tokens else "max_tokens"
         return {key: value}
+
+    def _reasoning_param(self) -> dict[str, str]:
+        """Return {'reasoning_effort': ...} if configured, else empty dict."""
+        if self._reasoning_effort:
+            return {"reasoning_effort": self._reasoning_effort}
+        return {}
 
     async def _get_session(self) -> aiohttp.ClientSession:
         if self._session is None or self._session.closed:
@@ -80,6 +96,7 @@ class OpenAICompatProvider(AbstractProvider):
             "model": self._model,
             "messages": openai_messages,
             **self._max_tokens_param(max_tokens),
+            **self._reasoning_param(),
         }
 
         data = await self._post_chat(body)
@@ -100,6 +117,7 @@ class OpenAICompatProvider(AbstractProvider):
             "messages": openai_messages,
             "tools": openai_tools,
             **self._max_tokens_param(max_tokens),
+            **self._reasoning_param(),
         }
 
         data = await self._post_chat(body)
@@ -122,6 +140,7 @@ class OpenAICompatProvider(AbstractProvider):
             "stream": True,
             "stream_options": {"include_usage": True},
             **self._max_tokens_param(max_tokens),
+            **self._reasoning_param(),
         }
 
         session = await self._get_session()

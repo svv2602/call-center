@@ -383,6 +383,7 @@ class LLMRouter:
                 model=model,
                 base_url=base_url,
                 provider_key=key,
+                reasoning_effort=cfg.get("reasoning_effort"),
             )
 
         logger.warning("Unknown provider type: %s for key %s", provider_type, key)

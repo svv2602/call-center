@@ -1061,19 +1061,37 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             if emphasis:
                 system_prompt = system_prompt + emphasis
 
+        # Per-tenant config extracted once — used for StoreClient AND LLM
+        # provider override.
+        tenant_config: dict[str, Any] = {}
+        if tenant and isinstance(tenant.get("config"), dict):
+            tenant_config = tenant["config"]
+
         # Create per-tenant StoreClient if tenant has custom store config
-        if tenant and tenant.get("config"):
-            tenant_config = tenant["config"] if isinstance(tenant["config"], dict) else {}
-            if tenant_config.get("store_api_url"):
-                tenant_store_client = StoreClient(
-                    base_url=tenant_config["store_api_url"],
-                    api_key=tenant_config.get("store_api_key", ""),
-                    timeout=settings.store_api.timeout,
-                    db_engine=_db_engine,
-                    redis=_redis,
-                )
-                await tenant_store_client.open()
-                logger.info("Per-tenant StoreClient: %s", tenant_config["store_api_url"])
+        if tenant_config.get("store_api_url"):
+            tenant_store_client = StoreClient(
+                base_url=tenant_config["store_api_url"],
+                api_key=tenant_config.get("store_api_key", ""),
+                timeout=settings.store_api.timeout,
+                db_engine=_db_engine,
+                redis=_redis,
+            )
+            await tenant_store_client.open()
+            logger.info("Per-tenant StoreClient: %s", tenant_config["store_api_url"])
+
+        # Per-tenant LLM provider override for the agent task. Used for A/B
+        # testing (e.g. one tenant on gpt-5-mini, another on gpt-4.1-mini).
+        # Set via tenant.config.agent_provider_override = "openai-gpt5-mini".
+        # None → falls back to task routing config (Redis llm:routing_config).
+        tenant_agent_provider_override: str | None = tenant_config.get(
+            "agent_provider_override"
+        )
+        if tenant_agent_provider_override:
+            logger.info(
+                "Per-tenant agent provider override: %s for tenant %s",
+                tenant_agent_provider_override,
+                tenant["slug"] if tenant else "?",
+            )
 
         # Per-call tool router, PII vault, and LLM agent
         router = _build_tool_router(session, store_client=tenant_store_client)
@@ -1168,6 +1186,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 tools=tools,
                 system_prompt=system_prompt,
                 pii_vault=vault,
+                provider_override=tenant_agent_provider_override,
                 few_shot_context=few_shot_context,
                 safety_context=safety_context,
                 promotions_context=promotions_context,

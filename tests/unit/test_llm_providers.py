@@ -237,3 +237,107 @@ class TestOpenAICompatProvider:
         provider._session = mock_session
 
         assert await provider.health_check() is False
+
+
+class TestReasoningEffort:
+    """reasoning_effort injection for GPT-5 / o1 / o3 series."""
+
+    def test_gpt5_auto_selects_minimal(self) -> None:
+        """gpt-5-* auto-gets reasoning_effort=minimal by default (voice-agent latency)."""
+        p = OpenAICompatProvider(
+            api_key="k", model="gpt-5-mini",
+            base_url="https://api.openai.com/v1", provider_key="openai-gpt5-mini",
+        )
+        assert p._reasoning_effort == "minimal"
+        assert p._reasoning_param() == {"reasoning_effort": "minimal"}
+
+    def test_gpt5_nano_auto_selects_minimal(self) -> None:
+        p = OpenAICompatProvider(
+            api_key="k", model="gpt-5-nano",
+            base_url="https://api.openai.com/v1", provider_key="openai-gpt5-nano",
+        )
+        assert p._reasoning_effort == "minimal"
+
+    def test_gpt41_no_reasoning(self) -> None:
+        """Non-reasoning models get no reasoning_effort injected."""
+        p = OpenAICompatProvider(
+            api_key="k", model="gpt-4.1-mini",
+            base_url="https://api.openai.com/v1", provider_key="openai-gpt41-mini",
+        )
+        assert p._reasoning_effort is None
+        assert p._reasoning_param() == {}
+
+    def test_explicit_override_wins(self) -> None:
+        """Explicit reasoning_effort overrides the gpt-5 auto-default."""
+        p = OpenAICompatProvider(
+            api_key="k", model="gpt-5-mini",
+            base_url="https://api.openai.com/v1", provider_key="openai-gpt5-mini",
+            reasoning_effort="high",
+        )
+        assert p._reasoning_effort == "high"
+
+    def test_explicit_for_non_gpt5(self) -> None:
+        """reasoning_effort can be explicitly set on any model (future-proof)."""
+        p = OpenAICompatProvider(
+            api_key="k", model="o1-mini",
+            base_url="https://api.openai.com/v1", provider_key="openai-o1-mini",
+            reasoning_effort="low",
+        )
+        assert p._reasoning_effort == "low"
+
+    @pytest.mark.asyncio()
+    async def test_reasoning_effort_in_complete_body(self) -> None:
+        """POST body includes reasoning_effort when configured."""
+        p = OpenAICompatProvider(
+            api_key="k", model="gpt-5-mini",
+            base_url="https://api.openai.com/v1", provider_key="openai-gpt5-mini",
+        )
+        captured: dict[str, Any] = {}
+
+        def _fake_post(url: str, json: dict) -> _FakeAiohttpResponse:
+            captured.update(json)
+            return _FakeAiohttpResponse(
+                200,
+                {
+                    "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+                },
+            )
+
+        mock_session = MagicMock()
+        mock_session.post.side_effect = _fake_post
+        mock_session.closed = False
+        p._session = mock_session
+
+        await p.complete(messages=[{"role": "user", "content": "hi"}])
+        assert captured.get("reasoning_effort") == "minimal"
+        # gpt-5 uses api.openai.com → max_completion_tokens (not max_tokens)
+        assert "max_completion_tokens" in captured
+        assert "max_tokens" not in captured
+
+    @pytest.mark.asyncio()
+    async def test_no_reasoning_effort_for_gpt41(self) -> None:
+        """gpt-4.1-mini body does NOT include reasoning_effort."""
+        p = OpenAICompatProvider(
+            api_key="k", model="gpt-4.1-mini",
+            base_url="https://api.openai.com/v1", provider_key="openai-gpt41-mini",
+        )
+        captured: dict[str, Any] = {}
+
+        def _fake_post(url: str, json: dict) -> _FakeAiohttpResponse:
+            captured.update(json)
+            return _FakeAiohttpResponse(
+                200,
+                {
+                    "choices": [{"message": {"role": "assistant", "content": "ok"}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 1},
+                },
+            )
+
+        mock_session = MagicMock()
+        mock_session.post.side_effect = _fake_post
+        mock_session.closed = False
+        p._session = mock_session
+
+        await p.complete(messages=[{"role": "user", "content": "hi"}])
+        assert "reasoning_effort" not in captured
