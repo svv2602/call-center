@@ -281,3 +281,38 @@ class TestRussianNumeralsDefensive:
     def test_hybrid_double_n_uk_ending(self) -> None:
         # STT produces «одиннадцять» (RU double-n + UA -ять ending)
         assert words_to_digits("одиннадцять")[0] == "11"
+
+
+class TestTimeSlotOrdinal:
+    """Ukrainian ordinal-hour + minutes readouts as callers pick slots.
+
+    Real call (2026-07-28): bot offered 8:20/9:20/10:20/11:20/12:20 and
+    caller said «одинадцята двадцять». The parser yields "1120" here;
+    the pipeline later inserts the ":" (see _apply_stt_corrections in
+    src/core/pipeline.py, `context_hint == "time"` branch)."""
+
+    def test_ordinal_eleven_twenty(self) -> None:
+        # 11 (fem.ord "одинадцята") + 20 (twenty) → concat "1120"
+        assert words_to_digits("одинадцята двадцять")[0] == "1120"
+
+    def test_nominative_eleven_twenty(self) -> None:
+        # 11 (nom.) + 20 → same result
+        assert words_to_digits("одинадцять двадцять")[0] == "1120"
+
+    def test_ordinal_eight_twenty(self) -> None:
+        assert words_to_digits("восьма двадцять")[0] == "820"
+
+    def test_ordinal_bare(self) -> None:
+        # Single ordinal-hour: just "8"
+        assert words_to_digits("восьма")[0] == "8"
+
+    def test_ordinal_ten_twenty(self) -> None:
+        assert words_to_digits("десята двадцять")[0] == "1020"
+
+    def test_ordinal_fifteen_twenty(self) -> None:
+        assert words_to_digits("п'ятнадцята двадцять")[0] == "1520"
+
+    def test_ordinal_hour_zero_five(self) -> None:
+        # «восьма нуль п'ять» = 8:05 — explicit zero blocks fold,
+        # yielding "805" which the time regex converts to "8:05".
+        assert words_to_digits("восьма нуль п'ять")[0] == "805"

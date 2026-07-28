@@ -702,12 +702,13 @@ class CallPipeline:
         for rule_id in applied:
             stt_corrections_applied_total.labels(rule_id=rule_id).inc()
 
-        # Ukrainian numeral-word → digit conversion, scoped to plate/phone
-        # so we don't rewrite dates ("двадцять восьме липня") or amounts
-        # ("сто гривень"). Runs AFTER Redis regex rules so STT garbage
-        # tokens («начать»/«натязь») get dropped first, leaving a clean
-        # sequence of numeral words + digits for the parser.
-        if context_hint in ("plate", "phone"):
+        # Ukrainian numeral-word → digit conversion. Enabled for plate/phone
+        # (spoken numbers like «два одинадцять» → "211") and time (spoken
+        # slot picks like «одинадцята двадцять» → "1120", colon added below).
+        # NOT enabled for other contexts to avoid mangling dates ("двадцять
+        # восьме липня") or amounts ("сто гривень"). Runs AFTER Redis regex
+        # rules so STT garbage tokens («начать»/«натязь») get dropped first.
+        if context_hint in ("plate", "phone", "time"):
             try:
                 from src.stt.numeral_parser import words_to_digits
 
@@ -728,6 +729,26 @@ class CallPipeline:
                     self._session.channel_uuid,
                     exc_info=True,
                 )
+
+        # Time context: reinsert HH:MM colon on compact 3-4 digit times.
+        # numeral_parser converts «одинадцята двадцять» → "1120"; here we
+        # split it back into "11:20" so the LLM can match against the
+        # offered_slots list directly. Also handles "820" → "8:20" for
+        # single-digit hours. Skipped outside `time` ctx to keep plate
+        # numbers («0211») intact.
+        if context_hint == "time":
+            colon_re = re.compile(
+                r"(?<!\d)(0?[1-9]|1\d|2[0-3])([0-5]\d)(?!\d)"
+            )
+            new_text2 = colon_re.sub(r"\1:\2", new_text)
+            if new_text2 != new_text:
+                logger.info(
+                    "stt_time_colon: call=%s %r → %r",
+                    self._session.channel_uuid,
+                    new_text[:120],
+                    new_text2[:120],
+                )
+                new_text = new_text2
 
         return Transcript(
             text=new_text,
