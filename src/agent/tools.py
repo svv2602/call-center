@@ -371,7 +371,11 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
                 },
                 "storage_contract": {
                     "type": "string",
-                    "description": "Номер договору зберігання шин (якщо клієнт має шини на зберіганні)",
+                    "description": (
+                        "Номер договору зберігання шин (11 цифр zero-padded, напр. '00000110596') — "
+                        "поле Number з результату find_storage. ОБОВ'ЯЗКОВО передавай коли клієнт "
+                        "монтуватиме шини зі зберігання. У 1С передається як NumberContract."
+                    ),
                 },
                 "linked_order_id": {
                     "type": "string",
