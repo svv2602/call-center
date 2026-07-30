@@ -142,7 +142,7 @@ def _mine_confusion_pairs(
             # Find the most recent user turn before this bot turn
             user_idx = None
             for j in range(i - 1, -1, -1):
-                if turns[j]["speaker"] == "user":
+                if turns[j]["speaker"] == "customer":
                     user_idx = j
                     break
             if user_idx is None:
@@ -183,7 +183,7 @@ def _mine_frequent_verbatims(
 
     for call_id, turns in turns_by_call.items():
         for i, turn in enumerate(turns):
-            if turn["speaker"] != "user":
+            if turn["speaker"] != "customer":
                 continue
             content = str(turn["content"] or "").strip()
             if not content or len(content) > 120:
