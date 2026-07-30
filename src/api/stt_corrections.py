@@ -27,7 +27,9 @@ from src.stt.corrections import (
     apply_corrections,
     delete_correction,
     load_corrections,
+    save_corrections,
     update_correction,
+    validate_rule,
 )
 
 if TYPE_CHECKING:
@@ -55,6 +57,20 @@ class CorrectionRuleIn(BaseModel):
     flags: str = Field(default="i", description="Regex flags — 'i' = case-insensitive")
     enabled: bool = True
     note: str = Field(default="", max_length=500)
+
+
+class BulkRequest(BaseModel):
+    """Payload for /corrections/bulk — a batch insert.
+
+    ``skip_duplicates=True`` (default) drops rows whose ``pattern`` already
+    exists in the current rule set — useful for re-running an import without
+    creating duplicate rules. When ``False``, duplicates are still inserted
+    (regex application is idempotent, so it is safe if the replacements match,
+    but harmless duplicate rows accumulate).
+    """
+
+    rules: list[CorrectionRuleIn]
+    skip_duplicates: bool = True
 
 
 class CorrectionRulePatch(BaseModel):
@@ -99,6 +115,81 @@ async def create_correction(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     logger.info("stt_corrections: created rule id=%s pattern=%s", rule["id"], rule["pattern"])
     return {"rule": rule}
+
+
+@router.post("/corrections/bulk")
+async def bulk_create_corrections(
+    body: BulkRequest, _: dict[str, Any] = _perm_w
+) -> dict[str, Any]:
+    """Batch-insert rules. Each row is validated independently — a single bad
+    row does not abort the rest. Returns per-row status plus totals.
+
+    Response shape::
+
+        {
+          "created": <int>,
+          "skipped": <int>,
+          "errors": <int>,
+          "results": [
+            {"index": 0, "status": "created", "id": "..."},
+            {"index": 1, "status": "skipped", "reason": "duplicate pattern"},
+            {"index": 2, "status": "error", "error": "invalid regex: ..."},
+          ]
+        }
+
+    Single Redis write at the end (batched) — safe for imports of 100s of rows.
+    """
+    import uuid
+
+    redis = await _get_redis()
+    existing = await load_corrections(redis, force=True)
+    existing_patterns = {r.get("pattern") for r in existing}
+
+    results: list[dict[str, Any]] = []
+    to_add: list[dict[str, Any]] = []
+
+    for idx, item in enumerate(body.rules):
+        rule = item.model_dump()
+        try:
+            validate_rule(rule)
+        except ValueError as exc:
+            results.append({"index": idx, "status": "error", "error": str(exc)})
+            continue
+
+        if body.skip_duplicates and rule["pattern"] in existing_patterns:
+            results.append(
+                {"index": idx, "status": "skipped", "reason": "duplicate pattern"}
+            )
+            continue
+
+        rule["id"] = uuid.uuid4().hex[:12]
+        rule.setdefault("enabled", True)
+        rule.setdefault("flags", "i")
+        rule.setdefault("context_hint", "")
+        rule.setdefault("note", "")
+        to_add.append(rule)
+        existing_patterns.add(rule["pattern"])
+        results.append({"index": idx, "status": "created", "id": rule["id"]})
+
+    if to_add:
+        await save_corrections(redis, existing + to_add)
+
+    created = sum(1 for r in results if r["status"] == "created")
+    skipped = sum(1 for r in results if r["status"] == "skipped")
+    errors = sum(1 for r in results if r["status"] == "error")
+
+    logger.info(
+        "stt_corrections: bulk import created=%d skipped=%d errors=%d",
+        created,
+        skipped,
+        errors,
+    )
+    return {
+        "created": created,
+        "skipped": skipped,
+        "errors": errors,
+        "results": results,
+    }
 
 
 @router.put("/corrections/{rule_id}")

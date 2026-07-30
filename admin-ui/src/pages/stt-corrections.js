@@ -57,6 +57,7 @@ function render() {
                 value="${escapeHtml(_filter)}"
                 class="${tw.formInput} max-w-xs"/>
             <button onclick="window._pages.sttCorrections.openTest()" class="${tw.btnSecondary}">${t('sttCorrections.test')}</button>
+            <button onclick="window._pages.sttCorrections.openImport()" class="${tw.btnSecondary}">${t('sttCorrections.import')}</button>
             <button onclick="window._pages.sttCorrections.openAdd()" class="${tw.btnPrimary}">${t('sttCorrections.addRule')}</button>
         </div>
 
@@ -262,6 +263,143 @@ async function runTest() {
     }
 }
 
+// ─── Import modal ───────────────────────────────────────────
+function openImport() {
+    const html = `
+        <div id="sttCorrImportModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div class="bg-white dark:bg-neutral-900 rounded-lg p-6 shadow-xl w-full max-w-2xl">
+            <h3 class="text-lg font-semibold mb-3">${t('sttCorrections.importTitle')}</h3>
+            <p class="text-xs text-neutral-500 mb-3">${t('sttCorrections.importHint')}</p>
+            <div class="flex items-center gap-3 mb-3">
+                <input type="file" id="corrImportFile" accept=".tsv,.csv,.txt"
+                    onchange="window._pages.sttCorrections._loadFileIntoTextarea(this)"
+                    class="text-sm"/>
+                <label class="text-sm flex items-center gap-1">
+                    <input type="checkbox" id="corrImportSkipDup" checked/>
+                    ${t('sttCorrections.importSkipDup')}
+                </label>
+                <label class="text-sm flex items-center gap-1">
+                    ${t('sttCorrections.importDelimiter')}
+                    <select id="corrImportDelim" class="${tw.formInput} text-sm py-0.5 px-1">
+                        <option value="\t" selected>TAB</option>
+                        <option value=",">,</option>
+                        <option value=";">;</option>
+                    </select>
+                </label>
+            </div>
+            <textarea id="corrImportText" rows="10" spellcheck="false"
+                class="${tw.formInput} w-full font-mono text-xs mb-3"
+                placeholder="pattern${'\t'}replacement${'\t'}context_hint${'\t'}note&#10;\\bвифт\\b${'\t'}вівторок${'\t'}date${'\t'}from call abc123"></textarea>
+            <div id="corrImportResult" class="mb-3"></div>
+            <div class="flex justify-end gap-2">
+                <button onclick="window._pages.sttCorrections.closeImport()" class="${tw.btnSecondary}">${t('common.close')}</button>
+                <button onclick="window._pages.sttCorrections.runImport()" class="${tw.btnPrimary}">${t('sttCorrections.importRun')}</button>
+            </div>
+          </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function closeImport() {
+    const el = document.getElementById('sttCorrImportModal');
+    if (el) el.remove();
+}
+
+function _loadFileIntoTextarea(input) {
+    const file = input.files && input.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+        document.getElementById('corrImportText').value = e.target.result || '';
+    };
+    reader.readAsText(file, 'utf-8');
+}
+
+function _parseImportText(text, delim) {
+    // Split into non-empty lines. Header row required.
+    const lines = text.split(/\r?\n/).map(l => l).filter((l, i) => i === 0 || l.trim().length);
+    if (lines.length < 2) return { rules: [], errors: ['no data rows'] };
+
+    const header = lines[0].split(delim).map(s => s.trim());
+    const idx = (name) => header.indexOf(name);
+    if (idx('pattern') < 0 || idx('replacement') < 0) {
+        return { rules: [], errors: ['header must contain pattern and replacement columns'] };
+    }
+
+    const iP = idx('pattern'), iR = idx('replacement');
+    const iC = idx('context_hint'), iN = idx('note');
+    const iE = idx('enabled'), iF = idx('flags');
+
+    const rules = [];
+    const errors = [];
+    for (let n = 1; n < lines.length; n++) {
+        const cols = lines[n].split(delim);
+        const pattern = (cols[iP] || '').trim();
+        const replacement = cols[iR] || '';
+        if (!pattern) continue;
+        if (!replacement.trim()) continue;  // uncurated row — skip silently
+        const enabledRaw = iE >= 0 ? (cols[iE] || '').trim().toLowerCase() : 'true';
+        rules.push({
+            pattern,
+            replacement,
+            context_hint: iC >= 0 ? (cols[iC] || '').trim() : '',
+            note: iN >= 0 ? (cols[iN] || '') : '',
+            flags: iF >= 0 && (cols[iF] || '').trim() ? cols[iF].trim() : 'i',
+            enabled: !['false', '0', 'no', 'off'].includes(enabledRaw),
+        });
+    }
+    return { rules, errors };
+}
+
+async function runImport() {
+    const text = document.getElementById('corrImportText').value || '';
+    const delim = document.getElementById('corrImportDelim').value || '\t';
+    const skipDup = document.getElementById('corrImportSkipDup').checked;
+    const resultEl = document.getElementById('corrImportResult');
+
+    const parsed = _parseImportText(text, delim);
+    if (parsed.errors.length) {
+        resultEl.innerHTML = `<div class="text-red-600 text-sm">${escapeHtml(parsed.errors.join('; '))}</div>`;
+        return;
+    }
+    if (parsed.rules.length === 0) {
+        resultEl.innerHTML = `<div class="text-neutral-500 text-sm">${t('sttCorrections.importEmpty')}</div>`;
+        return;
+    }
+
+    resultEl.innerHTML = `<div class="text-sm text-neutral-500">${t('sttCorrections.importSending', { n: parsed.rules.length })}</div>`;
+    try {
+        const r = await api('/admin/stt/corrections/bulk', {
+            method: 'POST',
+            body: JSON.stringify({ rules: parsed.rules, skip_duplicates: skipDup }),
+            headers: { 'Content-Type': 'application/json' },
+        });
+        const bad = (r.results || []).filter(x => x.status === 'error');
+        const skipped = (r.results || []).filter(x => x.status === 'skipped');
+        let html = `
+            <div class="text-sm">
+                <span class="${tw.badgeGreen}">${t('sttCorrections.importCreated', { n: r.created || 0 })}</span>
+                <span class="${tw.badgeGray}">${t('sttCorrections.importSkipped', { n: r.skipped || 0 })}</span>
+                <span class="${r.errors ? tw.badgeRed : tw.badgeGray}">${t('sttCorrections.importErrors', { n: r.errors || 0 })}</span>
+            </div>`;
+        if (bad.length) {
+            html += `<ul class="text-xs text-red-600 mt-2 list-disc pl-4">` +
+                bad.slice(0, 10).map(x => `<li>row ${x.index}: ${escapeHtml(x.error || '')}</li>`).join('') +
+                `</ul>`;
+        }
+        if (skipped.length && skipped.length <= 10) {
+            html += `<ul class="text-xs text-neutral-500 mt-2 list-disc pl-4">` +
+                skipped.map(x => `<li>row ${x.index}: ${escapeHtml(x.reason || '')}</li>`).join('') +
+                `</ul>`;
+        }
+        resultEl.innerHTML = html;
+        showToast(t('sttCorrections.importDone', { n: r.created || 0 }), 'success');
+        await loadData();
+    } catch (e) {
+        resultEl.innerHTML = `<div class="text-red-600 text-sm">${escapeHtml(e.message)}</div>`;
+    }
+}
+
 // ═══════════════════════════════════════════════════════════
 //  Init
 // ═══════════════════════════════════════════════════════════
@@ -273,4 +411,5 @@ window._pages = window._pages || {};
 window._pages.sttCorrections = {
     setFilter, openAdd, openEdit, closeModal, save, remove, toggleEnabled,
     openTest, runTest,
+    openImport, closeImport, runImport, _loadFileIntoTextarea,
 };
