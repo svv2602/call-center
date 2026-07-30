@@ -21,6 +21,7 @@ from src.agent.prompts import (
     FAREWELL_ORDER_TEXT,
     FAREWELL_TEXT,
     GREETING_TEXT,
+    SILENCE_CONFIRM_REPROMPT_TEXT,
     SILENCE_PROMPT_TEXT,
     SILENCE_TIMEOUT_1_TEXT,
     SILENCE_TIMEOUT_2_TEXT,
@@ -294,6 +295,32 @@ def _rotate(pool: list[str]) -> str:
     phrase = pool[idx % len(pool)]
     _wait_counters[pool_id] = idx + 1
     return phrase
+
+
+# Keywords that indicate the bot's last utterance was a yes/no confirmation
+# question — used to switch the silence-timeout re-prompt to a targeted
+# «say "так" or "ні"» message instead of the generic «Я на зв'язку», so
+# a caller whose short «так» was dropped by STT can retry.
+_CONFIRM_KEYWORDS: tuple[str, ...] = (
+    "підтверджуєте",
+    "підтвердіть",
+    "підтверджуй",
+    "вірно?",
+    "так?",
+    "правильно?",
+    "згодні",
+    "гаразд?",
+    "все правильно",
+    "все вірно",
+)
+
+
+def _is_pending_confirmation(bot_utterance: str) -> bool:
+    """True if bot's last utterance ended with a yes/no confirmation prompt."""
+    if not bot_utterance:
+        return False
+    lowered = bot_utterance.lower()
+    return any(kw in lowered for kw in _CONFIRM_KEYWORDS)
 
 
 # --- STT correction context inference ---
@@ -779,10 +806,21 @@ class CallPipeline:
                     await self._speak(farewell)
                     break
                 else:
-                    # Two-level silence messages:
-                    # 1st timeout (count=1) — gentle reminder
-                    # 2nd timeout (count=2) — direct question before farewell
-                    if self._session.timeout_count <= 1:
+                    # Context-aware silence re-prompt: if the bot's last
+                    # utterance was a yes/no confirmation question, prefer
+                    # a targeted re-ask («say "так" or "ні"») instead of
+                    # the generic «Я на зв'язку». Caller's short «так»
+                    # may have been dropped by STT — this gives them an
+                    # explicit second chance without breaking the flow.
+                    last_bot_text = ""
+                    for turn in reversed(self._session.dialog_history):
+                        if turn.speaker == "assistant":
+                            last_bot_text = turn.content or ""
+                            break
+                    pending_confirm = _is_pending_confirmation(last_bot_text)
+                    if pending_confirm and self._session.timeout_count <= 1:
+                        silence_msg = SILENCE_CONFIRM_REPROMPT_TEXT
+                    elif self._session.timeout_count <= 1:
                         silence_msg = SILENCE_TIMEOUT_1_TEXT
                     else:
                         silence_msg = SILENCE_TIMEOUT_2_TEXT

@@ -1550,6 +1550,13 @@ SILENCE_TIMEOUT_1_TEXT = "Я на зв'язку. Якщо маєте запит�
 # 2nd timeout — direct question before farewell
 SILENCE_TIMEOUT_2_TEXT = "Ви ще на лінії?"
 
+# Silence re-prompt when bot's last utterance was a yes/no confirmation
+# question and STT didn't relay the caller's short «так/да» to the LLM.
+# Used INSTEAD of SILENCE_TIMEOUT_1_TEXT in that context.
+SILENCE_CONFIRM_REPROMPT_TEXT = (
+    "Перепрошую, не розчула. Скажіть, будь ласка, \"так\" щоб підтвердити або \"ні\" щоб змінити."
+)
+
 FAREWELL_TEXT = "Дякую за дзвінок! До побачення!"
 
 TRANSFER_TEXT = "Зараз з'єдную вас з оператором. Залишайтесь на лінії."
