@@ -46,6 +46,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine
 
 from src.config import get_settings
+from src.stt.corrections import apply_rules
 
 if TYPE_CHECKING:
     from collections.abc import Iterable
@@ -253,6 +254,58 @@ def _merge_and_dedup(
     return rows
 
 
+async def _load_existing_rules() -> list[dict[str, object]]:
+    """Fetch current corrections rules from Redis (same key as pipeline)."""
+    import json as _json
+
+    try:
+        from redis import asyncio as aioredis
+    except ImportError:
+        logger.warning("redis package unavailable — coverage filter disabled")
+        return []
+
+    settings = get_settings()
+    client = aioredis.from_url(settings.redis.url, decode_responses=True)
+    try:
+        raw = await client.get("stt:corrections")
+    finally:
+        await client.aclose()
+    if not raw:
+        return []
+    try:
+        data = _json.loads(raw)
+    except (ValueError, TypeError):
+        logger.warning("stt:corrections in Redis is malformed — coverage filter disabled")
+        return []
+    return [r for r in data if isinstance(r, dict)] if isinstance(data, list) else []
+
+
+def _filter_covered(
+    rows: list[dict[str, object]],
+    rules: list[dict[str, object]],
+) -> tuple[list[dict[str, object]], list[dict[str, object]]]:
+    """Split rows into (uncovered, covered) by running each row's user_text
+    through the current corrections engine with its guessed context.
+
+    A row is «covered» when at least one rule rewrites its text. This uses
+    the same pure ``apply_rules`` the production pipeline uses, so the check
+    is bit-exact — no false negatives from a divergent regex engine.
+    """
+    if not rules:
+        return list(rows), []
+    uncovered: list[dict[str, object]] = []
+    covered: list[dict[str, object]] = []
+    for row in rows:
+        text_ = str(row.get("user_text", ""))
+        ctx = str(row.get("ctx_guess") or "") or None
+        new_text, applied = apply_rules(text_, rules, ctx)  # type: ignore[arg-type]
+        if applied and new_text != text_:
+            covered.append({**row, "covered_by": ",".join(applied)})
+        else:
+            uncovered.append(row)
+    return uncovered, covered
+
+
 def _write_tsv(rows: list[dict[str, object]], out_path: str) -> None:
     fields = [
         "signal",
@@ -309,6 +362,14 @@ async def main() -> None:
         default="stt_candidates.tsv",
         help="output TSV path",
     )
+    parser.add_argument(
+        "--include-covered",
+        action="store_true",
+        help=(
+            "keep candidates whose text is already rewritten by an existing "
+            "correction rule (default: drop them — no point curating dupes)"
+        ),
+    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -338,6 +399,16 @@ async def main() -> None:
     )
 
     rows = _merge_and_dedup(confusion, verbatim)
+
+    if not args.include_covered:
+        rules = await _load_existing_rules()
+        rows, covered = _filter_covered(rows, rules)
+        logger.info(
+            "coverage filter: %d covered by existing rules, %d remain (add --include-covered to keep them)",
+            len(covered),
+            len(rows),
+        )
+
     _write_tsv(rows, args.out)
     logger.info("wrote %d candidates to %s", len(rows), args.out)
     logger.info(
