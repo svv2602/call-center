@@ -53,6 +53,13 @@ class TestGetBasePhrases:
         phrases = get_base_phrases()
         assert "ПроКолесо" in phrases
 
+    def test_contains_cities_both_forms(self) -> None:
+        """Cities are hinted in both UA and RU forms — callers mix languages."""
+        phrases = get_base_phrases()
+        assert "Дніпро" in phrases and "Днепр" in phrases
+        assert "Запоріжжя" in phrases and "Запорожье" in phrases
+        assert "Харків" in phrases and "Харьков" in phrases
+
     def test_all_pronunciations_in_phrases(self) -> None:
         """All Cyrillic pronunciations should be in base phrases."""
         phrases = get_base_phrases()

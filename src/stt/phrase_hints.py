@@ -139,6 +139,44 @@ BASE_STORE_NAMES: list[str] = [
     "Твоя Шина",
 ]
 
+# Ukrainian cities — hint both UA and RU forms. Callers routinely mix
+# languages ("Днепр" / "Дніпро", "Запорожье" / "Запоріжжя" seen 5–7×
+# each in real transcripts). Boosting both stabilises STT top-K so it
+# stops fragmenting the name into single letters or substituting a
+# similar-sounding word. The Ukrainian form goes first for uk-UA
+# preference; the Russian form covers ru-RU alternative recognition.
+BASE_CITIES: list[str] = [
+    # Regional capitals + major hubs
+    "Дніпро", "Днепр",
+    "Запоріжжя", "Запорожье",
+    "Київ", "Киев",
+    "Харків", "Харьков",
+    "Одеса", "Одесса",
+    "Львів", "Львов",
+    "Черкаси", "Черкассы",
+    "Полтава",
+    "Вінниця", "Винница",
+    "Чернігів", "Чернигов",
+    "Рівне", "Ровно",
+    "Тернопіль", "Тернополь",
+    "Житомир",
+    "Івано-Франківськ", "Ивано-Франковск",
+    "Ужгород",
+    "Миколаїв", "Николаев",
+    "Херсон",
+    "Кривий Ріг", "Кривой Рог",
+    "Суми", "Сумы",
+    "Чернівці", "Черновцы",
+    "Кропивницький", "Кропивницкий",
+    "Хмельницький", "Хмельницкий",
+    "Луцьк", "Луцк",
+    "Кременчук", "Кременчуг",
+    "Біла Церква", "Белая Церковь",
+    "Дніпродзержинськ", "Каменское", "Кам'янське",
+    "Маріуполь", "Мариуполь",
+    "Мелітополь", "Мелитополь",
+]
+
 
 def get_base_phrases() -> list[str]:
     """Return all base phrases (Cyrillic pronunciations + terms + store names).
@@ -151,6 +189,7 @@ def get_base_phrases() -> list[str]:
     phrases.extend(BASE_TERMS_UK)
     phrases.extend(BASE_CONVERSATIONAL)
     phrases.extend(BASE_STORE_NAMES)
+    phrases.extend(BASE_CITIES)
     return phrases
 
 
