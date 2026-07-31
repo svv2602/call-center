@@ -240,6 +240,7 @@ class StreamingAgentLoop:
         selected_station: dict[str, Any] | None = None,
         selected_slot: dict[str, str] | None = None,
         offered_slots: list[dict[str, str]] | None = None,
+        fitting_progress: dict[str, Any] | None = None,
     ) -> TurnResult:
         """Run a full conversation turn with streaming audio output.
 
@@ -297,6 +298,7 @@ class StreamingAgentLoop:
             selected_station=selected_station,
             selected_slot=selected_slot,
             offered_slots=offered_slots,
+            fitting_progress=fitting_progress,
             enabled_tools={t["name"] for t in (self._tools or [])},
         )
 

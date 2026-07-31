@@ -1551,6 +1551,15 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         # Server-side validation: reject booking without required customer data
         customer_name = (kwargs.get("customer_name") or "").strip()
         auto_number = (kwargs.get("auto_number") or "").strip()
+        vehicle_info = (kwargs.get("vehicle_info") or "").strip()
+        # Progress tracking: save whatever we know so the LLM's progress block
+        # reflects the latest state — even if the call is rejected below.
+        if customer_name:
+            session.fitting_customer_name = customer_name
+        if auto_number:
+            session.fitting_plate = auto_number
+        if vehicle_info:
+            session.fitting_vehicle_brand = vehicle_info
         missing: list[str] = []
         if not customer_name:
             missing.append("customer_name (ім'я клієнта)")
@@ -1571,6 +1580,13 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         if storage_contract_raw.upper() == "NONE":
             kwargs["storage_contract"] = ""
             storage_contract_raw = ""
+            # Client explicitly rejected storage — flip choice to "own".
+            session.fitting_storage_choice = "own"
+            session.fitting_storage_contract = None
+        elif storage_contract_raw:
+            # LLM passed a specific contract — persist for the progress block.
+            session.fitting_storage_choice = "contract"
+            session.fitting_storage_contract = storage_contract_raw
         if (
             session.storage_contracts_found
             and not storage_contract_raw
@@ -1822,6 +1838,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                             session.channel_uuid,
                             guid,
                         )
+                        session.fitting_booked = True
                         return {
                             "status": "confirmed",
                             "message": (
@@ -2329,6 +2346,13 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 # follow-up confirmation cannot drift to another station's address.
                 if station_id:
                     session.last_fitting_station_id = station_id
+                # Progress inference: if LLM went to slots without find_storage
+                # matching a contract → client chose "own tires" (Krok 2 answered).
+                if (
+                    session.fitting_storage_choice is None
+                    and not session.storage_contracts_found
+                ):
+                    session.fitting_storage_choice = "own"
                 response: dict[str, Any] = {"station_id": station_id, "slots": slots}
                 # Empty-slots hint: give the LLM concrete text so it doesn't
                 # improvise weird phrasing when there are 0 slots (call 07-31
@@ -2587,6 +2611,13 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                                 )
                                 if num and str(num) not in session.storage_contracts_found:
                                     session.storage_contracts_found.append(str(num))
+                # Progress: if any contract was found, tentatively mark Krok 2
+                # as "contract" so the progress block reflects the branch.
+                # LLM will confirm with client; if client rejects, book_fitting
+                # guard will require storage_contract="NONE" and we correct.
+                if session.storage_contracts_found and session.fitting_storage_choice is None:
+                    session.fitting_storage_choice = "contract"
+                    session.fitting_storage_contract = session.storage_contracts_found[0]
                 return result
             except Exception:
                 logger.warning(

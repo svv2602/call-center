@@ -162,6 +162,7 @@ class LLMAgent:
         selected_station: dict[str, Any] | None = None,
         selected_slot: dict[str, str] | None = None,
         offered_slots: list[dict[str, str]] | None = None,
+        fitting_progress: dict[str, Any] | None = None,
     ) -> tuple[str, list[dict[str, Any]]]:
         """Process a user message and return the agent's text response.
 
@@ -244,6 +245,7 @@ class LLMAgent:
             selected_station=selected_station,
             selected_slot=selected_slot,
             offered_slots=offered_slots,
+            fitting_progress=fitting_progress,
             enabled_tools={t["name"] for t in self._tools},
         )
 

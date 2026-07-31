@@ -933,6 +933,22 @@ class CallPipeline:
             elif self._session.fitting_slots_offered:
                 offered_slots = list(self._session.fitting_slots_offered)
 
+            # Fitting progress block: shows LLM what's already collected so it
+            # doesn't loop back to Krok 2/3/4 after passing through them.
+            fitting_progress: dict[str, Any] = {
+                "customer_name": self._session.fitting_customer_name,
+                "city": (selected_station or {}).get("city"),
+                "station_address": (selected_station or {}).get("address"),
+                "storage_choice": self._session.fitting_storage_choice,
+                "storage_contract": self._session.fitting_storage_contract,
+                "date": self._session.selected_fitting_date,
+                "time": self._session.selected_fitting_time,
+                "plate": self._session.fitting_plate,
+                "brand": self._session.fitting_vehicle_brand,
+                "caller_phone": self._session.caller_phone,
+                "booked": self._session.fitting_booked,
+            }
+
             if self._streaming_loop is not None:
                 # STREAMING PATH — add user turn to session (streaming loop uses separate _llm_history)
                 self._session.add_user_turn(
@@ -969,6 +985,7 @@ class CallPipeline:
                             selected_station=selected_station,
                             selected_slot=selected_slot,
                             offered_slots=offered_slots,
+                            fitting_progress=fitting_progress,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )
@@ -1067,6 +1084,7 @@ class CallPipeline:
                             selected_station=selected_station,
                             selected_slot=selected_slot,
                             offered_slots=offered_slots,
+                            fitting_progress=fitting_progress,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )

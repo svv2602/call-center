@@ -103,6 +103,15 @@ class CallSession:
         # omits storage_contract=, we reject once and force a retry (call 07-30 16:25).
         self.storage_contracts_found: list[str] = []
         self.storage_contract_guard_triggered: bool = False
+        # --- Fitting progress fields (used by _build_fitting_progress) ---
+        # These surface state to the LLM as a "## 📋 Прогрес запису" block so
+        # the model does not loop back to already-completed steps.
+        self.fitting_customer_name: str | None = None      # Ім'я з профілю або питання
+        self.fitting_plate: str | None = None              # Держномер (нормалізований)
+        self.fitting_vehicle_brand: str | None = None      # Марка/модель авто
+        # storage_choice: None=pending, "own"=клієнт привезе свої, "contract"=зі зберігання
+        self.fitting_storage_choice: str | None = None
+        self.fitting_storage_contract: str | None = None   # Обраний Number коли choice="contract"
         self.tenant_id: str | None = None
         self.tenant_slug: str | None = None
         self.tenant_name: str | None = None
@@ -212,6 +221,13 @@ class CallSession:
             "selected_fitting_time": self.selected_fitting_time,
             "fitting_slots_offered": self.fitting_slots_offered,
             "last_fitting_station_id": self.last_fitting_station_id,
+            "storage_contracts_found": list(self.storage_contracts_found),
+            "storage_contract_guard_triggered": self.storage_contract_guard_triggered,
+            "fitting_customer_name": self.fitting_customer_name,
+            "fitting_plate": self.fitting_plate,
+            "fitting_vehicle_brand": self.fitting_vehicle_brand,
+            "fitting_storage_choice": self.fitting_storage_choice,
+            "fitting_storage_contract": self.fitting_storage_contract,
             "tools_called": sorted(self.tools_called),
             "active_scenarios": sorted(self.active_scenarios),
             "tenant_id": self.tenant_id,
@@ -260,6 +276,15 @@ class CallSession:
         session.selected_fitting_time = data.get("selected_fitting_time")
         session.fitting_slots_offered = list(data.get("fitting_slots_offered", []))
         session.last_fitting_station_id = data.get("last_fitting_station_id")
+        session.storage_contracts_found = list(data.get("storage_contracts_found", []))
+        session.storage_contract_guard_triggered = data.get(
+            "storage_contract_guard_triggered", False
+        )
+        session.fitting_customer_name = data.get("fitting_customer_name")
+        session.fitting_plate = data.get("fitting_plate")
+        session.fitting_vehicle_brand = data.get("fitting_vehicle_brand")
+        session.fitting_storage_choice = data.get("fitting_storage_choice")
+        session.fitting_storage_contract = data.get("fitting_storage_contract")
         session.tools_called = set(data.get("tools_called", []))
         session.active_scenarios = set(data.get("active_scenarios", []))
         session.tenant_id = data.get("tenant_id")

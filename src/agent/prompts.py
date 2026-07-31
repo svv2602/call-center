@@ -296,6 +296,12 @@ _MOD_FITTING = """\
 
 ## Сценарій: запис на шиномонтаж
 
+### 🎯 ГОЛОВНЕ ПРАВИЛО НАВІГАЦІЇ
+У кожному turn нижче з'являється блок **## 📋 Прогрес запису** з поточним станом (✅ = зібрано, ⏳ = ще ні) та явним «**НАСТУПНИЙ КРОК**». Твої дії:
+1. **Читай прогрес перед кожним питанням клієнту.** Якщо поле ✅ — воно ВЖЕ зібране, НЕ питай знову.
+2. **Веди клієнта тільки до НАСТУПНОГО КРОКУ.** Не стрибай через кроки, не повертайся до попередніх без явного «змінимо».
+3. Клієнт СКАЗАВ «ні, інша дата»/«не туди»/«змінимо номер» → тільки тоді повертайся до відповідного кроку.
+
 ### 🚫 КРИТИЧНИЙ КОНТРАКТ ІНСТРУМЕНТІВ (читай перед КОЖНИМ tool call)
 0. ⛔ **НЕ ОЗВУЧУЙ ТЕХНІЧНІ ІДЕНТИФІКАТОРИ КЛІЄНТУ.** Клієнт має чути ТІЛЬКИ адресу, місто, район, орієнтир — і НІЧОГО іншого з тех. полів. Заборонено:
    - Поле `id` станції ("000000003", "000000006", ...) — це для tool calls, НЕ говори.
@@ -1308,6 +1314,7 @@ def build_system_prompt_with_context(
     selected_station: dict[str, Any] | None = None,
     selected_slot: dict[str, str] | None = None,
     offered_slots: list[dict[str, str]] | None = None,
+    fitting_progress: dict[str, Any] | None = None,
     enabled_tools: set[str] | None = None,
 ) -> str:
     """Build the final system prompt with all dynamic context injected.
@@ -1544,7 +1551,107 @@ def build_system_prompt_with_context(
                 slot_block.append(f"- {d}: {times}")
             parts.append("\n".join(slot_block))
 
+    # --- Fitting progress block ---
+    # Surfaces already-collected data so LLM won't loop back to Krok 2/3/4
+    # after passing through them. See _build_fitting_progress in this file.
+    if fitting_progress and any(fitting_progress.values()):
+        progress_text = _render_fitting_progress(fitting_progress)
+        if progress_text:
+            parts.append(progress_text)
+
     return "\n".join(parts)
+
+
+def _render_fitting_progress(p: dict[str, Any]) -> str:
+    """Render fitting progress block for LLM.
+
+    Reads collected state and produces a checklist with ✅/⏳ markers and
+    a single «НАСТУПНИЙ КРОК» pointer, so the LLM does not re-ask completed
+    steps under attention dilution (recurring bug from calls 07-30/07-31).
+    """
+    # Fields in Krok order: 0=name, 1=city+station, 2=storage, 3=date,
+    # 4=time, 5=plate, 6=brand, 7=phone (from CallerID), 8=confirm.
+    name = p.get("customer_name")
+    city = p.get("city")
+    station_addr = p.get("station_address")
+    storage_choice = p.get("storage_choice")   # "own" | "contract" | None
+    storage_contract = p.get("storage_contract")
+    date = p.get("date")
+    time_ = p.get("time")
+    plate = p.get("plate")
+    brand = p.get("brand")
+    caller_phone = p.get("caller_phone")
+    booked = bool(p.get("booked"))
+
+    if booked:
+        return (
+            "\n## 📋 Прогрес запису"
+            "\n✅ ЗАПИС СТВОРЕНО. Далі — тільки прощання або новий сценарій "
+            "(наприклад другий договір, консультація)."
+        )
+
+    checklist: list[tuple[str, bool, str]] = []
+    checklist.append(("Ім'я", bool(name), name or "ще не назвали"))
+    if city or station_addr:
+        parts_addr = []
+        if city:
+            parts_addr.append(city)
+        if station_addr:
+            parts_addr.append(station_addr)
+        checklist.append(("Місто/точка", True, ", ".join(parts_addr)))
+    else:
+        checklist.append(("Місто/точка", False, "не обрано"))
+    storage_desc = "не з'ясовано"
+    if storage_choice == "own":
+        storage_desc = "клієнт привозить свої"
+    elif storage_choice == "contract":
+        storage_desc = (
+            f"зі зберігання (договір {storage_contract})"
+            if storage_contract
+            else "зі зберігання (договір ЗАФІКСОВАНИЙ у сесії, передавай storage_contract)"
+        )
+    checklist.append(("Зберігання", storage_choice is not None, storage_desc))
+    checklist.append(("Дата", bool(date), date or "не обрано"))
+    checklist.append(("Час", bool(time_), time_ or "не обрано"))
+    checklist.append(("Держномер", bool(plate), plate or "не назвали"))
+    checklist.append(("Марка авто", bool(brand), brand or "не назвали"))
+    checklist.append(("Телефон", bool(caller_phone), caller_phone or "нема CallerID"))
+
+    # Find next step — first "not done"
+    next_step_idx = next(
+        (i for i, (_, done, _) in enumerate(checklist) if not done), None
+    )
+    step_labels = [
+        "Крок 0 (Ім'я)",
+        "Крок 1 (Місто/точка)",
+        "Крок 2 (Зберігання)",
+        "Крок 3 (Дата)",
+        "Крок 4 (Час)",
+        "Крок 5 (Держномер)",
+        "Крок 6 (Марка авто)",
+        "Крок 7 (Телефон — з CallerID)",
+    ]
+
+    lines = ["\n## 📋 Прогрес запису"]
+    for label, done, value in checklist:
+        marker = "✅" if done else "⏳"
+        lines.append(f"{marker} {label}: {value}")
+
+    if next_step_idx is None:
+        lines.append(
+            "\n**НАСТУПНИЙ КРОК: Крок 8 (Підтвердження).** "
+            "Всі поля зібрано — сформулюй підтвердження і чекай «так» → book_fitting."
+        )
+    else:
+        next_label = step_labels[next_step_idx]
+        lines.append(f"\n**НАСТУПНИЙ КРОК: {next_label}.**")
+
+    lines.append(
+        "⛔ **ЗАБОРОНЕНО ставити питання про пункти з ✅** — вони вже зібрані. "
+        "Клієнт має явно сказати «змінимо»/«ні, інше», щоб ти повернувся. "
+        "Інакше — тільки НАСТУПНИЙ КРОК."
+    )
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------
