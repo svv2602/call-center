@@ -1810,10 +1810,26 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                                 logger.debug(
                                     "Failed to update customer profile after booking", exc_info=True
                                 )
+                        # NOTE: booking_id is deliberately NOT included in the
+                        # LLM-visible response. Bot has repeatedly leaked the
+                        # UUID to callers ("b1486d3c-8cca-...") despite anti-
+                        # patterns in the prompt (calls 07-31 12:59, 13:xx).
+                        # The GUID is still persisted (logs above + call_logger
+                        # via _log_tool_call downstream). SMS delivery is 1С's job.
+                        logger.info(
+                            "book_fitting success (booking_id withheld from LLM) "
+                            "for call %s: guid=%s",
+                            session.channel_uuid,
+                            guid,
+                        )
                         return {
-                            "booking_id": guid,
                             "status": "confirmed",
-                            "message": "Запис створено",
+                            "message": (
+                                "Запис створено. Клієнту скажи: «Готово, записала "
+                                "на [дата] о [час] на [адреса]. Приїжджайте за десять "
+                                "хвилин до початку.» БЕЗ згадки «номер броні», «код "
+                                "запису», «bookingid» — цих полів у результаті немає."
+                            ),
                         }
                 # 1C returned success=false or no GUID
                 errors = result.get("errors", [])
