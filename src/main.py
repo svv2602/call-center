@@ -1563,6 +1563,43 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 "Поверніся до чеклісту і запитай у клієнта відсутні дані.",
             }
 
+        # Server-side guard: storage_contract must be passed if find_storage
+        # matched a contract earlier in the call (LLM tends to forget after
+        # long dialogs — call 07-30 16:25, 07-31). We block ONCE per call
+        # and force a retry; sentinel "NONE" means "client explicitly rejected".
+        storage_contract_raw = (kwargs.get("storage_contract") or "").strip()
+        if storage_contract_raw.upper() == "NONE":
+            kwargs["storage_contract"] = ""
+            storage_contract_raw = ""
+        if (
+            session.storage_contracts_found
+            and not storage_contract_raw
+            and not session.storage_contract_guard_triggered
+        ):
+            session.storage_contract_guard_triggered = True
+            first_contract = session.storage_contracts_found[0]
+            all_contracts = ", ".join(session.storage_contracts_found)
+            logger.warning(
+                "book_fitting: guard triggered — storage_contract empty but "
+                "find_storage matched [%s] for call %s",
+                all_contracts,
+                session.channel_uuid,
+            )
+            return {
+                "error": True,
+                "message": (
+                    f"⛔ У цьому дзвінку find_storage знайшов договір: {all_contracts}. "
+                    f"Ти викликаєш book_fitting з порожнім storage_contract — це втратить "
+                    f"прив'язку до шин, оператор шиномонтажу не буде знати які принести. "
+                    f"Виправ і виклич book_fitting ЩЕ РАЗ:\n"
+                    f"- якщо клієнт погодився зі знайденим договором → "
+                    f"передай storage_contract='{first_contract}'\n"
+                    f"- якщо клієнт відмовився ('привезу свої') → "
+                    f"передай storage_contract='NONE' (сигнал явної відмови). "
+                    f"НЕ говори клієнту про цю технічну помилку."
+                ),
+            }
+
         # Server-side validation: station_id must be a numeric 1C id, not the caller's
         # landmark text ("Оболонь", "Тимошенко"). If the LLM skipped
         # get_fitting_stations and passed a name, redirect it to the discovery tool.
@@ -2493,9 +2530,24 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     storage_number=kwargs.get("storage_number", ""),
                     phone=kwargs.get("phone", ""),
                 )
-                if isinstance(data, dict):
-                    return data
-                return {"result": data}
+                result = data if isinstance(data, dict) else {"result": data}
+                # Extract contract Numbers so the book_fitting guard can catch
+                # the case where LLM later forgets to pass storage_contract=.
+                # 1C response shapes vary — accept "data" / "result" / "contracts"
+                # and any dict with "Number" or "NumberContract".
+                for key in ("data", "result", "contracts"):
+                    candidates = result.get(key)
+                    if isinstance(candidates, list):
+                        for item in candidates:
+                            if isinstance(item, dict):
+                                num = (
+                                    item.get("Number")
+                                    or item.get("NumberContract")
+                                    or item.get("number")
+                                )
+                                if num and str(num) not in session.storage_contracts_found:
+                                    session.storage_contracts_found.append(str(num))
+                return result
             except Exception:
                 logger.warning(
                     "1C find_storage failed for call %s",

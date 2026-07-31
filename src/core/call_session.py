@@ -98,6 +98,11 @@ class CallSession:
         self.last_fitting_station_id: str | None = None
         self.tools_called: set[str] = set()
         self.active_scenarios: set[str] = set()  # accumulated detected scenarios
+        # Storage contract Numbers returned by find_storage during this call.
+        # Used to guard book_fitting: if find_storage matched a contract but LLM
+        # omits storage_contract=, we reject once and force a retry (call 07-30 16:25).
+        self.storage_contracts_found: list[str] = []
+        self.storage_contract_guard_triggered: bool = False
         self.tenant_id: str | None = None
         self.tenant_slug: str | None = None
         self.tenant_name: str | None = None
