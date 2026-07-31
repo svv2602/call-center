@@ -977,6 +977,11 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         storage_context_text = format_storage_context(storage_raw)
         customer_profile_text = format_customer_profile(customer_profile_raw)
         profile_name = customer_profile_raw.get("name") if customer_profile_raw else None
+        # Progress-block pre-fill: mark name as ✅ from the start when caller is
+        # a known customer. Prevents the "asks name twice" regression where bot
+        # greeting has «Виктория, чим допомогти?» but Krok 0 later re-asks.
+        if profile_name:
+            session.fitting_customer_name = profile_name
 
         # Modular prompt assembly: if no DB/A-B prompt, assemble from modules
         is_modular = False
@@ -2355,28 +2360,59 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     session.fitting_storage_choice = "own"
                 response: dict[str, Any] = {"station_id": station_id, "slots": slots}
                 # Empty-slots hint: give the LLM concrete text so it doesn't
-                # improvise weird phrasing when there are 0 slots (call 07-31
-                # где бот on Saturday-in-Zaporizhzhia spoke garbage instead of
-                # explaining the station is closed on weekends).
+                # improvise weird phrasing when there are 0 slots (calls 07-31
+                # Saturday-in-Zaporizhzhia + Friday-today-in-Cherkasy). Compute
+                # a real next-business-day suggestion so bot can offer it.
                 if not avail:
                     weekday = d_from.weekday()  # 0=Mon..6=Sun
-                    if weekday in (5, 6):
-                        # Skip forward to next Monday
-                        next_open = d_from + timedelta(days=(7 - weekday))
+
+                    def _next_business_day(from_date: date_type) -> date_type:
+                        """Return the earliest business day strictly after from_date."""
+                        candidate = from_date + timedelta(days=1)
+                        while candidate.weekday() in (5, 6):  # Sat/Sun
+                            candidate += timedelta(days=1)
+                        return candidate
+
+                    same_weekday_next_week = d_from + timedelta(days=7)
+
+                    if d_from == today_date:
+                        # Today has no slots — day is over. Suggest tomorrow (business).
+                        next_open = _next_business_day(d_from)
+                        response["reason"] = "today_too_late"
+                        response["message"] = (
+                            f"На сьогодні онлайн-запис уже закритий. "
+                            f"Пропоную {next_open.isoformat()}."
+                        )
+                        response["suggested_date"] = next_open.isoformat()
+                        response["suggested_same_weekday_next_week"] = (
+                            same_weekday_next_week.isoformat()
+                        )
+                    elif weekday in (5, 6):
+                        # Weekend request → suggest next Monday (business).
+                        next_open = _next_business_day(d_from)
                         response["reason"] = "weekend"
                         response["message"] = (
                             f"Станція у вихідні (сб/нд) не працює. "
                             f"Найближчий робочий день — {next_open.isoformat()}."
                         )
                         response["suggested_date"] = next_open.isoformat()
+                        response["suggested_same_weekday_next_week"] = (
+                            same_weekday_next_week.isoformat()
+                        )
                     else:
-                        next_day = d_from + timedelta(days=1)
+                        # Weekday with no slots → next business day + same weekday next week
+                        next_open = _next_business_day(d_from)
                         response["reason"] = "no_slots"
                         response["message"] = (
                             f"На {date_from} вільних слотів немає. "
-                            f"Спробуй наступний день — {next_day.isoformat()}."
+                            f"Найближчий варіант — {next_open.isoformat()}, "
+                            f"або той самий день тижня наступного разу — "
+                            f"{same_weekday_next_week.isoformat()}."
                         )
-                        response["suggested_date"] = next_day.isoformat()
+                        response["suggested_date"] = next_open.isoformat()
+                        response["suggested_same_weekday_next_week"] = (
+                            same_weekday_next_week.isoformat()
+                        )
                 return response
             except Exception:
                 logger.warning(
