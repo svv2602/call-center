@@ -2313,7 +2313,31 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 # follow-up confirmation cannot drift to another station's address.
                 if station_id:
                     session.last_fitting_station_id = station_id
-                return {"station_id": station_id, "slots": slots}
+                response: dict[str, Any] = {"station_id": station_id, "slots": slots}
+                # Empty-slots hint: give the LLM concrete text so it doesn't
+                # improvise weird phrasing when there are 0 slots (call 07-31
+                # где бот on Saturday-in-Zaporizhzhia spoke garbage instead of
+                # explaining the station is closed on weekends).
+                if not avail:
+                    weekday = d_from.weekday()  # 0=Mon..6=Sun
+                    if weekday in (5, 6):
+                        # Skip forward to next Monday
+                        next_open = d_from + timedelta(days=(7 - weekday))
+                        response["reason"] = "weekend"
+                        response["message"] = (
+                            f"Станція у вихідні (сб/нд) не працює. "
+                            f"Найближчий робочий день — {next_open.isoformat()}."
+                        )
+                        response["suggested_date"] = next_open.isoformat()
+                    else:
+                        next_day = d_from + timedelta(days=1)
+                        response["reason"] = "no_slots"
+                        response["message"] = (
+                            f"На {date_from} вільних слотів немає. "
+                            f"Спробуй наступний день — {next_day.isoformat()}."
+                        )
+                        response["suggested_date"] = next_day.isoformat()
+                return response
             except Exception:
                 logger.warning(
                     "1C REST get_station_schedule failed for call %s, falling back to Store API",
