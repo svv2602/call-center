@@ -933,6 +933,33 @@ class CallPipeline:
             elif self._session.fitting_slots_offered:
                 offered_slots = list(self._session.fitting_slots_offered)
 
+            # Server-side detect "own tires" phrases in user utterance.
+            # Client often answers the storage question unprompted while
+            # picking a station (call 2026-08-02). Pre-set choice="own" so
+            # the progress block shows ✅ and LLM skips Krok 2.
+            if self._session.fitting_storage_choice is None:
+                _text_lc = transcript.text.lower()
+                _own_hints = (
+                    "привезу з собою",
+                    "привезли з собою",
+                    "привозим з собою",
+                    "привозимо з собою",
+                    "везу з собою",
+                    "везу свої",
+                    "свої привезу",
+                    "свій комплект",
+                    "шини в мене",
+                    "шини мої",
+                    "мої шини",
+                    "з собою везу",
+                )
+                if any(h in _text_lc for h in _own_hints):
+                    self._session.fitting_storage_choice = "own"
+                    logger.info(
+                        "Storage auto-detected 'own' from user text: call=%s",
+                        self._session.channel_uuid,
+                    )
+
             # Fitting progress block: shows LLM what's already collected so it
             # doesn't loop back to Krok 2/3/4 after passing through them.
             fitting_progress: dict[str, Any] = {
