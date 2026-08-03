@@ -112,6 +112,10 @@ class CallSession:
         # storage_choice: None=pending, "own"=клієнт привезе свої, "contract"=зі зберігання
         self.fitting_storage_choice: str | None = None
         self.fitting_storage_contract: str | None = None   # Обраний Number коли choice="contract"
+        # Requested weekday (0=Mon..6=Sun) extracted from user text early in the
+        # call — carried across intervening turns so the bot doesn't re-ask
+        # "На яку дату?" after storage/city clarifications (call 2026-08-03).
+        self.fitting_requested_weekday: int | None = None
         self.tenant_id: str | None = None
         self.tenant_slug: str | None = None
         self.tenant_name: str | None = None
@@ -228,6 +232,7 @@ class CallSession:
             "fitting_vehicle_brand": self.fitting_vehicle_brand,
             "fitting_storage_choice": self.fitting_storage_choice,
             "fitting_storage_contract": self.fitting_storage_contract,
+            "fitting_requested_weekday": self.fitting_requested_weekday,
             "tools_called": sorted(self.tools_called),
             "active_scenarios": sorted(self.active_scenarios),
             "tenant_id": self.tenant_id,
@@ -285,6 +290,7 @@ class CallSession:
         session.fitting_vehicle_brand = data.get("fitting_vehicle_brand")
         session.fitting_storage_choice = data.get("fitting_storage_choice")
         session.fitting_storage_contract = data.get("fitting_storage_contract")
+        session.fitting_requested_weekday = data.get("fitting_requested_weekday")
         session.tools_called = set(data.get("tools_called", []))
         session.active_scenarios = set(data.get("active_scenarios", []))
         session.tenant_id = data.get("tenant_id")

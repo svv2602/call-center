@@ -933,6 +933,32 @@ class CallPipeline:
             elif self._session.fitting_slots_offered:
                 offered_slots = list(self._session.fitting_slots_offered)
 
+            # Server-side extract requested weekday from user text. Client
+            # often names weekday early («на пʼятницю»), then bot goes through
+            # storage/city clarifications and forgets. Store in session so
+            # progress block reminds LLM. Call 2026-08-03: bot re-asked date
+            # after storage question, ignoring earlier «пʼятницю».
+            if self._session.fitting_requested_weekday is None:
+                _wd_kw = {
+                    "понеділок": 0, "понеділка": 0,
+                    "вівторок": 1, "вівторка": 1,
+                    "серед": 2,
+                    "четвер": 3, "четвр": 3,
+                    "п'ятниц": 4, "пʼятниц": 4, "пятниц": 4,
+                    "субот": 5,
+                    "неділ": 6,
+                }
+                _text_wd = transcript.text.lower()
+                for _kw, _wd in _wd_kw.items():
+                    if _kw in _text_wd:
+                        self._session.fitting_requested_weekday = _wd
+                        logger.info(
+                            "Weekday auto-detected: %d (%s) from call=%s text=%r",
+                            _wd, _kw, self._session.channel_uuid,
+                            transcript.text[:60],
+                        )
+                        break
+
             # Server-side detect "own tires" phrases in user utterance.
             # Client often answers the storage question unprompted while
             # picking a station (call 2026-08-02). Pre-set choice="own" so
@@ -1009,6 +1035,7 @@ class CallPipeline:
                 "brand": self._session.fitting_vehicle_brand,
                 "caller_phone": self._session.caller_phone,
                 "booked": self._session.fitting_booked,
+                "requested_weekday": self._session.fitting_requested_weekday,
             }
 
             if self._streaming_loop is not None:
