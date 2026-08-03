@@ -51,6 +51,9 @@ admin-ui/dist/
 # Claude Code / Agent skills
 .agents/
 .claude/
+# Belt-and-suspenders: keep the deploy skill out even if the broad .claude/ rule
+# above is ever relaxed — it hard-codes prod SSH host / paths.
+.claude/skills/deploy/
 
 # Audit prompts and reports (local only)
 audit/
