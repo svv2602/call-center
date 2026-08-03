@@ -963,7 +963,11 @@ class CallPipeline:
             # Client often answers the storage question unprompted while
             # picking a station (call 2026-08-02). Pre-set choice="own" so
             # the progress block shows ✅ and LLM skips Krok 2.
-            if self._session.fitting_storage_choice is None:
+            # Also flips from "contract" → "own" when find_storage auto-
+            # locked the session to a contract but client actually said
+            # «свої з собою» (call 2026-08-03 14:55: session stuck on
+            # contract → 3-day guard blocked next-day booking forever).
+            if self._session.fitting_storage_choice != "own":
                 _text_lc = transcript.text.lower()
                 _own_hints = (
                     "привезу з собою",
@@ -978,6 +982,19 @@ class CallPipeline:
                     "шини мої",
                     "мої шини",
                     "з собою везу",
+                    # Short affirmations to the storage question — STT often
+                    # cuts «з собою» down to «тобою» / «з тобою» (call 2026-08-03
+                    # 14:56). And the rus/ukr mix «Шины будут любую» is real STT
+                    # output for «шини будуть з собою».
+                    "тобою",
+                    "з тобою",
+                    "шини будуть з собою",
+                    "шини будуть с собой",
+                    "шины будут с собой",
+                    "шины будут з собою",
+                    "шины будут любую",
+                    "будуть з собою",
+                    "будут с собой",
                     # Explicit "no storage" phrasings — client denies having a
                     # storage contract, implicitly = own tires. Call 2026-08-03:
                     # STT «в мене нема сина зберігає» (mangled) → repeat loop.
@@ -1015,11 +1032,30 @@ class CallPipeline:
                         "нема у мене",
                     )
                 if any(h in _text_lc for h in _own_hints):
-                    self._session.fitting_storage_choice = "own"
-                    logger.info(
-                        "Storage auto-detected 'own' from user text: call=%s",
-                        self._session.channel_uuid,
+                    _was_contract = (
+                        self._session.fitting_storage_choice == "contract"
                     )
+                    self._session.fitting_storage_choice = "own"
+                    # Flip cleanup: when find_storage previously auto-locked
+                    # us to a contract, clear the contract state AND clear
+                    # storage_contracts_found so book_fitting's "storage
+                    # forgot to pass NumberContract" guard does not force a
+                    # sentinel retry. The client explicitly said «свої з
+                    # собою» — respect that.
+                    if _was_contract:
+                        self._session.fitting_storage_contract = None
+                        self._session.storage_contracts_found = []
+                        self._session.storage_contract_guard_triggered = False
+                        logger.info(
+                            "Storage FLIPPED contract→own for call=%s "
+                            "(client said own-tires); cleared contract state",
+                            self._session.channel_uuid,
+                        )
+                    else:
+                        logger.info(
+                            "Storage auto-detected 'own' from user text: call=%s",
+                            self._session.channel_uuid,
+                        )
 
             # Fitting progress block: shows LLM what's already collected so it
             # doesn't loop back to Krok 2/3/4 after passing through them.
