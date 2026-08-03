@@ -305,8 +305,8 @@ _SQL_LIST_SUGGESTIONS = """
         match_distance, status, created_rule_id, reviewer, reviewed_at,
         reject_reason, first_seen_at, last_seen_at
     FROM stt_correction_suggestions
-    WHERE (:status IS NULL OR status = :status)
-      AND (:context IS NULL OR detected_context = :context)
+    WHERE (CAST(:status AS text) = '' OR status = CAST(:status AS text))
+      AND (CAST(:context AS text) = '' OR detected_context = CAST(:context AS text))
       AND occurrence_count >= :min_count
     ORDER BY occurrence_count DESC, last_seen_at DESC
     LIMIT :limit
@@ -325,14 +325,17 @@ async def list_suggestions(
     from sqlalchemy import text
 
     engine = await _get_engine()
-    status_arg = None if status.lower() in ("all", "*", "") else status
+    # Empty string = "no filter" — see _SQL_LIST_SUGGESTIONS. asyncpg cannot
+    # infer the type of a NULL bind param without help, so we use '' instead.
+    status_arg = "" if status.lower() in ("all", "*", "") else status
+    context_arg = context or ""
 
     async with engine.begin() as conn:
         result = await conn.execute(
             text(_SQL_LIST_SUGGESTIONS),
             {
                 "status": status_arg,
-                "context": context,
+                "context": context_arg,
                 "min_count": max(min_count, 1),
                 "limit": min(max(limit, 1), 500),
             },
