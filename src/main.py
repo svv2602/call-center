@@ -2372,6 +2372,43 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         except (ValueError, AttributeError):
             pass
 
+        # Storage 3-business-day lead-time guard: if tires come from client's
+        # storage contract, they must be shipped from the central warehouse —
+        # that takes 3 business days (Sat/Sun skipped). Prompt already tells
+        # LLM, but LLM sometimes ignores it (call 2026-08-03: booked for
+        # 04.08 while call was on 03.08 with contract chosen).
+        if session.fitting_storage_choice == "contract":
+            try:
+                _d_from = date_type.fromisoformat(date_from)
+                _min_date = today_date
+                _biz_days_added = 0
+                while _biz_days_added < 3:
+                    _min_date += timedelta(days=1)
+                    if _min_date.weekday() < 5:  # Mon..Fri
+                        _biz_days_added += 1
+                if _d_from < _min_date:
+                    logger.warning(
+                        "get_fitting_slots storage 3-day guard call=%s: "
+                        "date_from=%s < min=%s (storage_choice=contract)",
+                        session.channel_uuid, date_from, _min_date.isoformat(),
+                    )
+                    return {
+                        "station_id": station_id,
+                        "error": True,
+                        "message": (
+                            f"Шини зі зберігання доставляються з центрального складу "
+                            f"3 робочих дні. Мінімальна дата запису = "
+                            f"{_min_date.isoformat()}. Скажи клієнту: «Оскільки шини "
+                            f"зі зберігання, доставка до центру займає 3 робочих дні — "
+                            f"раніше {_min_date.isoformat()} записати не можу.» "
+                            f"І виклич ЩЕ РАЗ get_fitting_slots з "
+                            f"date_from='{_min_date.isoformat()}'."
+                        ),
+                        "slots": [],
+                    }
+            except (ValueError, AttributeError):
+                pass
+
         if _onec_client is not None:
             try:
                 result = await _onec_client.get_station_schedule(
@@ -2763,6 +2800,40 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     "НЕ використовуй reserve — оформляй одразу book_fitting."
                 ),
             }
+
+        # Storage 3-business-day lead-time guard (mirror of _get_fitting_slots).
+        # If client's tires come from storage contract, reserving a slot
+        # earlier than today+3 business days is invalid — no time to ship.
+        if session.fitting_storage_choice == "contract":
+            _reserve_date_str = str(kwargs.get("date", "")).strip()
+            if _reserve_date_str:
+                try:
+                    _today = datetime.now(tz=UTC).date()
+                    _d = date_type.fromisoformat(_reserve_date_str)
+                    _min_date = _today
+                    _biz_days_added = 0
+                    while _biz_days_added < 3:
+                        _min_date += timedelta(days=1)
+                        if _min_date.weekday() < 5:
+                            _biz_days_added += 1
+                    if _d < _min_date:
+                        logger.warning(
+                            "reserve_fitting_slot storage 3-day guard call=%s: "
+                            "date=%s < min=%s (storage_choice=contract)",
+                            session.channel_uuid, _reserve_date_str,
+                            _min_date.isoformat(),
+                        )
+                        return {
+                            "error": True,
+                            "message": (
+                                f"Шини зі зберігання доставляються 3 робочих дні. "
+                                f"Мінімальна дата = {_min_date.isoformat()}. "
+                                f"Виклич get_fitting_slots(date_from='{_min_date.isoformat()}') "
+                                f"і запропонуй клієнту слоти з {_min_date.isoformat()}."
+                            ),
+                        }
+                except (ValueError, AttributeError):
+                    pass
 
         if _onec_client is not None:
             try:
