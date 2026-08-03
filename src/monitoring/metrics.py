@@ -392,6 +392,18 @@ stt_corrections_applied_total = Counter(
     ["rule_id"],
 )
 
+stt_correction_suggestions_upserted_total = Counter(
+    "callcenter_stt_correction_suggestions_upserted_total",
+    "STT correction suggestions upserted by the weekly scanner",
+    ["context"],  # date, plate, city, tire_size, time, address, name, any
+)
+
+stt_correction_suggestions_promoted_total = Counter(
+    "callcenter_stt_correction_suggestions_promoted_total",
+    "STT correction suggestions promoted into live rules",
+    ["context"],
+)
+
 bot_filler_stripped_total = Counter(
     "callcenter_bot_filler_stripped_total",
     "Filler sentences stripped from bot response before TTS",

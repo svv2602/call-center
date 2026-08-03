@@ -182,6 +182,7 @@ export const HELP_PAGES = {
             { titleKey: 'help.sttCorrections.regex.examples', contentKey: 'help.sttCorrections.regex.examplesContent' },
             { titleKey: 'help.sttCorrections.metrics.title', contentKey: 'help.sttCorrections.metrics.content' },
             { titleKey: 'help.sttCorrections.diff.title', contentKey: 'help.sttCorrections.diff.content' },
+            { titleKey: 'help.sttCorrections.suggestions.title', contentKey: 'help.sttCorrections.suggestions.content' },
         ],
         tipsKey: 'help.sttCorrections.tips',
     },

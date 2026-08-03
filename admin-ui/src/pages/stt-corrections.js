@@ -9,6 +9,9 @@ import * as tw from '../tw.js';
 let _rules = [];
 let _validContexts = ['any', 'date', 'time', 'city', 'plate', 'station', 'phone'];
 let _filter = '';
+let _activeTab = 'rules';  // 'rules' | 'suggestions'
+let _suggestions = [];
+let _suggestionsLoaded = false;
 
 // ═══════════════════════════════════════════════════════════
 //  Load
@@ -23,19 +26,67 @@ async function loadData() {
         if (Array.isArray(data.valid_contexts) && data.valid_contexts.length) {
             _validContexts = data.valid_contexts;
         }
+        // Load suggestion count lazily so the tab header can show a badge.
+        if (!_suggestionsLoaded) {
+            try {
+                const s = await api('/admin/stt/corrections/suggestions?status=pending&limit=200');
+                _suggestions = s.suggestions || [];
+                _suggestionsLoaded = true;
+            } catch (_) {
+                _suggestions = [];
+            }
+        }
         render();
     } catch (e) {
         container.innerHTML = `<div class="${tw.emptyState}">${t('sttCorrections.loadFailed', { error: escapeHtml(e.message) })}</div>`;
     }
 }
 
+async function _reloadSuggestions() {
+    try {
+        const s = await api('/admin/stt/corrections/suggestions?status=pending&limit=200');
+        _suggestions = s.suggestions || [];
+        _suggestionsLoaded = true;
+    } catch (_) {
+        _suggestions = [];
+    }
+}
+
+function switchTab(tab) {
+    _activeTab = tab;
+    render();
+}
+
 // ═══════════════════════════════════════════════════════════
-//  Render
+//  Render — tabs
 // ═══════════════════════════════════════════════════════════
 function render() {
     const container = document.getElementById('sttCorrectionsContent');
     if (!container) return;
 
+    const pendingCount = _suggestions.filter(s => s.status === 'pending').length;
+    const tabsHtml = `
+        <div class="flex gap-1 border-b border-neutral-200 dark:border-neutral-800 mb-4">
+            <button onclick="window._pages.sttCorrections.switchTab('rules')"
+                class="px-4 py-2 text-sm border-b-2 ${_activeTab === 'rules' ? 'border-blue-500 text-blue-600 font-semibold' : 'border-transparent text-neutral-500 hover:text-neutral-800'}">
+                ${t('sttCorrections.tabRules')} <span class="text-xs text-neutral-400">(${_rules.length})</span>
+            </button>
+            <button onclick="window._pages.sttCorrections.switchTab('suggestions')"
+                class="px-4 py-2 text-sm border-b-2 ${_activeTab === 'suggestions' ? 'border-blue-500 text-blue-600 font-semibold' : 'border-transparent text-neutral-500 hover:text-neutral-800'}">
+                ${t('sttCorrections.tabSuggestions')}
+                ${pendingCount > 0 ? `<span class="ml-1 inline-block bg-amber-100 text-amber-800 text-xs px-1.5 py-0.5 rounded">${pendingCount}</span>` : ''}
+            </button>
+        </div>`;
+
+    if (_activeTab === 'suggestions') {
+        container.innerHTML = tabsHtml + _renderSuggestionsTab();
+        return;
+    }
+
+    container.innerHTML = tabsHtml + _renderRulesTab();
+}
+
+function _renderRulesTab() {
     const total = _rules.length;
     const enabled = _rules.filter(r => r.enabled !== false).length;
     const filter = _filter.trim().toLowerCase();
@@ -98,12 +149,162 @@ function render() {
         }
     }
     html += `</tbody></table></div>`;
-    container.innerHTML = html;
+    return html;
 }
 
 function setFilter(v) {
     _filter = v || '';
     render();
+}
+
+// ═══════════════════════════════════════════════════════════
+//  Suggestions tab
+// ═══════════════════════════════════════════════════════════
+function _renderSuggestionsTab() {
+    const pending = _suggestions.filter(s => s.status === 'pending');
+
+    let html = `
+        <div class="flex flex-wrap gap-3 items-center mb-4">
+            <div class="${tw.badgeGray}">${t('sttCorrections.suggestions.total')}: ${_suggestions.length}</div>
+            <div class="${tw.badgeYellow}">${t('sttCorrections.suggestions.pending')}: ${pending.length}</div>
+            <div class="flex-1"></div>
+            <button onclick="window._pages.sttCorrections.rescan()" class="${tw.btnSecondary}">${t('sttCorrections.suggestions.rescan')}</button>
+        </div>
+        <p class="text-xs text-neutral-500 mb-3">${t('sttCorrections.suggestions.hint')}</p>`;
+
+    if (pending.length === 0) {
+        html += `<div class="${tw.emptyState}">${t('sttCorrections.suggestions.empty')}</div>`;
+        return html;
+    }
+
+    html += `
+        <div class="overflow-x-auto">
+        <table class="${tw.table}">
+            <thead>
+                <tr>
+                    <th class="${tw.th}">${t('sttCorrections.suggestions.token')}</th>
+                    <th class="${tw.th}">${t('sttCorrections.suggestions.count')}</th>
+                    <th class="${tw.th}">${t('sttCorrections.suggestions.context')}</th>
+                    <th class="${tw.th}">${t('sttCorrections.suggestions.proposedReplacement')}</th>
+                    <th class="${tw.th}">${t('sttCorrections.suggestions.samples')}</th>
+                    <th class="${tw.th} text-right">${t('sttCorrections.actions')}</th>
+                </tr>
+            </thead>
+            <tbody>`;
+
+    for (const s of pending) {
+        const ctxBadge = s.detected_context === 'any' ? tw.badgeGray : tw.badgeBlue;
+        const samples = Array.isArray(s.sample_transcripts) ? s.sample_transcripts : [];
+        const sampleTexts = samples.slice(0, 3).map(sam =>
+            `<div class="text-xs text-neutral-500 truncate max-w-xs" title="${escapeHtml(sam.text || '')}">"${escapeHtml(sam.text || '')}"</div>`
+        ).join('');
+        const replacement = s.proposed_replacement
+            ? `<code class="text-xs">${escapeHtml(s.proposed_replacement)}</code>${s.match_distance != null ? ` <span class="text-xs text-neutral-400">(d=${s.match_distance})</span>` : ''}`
+            : `<span class="text-xs text-neutral-400 italic">${t('sttCorrections.suggestions.noAutoMatch')}</span>`;
+
+        html += `
+            <tr>
+                <td class="${tw.td}"><code class="text-sm">${escapeHtml(s.bad_token || '')}</code></td>
+                <td class="${tw.td}"><span class="${tw.badgeGray}">${s.occurrence_count}</span></td>
+                <td class="${tw.td}"><span class="${ctxBadge}">${escapeHtml(s.detected_context || 'any')}</span></td>
+                <td class="${tw.td}">${replacement}</td>
+                <td class="${tw.td}">${sampleTexts || '<span class="text-xs text-neutral-400">—</span>'}</td>
+                <td class="${tw.td} text-right whitespace-nowrap">
+                    <button onclick="window._pages.sttCorrections.openApprove('${escapeHtml(s.id)}')" class="text-green-600 hover:underline text-sm cursor-pointer mr-2">${t('sttCorrections.suggestions.approve')}</button>
+                    <button onclick="window._pages.sttCorrections.rejectSuggestion('${escapeHtml(s.id)}')" class="text-red-600 hover:underline text-sm cursor-pointer">${t('sttCorrections.suggestions.reject')}</button>
+                </td>
+            </tr>`;
+    }
+
+    html += `</tbody></table></div>`;
+    return html;
+}
+
+function openApprove(id) {
+    const s = _suggestions.find(x => x.id === id);
+    if (!s) return;
+
+    const html = `
+        <div id="sttSuggestModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div class="bg-white dark:bg-neutral-900 rounded-lg p-6 shadow-xl w-full max-w-lg">
+            <h3 class="text-lg font-semibold mb-3">${t('sttCorrections.suggestions.approveTitle')}</h3>
+            <div class="text-xs text-neutral-500 mb-3">${t('sttCorrections.suggestions.approveHint', { token: escapeHtml(s.bad_token) })}</div>
+            <label class="block mb-2 text-sm">${t('sttCorrections.pattern')} <span class="text-xs text-neutral-500">(regex)</span></label>
+            <input id="suggPattern" class="${tw.formInput} w-full mb-3" value="${escapeHtml(s.proposed_pattern || '')}"/>
+            <label class="block mb-2 text-sm">${t('sttCorrections.replacement')}</label>
+            <input id="suggReplacement" class="${tw.formInput} w-full mb-3" value="${escapeHtml(s.proposed_replacement || '')}" placeholder="${t('sttCorrections.suggestions.replacementPlaceholder')}"/>
+            <label class="block mb-2 text-sm">${t('sttCorrections.context')}</label>
+            <select id="suggContext" class="${tw.formInput} w-full mb-3">${_contextOptions(s.detected_context || 'any')}</select>
+            <label class="block mb-2 text-sm">${t('sttCorrections.note')}</label>
+            <input id="suggNote" class="${tw.formInput} w-full mb-3" value="auto-suggested from token '${escapeHtml(s.bad_token)}' (seen ${s.occurrence_count}×)"/>
+            <div class="flex justify-end gap-2">
+                <button onclick="window._pages.sttCorrections.closeApprove()" class="${tw.btnSecondary}">${t('common.cancel')}</button>
+                <button onclick="window._pages.sttCorrections.submitApprove('${escapeHtml(id)}')" class="${tw.btnPrimary}">${t('sttCorrections.suggestions.createRule')}</button>
+            </div>
+          </div>
+        </div>`;
+    document.body.insertAdjacentHTML('beforeend', html);
+}
+
+function closeApprove() {
+    const el = document.getElementById('sttSuggestModal');
+    if (el) el.remove();
+}
+
+async function submitApprove(id) {
+    const pattern = document.getElementById('suggPattern').value.trim();
+    const replacement = document.getElementById('suggReplacement').value;
+    const context_hint = document.getElementById('suggContext').value;
+    const note = document.getElementById('suggNote').value;
+    if (!pattern) {
+        showToast(t('sttCorrections.patternRequired'), 'error');
+        return;
+    }
+    if (!replacement.trim()) {
+        if (!confirm(t('sttCorrections.suggestions.emptyReplacementConfirm'))) return;
+    }
+    try {
+        await api(`/admin/stt/corrections/suggestions/${encodeURIComponent(id)}/approve`, {
+            method: 'POST',
+            body: JSON.stringify({ pattern, replacement, context_hint, note }),
+            headers: { 'Content-Type': 'application/json' },
+        });
+        closeApprove();
+        showToast(t('sttCorrections.suggestions.promoted'), 'success');
+        await _reloadSuggestions();
+        await loadData();
+    } catch (e) {
+        showToast(t('sttCorrections.saveFailed', { error: e.message }), 'error');
+    }
+}
+
+async function rejectSuggestion(id) {
+    const reason = prompt(t('sttCorrections.suggestions.rejectPrompt')) || '';
+    try {
+        await api(`/admin/stt/corrections/suggestions/${encodeURIComponent(id)}/reject`, {
+            method: 'POST',
+            body: JSON.stringify({ reason }),
+            headers: { 'Content-Type': 'application/json' },
+        });
+        showToast(t('sttCorrections.suggestions.rejected'), 'success');
+        await _reloadSuggestions();
+        render();
+    } catch (e) {
+        showToast(t('sttCorrections.saveFailed', { error: e.message }), 'error');
+    }
+}
+
+async function rescan() {
+    try {
+        const r = await api('/admin/stt/corrections/suggestions/rescan', {
+            method: 'POST',
+            body: JSON.stringify({ days: 30, min_occurrences: 2 }),
+            headers: { 'Content-Type': 'application/json' },
+        });
+        showToast(t('sttCorrections.suggestions.rescanQueued', { id: (r.task_id || '').slice(0, 8) }), 'success');
+    } catch (e) {
+        showToast(t('sttCorrections.saveFailed', { error: e.message }), 'error');
+    }
 }
 
 // ═══════════════════════════════════════════════════════════
@@ -412,4 +613,6 @@ window._pages.sttCorrections = {
     setFilter, openAdd, openEdit, closeModal, save, remove, toggleEnabled,
     openTest, runTest,
     openImport, closeImport, runImport, _loadFileIntoTextarea,
+    switchTab,
+    openApprove, closeApprove, submitApprove, rejectSuggestion, rescan,
 };

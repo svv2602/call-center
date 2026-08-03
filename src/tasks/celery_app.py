@@ -30,6 +30,7 @@ app = Celery(
         "src.tasks.scraper_tasks",
         "src.tasks.catalog_sync_tasks",
         "src.tasks.stt_hints_tasks",
+        "src.tasks.stt_suggestions_tasks",
         "src.tasks.prompt_optimizer",
         "src.tasks.promo_summary_tasks",
         "src.tasks.pricing_sync",
@@ -59,6 +60,7 @@ app.conf.update(
         "src.tasks.scraper_tasks.*": {"queue": "scraper"},
         "src.tasks.catalog_sync_tasks.*": {"queue": "catalog"},
         "src.tasks.stt_hints_tasks.*": {"queue": "catalog"},
+        "src.tasks.stt_suggestions_tasks.*": {"queue": "stats"},
         "src.tasks.prompt_optimizer.*": {"queue": "quality"},
         "src.tasks.promo_summary_tasks.*": {"queue": "embeddings"},
         "src.tasks.pricing_sync.*": {"queue": "stats"},
@@ -80,6 +82,13 @@ app.conf.beat_schedule = {
         "schedule": crontab(
             hour=2, minute=0, day_of_week="monday"
         ),  # Weekly Monday 02:00 (idempotent, 3 months ahead)
+    },
+    "rescan-stt-suggestions": {
+        "task": "src.tasks.stt_suggestions_tasks.rescan_stt_suggestions",
+        "schedule": crontab(
+            hour=3, minute=15, day_of_week="monday"
+        ),  # Weekly Monday 03:15 (after partitions ensured)
+        "kwargs": {"triggered_by": "beat"},
     },
     "backup-database": {
         "task": "src.tasks.backup.backup_database",

@@ -245,3 +245,267 @@ async def test_correction(
         "changed": new_text != body.text,
         "applied_rule_ids": applied,
     }
+
+
+# ═══════════════════════════════════════════════════════════
+#  Auto-suggested corrections (from call history)
+# ═══════════════════════════════════════════════════════════
+#
+# A weekly Celery task (`rescan_stt_suggestions`) mines call_turns for
+# tokens the STT keeps producing that aren't in any vocabulary and were
+# followed by the bot re-asking. Each cluster lands here as a candidate
+# rule — content manager approves it into the live rule set with one
+# click.
+
+
+class SuggestionListParams(BaseModel):
+    """Query filters for /suggestions listing."""
+
+    status: str | None = Field(default="pending", description="pending/approved/rejected/promoted")
+    context: str | None = Field(default=None, description="Filter by detected_context")
+    min_count: int = Field(default=1, ge=1)
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class SuggestionApprove(BaseModel):
+    """Approve payload — content-manager can override pattern/replacement."""
+
+    pattern: str | None = Field(default=None, min_length=1, max_length=500)
+    replacement: str | None = Field(default=None, max_length=500)
+    context_hint: str | None = Field(default=None)
+    note: str | None = Field(default=None, max_length=500)
+    reviewer: str | None = Field(default=None, max_length=100)
+
+
+class SuggestionReject(BaseModel):
+    """Reject payload with optional reason for future filtering."""
+
+    reason: str | None = Field(default=None, max_length=500)
+    reviewer: str | None = Field(default=None, max_length=100)
+
+
+class RescanRequest(BaseModel):
+    """Manual rescan trigger — same params as the Celery task."""
+
+    days: int = Field(default=30, ge=1, le=90)
+    min_occurrences: int = Field(default=2, ge=1, le=50)
+
+
+async def _get_engine() -> Any:
+    """Fetch the shared async SQLAlchemy engine used across the API."""
+    from src.api.database import get_engine
+
+    return await get_engine()
+
+
+_SQL_LIST_SUGGESTIONS = """
+    SELECT
+        id::text, bad_token, detected_context, occurrence_count,
+        sample_transcripts, proposed_pattern, proposed_replacement,
+        match_distance, status, created_rule_id, reviewer, reviewed_at,
+        reject_reason, first_seen_at, last_seen_at
+    FROM stt_correction_suggestions
+    WHERE (:status IS NULL OR status = :status)
+      AND (:context IS NULL OR detected_context = :context)
+      AND occurrence_count >= :min_count
+    ORDER BY occurrence_count DESC, last_seen_at DESC
+    LIMIT :limit
+"""
+
+
+@router.get("/corrections/suggestions")
+async def list_suggestions(
+    status: str = "pending",
+    context: str | None = None,
+    min_count: int = 1,
+    limit: int = 100,
+    _: dict[str, Any] = _perm_r,
+) -> dict[str, Any]:
+    """List auto-generated correction suggestions with counts and samples."""
+    from sqlalchemy import text
+
+    engine = await _get_engine()
+    status_arg = None if status.lower() in ("all", "*", "") else status
+
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(_SQL_LIST_SUGGESTIONS),
+            {
+                "status": status_arg,
+                "context": context,
+                "min_count": max(min_count, 1),
+                "limit": min(max(limit, 1), 500),
+            },
+        )
+        rows = [dict(r._mapping) for r in result]
+
+    for row in rows:
+        for k in ("first_seen_at", "last_seen_at", "reviewed_at"):
+            if row.get(k) is not None:
+                row[k] = row[k].isoformat()
+        if row.get("id") is not None:
+            row["id"] = str(row["id"])
+
+    return {"suggestions": rows, "count": len(rows)}
+
+
+_SQL_GET_SUGGESTION = """
+    SELECT id::text, bad_token, detected_context, proposed_pattern,
+           proposed_replacement, status
+    FROM stt_correction_suggestions
+    WHERE id = :id
+"""
+
+_SQL_MARK_PROMOTED = """
+    UPDATE stt_correction_suggestions
+    SET status = 'promoted',
+        created_rule_id = :rule_id,
+        reviewer = :reviewer,
+        reviewed_at = NOW()
+    WHERE id = :id
+"""
+
+_SQL_MARK_REJECTED = """
+    UPDATE stt_correction_suggestions
+    SET status = 'rejected',
+        reject_reason = :reason,
+        reviewer = :reviewer,
+        reviewed_at = NOW()
+    WHERE id = :id
+"""
+
+
+@router.post("/corrections/suggestions/{suggestion_id}/approve")
+async def approve_suggestion(
+    suggestion_id: str,
+    body: SuggestionApprove,
+    _: dict[str, Any] = _perm_w,
+) -> dict[str, Any]:
+    """Promote a suggestion into a real correction rule.
+
+    Manager may override pattern/replacement/context — otherwise the
+    stored proposals are used. On success, returns the created rule and
+    marks the suggestion as ``promoted``.
+    """
+    from sqlalchemy import text
+
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(_SQL_GET_SUGGESTION), {"id": suggestion_id}
+        )
+        row = result.mappings().first()
+
+    if row is None:
+        raise HTTPException(status_code=404, detail="suggestion not found")
+    if row["status"] != "pending":
+        raise HTTPException(
+            status_code=409, detail=f"already {row['status']}, cannot promote again"
+        )
+
+    pattern = body.pattern or row["proposed_pattern"]
+    replacement = body.replacement if body.replacement is not None else (
+        row["proposed_replacement"] or ""
+    )
+    context_hint = (
+        body.context_hint
+        if body.context_hint is not None
+        else (row["detected_context"] if row["detected_context"] != "any" else "")
+    )
+
+    if not pattern:
+        raise HTTPException(
+            status_code=400,
+            detail="pattern is empty — provide `pattern` in body or run rescan first",
+        )
+
+    redis = await _get_redis()
+    rule_payload = {
+        "pattern": pattern,
+        "replacement": replacement,
+        "context_hint": context_hint,
+        "enabled": True,
+        "flags": "i",
+        "note": body.note or f"auto-suggested from token '{row['bad_token']}'",
+    }
+    try:
+        rule = await add_correction(redis, rule_payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(_SQL_MARK_PROMOTED),
+            {
+                "id": suggestion_id,
+                "rule_id": rule["id"],
+                "reviewer": body.reviewer or "",
+            },
+        )
+
+    from src.monitoring.metrics import stt_correction_suggestions_promoted_total
+
+    stt_correction_suggestions_promoted_total.labels(
+        context=row["detected_context"] or "any"
+    ).inc()
+
+    logger.info(
+        "stt_corrections: promoted suggestion %s → rule %s (token=%s)",
+        suggestion_id,
+        rule["id"],
+        row["bad_token"],
+    )
+    return {"rule": rule, "suggestion_id": suggestion_id}
+
+
+@router.post("/corrections/suggestions/{suggestion_id}/reject")
+async def reject_suggestion(
+    suggestion_id: str,
+    body: SuggestionReject,
+    _: dict[str, Any] = _perm_w,
+) -> dict[str, Any]:
+    """Mark a suggestion as rejected — it won't be re-surfaced on rescan."""
+    from sqlalchemy import text
+
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(_SQL_MARK_REJECTED),
+            {
+                "id": suggestion_id,
+                "reason": body.reason or "",
+                "reviewer": body.reviewer or "",
+            },
+        )
+        if result.rowcount == 0:
+            raise HTTPException(status_code=404, detail="suggestion not found")
+
+    logger.info("stt_corrections: rejected suggestion %s", suggestion_id)
+    return {"status": "rejected", "id": suggestion_id}
+
+
+@router.post("/corrections/suggestions/rescan")
+async def rescan_suggestions(
+    body: RescanRequest | None = None,
+    _: dict[str, Any] = _perm_w,
+) -> dict[str, Any]:
+    """Trigger the Celery rescan asynchronously; returns the task id."""
+    from src.tasks.stt_suggestions_tasks import rescan_stt_suggestions
+
+    params = body or RescanRequest()
+    async_result = rescan_stt_suggestions.delay(  # type: ignore[attr-defined]
+        days=params.days,
+        min_occurrences=params.min_occurrences,
+        triggered_by="manual",
+    )
+    logger.info(
+        "stt_corrections: rescan task queued id=%s days=%d min_occ=%d",
+        async_result.id,
+        params.days,
+        params.min_occurrences,
+    )
+    return {
+        "task_id": async_result.id,
+        "days": params.days,
+        "min_occurrences": params.min_occurrences,
+    }
