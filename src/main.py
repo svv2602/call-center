@@ -2304,6 +2304,74 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         except ValueError:
             pass
 
+        # Weekday-date sanity check: if the last user turn mentioned a weekday
+        # by name (напр. «на п'ятницю») and the LLM-passed date_from does not
+        # land on that weekday, refuse and tell the LLM the correct date.
+        # Call 2026-08-03: client said «п'ятницю» (7 серпня), bot called with
+        # date_from=6 серпня (четвер) → offered slots for wrong day.
+        try:
+            d_from_check = date_type.fromisoformat(date_from)
+            _weekday_map = {
+                "понеділок": 0, "понеділка": 0, "пн": 0, "monday": 0,
+                "вівторок": 1, "вівторка": 1, "вт": 1, "tuesday": 1,
+                "серед": 2, "середу": 2, "wednesday": 2,
+                "четвер": 3, "четвр": 3, "чт": 3, "thursday": 3,
+                "п'ятниц": 4, "пʼятниц": 4, "пятниц": 4, "пт": 4, "friday": 4,
+                "субот": 5, "сб": 5, "saturday": 5,
+                "неділ": 6, "нд": 6, "sunday": 6,
+            }
+            _requested_wd: int | None = None
+            # Scan last 3 user turns for a weekday keyword
+            _turns_scanned = 0
+            for _turn in reversed(session.dialog_history):
+                if _turn.speaker != "user" or not _turn.content:
+                    continue
+                _text = _turn.content.lower()
+                for _kw, _wd in _weekday_map.items():
+                    if _kw in _text:
+                        _requested_wd = _wd
+                        break
+                if _requested_wd is not None:
+                    break
+                _turns_scanned += 1
+                if _turns_scanned >= 3:
+                    break
+
+            if (
+                _requested_wd is not None
+                and d_from_check.weekday() != _requested_wd
+            ):
+                _wd_names = [
+                    "понеділок", "вівторок", "середу", "четвер",
+                    "пʼятницю", "суботу", "неділю",
+                ]
+                # Compute the nearest matching weekday ≥ tomorrow.
+                _min_date = today_date + timedelta(days=1)
+                _delta = (_requested_wd - _min_date.weekday()) % 7
+                _correct = _min_date + timedelta(days=_delta)
+                logger.warning(
+                    "get_fitting_slots weekday mismatch call=%s: "
+                    "requested=%s but date_from=%s (%s). Correct=%s",
+                    session.channel_uuid,
+                    _wd_names[_requested_wd],
+                    date_from,
+                    _wd_names[d_from_check.weekday()],
+                    _correct.isoformat(),
+                )
+                return {
+                    "station_id": station_id,
+                    "error": True,
+                    "message": (
+                        f"Дата {date_from} — це {_wd_names[d_from_check.weekday()]}, "
+                        f"а не {_wd_names[_requested_wd]}. Клієнт просив "
+                        f"{_wd_names[_requested_wd]} — це {_correct.isoformat()}. "
+                        f"Виклич ЩЕ РАЗ get_fitting_slots з date_from='{_correct.isoformat()}'."
+                    ),
+                    "slots": [],
+                }
+        except (ValueError, AttributeError):
+            pass
+
         if _onec_client is not None:
             try:
                 result = await _onec_client.get_station_schedule(
@@ -2676,6 +2744,24 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 "error": True,
                 "message": f"Невірний station_id '{station_id}'. "
                 f"Використай station_id з результату get_fitting_stations: {known}",
+            }
+
+        # Anti-pattern: LLM sometimes uses reserve_fitting_slot as a fallback
+        # when client says «не пам'ятаю номер», instead of following the
+        # color-as-plate flow (Krok 5). Reject if we have neither plate nor
+        # any vehicle identifier collected — force LLM to ask for color.
+        # Call 2026-08-03: bot proposed «Тимчасово забронювати слот» after
+        # «я не помню».
+        if not session.fitting_plate and not session.fitting_vehicle_brand:
+            return {
+                "error": True,
+                "message": (
+                    "reserve_fitting_slot ЗАБОРОНЕНО без держномера АБО "
+                    "марки/кольору. Клієнт «не пам'ятає номер» → спитай "
+                    "«Тоді назвіть, будь ласка, колір автомобіля» і у "
+                    "book_fitting передавай plate='не пам'ятає, [колір]'. "
+                    "НЕ використовуй reserve — оформляй одразу book_fitting."
+                ),
             }
 
         if _onec_client is not None:

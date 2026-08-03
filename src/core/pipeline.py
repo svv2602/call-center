@@ -952,7 +952,42 @@ class CallPipeline:
                     "шини мої",
                     "мої шини",
                     "з собою везу",
+                    # Explicit "no storage" phrasings — client denies having a
+                    # storage contract, implicitly = own tires. Call 2026-08-03:
+                    # STT «в мене нема сина зберігає» (mangled) → repeat loop.
+                    "нема зберігання",
+                    "немає зберігання",
+                    "нема ніякого зберігання",
+                    "немає ніякого зберігання",
+                    "не здавав на зберігання",
+                    "не здавали на зберігання",
+                    "ніколи не здавав",
+                    "нема сина зберіга",  # STT mangle of «немає жодного зберігання»/«немає нашого»
+                    "немає сина зберіга",
                 )
+                # Context-scoped: «в мене нема»/«у мене немає» = storage denial
+                # ONLY if the bot just asked the storage question (Krok 2).
+                _last_bot = ""
+                for _t in reversed(self._session.dialog_history):
+                    if _t.speaker == "assistant" and _t.content:
+                        _last_bot = _t.content.lower()
+                        break
+                _asking_storage = (
+                    "зберіган" in _last_bot
+                    or "привозите свої" in _last_bot
+                    or "з собою чи" in _last_bot
+                )
+                if _asking_storage:
+                    _own_hints = (
+                        *_own_hints,
+                        "в мене нема",
+                        "у мене немає",
+                        "в мене немає",
+                        "у мене нема",
+                        "не маю",
+                        "немає у мене",
+                        "нема у мене",
+                    )
                 if any(h in _text_lc for h in _own_hints):
                     self._session.fitting_storage_choice = "own"
                     logger.info(
