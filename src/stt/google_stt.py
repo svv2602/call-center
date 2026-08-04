@@ -8,6 +8,7 @@ import logging
 import time
 from typing import TYPE_CHECKING
 
+from google.api_core.client_options import ClientOptions
 from google.cloud.speech_v2 import SpeechAsyncClient
 from google.cloud.speech_v2.types import cloud_speech
 from google.protobuf import duration_pb2
@@ -95,7 +96,14 @@ class GoogleSTTEngine:
     async def start_stream(self, config: STTConfig) -> None:
         """Start a new recognition stream."""
         self._config = config
-        self._client = SpeechAsyncClient()
+        location = config.location
+        if location and location != "global":
+            client_options = ClientOptions(
+                api_endpoint=f"{location}-speech.googleapis.com"
+            )
+            self._client = SpeechAsyncClient(client_options=client_options)
+        else:
+            self._client = SpeechAsyncClient()
         self._audio_queue = asyncio.Queue(maxsize=100)
         self._transcript_queue = asyncio.Queue(maxsize=100)
         self._running = True
