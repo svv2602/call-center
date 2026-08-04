@@ -27,13 +27,14 @@ CONTENT_PERMISSIONS = [
     "prompts:read",
     "prompts:write",
     "prompts:delete",
-    # STT correction rules + auto-suggestions curation. Same tier as
-    # prompts — both shape bot behaviour on every call, and both benefit
-    # from the same review-by-content-manager workflow. The
-    # AI-generated regex + preview flow keeps blast radius manageable
-    # for non-experts.
+    # These three groups all shape what the bot hears / says on every call
+    # and belong to the same content-curation workflow.
     "stt_corrections:read",
     "stt_corrections:write",
+    "stt_hints:read",
+    "stt_hints:write",
+    "point_hints:read",
+    "point_hints:write",
 ]
 
 SYSTEM_PERMISSIONS = [
@@ -62,12 +63,6 @@ SYSTEM_PERMISSIONS = [
     "vehicles:write",
     "pronunciation:read",
     "pronunciation:write",
-    "stt_hints:read",
-    "stt_hints:write",
-    # NOTE: stt_corrections:{read,write} intentionally moved to
-    # CONTENT_PERMISSIONS so the content_manager role gets them by default.
-    "point_hints:read",
-    "point_hints:write",
 ]
 
 ALL_PERMISSIONS: list[str] = sorted({*CONTENT_PERMISSIONS, *SYSTEM_PERMISSIONS})
@@ -89,7 +84,14 @@ ROLE_DEFAULT_PERMISSIONS: dict[str, list[str]] = {
     "operator": [
         "operators:read",
     ],
-    "content_manager": CONTENT_PERMISSIONS.copy(),
+    "content_manager": [
+        *CONTENT_PERMISSIONS,
+        # Networks (tenants) and 1C data viewer are needed by content managers
+        # but are system-level resources not shared with other content roles.
+        "tenants:read",
+        "tenants:write",
+        "onec_data:read",
+    ],
 }
 
 # ── Permission groups (for UI rendering) ─────────────────────
