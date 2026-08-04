@@ -738,32 +738,166 @@ function _contextOptions(selected) {
     ).join('');
 }
 
+// Edit-modal state — tracks whether the manager touched the regex/replacement/
+// context so we can require a fresh preview only when the actual matching
+// behaviour would change. Note/enabled edits skip the preview requirement.
+let _editState = {
+    isEdit: false,
+    regexDirty: false,
+    previewShown: false,
+    initial: null,  // snapshot of {pattern, replacement, context_hint}
+};
+
 function _openRuleModal(mode, rule) {
     const isEdit = mode === 'edit';
     const title = isEdit ? t('sttCorrections.editRule') : t('sttCorrections.addRule');
+    _editState = {
+        isEdit,
+        regexDirty: false,
+        // On add: preview not required (nothing to compare against).
+        // On edit: preview required only if the manager changes matching fields.
+        previewShown: !isEdit,
+        initial: isEdit ? {
+            pattern: rule?.pattern || '',
+            replacement: rule?.replacement || '',
+            context_hint: rule?.context_hint || '',
+        } : null,
+    };
+
+    // Audit strip — only when editing an existing rule with tracked authorship.
+    const auditParts = [];
+    if (isEdit && rule?.reviewer) {
+        auditParts.push(t('sttCorrections.audit.by', { user: escapeHtml(rule.reviewer) }));
+    }
+    if (isEdit && rule?.created_at) {
+        auditParts.push(rule.created_at.slice(0, 10));
+    }
+    if (isEdit && rule?.last_edited_by && rule.last_edited_by !== rule.reviewer) {
+        auditParts.push(t('sttCorrections.audit.editedBy', { user: escapeHtml(rule.last_edited_by) }));
+    }
+    if (isEdit && rule?.last_edited_at) {
+        auditParts.push(rule.last_edited_at.slice(0, 10));
+    }
+    const auditStrip = auditParts.length
+        ? `<div class="text-xs text-neutral-500 bg-neutral-50 dark:bg-neutral-800 rounded px-2 py-1 mb-3 border border-neutral-200 dark:border-neutral-700">👤 ${auditParts.join(' · ')}</div>`
+        : '';
+
+    const previewStrip = isEdit ? `
+        <div class="border-t border-neutral-200 dark:border-neutral-800 pt-3 mb-3">
+            <div class="flex items-center justify-between mb-2">
+                <div class="text-sm font-medium">${t('sttCorrections.editPreviewTitle')}</div>
+                <button onclick="window._pages.sttCorrections.runEditPreview()" class="${tw.btnSecondary} text-xs">${t('sttCorrections.suggestions.previewRun')}</button>
+            </div>
+            <div id="editPreview" class="text-sm text-neutral-500 italic">${t('sttCorrections.editPreviewInitial')}</div>
+        </div>` : '';
+
     const html = `
-        <div id="sttCorrModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div class="bg-white dark:bg-neutral-900 rounded-lg p-6 shadow-xl w-full max-w-lg">
+        <div id="sttCorrModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div class="bg-white dark:bg-neutral-900 rounded-lg p-6 shadow-xl w-full max-w-2xl my-8">
             <h3 class="text-lg font-semibold mb-3">${title}</h3>
+            ${auditStrip}
             <label class="block mb-2 text-sm">${t('sttCorrections.pattern')} <span class="text-xs text-neutral-500">(regex)</span></label>
-            <input id="corrPattern" class="${tw.formInput} w-full mb-3" value="${escapeHtml(rule?.pattern || '')}" placeholder="e.g. \\bлет\\b"/>
+            <input id="corrPattern" class="${tw.formInput} w-full mb-3 font-mono text-xs" value="${escapeHtml(rule?.pattern || '')}" placeholder="e.g. \\bлет\\b" oninput="window._pages.sttCorrections._onEditRegexChange()"/>
             <label class="block mb-2 text-sm">${t('sttCorrections.replacement')}</label>
-            <input id="corrReplacement" class="${tw.formInput} w-full mb-3" value="${escapeHtml(rule?.replacement || '')}" placeholder="e.g. липня"/>
+            <input id="corrReplacement" class="${tw.formInput} w-full mb-3" value="${escapeHtml(rule?.replacement || '')}" placeholder="e.g. липня" oninput="window._pages.sttCorrections._onEditRegexChange()"/>
             <label class="block mb-2 text-sm">${t('sttCorrections.context')}</label>
-            <select id="corrContext" class="${tw.formInput} w-full mb-3">${_contextOptions(rule?.context_hint || 'any')}</select>
+            <select id="corrContext" class="${tw.formInput} w-full mb-3" onchange="window._pages.sttCorrections._onEditRegexChange()">${_contextOptions(rule?.context_hint || 'any')}</select>
             <label class="block mb-2 text-sm">${t('sttCorrections.note')}</label>
             <input id="corrNote" class="${tw.formInput} w-full mb-3" value="${escapeHtml(rule?.note || '')}"/>
             <label class="flex items-center gap-2 mb-4 text-sm">
                 <input type="checkbox" id="corrEnabled" ${rule?.enabled !== false ? 'checked' : ''}/>
                 ${t('sttCorrections.enabledLabel')}
             </label>
+            ${previewStrip}
             <div class="flex justify-end gap-2">
                 <button onclick="window._pages.sttCorrections.closeModal()" class="${tw.btnSecondary}">${t('common.cancel')}</button>
-                <button onclick="window._pages.sttCorrections.save('${isEdit ? escapeHtml(rule.id) : ''}')" class="${tw.btnPrimary}">${t('common.save')}</button>
+                <button id="corrSaveBtn" onclick="window._pages.sttCorrections.save('${isEdit ? escapeHtml(rule.id) : ''}')" class="${tw.btnPrimary}">${t('common.save')}</button>
             </div>
           </div>
         </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
+
+    // For edit mode, load initial preview so the manager sees current impact.
+    if (isEdit) {
+        runEditPreview();
+    }
+}
+
+function _onEditRegexChange() {
+    if (!_editState.isEdit || !_editState.initial) return;
+    const now = {
+        pattern: document.getElementById('corrPattern').value.trim(),
+        replacement: document.getElementById('corrReplacement').value,
+        context_hint: document.getElementById('corrContext').value,
+    };
+    const changed =
+        now.pattern !== _editState.initial.pattern ||
+        now.replacement !== _editState.initial.replacement ||
+        now.context_hint !== _editState.initial.context_hint;
+    _editState.regexDirty = changed;
+    if (changed) {
+        _editState.previewShown = false;
+        const el = document.getElementById('editPreview');
+        if (el) el.innerHTML = `<span class="italic">${t('sttCorrections.suggestions.previewStale')}</span>`;
+    }
+    _updateSaveEnabled();
+}
+
+function _updateSaveEnabled() {
+    const btn = document.getElementById('corrSaveBtn');
+    if (!btn) return;
+    const needPreview = _editState.isEdit && _editState.regexDirty && !_editState.previewShown;
+    btn.disabled = needPreview;
+    btn.classList.toggle('opacity-50', needPreview);
+    btn.classList.toggle('cursor-not-allowed', needPreview);
+}
+
+async function runEditPreview() {
+    const pattern = document.getElementById('corrPattern').value.trim();
+    const replacement = document.getElementById('corrReplacement').value;
+    const context_hint = document.getElementById('corrContext').value;
+    const el = document.getElementById('editPreview');
+    if (!el) return;
+    if (!pattern) {
+        el.innerHTML = `<span class="text-red-600 text-sm">${t('sttCorrections.patternRequired')}</span>`;
+        return;
+    }
+    el.innerHTML = `<span class="italic">${t('sttCorrections.suggestions.previewLoading')}</span>`;
+    try {
+        const r = await api('/admin/stt/corrections/preview', {
+            method: 'POST',
+            body: JSON.stringify({ pattern, replacement, context_hint, days: 7 }),
+            headers: { 'Content-Type': 'application/json' },
+        });
+        if (!r.regex_ok) {
+            el.innerHTML = `<span class="text-red-600 text-sm">${escapeHtml(r.error || 'invalid regex')}</span>`;
+            return;
+        }
+        const renderList = (items) => items.slice(0, 6).map(m => `
+            <div class="text-xs border-l-2 pl-2 my-1">
+                <div class="text-neutral-500">"${escapeHtml(m.before)}"</div>
+                <div class="text-green-700 dark:text-green-400">→ "${escapeHtml(m.after)}"</div>
+            </div>`).join('');
+        let html = `
+            <div class="flex gap-2 mb-2 text-xs">
+                <span class="${tw.badgeGray}">${t('sttCorrections.suggestions.previewScanned')}: ${r.scanned}</span>
+                <span class="${tw.badgeGreen}">${t('sttCorrections.suggestions.previewExpected')}: ${r.expected_count}</span>
+                <span class="${r.unexpected_count > 0 ? tw.badgeYellow : tw.badgeGray}">${t('sttCorrections.suggestions.previewUnexpected')}: ${r.unexpected_count}</span>
+            </div>`;
+        if (r.unexpected_count > 0) {
+            html += `<div class="text-xs text-amber-700 dark:text-amber-400 mb-2">⚠ ${t('sttCorrections.suggestions.unexpectedWarning')}</div>`;
+        }
+        if (r.expected.length) html += renderList(r.expected);
+        if (r.unexpected.length) html += `<div class="text-xs font-semibold mt-2 text-amber-700 dark:text-amber-400">${t('sttCorrections.suggestions.previewUnexpectedList')}</div>${renderList(r.unexpected)}`;
+        if (!r.expected.length && !r.unexpected.length) {
+            html += `<div class="text-xs italic text-neutral-500">${t('sttCorrections.suggestions.previewNoMatches')}</div>`;
+        }
+        el.innerHTML = html;
+        _editState.previewShown = true;
+        _updateSaveEnabled();
+    } catch (e) {
+        el.innerHTML = `<span class="text-red-600 text-sm">${escapeHtml(e.message)}</span>`;
+    }
 }
 
 function openAdd() {
@@ -791,6 +925,10 @@ async function save(id) {
     const enabled = document.getElementById('corrEnabled').checked;
     if (!pattern) {
         showToast(t('sttCorrections.patternRequired'), 'error');
+        return;
+    }
+    if (_editState.isEdit && _editState.regexDirty && !_editState.previewShown) {
+        showToast(t('sttCorrections.editPreviewRequired'), 'error');
         return;
     }
     const body = { pattern, replacement, context_hint, note, enabled, flags: 'i' };
@@ -1040,4 +1178,5 @@ window._pages.sttCorrections = {
     generateRegexAI, runPreview, _onRegexEdit, _onFieldChange,
     toggleSampleContext,
     addAnotherRule, generateRegexManualMode,
+    runEditPreview, _onEditRegexChange,
 };

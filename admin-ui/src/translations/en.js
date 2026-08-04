@@ -754,6 +754,9 @@ export default {
     'sttCorrections.suggestions.heardPlaceholder': 'e.g. викторорок',
     'sttCorrections.suggestions.heardFirst': 'Fill in "what the bot heard" first',
     'sttCorrections.suggestions.manualModeHint': 'Quick default (\\bTOKEN\\b). Edit the regex by hand if you need morphological variants.',
+    'sttCorrections.editPreviewTitle': 'Preview: how the rule currently fires over the last 7 days',
+    'sttCorrections.editPreviewInitial': 'Loading current rule impact…',
+    'sttCorrections.editPreviewRequired': 'Regex/replacement/context changed — run preview before saving',
     // STT Phrase Hints (standalone page)
     'nav.sttHints': 'STT Hints',
     'sttHints.base': 'Base',

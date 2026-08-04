@@ -754,6 +754,9 @@ export default {
     'sttCorrections.suggestions.heardPlaceholder': 'например: викторорок',
     'sttCorrections.suggestions.heardFirst': 'Сначала заполни «что услышал бот»',
     'sttCorrections.suggestions.manualModeHint': 'Быстрая заглушка (\\bTOKEN\\b). Отредактируй regex вручную если нужны падежи/варианты.',
+    'sttCorrections.editPreviewTitle': 'Preview: как правило работает сейчас на последних 7 днях',
+    'sttCorrections.editPreviewInitial': 'Загружаем текущий impact правила…',
+    'sttCorrections.editPreviewRequired': 'Regex/замена/контекст изменились — запусти preview перед сохранением',
     // STT Phrase Hints (standalone page)
     'nav.sttHints': 'Подсказки STT',
     'sttHints.base': 'Базовые',
