@@ -104,6 +104,27 @@ _MAX_SAMPLES_FOR_PROMPT = 5
 _FALLBACK_MAX_MATCHED = 12
 
 
+def _fix_space_injection(pattern: str, bad_token: str) -> str:
+    """Replace literal spaces in pattern with \\s* when bad_token was space-fragmented.
+
+    LLMs often ignore the space-injection instruction and return a literal
+    word-boundary wrap: \\bодин на дцать\\b. Since STT patterns should never
+    require exact spacing, we unconditionally replace every literal space with
+    \\s* — this is always correct for STT context.
+    """
+    if " " not in bad_token or " " not in pattern:
+        return pattern
+    fixed = pattern.replace(" ", r"\s*")
+    # Verify the modified pattern still compiles.
+    try:
+        re.compile(fixed, re.IGNORECASE)
+        if fixed != pattern:
+            logger.info("regex_generator: space→\\s* fix applied: %r → %r", pattern, fixed)
+        return fixed
+    except re.error:
+        return pattern  # leave untouched if the substitution somehow breaks it
+
+
 def _fallback(bad_token: str, replacement: str) -> dict[str, Any]:
     """Safe default when the LLM cannot help."""
     escaped = re.escape(bad_token)
@@ -244,6 +265,10 @@ async def generate_regex(
     cleaned = _validate_output(raw)
     if not cleaned:
         return _fallback(bad_token, replacement)
+
+    # Post-process: if LLM ignored the space-injection instruction and returned a
+    # literal pattern with spaces, automatically replace them with \s*.
+    cleaned["pattern"] = _fix_space_injection(cleaned["pattern"], bad_token)
 
     # Sanity check: pattern must match either:
     #   (a) the bad_token verbatim, OR
