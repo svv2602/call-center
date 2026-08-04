@@ -14,6 +14,7 @@ class LLMTask(enum.StrEnum):
     ARTICLE_PROCESSOR = "article_processor"
     QUALITY_SCORING = "quality_scoring"
     PROMPT_OPTIMIZER = "prompt_optimizer"
+    REGEX_GENERATOR = "regex_generator"
 
 
 class ProviderType(enum.StrEnum):
@@ -168,5 +169,6 @@ DEFAULT_ROUTING_CONFIG: dict[str, Any] = {
         "article_processor": {"primary": "gemini-2.5-flash", "fallbacks": ["openai-gpt41-nano"]},
         "quality_scoring": {"primary": "gemini-2.5-flash", "fallbacks": ["openai-gpt41-mini"]},
         "prompt_optimizer": {"primary": "openai-gpt41-mini", "fallbacks": ["openai-gpt41-nano"]},
+        "regex_generator": {"primary": "gemini-2.5-flash", "fallbacks": ["openai-gpt41-mini"]},
     },
 }

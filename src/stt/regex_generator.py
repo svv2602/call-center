@@ -245,11 +245,8 @@ async def generate_regex(
     user_msg = _build_user_message(bad_token, replacement, context, samples)
 
     try:
-        # Reuse PROMPT_OPTIMIZER task — semantically closest (structured
-        # configuration built from context), and it's already wired to a
-        # cheap model in every deployed routing config.
         response = await router.complete(
-            task=LLMTask.PROMPT_OPTIMIZER,
+            task=LLMTask.REGEX_GENERATOR,
             messages=[{"role": "user", "content": user_msg}],
             system=_SYSTEM_PROMPT,
             max_tokens=400,
