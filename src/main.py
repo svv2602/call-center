@@ -813,6 +813,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             language_code=settings.google_stt.language_code,
             alternative_languages=settings.google_stt.alternative_language_list,
             model=settings.google_stt.model,
+            location=settings.google_stt.location,
             phrase_hints=phrase_hints,
             boost_phrases=boost_phrases,
             endpointing_sensitivity=settings.google_stt.endpointing_sensitivity,

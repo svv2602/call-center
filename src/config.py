@@ -22,6 +22,7 @@ class GoogleSTTSettings(BaseSettings):
     alternative_languages: str = "ru-RU"
     project_id: str = ""
     model: str = "latest_long"
+    location: str = "global"
     # Endpointing: how quickly STT finalizes on pauses.
     # STANDARD (default) tends to over-fragment mid-utterance pauses.
     # SHORT is less aggressive; SUPERSHORT more aggressive. Empty = don't set (SDK default).

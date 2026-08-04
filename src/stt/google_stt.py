@@ -247,7 +247,8 @@ class GoogleSTTEngine:
         if self._client is None or self._config is None:
             return
 
-        recognizer = f"projects/{self._project_id}/locations/global/recognizers/_"
+        location = self._config.location if self._config else "global"
+        recognizer = f"projects/{self._project_id}/locations/{location}/recognizers/_"
 
         # Try with adaptation first; if recognizer doesn't support it, retry without
         has_any_hints = bool(self._config.phrase_hints or self._config.boost_phrases)

@@ -37,6 +37,7 @@ class STTConfig:
     sample_rate_hertz: int = 8000
     interim_results: bool = True
     model: str = "latest_long"
+    location: str = "global"
     enable_punctuation: bool = True
     phrase_hints: tuple[str, ...] = ()
     # Additional phrase hints with per-phrase boost values. Used for
