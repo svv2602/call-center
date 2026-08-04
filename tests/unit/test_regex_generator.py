@@ -109,6 +109,20 @@ class TestFallback:
         f = _fallback("what?", "y")
         assert "\\?" in f["pattern"]
 
+    def test_fallback_spaced_token_uses_s_star(self) -> None:
+        # Python 3.12 re.escape() escapes spaces; _fallback must not produce "\ ".
+        import re as _re
+        f = _fallback("один над цать", "одинадцять")
+        assert "\\ " not in f["pattern"]   # no escaped-space
+        assert r"\s*" in f["pattern"]      # uses \s* between fragments
+        assert _re.search(f["pattern"], "один над цать", _re.IGNORECASE)
+        assert _re.search(f["pattern"], "одиннадцать", _re.IGNORECASE)  # fused
+
+    def test_fallback_spaced_token_valid_regex(self) -> None:
+        import re as _re
+        f = _fallback("один на дцать", "одинадцять")
+        _re.compile(f["pattern"], _re.IGNORECASE)
+
 
 @pytest.mark.asyncio
 class TestGenerateRegex:

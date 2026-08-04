@@ -133,10 +133,20 @@ def _fix_space_injection(pattern: str, bad_token: str) -> str:
 
 
 def _fallback(bad_token: str, replacement: str) -> dict[str, Any]:
-    """Safe default when the LLM cannot help."""
-    escaped = re.escape(bad_token)
+    """Safe default when the LLM cannot help.
+
+    When bad_token contains spaces the token was STT-fragmented; use \\s*
+    between fragments so the pattern matches both spaced and fused forms.
+    Python 3.12 re.escape() escapes spaces as "\\ " (for verbose-mode
+    safety), so we bypass re.escape for space-containing tokens.
+    """
+    if " " in bad_token:
+        fragments = [re.escape(f) for f in bad_token.strip().split()]
+        pattern = r"\b" + r"\s*".join(fragments) + r"\b"
+    else:
+        pattern = rf"\b{re.escape(bad_token)}\b"
     return {
-        "pattern": rf"\b{escaped}\b",
+        "pattern": pattern,
         "matched_forms": [bad_token],
         "reasoning": (
             "AI generation unavailable — using literal word-boundary match "
@@ -260,7 +270,7 @@ async def generate_regex(
             task=LLMTask.REGEX_GENERATOR,
             messages=[{"role": "user", "content": user_msg}],
             system=_SYSTEM_PROMPT,
-            max_tokens=400,
+            max_tokens=1000,
         )
     except Exception:
         logger.exception("regex_generator: LLM call failed")
