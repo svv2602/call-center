@@ -60,8 +60,12 @@ When `bad_token` CONTAINS SPACES, Google STT has fragmented a single word into p
   (d) Put the ENTIRE expression inside a non-capturing group: `(?:...)`.
 
   Example: bad_token="один над цать", replacement="одинадцять"
-  → `\\b(?:один\\s*на[дт]\\s*ц[ая]?т[ьъ]?)\\b`  — matches all of:
-    "один над цать", "одиннадцать", "одинадцять", "один надцять", "один на цать"
+  → `\\b(?:один\\s*н?\\s*а[дт]\\s*ц[ая]?т[ьъ]?(?:и|ю|ма)?)\\b`  — matches all of:
+    "один над цать", "одиннадцать", "одинадцять", "один надцять", "одинадцяти", "одиннадцати"
+
+  Key insight for -надцять words: the optional `н?` must sit BETWEEN `один` and `а[дт]`, not at
+  the end of `один`. This is because Ukrainian "одинадцять" = один+адцять (no double-н), while
+  Russian "одиннадцать" = один+нн+адцать. Pattern `один\\s*н?\\s*а[дт]` handles both.
 
 ## STT-specific artifact: Cyrillic Ukrainian/Russian alternation
 
@@ -73,8 +77,8 @@ Google STT trained on Russian often substitutes Russian letters for Ukrainian on
   | є         | е       | `[єе]`        |
   | ь (soft)  | ъ (hard)| `[ьъ]`        |
   | single н  | double нн (Russian geminate) | `нн?` |
-  | -цять (UA suffix) | -цать (RU) | `ц[ая]?т[ьъ]?` |
-  | -надцять  | -надцать | `на[дт]\\s*ц[ая]?т[ьъ]?` |
+  | -цять (UA suffix) | -цать (RU) | `ц[ая]?т[ьъ]?(?:и|ю|ма)?` (the `(?:и|ю|ма)?` tail covers declensions: -ті/-ти gen/dat/loc, -тю/-тью instr, -тьма instr-pl) |
+  | -надцять  | -надцать | `н?\\s*а[дт]\\s*ц[ая]?т[ьъ]?(?:и|ю|ма)?` (н? optional — UA has одинадцять, RU has одиннадцать) |
 
   Use these brackets ONLY where the mismatch is plausible (bad_token or samples show it). Do NOT add brackets everywhere.
 
@@ -83,7 +87,7 @@ Google STT trained on Russian often substitutes Russian letters for Ukrainian on
 The `context` field says WHAT the bot was asking. Different contexts should use different regex tightness:
 
   * `date`      — day/month names. Broad morphological coverage (many cases used).
-  * `number`    — number words (cardinal + ordinal). ALWAYS apply space-injection + Cyrillic-alternation rules. Cover: space-split forms, Russian/Ukrainian spelling variants, double-consonant variants.
+  * `number`    — number words (cardinal + ordinal). ALWAYS apply space-injection + Cyrillic-alternation rules. Cover: space-split forms, Russian/Ukrainian spelling variants, double-consonant variants, AND case endings. Cardinal endings: nom/acc -ть, gen/dat/loc -ти (most common in phrases "до X", "о X годині"), instr -тьма/-тью. Ordinal endings: -ий/-ій/-ого/-ому/-им. Use `(?:и|ю|ма)?` after the -ть suffix to cover the main cardinal cases.
   * `plate`     — vehicle plate numbers. Tighten aggressively — false match is a real risk.
   * `city`, `address` — place names. Cover masc/fem/neuter endings.
   * `tire_size` — brand names, sizes. Narrow — brand hallucinations are rare and specific.
