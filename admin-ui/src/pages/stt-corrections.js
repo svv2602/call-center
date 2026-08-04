@@ -220,26 +220,64 @@ function _renderSuggestionsTab() {
     return html;
 }
 
+// State for the approve modal — tracks which suggestion is open and whether
+// the preview has been generated (Create-rule button is disabled until it is).
+let _approveState = {
+    id: null,
+    previewShown: false,
+    generatedBy: null,  // 'ai' | 'manual' | null (unchanged from scanner default)
+    regexEditedManually: false,
+};
+
 function openApprove(id) {
     const s = _suggestions.find(x => x.id === id);
     if (!s) return;
+    _approveState = { id, previewShown: false, generatedBy: null, regexEditedManually: false };
 
     const html = `
-        <div id="sttSuggestModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div class="bg-white dark:bg-neutral-900 rounded-lg p-6 shadow-xl w-full max-w-lg">
+        <div id="sttSuggestModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
+          <div class="bg-white dark:bg-neutral-900 rounded-lg p-6 shadow-xl w-full max-w-2xl my-8">
             <h3 class="text-lg font-semibold mb-3">${t('sttCorrections.suggestions.approveTitle')}</h3>
-            <div class="text-xs text-neutral-500 mb-3">${t('sttCorrections.suggestions.approveHint', { token: escapeHtml(s.bad_token) })}</div>
-            <label class="block mb-2 text-sm">${t('sttCorrections.pattern')} <span class="text-xs text-neutral-500">(regex)</span></label>
-            <input id="suggPattern" class="${tw.formInput} w-full mb-3" value="${escapeHtml(s.proposed_pattern || '')}"/>
-            <label class="block mb-2 text-sm">${t('sttCorrections.replacement')}</label>
-            <input id="suggReplacement" class="${tw.formInput} w-full mb-3" value="${escapeHtml(s.proposed_replacement || '')}" placeholder="${t('sttCorrections.suggestions.replacementPlaceholder')}"/>
-            <label class="block mb-2 text-sm">${t('sttCorrections.context')}</label>
-            <select id="suggContext" class="${tw.formInput} w-full mb-3">${_contextOptions(s.detected_context || 'any')}</select>
-            <label class="block mb-2 text-sm">${t('sttCorrections.note')}</label>
-            <input id="suggNote" class="${tw.formInput} w-full mb-3" value="auto-suggested from token '${escapeHtml(s.bad_token)}' (seen ${s.occurrence_count}×)"/>
+            <div class="text-xs text-neutral-500 mb-4">${t('sttCorrections.suggestions.approveHint', { token: escapeHtml(s.bad_token) })}</div>
+
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+                <div>
+                    <label class="block mb-1 text-sm font-medium">${t('sttCorrections.suggestions.heard')}</label>
+                    <input id="suggHeard" class="${tw.formInput} w-full bg-neutral-50 dark:bg-neutral-800" value="${escapeHtml(s.bad_token || '')}" readonly/>
+                </div>
+                <div>
+                    <label class="block mb-1 text-sm font-medium">${t('sttCorrections.suggestions.meant')} <span class="text-red-600">*</span></label>
+                    <input id="suggReplacement" class="${tw.formInput} w-full" value="${escapeHtml(s.proposed_replacement || '')}" placeholder="${t('sttCorrections.suggestions.replacementPlaceholder')}" oninput="window._pages.sttCorrections._onFieldChange()"/>
+                </div>
+            </div>
+            <div class="mb-3">
+                <label class="block mb-1 text-sm font-medium">${t('sttCorrections.context')}</label>
+                <select id="suggContext" class="${tw.formInput} w-full" onchange="window._pages.sttCorrections._onFieldChange()">${_contextOptions(s.detected_context || 'any')}</select>
+            </div>
+
+            <div class="border-t border-neutral-200 dark:border-neutral-800 pt-3 mb-3">
+                <div class="flex items-center gap-2 mb-2">
+                    <button onclick="window._pages.sttCorrections.generateRegexAI('${escapeHtml(id)}')" class="${tw.btnSecondary} text-sm" id="suggGenBtn">🤖 ${t('sttCorrections.suggestions.generateAI')}</button>
+                    <span class="text-xs text-neutral-500">${t('sttCorrections.suggestions.generateHint')}</span>
+                </div>
+                <label class="block mb-1 text-xs text-neutral-500">${t('sttCorrections.pattern')} <span class="text-xs">(regex)</span></label>
+                <input id="suggPattern" class="${tw.formInput} w-full font-mono text-xs" value="${escapeHtml(s.proposed_pattern || '')}" oninput="window._pages.sttCorrections._onRegexEdit()"/>
+                <div id="suggReasoning" class="text-xs text-neutral-500 mt-1"></div>
+            </div>
+
+            <div class="border-t border-neutral-200 dark:border-neutral-800 pt-3 mb-3">
+                <div class="flex items-center justify-between mb-2">
+                    <div class="text-sm font-medium">${t('sttCorrections.suggestions.previewTitle')}</div>
+                    <button onclick="window._pages.sttCorrections.runPreview()" class="${tw.btnSecondary} text-xs">${t('sttCorrections.suggestions.previewRun')}</button>
+                </div>
+                <div id="suggPreview" class="text-sm text-neutral-500 italic">${t('sttCorrections.suggestions.previewEmpty')}</div>
+            </div>
+
+            <label class="block mb-1 text-sm">${t('sttCorrections.note')}</label>
+            <input id="suggNote" class="${tw.formInput} w-full mb-4" value="auto-suggested from token '${escapeHtml(s.bad_token)}' (seen ${s.occurrence_count}×)"/>
             <div class="flex justify-end gap-2">
                 <button onclick="window._pages.sttCorrections.closeApprove()" class="${tw.btnSecondary}">${t('common.cancel')}</button>
-                <button onclick="window._pages.sttCorrections.submitApprove('${escapeHtml(id)}')" class="${tw.btnPrimary}">${t('sttCorrections.suggestions.createRule')}</button>
+                <button id="suggApproveBtn" onclick="window._pages.sttCorrections.submitApprove('${escapeHtml(id)}')" class="${tw.btnPrimary} opacity-50 cursor-not-allowed" disabled>${t('sttCorrections.suggestions.createRule')}</button>
             </div>
           </div>
         </div>`;
@@ -249,6 +287,126 @@ function openApprove(id) {
 function closeApprove() {
     const el = document.getElementById('sttSuggestModal');
     if (el) el.remove();
+    _approveState = { id: null, previewShown: false, generatedBy: null, regexEditedManually: false };
+}
+
+function _onRegexEdit() {
+    _approveState.regexEditedManually = true;
+    _approveState.generatedBy = 'manual';
+    _approveState.previewShown = false;
+    _updateApproveEnabled();
+    _clearPreview();
+}
+
+function _onFieldChange() {
+    // Changing "meant" or context invalidates any prior AI-generated regex.
+    // Not aggressive — we just re-require a preview before approve.
+    _approveState.previewShown = false;
+    _updateApproveEnabled();
+}
+
+function _updateApproveEnabled() {
+    const btn = document.getElementById('suggApproveBtn');
+    if (!btn) return;
+    const ok = _approveState.previewShown;
+    btn.disabled = !ok;
+    btn.classList.toggle('opacity-50', !ok);
+    btn.classList.toggle('cursor-not-allowed', !ok);
+}
+
+function _clearPreview() {
+    const el = document.getElementById('suggPreview');
+    if (el) el.innerHTML = `<span class="italic">${t('sttCorrections.suggestions.previewStale')}</span>`;
+}
+
+async function generateRegexAI(id) {
+    const btn = document.getElementById('suggGenBtn');
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ ' + t('sttCorrections.suggestions.generating'); }
+    try {
+        const replacement = document.getElementById('suggReplacement').value.trim();
+        const context_hint = document.getElementById('suggContext').value;
+        if (!replacement) {
+            showToast(t('sttCorrections.suggestions.replacementFirst'), 'error');
+            return;
+        }
+        const r = await api(`/admin/stt/corrections/suggestions/${encodeURIComponent(id)}/generate-regex`, {
+            method: 'POST',
+            body: JSON.stringify({ replacement, context_hint }),
+            headers: { 'Content-Type': 'application/json' },
+        });
+        document.getElementById('suggPattern').value = r.pattern || '';
+        _approveState.generatedBy = r.fallback ? null : 'ai';
+        _approveState.regexEditedManually = false;
+        _approveState.previewShown = false;
+        _updateApproveEnabled();
+
+        const forms = (r.matched_forms || []).map(f => `<code class="bg-neutral-100 dark:bg-neutral-800 px-1 rounded text-xs">${escapeHtml(f)}</code>`).join(' ');
+        const badge = r.fallback
+            ? `<span class="${tw.badgeYellow}">${t('sttCorrections.suggestions.fallbackBadge')}</span>`
+            : `<span class="${tw.badgeGreen}">AI</span>`;
+        document.getElementById('suggReasoning').innerHTML = `
+            ${badge} <span class="text-xs">${escapeHtml(r.reasoning || '')}</span>
+            ${forms ? `<div class="mt-1"><span class="text-xs text-neutral-500">${t('sttCorrections.suggestions.matchedForms')}:</span> ${forms}</div>` : ''}`;
+        _clearPreview();
+    } catch (e) {
+        showToast(t('sttCorrections.saveFailed', { error: e.message }), 'error');
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '🤖 ' + t('sttCorrections.suggestions.generateAI'); }
+    }
+}
+
+async function runPreview() {
+    const pattern = document.getElementById('suggPattern').value.trim();
+    const replacement = document.getElementById('suggReplacement').value;
+    const context_hint = document.getElementById('suggContext').value;
+    const el = document.getElementById('suggPreview');
+    if (!pattern) {
+        el.innerHTML = `<span class="text-red-600 text-sm">${t('sttCorrections.patternRequired')}</span>`;
+        return;
+    }
+    el.innerHTML = `<span class="italic">${t('sttCorrections.suggestions.previewLoading')}</span>`;
+    try {
+        const r = await api('/admin/stt/corrections/preview', {
+            method: 'POST',
+            body: JSON.stringify({ pattern, replacement, context_hint, days: 7 }),
+            headers: { 'Content-Type': 'application/json' },
+        });
+        if (!r.regex_ok) {
+            el.innerHTML = `<span class="text-red-600 text-sm">${escapeHtml(r.error || 'invalid regex')}</span>`;
+            return;
+        }
+
+        const renderList = (items) => items.slice(0, 8).map(m => `
+            <div class="text-xs border-l-2 pl-2 my-1">
+                <div class="text-neutral-500">"${escapeHtml(m.before)}"</div>
+                <div class="text-green-700 dark:text-green-400">→ "${escapeHtml(m.after)}"</div>
+            </div>`).join('');
+
+        let html = `
+            <div class="flex gap-2 mb-2 text-xs">
+                <span class="${tw.badgeGray}">${t('sttCorrections.suggestions.previewScanned')}: ${r.scanned}</span>
+                <span class="${tw.badgeGreen}">${t('sttCorrections.suggestions.previewExpected')}: ${r.expected_count}</span>
+                <span class="${r.unexpected_count > 0 ? tw.badgeYellow : tw.badgeGray}">${t('sttCorrections.suggestions.previewUnexpected')}: ${r.unexpected_count}</span>
+            </div>`;
+        if (r.unexpected_count > 0) {
+            html += `<div class="text-xs text-amber-700 dark:text-amber-400 mb-2">⚠ ${t('sttCorrections.suggestions.unexpectedWarning')}</div>`;
+        }
+        if (r.expected.length) {
+            html += `<div class="text-xs font-semibold mt-2 text-green-700 dark:text-green-400">${t('sttCorrections.suggestions.previewExpectedList')}</div>${renderList(r.expected)}`;
+        }
+        if (r.unexpected.length) {
+            html += `<div class="text-xs font-semibold mt-2 text-amber-700 dark:text-amber-400">${t('sttCorrections.suggestions.previewUnexpectedList')}</div>${renderList(r.unexpected)}`;
+        }
+        if (!r.expected.length && !r.unexpected.length) {
+            html += `<div class="text-xs italic text-neutral-500">${t('sttCorrections.suggestions.previewNoMatches')}</div>`;
+        }
+        el.innerHTML = html;
+
+        _approveState.previewShown = true;
+        _updateApproveEnabled();
+    } catch (e) {
+        el.innerHTML = `<span class="text-red-600 text-sm">${escapeHtml(e.message)}</span>`;
+    }
 }
 
 async function submitApprove(id) {
@@ -260,13 +418,20 @@ async function submitApprove(id) {
         showToast(t('sttCorrections.patternRequired'), 'error');
         return;
     }
+    if (!_approveState.previewShown) {
+        showToast(t('sttCorrections.suggestions.previewRequired'), 'error');
+        return;
+    }
     if (!replacement.trim()) {
         if (!confirm(t('sttCorrections.suggestions.emptyReplacementConfirm'))) return;
     }
     try {
         await api(`/admin/stt/corrections/suggestions/${encodeURIComponent(id)}/approve`, {
             method: 'POST',
-            body: JSON.stringify({ pattern, replacement, context_hint, note }),
+            body: JSON.stringify({
+                pattern, replacement, context_hint, note,
+                generated_by: _approveState.generatedBy,
+            }),
             headers: { 'Content-Type': 'application/json' },
         });
         closeApprove();
@@ -615,4 +780,5 @@ window._pages.sttCorrections = {
     openImport, closeImport, runImport, _loadFileIntoTextarea,
     switchTab,
     openApprove, closeApprove, submitApprove, rejectSuggestion, rescan,
+    generateRegexAI, runPreview, _onRegexEdit, _onFieldChange,
 };

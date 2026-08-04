@@ -268,13 +268,40 @@ class SuggestionListParams(BaseModel):
 
 
 class SuggestionApprove(BaseModel):
-    """Approve payload — content-manager can override pattern/replacement."""
+    """Approve payload — content-manager can override pattern/replacement.
+
+    ``generated_by`` records provenance for future audit — 'ai' when the
+    regex came from generate-regex, 'manual' when the manager typed or
+    heavily edited it, NULL when they accepted the scanner default.
+    """
 
     pattern: str | None = Field(default=None, min_length=1, max_length=500)
     replacement: str | None = Field(default=None, max_length=500)
     context_hint: str | None = Field(default=None)
     note: str | None = Field(default=None, max_length=500)
     reviewer: str | None = Field(default=None, max_length=100)
+    generated_by: str | None = Field(default=None, description="ai / manual / null")
+
+
+class GenerateRegexRequest(BaseModel):
+    """Ask the LLM to build a regex for a suggestion.
+
+    ``replacement`` is the human-readable "what the customer meant";
+    ``context_hint`` narrows the morphology dictionary the LLM draws from.
+    Both are optional overrides — defaults come from the stored suggestion.
+    """
+
+    replacement: str | None = Field(default=None, max_length=500)
+    context_hint: str | None = Field(default=None)
+
+
+class PreviewRequest(BaseModel):
+    """Preview a candidate rule against recent call_turns."""
+
+    pattern: str = Field(..., min_length=1, max_length=500)
+    replacement: str = Field(default="", max_length=500)
+    context_hint: str = Field(default="")
+    days: int = Field(default=7, ge=1, le=30)
 
 
 class SuggestionReject(BaseModel):
@@ -364,7 +391,8 @@ _SQL_MARK_PROMOTED = """
     SET status = 'promoted',
         created_rule_id = :rule_id,
         reviewer = :reviewer,
-        reviewed_at = NOW()
+        reviewed_at = NOW(),
+        generated_by = COALESCE(:generated_by, generated_by)
     WHERE id = :id
 """
 
@@ -443,6 +471,7 @@ async def approve_suggestion(
                 "id": suggestion_id,
                 "rule_id": rule["id"],
                 "reviewer": body.reviewer or "",
+                "generated_by": body.generated_by,
             },
         )
 
@@ -512,3 +541,93 @@ async def rescan_suggestions(
         "days": params.days,
         "min_occurrences": params.min_occurrences,
     }
+
+
+_SQL_GET_SUGGESTION_FULL = """
+    SELECT id::text, bad_token, detected_context, proposed_pattern,
+           proposed_replacement, sample_transcripts
+    FROM stt_correction_suggestions
+    WHERE id = :id
+"""
+
+
+@router.post("/corrections/suggestions/{suggestion_id}/generate-regex")
+async def suggestion_generate_regex(
+    suggestion_id: str,
+    body: GenerateRegexRequest,
+    _: dict[str, Any] = _perm_w,
+) -> dict[str, Any]:
+    """Have the LLM build a morphology-aware regex for this suggestion.
+
+    Returns {pattern, matched_forms, reasoning, fallback}. Does not
+    persist — the modal shows the result for the manager to review /
+    edit / approve. `fallback: true` means the LLM was unavailable and
+    the response degraded to `\\bTOKEN\\b`.
+    """
+    from sqlalchemy import text as sql_text
+
+    from src.llm import get_router
+
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            sql_text(_SQL_GET_SUGGESTION_FULL), {"id": suggestion_id}
+        )
+        row = result.mappings().first()
+    if row is None:
+        raise HTTPException(status_code=404, detail="suggestion not found")
+
+    router_obj = get_router()
+    if router_obj is None:
+        # Router not initialised (e.g. FF_LLM_ROUTING_ENABLED=false) —
+        # fall back to the deterministic default rather than 500ing.
+        import re as re_mod
+
+        from src.stt.regex_generator import _fallback
+
+        _ = re_mod  # keep import used
+        return {
+            **_fallback(row["bad_token"], body.replacement or row["proposed_replacement"] or ""),
+            "router_available": False,
+        }
+
+    replacement = (body.replacement or row["proposed_replacement"] or "").strip()
+    context = (body.context_hint or row["detected_context"] or "any").strip() or "any"
+    samples_raw = row["sample_transcripts"] or []
+    samples = [s.get("text", "") for s in samples_raw if isinstance(s, dict)]
+
+    from src.stt.regex_generator import generate_regex
+
+    result_dict = await generate_regex(
+        router_obj,
+        bad_token=row["bad_token"],
+        replacement=replacement,
+        context=context,
+        samples=samples,
+    )
+    return {**result_dict, "router_available": True}
+
+
+@router.post("/corrections/preview")
+async def preview_correction_endpoint(
+    body: PreviewRequest,
+    _: dict[str, Any] = _perm_r,
+) -> dict[str, Any]:
+    """Apply a candidate pattern to recent call_turns; return match diffs.
+
+    Splits matches into `expected` (turn was followed by bot re-ask —
+    correction is helping) and `unexpected` (turn was successful —
+    correction may be a false positive). The UI shows the second bucket
+    as a yellow warning.
+    """
+    from src.stt.correction_preview import preview_correction
+
+    engine = await _get_engine()
+    result = await preview_correction(
+        engine,
+        pattern=body.pattern,
+        replacement=body.replacement,
+        context_hint=body.context_hint,
+        days=body.days,
+    )
+    return result
