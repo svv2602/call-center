@@ -194,7 +194,11 @@ def _extract_json(text: str) -> dict[str, Any] | None:
     try:
         result = json.loads(candidate)
     except json.JSONDecodeError as exc:
-        logger.warning("regex_generator: LLM output not valid JSON: %s", exc)
+        logger.warning(
+            "regex_generator: LLM output not valid JSON: %s | raw=%r",
+            exc,
+            text[:300],
+        )
         return None
     return result if isinstance(result, dict) else None
 
