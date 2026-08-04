@@ -194,6 +194,86 @@ def get_base_phrases() -> list[str]:
 
 
 # ═══════════════════════════════════════════════════════════
+#  Boosted phrases — license plates (structured input)
+# ═══════════════════════════════════════════════════════════
+#
+# 24 % of all STT re-ask failures are on state licence plates:
+# STT hears digits fine ("44", "84") but drops individual Cyrillic
+# letters or fragments the plate into pieces. Neither phrase-hint
+# additions nor post-STT regex corrections fix this — the letters
+# never make it into the transcript at all.
+#
+# The Ukrainian licence-plate alphabet is deliberately restricted to
+# the 12 Cyrillic characters that are visually identical to Latin
+# letters (DSTU 4278-2004). Boosting these single-letter phrases with
+# a high `boost` value shifts STT's top-K when it hears an isolated
+# consonant — enough to keep the letter in the output most of the
+# time. Region codes (the two-letter plate prefix) are boosted too.
+#
+# This is Phase A of the plate-recognition improvement: applied
+# globally on every call, low-risk. Phase B will make the boost
+# context-aware (only during turns where the bot just asked for a
+# plate) to reduce the small amount of noise this adds to normal
+# conversation.
+
+BASE_PLATE_LETTERS: list[str] = [
+    "А", "В", "Е", "І", "К", "М", "Н", "О", "Р", "С", "Т", "Х",
+]
+
+# Common Ukrainian regional plate prefixes. Not exhaustive — coverage of
+# the busiest oblast codes. Adding all ~60 regional variants would dilute
+# boost across the set; the current subset picks the highest-traffic ones
+# from Kyiv, Dnipro, Kharkiv, Lviv, Odesa, and neighbouring oblasts.
+BASE_PLATE_REGION_CODES: list[str] = [
+    # Kyiv city + oblast
+    "АА", "АІ", "КА", "КВ", "КЕ", "КІ", "КМ", "КН", "КО", "КР", "КС", "КТ", "КХ",
+    # Dnipro
+    "АЕ", "АХ",
+    # Kharkiv
+    "АХ",
+    # Lviv
+    "ВС", "ВК", "ВЕ",
+    # Odesa
+    "ВН", "ВО",
+    # Zaporizhzhia
+    "АР", "АТ",
+    # Vinnytsia
+    "АВ", "АМ",
+    # Poltava
+    "АО",
+    # Rest — most-used prefixes seen in the fleet
+    "ВА", "ВВ", "ВІ", "ВТ", "ВХ",
+    "СА", "СВ", "СЕ", "СМ", "СН",
+    "ІА", "ІВ", "ІН", "ІС", "ІТ",
+    "НА", "НВ", "НЕ", "НК", "НМ",
+]
+
+# Boost value passed to Google STT v2 PhraseSet.Phrase(boost=...).
+# Google's soft ceiling is around 20 — 15 is aggressive enough to keep
+# short/isolated letter tokens in the top-K when the acoustic signal is
+# ambiguous, without swamping the model with false letter recognition
+# during normal Ukrainian conversation.
+PLATE_BOOST_VALUE = 15.0
+
+
+def get_plate_boost_phrases() -> list[tuple[str, float]]:
+    """Return (phrase, boost) pairs for plate letters + region codes.
+
+    Kept separate from get_base_phrases() because these need a non-default
+    boost value — the general vocab lives at boost=0 which is Google's
+    "no preference" default. Deduplicated across letters + prefixes.
+    """
+    seen: set[str] = set()
+    out: list[tuple[str, float]] = []
+    for phrase in [*BASE_PLATE_LETTERS, *BASE_PLATE_REGION_CODES]:
+        if phrase in seen:
+            continue
+        seen.add(phrase)
+        out.append((phrase, PLATE_BOOST_VALUE))
+    return out
+
+
+# ═══════════════════════════════════════════════════════════
 #  2. Transliteration Latin → Cyrillic
 # ═══════════════════════════════════════════════════════════
 

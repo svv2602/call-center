@@ -803,11 +803,18 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 phrase_hints = await get_all_phrases_flat(_redis)
             except Exception:
                 logger.debug("Failed to load STT phrase hints", exc_info=True)
+        # Plate letters + region codes at high boost. Global for now
+        # (Phase A) — Phase B will make this context-aware so the boost
+        # only fires on turns where the bot just asked for a plate.
+        from src.stt.phrase_hints import get_plate_boost_phrases
+
+        boost_phrases = tuple(get_plate_boost_phrases())
         stt_config = STTConfig(
             language_code=settings.google_stt.language_code,
             alternative_languages=settings.google_stt.alternative_language_list,
             model=settings.google_stt.model,
             phrase_hints=phrase_hints,
+            boost_phrases=boost_phrases,
             endpointing_sensitivity=settings.google_stt.endpointing_sensitivity,
             speech_end_timeout_ms=settings.google_stt.speech_end_timeout_ms,
             transcript_buffer_sec=settings.google_stt.transcript_buffer_sec,

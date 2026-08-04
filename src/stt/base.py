@@ -39,6 +39,11 @@ class STTConfig:
     model: str = "latest_long"
     enable_punctuation: bool = True
     phrase_hints: tuple[str, ...] = ()
+    # Additional phrase hints with per-phrase boost values. Used for
+    # tokens that need aggressive preference (plate letters/prefixes)
+    # separate from the general vocab that rides at Google's default
+    # boost of 0. Google STT v2 packs these into a second PhraseSet.
+    boost_phrases: tuple[tuple[str, float], ...] = ()
     # Google STT endpointing tuning. Empty/0 means "use SDK default".
     endpointing_sensitivity: str = ""
     speech_end_timeout_ms: int = 0

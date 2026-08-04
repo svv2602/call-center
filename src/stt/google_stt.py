@@ -28,18 +28,50 @@ _MAX_PHRASE_HINTS = 1200
 
 def _build_adaptation(
     phrase_hints: tuple[str, ...],
+    boost_phrases: tuple[tuple[str, float], ...] = (),
 ) -> cloud_speech.SpeechAdaptation | None:
-    """Build SpeechAdaptation with inline PhraseSet from phrase hints."""
-    if not phrase_hints:
+    """Build SpeechAdaptation with inline PhraseSet(s).
+
+    Emits up to TWO phrase sets:
+      1. General vocab (``phrase_hints``) at Google's default boost of 0.
+      2. Boosted vocab (``boost_phrases``) with per-phrase boost values —
+         used for structured tokens that STT tends to drop or fragment
+         (plate letters, region prefixes). Boost 15 ≈ "strong preference"
+         without swamping normal-speech recognition.
+
+    Returns None when both inputs are empty.
+    """
+    if not phrase_hints and not boost_phrases:
         return None
 
-    phrases = phrase_hints[:_MAX_PHRASE_HINTS]
-    phrase_set = cloud_speech.SpeechAdaptation.AdaptationPhraseSet(
-        inline_phrase_set=cloud_speech.PhraseSet(
-            phrases=[cloud_speech.PhraseSet.Phrase(value=p) for p in phrases],
-        ),
-    )
-    return cloud_speech.SpeechAdaptation(phrase_sets=[phrase_set])
+    phrase_sets: list[cloud_speech.SpeechAdaptation.AdaptationPhraseSet] = []
+
+    if phrase_hints:
+        general = phrase_hints[:_MAX_PHRASE_HINTS]
+        phrase_sets.append(
+            cloud_speech.SpeechAdaptation.AdaptationPhraseSet(
+                inline_phrase_set=cloud_speech.PhraseSet(
+                    phrases=[cloud_speech.PhraseSet.Phrase(value=p) for p in general],
+                ),
+            ),
+        )
+
+    if boost_phrases:
+        # Google STT v2 accepts per-phrase boost inside a PhraseSet;
+        # keeping the boosted tokens in their own set makes the intent
+        # obvious in logs and lets Phase B swap this set independently.
+        phrase_sets.append(
+            cloud_speech.SpeechAdaptation.AdaptationPhraseSet(
+                inline_phrase_set=cloud_speech.PhraseSet(
+                    phrases=[
+                        cloud_speech.PhraseSet.Phrase(value=p, boost=b)
+                        for p, b in boost_phrases
+                    ],
+                ),
+            ),
+        )
+
+    return cloud_speech.SpeechAdaptation(phrase_sets=phrase_sets)
 
 
 class GoogleSTTEngine:
@@ -194,8 +226,11 @@ class GoogleSTTEngine:
         """
         assert self._config is not None
         adaptation = None
-        if with_adaptation and self._config.phrase_hints:
-            adaptation = _build_adaptation(self._config.phrase_hints)
+        if with_adaptation and (self._config.phrase_hints or self._config.boost_phrases):
+            adaptation = _build_adaptation(
+                self._config.phrase_hints,
+                self._config.boost_phrases,
+            )
         return cloud_speech.RecognitionConfig(
             explicit_decoding_config=cloud_speech.ExplicitDecodingConfig(
                 encoding=cloud_speech.ExplicitDecodingConfig.AudioEncoding.LINEAR16,
@@ -215,8 +250,9 @@ class GoogleSTTEngine:
         recognizer = f"projects/{self._project_id}/locations/global/recognizers/_"
 
         # Try with adaptation first; if recognizer doesn't support it, retry without
+        has_any_hints = bool(self._config.phrase_hints or self._config.boost_phrases)
         for attempt, use_adaptation in enumerate((True, False)):
-            if attempt > 0 and not self._config.phrase_hints:
+            if attempt > 0 and not has_any_hints:
                 # No point retrying without adaptation if there were no hints
                 break
 
@@ -232,11 +268,15 @@ class GoogleSTTEngine:
                 if use_adaptation and self._config.phrase_hints
                 else 0
             )
+            boost_count = (
+                len(self._config.boost_phrases) if use_adaptation else 0
+            )
             logger.info(
-                "STT attempt %d: model=%s, hints=%d",
+                "STT attempt %d: model=%s, hints=%d, boost=%d",
                 attempt + 1,
                 model,
                 hints_count,
+                boost_count,
             )
 
             try:
@@ -245,7 +285,7 @@ class GoogleSTTEngine:
             except asyncio.CancelledError:
                 raise
             except Exception:
-                if attempt == 0 and self._config.phrase_hints:
+                if attempt == 0 and has_any_hints:
                     logger.warning(
                         "STT recognition failed with adaptation (%s), "
                         "retrying with %s without phrase hints",
