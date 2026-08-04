@@ -107,15 +107,22 @@ _FALLBACK_MAX_MATCHED = 12
 def _fix_space_injection(pattern: str, bad_token: str) -> str:
     """Replace literal spaces in pattern with \\s* when bad_token was space-fragmented.
 
-    LLMs often ignore the space-injection instruction and return a literal
-    word-boundary wrap: \\bодин на дцать\\b. Since STT patterns should never
-    require exact spacing, we unconditionally replace every literal space with
-    \\s* — this is always correct for STT context.
+    LLMs handle spaces in two ways:
+      - Plain space:   \\bодин на дцать\\b   (GPT-style)
+      - Escaped space: \\bодин\\ над\\ цать\\b  (Gemini-style — \\ followed by space)
+
+    Both must become \\s* so all spacing variants match. The escaped-space
+    case must be handled first: replacing \" \" first would turn \"\\ \" into
+    \"\\\\s*\" (double-backslash) which breaks the regex.
     """
-    if " " not in bad_token or " " not in pattern:
+    if " " not in bad_token:
         return pattern
-    fixed = pattern.replace(" ", r"\s*")
-    # Verify the modified pattern still compiles.
+    has_escaped = "\\ " in pattern   # backslash + space (Gemini output)
+    has_plain = " " in pattern        # plain space (GPT output)
+    if not has_escaped and not has_plain:
+        return pattern
+    # Order matters: escaped-space first, then any remaining plain spaces.
+    fixed = pattern.replace("\\ ", r"\s*").replace(" ", r"\s*")
     try:
         re.compile(fixed, re.IGNORECASE)
         if fixed != pattern:
