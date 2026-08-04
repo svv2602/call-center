@@ -479,7 +479,10 @@ function unlockHeard() {
     const unlockBtn = document.getElementById('suggHeardUnlock');
     if (!heardEl) return;
     heardEl.readOnly = false;
-    heardEl.classList.remove('bg-neutral-50', 'dark:bg-neutral-800');
+    // Only remove the light-mode readonly tint; dark:bg-neutral-800 must stay
+    // (it also comes from tw.formInput — removing it leaves bg-white in dark mode,
+    // making near-white text invisible on a white background).
+    heardEl.classList.remove('bg-neutral-50');
     heardEl.focus();
     heardEl.select();
     if (warnEl) {
