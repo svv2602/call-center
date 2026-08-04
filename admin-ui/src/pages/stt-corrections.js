@@ -773,10 +773,6 @@ function addAnotherRule() {
 }
 
 async function generateRegexManualMode() {
-    // Same as generateRegexAI but doesn't require a suggestion_id — used
-    // by the "+ Add another rule" flow. Bypasses the /suggestions/{id}
-    // endpoint and calls the regex_generator internally by wrapping the
-    // token + replacement into the same request the backend expects.
     const btn = document.getElementById('suggGenBtn');
     const heard = document.getElementById('suggHeard').value.trim();
     const replacement = document.getElementById('suggReplacement').value.trim();
@@ -789,22 +785,29 @@ async function generateRegexManualMode() {
         showToast(t('sttCorrections.suggestions.replacementFirst'), 'error');
         return;
     }
-    // No dedicated endpoint for token-only regex gen (LLM helper needs a
-    // suggestion for its sample transcripts). Fall back to a simple
-    // \bTOKEN\b pattern — same behaviour as the "fallback" branch of AI.
     if (btn) { btn.disabled = true; btn.textContent = '⏳ ' + t('sttCorrections.suggestions.generating'); }
     try {
-        const escaped = heard.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const pattern = `\\b${escaped}\\b`;
-        document.getElementById('suggPattern').value = pattern;
-        document.getElementById('suggReasoning').innerHTML = `
-            <span class="${tw.badgeYellow}">${t('sttCorrections.suggestions.fallbackBadge')}</span>
-            <span class="text-xs">${t('sttCorrections.suggestions.manualModeHint')}</span>`;
-        _approveState.generatedBy = 'manual';
+        const r = await api('/admin/stt/corrections/generate-regex', {
+            method: 'POST',
+            body: JSON.stringify({ bad_token: heard, replacement, context_hint }),
+            headers: { 'Content-Type': 'application/json' },
+        });
+        document.getElementById('suggPattern').value = r.pattern;
+        const isFallback = r.fallback || !r.router_available;
+        const forms = (r.matched_forms || []).map(f => `<code class="text-xs bg-gray-100 dark:bg-gray-700 px-1 rounded">${f}</code>`).join(' ');
+        document.getElementById('suggReasoning').innerHTML = isFallback
+            ? `<span class="${tw.badgeYellow}">${t('sttCorrections.suggestions.fallbackBadge')}</span>
+               <span class="text-xs">${r.reasoning || ''}</span>`
+            : `<span class="${tw.badgeGreen}">${t('sttCorrections.suggestions.aiBadge')}</span>
+               <span class="text-xs">${r.reasoning || ''}</span>
+               ${forms ? `<div class="mt-1 flex flex-wrap gap-1">${forms}</div>` : ''}`;
+        _approveState.generatedBy = isFallback ? 'manual' : 'ai';
         _approveState.regexEditedManually = false;
         _approveState.previewShown = false;
         _updateApproveEnabled();
         _clearPreview();
+    } catch (e) {
+        showToast(t('sttCorrections.saveFailed', { error: e.message }), 'error');
     } finally {
         if (btn) { btn.disabled = false; btn.textContent = '🤖 ' + t('sttCorrections.suggestions.generateAI'); }
     }

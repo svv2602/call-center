@@ -328,6 +328,14 @@ class GenerateRegexRequest(BaseModel):
     context_hint: str | None = Field(default=None)
 
 
+class GenerateRegexDirectRequest(BaseModel):
+    """Generate regex directly from a bad_token without a stored suggestion."""
+
+    bad_token: str = Field(min_length=1, max_length=500)
+    replacement: str = Field(default="", max_length=500)
+    context_hint: str | None = Field(default=None)
+
+
 class PreviewRequest(BaseModel):
     """Preview a candidate rule against recent call_turns."""
 
@@ -642,6 +650,39 @@ async def suggestion_generate_regex(
         replacement=replacement,
         context=context,
         samples=samples,
+    )
+    return {**result_dict, "router_available": True}
+
+
+@router.post("/corrections/generate-regex")
+async def generate_regex_direct(
+    body: GenerateRegexDirectRequest,
+    _: dict[str, Any] = _perm_w,
+) -> dict[str, Any]:
+    """Generate a regex directly from bad_token without a stored suggestion.
+
+    Used by the manual "Add rule" flow where no suggestion_id exists.
+    Calls the same LLM pipeline as suggestion_generate_regex but with
+    empty samples (no transcript context).
+    """
+    from src.llm import get_router
+
+    router_obj = get_router()
+    if router_obj is None:
+        from src.stt.regex_generator import _fallback
+
+        return {**_fallback(body.bad_token, body.replacement), "router_available": False}
+
+    context = (body.context_hint or "any").strip() or "any"
+
+    from src.stt.regex_generator import generate_regex
+
+    result_dict = await generate_regex(
+        router_obj,
+        bad_token=body.bad_token,
+        replacement=body.replacement,
+        context=context,
+        samples=[],
     )
     return {**result_dict, "router_available": True}
 
