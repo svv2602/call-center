@@ -179,6 +179,7 @@ export const HELP_PAGES = {
             { titleKey: 'help.sttCorrections.readingPreview.title', contentKey: 'help.sttCorrections.readingPreview.content' },
             { titleKey: 'help.sttCorrections.whenNotToApprove.title', contentKey: 'help.sttCorrections.whenNotToApprove.content' },
             { titleKey: 'help.sttCorrections.ruleBroke.title', contentKey: 'help.sttCorrections.ruleBroke.content' },
+            { titleKey: 'help.sttCorrections.editing.title', contentKey: 'help.sttCorrections.editing.content' },
             // ─── Advanced (for admins / manual rule authors) ───
             { titleKey: 'help.sttCorrections.pipeline.title', contentKey: 'help.sttCorrections.pipeline.content' },
             { titleKey: 'help.sttCorrections.rule.title', contentKey: 'help.sttCorrections.rule.content' },
