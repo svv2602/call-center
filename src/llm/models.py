@@ -169,6 +169,6 @@ DEFAULT_ROUTING_CONFIG: dict[str, Any] = {
         "article_processor": {"primary": "gemini-2.5-flash", "fallbacks": ["openai-gpt41-nano"]},
         "quality_scoring": {"primary": "gemini-2.5-flash", "fallbacks": ["openai-gpt41-mini"]},
         "prompt_optimizer": {"primary": "openai-gpt41-mini", "fallbacks": ["openai-gpt41-nano"]},
-        "regex_generator": {"primary": "gemini-2.5-flash", "fallbacks": ["openai-gpt41-mini"]},
+        "regex_generator": {"primary": "openai-gpt5-mini", "fallbacks": ["openai-gpt41-mini"]},
     },
 }
