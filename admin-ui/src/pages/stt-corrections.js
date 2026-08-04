@@ -245,11 +245,41 @@ function openApprove(id) {
     if (!s) return;
     _approveState = { id, previewShown: false, generatedBy: null, regexEditedManually: false };
 
+    const samples = Array.isArray(s.sample_transcripts) ? s.sample_transcripts : [];
+    const samplesHtml = samples.length ? `
+        <div class="border-t border-neutral-200 dark:border-neutral-800 pt-3 mb-3">
+            <div class="text-sm font-medium mb-2">${t('sttCorrections.suggestions.samplesLabel')} <span class="text-xs text-neutral-500">(${samples.length})</span></div>
+            <div class="space-y-2">
+                ${samples.map((sam, i) => {
+                    const shortCallId = (sam.call_id || '').slice(0, 8);
+                    return `
+                        <div class="border border-neutral-200 dark:border-neutral-800 rounded-md p-2 text-sm">
+                            <div class="text-xs text-neutral-500 mb-1">
+                                ${t('sttCorrections.suggestions.samplesBotAsked')}: <span class="italic">"${escapeHtml((sam.bot_question || '').slice(0, 140))}"</span>
+                            </div>
+                            <div class="font-medium text-neutral-900 dark:text-neutral-100 mb-1">
+                                ${t('sttCorrections.suggestions.samplesCustomerSaid')}: "${escapeHtml(sam.text || '')}"
+                            </div>
+                            <div class="flex items-center gap-2 text-xs">
+                                <button onclick="window._pages.sttCorrections.toggleSampleContext(${i}, '${escapeHtml(sam.call_id)}', ${sam.turn_number})" class="text-blue-600 hover:underline cursor-pointer" id="ctxBtn-${i}">
+                                    ${t('sttCorrections.suggestions.samplesShowContext')}
+                                </button>
+                                <span class="text-neutral-400">·</span>
+                                <span class="text-neutral-400 font-mono">${escapeHtml(shortCallId)} #${sam.turn_number}</span>
+                            </div>
+                            <div id="ctxPanel-${i}" class="hidden mt-2 border-l-2 border-blue-300 dark:border-blue-700 pl-2"></div>
+                        </div>`;
+                }).join('')}
+            </div>
+        </div>` : '';
+
     const html = `
         <div id="sttSuggestModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
           <div class="bg-white dark:bg-neutral-900 rounded-lg p-6 shadow-xl w-full max-w-2xl my-8">
             <h3 class="text-lg font-semibold mb-3">${t('sttCorrections.suggestions.approveTitle')}</h3>
             <div class="text-xs text-neutral-500 mb-4">${t('sttCorrections.suggestions.approveHint', { token: escapeHtml(s.bad_token) })}</div>
+
+            ${samplesHtml}
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
                 <div>
@@ -328,6 +358,51 @@ function _updateApproveEnabled() {
 function _clearPreview() {
     const el = document.getElementById('suggPreview');
     if (el) el.innerHTML = `<span class="italic">${t('sttCorrections.suggestions.previewStale')}</span>`;
+}
+
+async function toggleSampleContext(index, callId, turnNumber) {
+    const panel = document.getElementById(`ctxPanel-${index}`);
+    const btn = document.getElementById(`ctxBtn-${index}`);
+    if (!panel || !btn) return;
+
+    // Collapse if already open.
+    if (!panel.classList.contains('hidden')) {
+        panel.classList.add('hidden');
+        btn.textContent = t('sttCorrections.suggestions.samplesShowContext');
+        return;
+    }
+
+    // Fetch on first open, cache afterwards on the DOM node.
+    if (!panel.dataset.loaded) {
+        panel.innerHTML = `<div class="text-xs italic text-neutral-500 py-1">${t('sttCorrections.suggestions.samplesLoadingContext')}</div>`;
+        panel.classList.remove('hidden');
+        btn.textContent = t('sttCorrections.suggestions.samplesHideContext');
+        try {
+            const url = `/admin/stt/corrections/call-context?call_id=${encodeURIComponent(callId)}&turn=${turnNumber}&window=5`;
+            const r = await api(url);
+            const turns = r.turns || [];
+            if (!turns.length) {
+                panel.innerHTML = `<div class="text-xs italic text-neutral-500 py-1">${t('sttCorrections.suggestions.samplesNoContext')}</div>`;
+            } else {
+                panel.innerHTML = turns.map(tr => {
+                    const isTarget = tr.turn_number === turnNumber;
+                    const speakerLabel = tr.speaker === 'customer' ? '👤' : '🤖';
+                    const cls = isTarget
+                        ? 'bg-yellow-50 dark:bg-yellow-900/20 border-l-4 border-yellow-500 pl-1'
+                        : '';
+                    const conf = tr.confidence != null ? ` <span class="text-[10px] text-neutral-400">conf=${tr.confidence}</span>` : '';
+                    const lang = tr.language ? ` <span class="text-[10px] text-neutral-400">${escapeHtml(tr.language)}</span>` : '';
+                    return `<div class="text-xs py-0.5 ${cls}"><span class="font-mono text-neutral-400">#${tr.turn_number}</span> ${speakerLabel} ${escapeHtml(tr.text || '')}${tr.speaker === 'customer' ? conf + lang : ''}</div>`;
+                }).join('');
+            }
+            panel.dataset.loaded = '1';
+        } catch (e) {
+            panel.innerHTML = `<div class="text-xs text-red-600 py-1">${escapeHtml(e.message)}</div>`;
+        }
+    } else {
+        panel.classList.remove('hidden');
+        btn.textContent = t('sttCorrections.suggestions.samplesHideContext');
+    }
 }
 
 async function generateRegexAI(id) {
@@ -792,4 +867,5 @@ window._pages.sttCorrections = {
     switchTab,
     openApprove, closeApprove, submitApprove, rejectSuggestion, rescan,
     generateRegexAI, runPreview, _onRegexEdit, _onFieldChange,
+    toggleSampleContext,
 };

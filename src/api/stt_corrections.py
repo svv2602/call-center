@@ -646,6 +646,61 @@ async def suggestion_generate_regex(
     return {**result_dict, "router_available": True}
 
 
+_SQL_CALL_CONTEXT = """
+    SELECT turn_number, speaker,
+           content AS text,
+           ROUND(stt_confidence::numeric, 2) AS confidence,
+           language,
+           created_at
+    FROM call_turns
+    WHERE call_id = :call_id
+      AND turn_number BETWEEN :from_turn AND :to_turn
+    ORDER BY turn_number
+"""
+
+
+@router.get("/corrections/call-context")
+async def get_call_context(
+    call_id: str,
+    turn: int,
+    window: int = 5,
+    _: dict[str, Any] = _perm_r,
+) -> dict[str, Any]:
+    """Return N turns around the flagged one for a suggestion sample.
+
+    Scoped to stt_corrections:read (not analytics:read) so that
+    content_manager can inspect the surrounding context without needing
+    full analytics access. Returns only the requested slice of one call.
+    """
+    from sqlalchemy import text as sql_text
+
+    if window < 1 or window > 20:
+        raise HTTPException(status_code=400, detail="window must be 1..20")
+
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            sql_text(_SQL_CALL_CONTEXT),
+            {
+                "call_id": call_id,
+                "from_turn": max(0, turn - window),
+                "to_turn": turn + window,
+            },
+        )
+        rows = [dict(r._mapping) for r in result]
+
+    for row in rows:
+        if row.get("created_at"):
+            row["created_at"] = row["created_at"].isoformat()
+
+    return {
+        "call_id": call_id,
+        "target_turn": turn,
+        "window": window,
+        "turns": rows,
+    }
+
+
 @router.post("/corrections/preview")
 async def preview_correction_endpoint(
     body: PreviewRequest,
