@@ -246,23 +246,25 @@ let _approveState = {
 };
 
 function openApprove(id) {
-    const s = _suggestions.find(x => x.id === id);
-    if (!s) return;
+    // `id === null` → manual-create mode (invoked from the Rules-tab
+    // "Add rule" button). Same modal, empty fields, no samples, no
+    // retargeting, submit goes to POST /corrections.
+    const s = id ? _suggestions.find(x => x.id === id) : null;
+    if (id && !s) return;  // stale click: suggestion gone from cache
+    const isManual = !s;
+
     _approveState = {
-        id,
-        mode: 'suggestion',
+        id: s ? s.id : null,
+        mode: isManual ? 'manual' : 'suggestion',
         previewShown: false,
         generatedBy: null,
         regexEditedManually: false,
-        sourceCallId: (s.sample_transcripts && s.sample_transcripts[0] && s.sample_transcripts[0].call_id) || null,
-        // Retargeting: if manager clicks ✏ and edits "heard" to a different
-        // token, we switch behaviour on submit — create a manual rule for
-        // the new token AND reject the original suggestion with a note.
-        originalBadToken: s.bad_token || '',
+        sourceCallId: (s && s.sample_transcripts && s.sample_transcripts[0] && s.sample_transcripts[0].call_id) || null,
+        originalBadToken: s ? (s.bad_token || '') : '',
         heardChanged: false,
     };
 
-    const samples = Array.isArray(s.sample_transcripts) ? s.sample_transcripts : [];
+    const samples = s && Array.isArray(s.sample_transcripts) ? s.sample_transcripts : [];
     const samplesHtml = samples.length ? `
         <div class="border-t border-neutral-200 dark:border-neutral-800 pt-3 mb-3">
             <div class="text-sm font-medium mb-2">${t('sttCorrections.suggestions.samplesLabel')} <span class="text-xs text-neutral-500">(${samples.length})</span></div>
@@ -290,11 +292,45 @@ function openApprove(id) {
             </div>
         </div>` : '';
 
+    // Manual mode differs in a few places — precompute the differing bits.
+    const title = isManual
+        ? t('sttCorrections.suggestions.manualCreateTitle')
+        : t('sttCorrections.suggestions.approveTitle');
+    const hint = isManual
+        ? t('sttCorrections.suggestions.manualCreateHint')
+        : t('sttCorrections.suggestions.approveHint', { token: escapeHtml(s.bad_token) });
+    const heardValue = isManual ? '' : escapeHtml(s.bad_token || '');
+    const heardReadonly = isManual ? '' : 'readonly';
+    const heardBg = isManual ? '' : 'bg-neutral-50 dark:bg-neutral-800';
+    // Manual mode: no ✏ unlock button (field is already editable),
+    // but Heard input has an oninput that fires the similar-rule check.
+    const heardUnlockBtn = isManual ? '' : `
+        <button id="suggHeardUnlock" onclick="window._pages.sttCorrections.unlockHeard()" class="ml-1 text-xs text-blue-600 hover:underline cursor-pointer" title="${t('sttCorrections.suggestions.heardUnlockTitle')}">✏ ${t('sttCorrections.suggestions.heardUnlock')}</button>`;
+    const heardOninput = isManual
+        ? `oninput="window._pages.sttCorrections._onManualHeardInput()"`
+        : '';
+    const heardPlaceholder = isManual
+        ? `placeholder="${t('sttCorrections.suggestions.heardPlaceholder')}"`
+        : '';
+    const replacementValue = isManual ? '' : escapeHtml(s.proposed_replacement || '');
+    const contextValue = isManual ? 'any' : (s.detected_context || 'any');
+    const patternValue = isManual ? '' : escapeHtml(s.proposed_pattern || '');
+    const noteDefault = isManual
+        ? ''
+        : `auto-suggested from token '${escapeHtml(s.bad_token)}' (seen ${s.occurrence_count}×)`;
+    // AI-generate handler differs — manual mode has no suggestion_id to send.
+    const genOnclick = isManual
+        ? `window._pages.sttCorrections.generateRegexManualMode()`
+        : `window._pages.sttCorrections.generateRegexAI('${escapeHtml(s.id)}')`;
+    const submitOnclick = isManual
+        ? `window._pages.sttCorrections.submitApprove('')`
+        : `window._pages.sttCorrections.submitApprove('${escapeHtml(s.id)}')`;
+
     const html = `
         <div id="sttSuggestModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
           <div class="bg-white dark:bg-neutral-900 rounded-lg p-6 shadow-xl w-full max-w-2xl my-8">
-            <h3 id="suggModalTitle" class="text-lg font-semibold mb-3">${t('sttCorrections.suggestions.approveTitle')}</h3>
-            <div class="text-xs text-neutral-500 mb-4">${t('sttCorrections.suggestions.approveHint', { token: escapeHtml(s.bad_token) })}</div>
+            <h3 id="suggModalTitle" class="text-lg font-semibold mb-3">${title}</h3>
+            <div class="text-xs text-neutral-500 mb-4">${hint}</div>
 
             <div id="suggSimilar"></div>
             ${samplesHtml}
@@ -303,28 +339,28 @@ function openApprove(id) {
                 <div>
                     <label class="block mb-1 text-sm font-medium">
                         ${t('sttCorrections.suggestions.heard')}
-                        <button id="suggHeardUnlock" onclick="window._pages.sttCorrections.unlockHeard()" class="ml-1 text-xs text-blue-600 hover:underline cursor-pointer" title="${t('sttCorrections.suggestions.heardUnlockTitle')}">✏ ${t('sttCorrections.suggestions.heardUnlock')}</button>
+                        ${heardUnlockBtn}
                     </label>
-                    <input id="suggHeard" class="${tw.formInput} w-full bg-neutral-50 dark:bg-neutral-800" value="${escapeHtml(s.bad_token || '')}" readonly/>
+                    <input id="suggHeard" class="${tw.formInput} w-full ${heardBg}" value="${heardValue}" ${heardReadonly} ${heardPlaceholder} ${heardOninput}/>
                 </div>
                 <div>
                     <label class="block mb-1 text-sm font-medium">${t('sttCorrections.suggestions.meant')} <span class="text-red-600">*</span></label>
-                    <input id="suggReplacement" class="${tw.formInput} w-full" value="${escapeHtml(s.proposed_replacement || '')}" placeholder="${t('sttCorrections.suggestions.replacementPlaceholder')}" oninput="window._pages.sttCorrections._onFieldChange()"/>
+                    <input id="suggReplacement" class="${tw.formInput} w-full" value="${replacementValue}" placeholder="${t('sttCorrections.suggestions.replacementPlaceholder')}" oninput="window._pages.sttCorrections._onFieldChange()"/>
                 </div>
             </div>
             <div id="suggHeardWarning" class="hidden mb-3 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded px-2 py-1"></div>
             <div class="mb-3">
                 <label class="block mb-1 text-sm font-medium">${t('sttCorrections.context')}</label>
-                <select id="suggContext" class="${tw.formInput} w-full" onchange="window._pages.sttCorrections._onFieldChange()">${_contextOptions(s.detected_context || 'any')}</select>
+                <select id="suggContext" class="${tw.formInput} w-full" onchange="window._pages.sttCorrections._onFieldChange()">${_contextOptions(contextValue)}</select>
             </div>
 
             <div class="border-t border-neutral-200 dark:border-neutral-800 pt-3 mb-3">
                 <div class="flex items-center gap-2 mb-2">
-                    <button onclick="window._pages.sttCorrections.generateRegexAI('${escapeHtml(id)}')" class="${tw.btnSecondary} text-sm" id="suggGenBtn">🤖 ${t('sttCorrections.suggestions.generateAI')}</button>
+                    <button onclick="${genOnclick}" class="${tw.btnSecondary} text-sm" id="suggGenBtn">🤖 ${t('sttCorrections.suggestions.generateAI')}</button>
                     <span class="text-xs text-neutral-500">${t('sttCorrections.suggestions.generateHint')}</span>
                 </div>
                 <label class="block mb-1 text-xs text-neutral-500">${t('sttCorrections.pattern')} <span class="text-xs">(regex)</span></label>
-                <input id="suggPattern" class="${tw.formInput} w-full font-mono text-xs" value="${escapeHtml(s.proposed_pattern || '')}" oninput="window._pages.sttCorrections._onRegexEdit()"/>
+                <input id="suggPattern" class="${tw.formInput} w-full font-mono text-xs" value="${patternValue}" oninput="window._pages.sttCorrections._onRegexEdit()"/>
                 <div id="suggReasoning" class="text-xs text-neutral-500 mt-1"></div>
             </div>
 
@@ -337,16 +373,37 @@ function openApprove(id) {
             </div>
 
             <label class="block mb-1 text-sm">${t('sttCorrections.note')}</label>
-            <input id="suggNote" class="${tw.formInput} w-full mb-4" value="auto-suggested from token '${escapeHtml(s.bad_token)}' (seen ${s.occurrence_count}×)"/>
+            <input id="suggNote" class="${tw.formInput} w-full mb-4" value="${escapeHtml(noteDefault)}" placeholder="${t('sttCorrections.suggestions.notePlaceholder')}"/>
             <div class="flex justify-end gap-2">
                 <button onclick="window._pages.sttCorrections.closeApprove()" class="${tw.btnSecondary}">${t('common.cancel')}</button>
-                <button id="suggApproveBtn" onclick="window._pages.sttCorrections.submitApprove('${escapeHtml(id)}')" class="${tw.btnPrimary} opacity-50 cursor-not-allowed" disabled>${t('sttCorrections.suggestions.createRule')}</button>
+                <button id="suggApproveBtn" onclick="${submitOnclick}" class="${tw.btnPrimary} opacity-50 cursor-not-allowed" disabled>${t('sttCorrections.suggestions.createRule')}</button>
             </div>
           </div>
         </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
-    // Fire similar-rule check for the current bad_token — non-blocking.
-    _checkSimilarForToken(s.bad_token, s.detected_context || '');
+    // In suggestion mode fire similar-rule check for the pre-filled token.
+    // In manual mode the check fires on typing via _onManualHeardInput.
+    if (!isManual) {
+        _checkSimilarForToken(s.bad_token, s.detected_context || '');
+    }
+}
+
+// Debounced similar-rule check invoked while the manager types in manual mode.
+let _manualHeardTimer = null;
+function _onManualHeardInput() {
+    if (_manualHeardTimer) clearTimeout(_manualHeardTimer);
+    _manualHeardTimer = setTimeout(() => {
+        const heard = document.getElementById('suggHeard');
+        const ctx = document.getElementById('suggContext');
+        if (!heard || !ctx) return;
+        const token = heard.value.trim();
+        if (token.length >= 3) {
+            _checkSimilarForToken(token, ctx.value);
+        } else {
+            const el = document.getElementById('suggSimilar');
+            if (el) el.innerHTML = '';
+        }
+    }, 300);
 }
 
 async function _checkSimilarForToken(token, context) {
@@ -954,7 +1011,11 @@ async function runEditPreview() {
 }
 
 function openAdd() {
-    _openRuleModal('add', null);
+    // Unified path: same modal as approve-suggestion, but in manual mode
+    // (empty fields, no samples/retargeting, submit → POST /corrections).
+    // The old raw-regex modal is retained only for the Edit flow which
+    // has its own audit strip + auto-preview panel.
+    openApprove(null);
 }
 
 function openEdit(id) {
@@ -1233,4 +1294,5 @@ window._pages.sttCorrections = {
     addAnotherRule, generateRegexManualMode,
     runEditPreview, _onEditRegexChange,
     unlockHeard,
+    _onManualHeardInput,
 };
