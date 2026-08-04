@@ -60,7 +60,7 @@ When `bad_token` CONTAINS SPACES, Google STT has fragmented a single word into p
   (d) Put the ENTIRE expression inside a non-capturing group: `(?:...)`.
 
   Example: bad_token="один над цать", replacement="одинадцять"
-  → `\\b(?:один\\s*на[дт]\\s*ця?т[ьъ]?)\\b`  — matches all of:
+  → `\\b(?:один\\s*на[дт]\\s*ц[ая]?т[ьъ]?)\\b`  — matches all of:
     "один над цать", "одиннадцать", "одинадцять", "один надцять", "один на цать"
 
 ## STT-specific artifact: Cyrillic Ukrainian/Russian alternation
@@ -73,8 +73,8 @@ Google STT trained on Russian often substitutes Russian letters for Ukrainian on
   | є         | е       | `[єе]`        |
   | ь (soft)  | ъ (hard)| `[ьъ]`        |
   | single н  | double нн (Russian geminate) | `нн?` |
-  | -цять (UA suffix) | -цать (RU) | `ця?ть?` |
-  | -надцять  | -надцать | `на[дт]\\s*ця?т[ьь]?` |
+  | -цять (UA suffix) | -цать (RU) | `ц[ая]?т[ьъ]?` |
+  | -надцять  | -надцать | `на[дт]\\s*ц[ая]?т[ьъ]?` |
 
   Use these brackets ONLY where the mismatch is plausible (bad_token or samples show it). Do NOT add brackets everywhere.
 

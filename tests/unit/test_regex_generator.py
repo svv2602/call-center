@@ -186,8 +186,8 @@ class TestGenerateRegex:
         # Must still match the original spaced form
         import re
         assert re.search(result["pattern"], "один на дцать", re.IGNORECASE)
-        # Must also match the fused (no-space) form
-        assert re.search(result["pattern"], "однадцать", re.IGNORECASE)
+        # Must also match the fused (no-space) form: "один"+"на"+"дцать"="одиннадцать"
+        assert re.search(result["pattern"], "одиннадцать", re.IGNORECASE)
 
     async def test_gemini_escaped_space_pattern_fixed(self) -> None:
         """Gemini returns backslash-space pattern → fixed to \\s*."""
@@ -212,9 +212,10 @@ class TestGenerateRegex:
         assert re.search(result["pattern"], "одиннадцать", re.IGNORECASE)
 
     async def test_good_s_star_pattern_not_mangled(self) -> None:
-        """LLM already generated correct \\s* pattern → not double-processed."""
-        good = r"\b(?:один\s*на[дт]\s*ця?т[ьъ]?)\b"
-        json_text = f'{{"pattern": "{good.replace(chr(92), chr(92)+chr(92))}", "matched_forms": ["один над цать"], "reasoning": "good"}}'
+        """LLM already generated correct \\s* pattern → passes sanity, not mangled."""
+        # ц[ая]?т covers both "цать" (RU) and "цять" (UA) — correct alternation
+        good = r"\b(?:один\s*на[дт]\s*ц[ая]?т[ьъ]?)\b"
+        json_text = f'{{"pattern": "{good.replace(chr(92), chr(92)+chr(92))}", "matched_forms": ["один над цать", "одиннадцать"], "reasoning": "good"}}'
         router = AsyncMock()
         router.complete.return_value = _StubResponse(text=json_text)
         result = await generate_regex(
@@ -225,10 +226,10 @@ class TestGenerateRegex:
             samples=[],
         )
         assert result["fallback"] is False
-        # Pattern should be functionally identical (spaces replaced by \s* already)
         import re
         assert re.search(result["pattern"], "один над цать", re.IGNORECASE)
-        assert re.search(result["pattern"], "одиннадцять", re.IGNORECASE)
+        assert re.search(result["pattern"], "одиннадцать", re.IGNORECASE)
+        assert re.search(result["pattern"], "один надцять", re.IGNORECASE)
 
     async def test_fused_form_passes_sanity_check(self) -> None:
         """Pattern matching fused bad_token passes sanity even without spaces."""
@@ -292,8 +293,8 @@ class TestFixSpaceInjection:
     def test_result_matches_fused_form(self) -> None:
         pat = r"\bодин на дцать\b"
         fixed = _fix_space_injection(pat, "один на дцать")
-        # Fused: remove all spaces from bad_token
-        assert _re.search(fixed, "однадцать", _re.IGNORECASE)
+        # Fused: "один" + "на" + "дцать" = "одиннадцать" (spaces removed)
+        assert _re.search(fixed, "одиннадцать", _re.IGNORECASE)
 
     def test_result_matches_single_space_variant(self) -> None:
         pat = r"\bодин на дцать\b"
