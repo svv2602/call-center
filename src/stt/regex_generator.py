@@ -42,7 +42,7 @@ _SYSTEM_PROMPT = """You build Python regex patterns that fix reproducible STT (s
 
 ## Rules (strict)
 
-1. **Always use `\\b` word boundaries** around matched forms. Never leave a raw substring that could match inside another word.
+1. **Always use `\\b` word boundaries** around matched forms — only at the very START and very END of the whole pattern, never in the middle of a multi-fragment bad token.
 2. **Cover morphological forms of the source noun/adjective/verb** when it's a real Ukrainian/Russian word. For "приятный" also match "приятная", "приятного", "приятную", "приятные", "приятненький". For "виктора" also match "викторе", "викторов", "викторовна".
 3. **Use `\\w+` sparingly** — only when the samples show variable endings AND you can't enumerate them cleanly. Prefer `(форма1|форма2|форма3)` explicit alternation.
 4. **DO NOT over-generalise**. If samples all say "на X", make the regex require the "на " prefix. If samples show different prefixes, drop the prefix requirement.
@@ -50,15 +50,44 @@ _SYSTEM_PROMPT = """You build Python regex patterns that fix reproducible STT (s
 6. **Replacement is literal** — no backreferences unless you also captured a group you want to preserve (rare — usually the prefix/suffix is discarded).
 7. **Never invent samples**. Only use what's provided.
 
+## STT-specific artifact: space injection
+
+When `bad_token` CONTAINS SPACES, Google STT has fragmented a single word into pieces. In this case you MUST:
+
+  (a) Insert `\\s*` between every fragment (not `\\s+` — the fused form also occurs).
+  (b) Place `\\b` only at the very start and very end of the whole expression.
+  (c) Apply Cyrillic alternation rules (see below) at fragment boundaries.
+  (d) Put the ENTIRE expression inside a non-capturing group: `(?:...)`.
+
+  Example: bad_token="один над цать", replacement="одинадцять"
+  → `\\b(?:один\\s*на[дт]\\s*ця?т[ьъ]?)\\b`  — matches all of:
+    "один над цать", "одиннадцать", "одинадцять", "один надцять", "один на цать"
+
+## STT-specific artifact: Cyrillic Ukrainian/Russian alternation
+
+Google STT trained on Russian often substitutes Russian letters for Ukrainian ones. Apply these substitutions when the bad_token or replacement shows a known Cyrillic mismatch:
+
+  | Ukrainian | Russian | Regex bracket |
+  |-----------|---------|---------------|
+  | і         | и       | `[іи]`        |
+  | є         | е       | `[єе]`        |
+  | ь (soft)  | ъ (hard)| `[ьъ]`        |
+  | single н  | double нн (Russian geminate) | `нн?` |
+  | -цять (UA suffix) | -цать (RU) | `ця?ть?` |
+  | -надцять  | -надцать | `на[дт]\\s*ця?т[ьь]?` |
+
+  Use these brackets ONLY where the mismatch is plausible (bad_token or samples show it). Do NOT add brackets everywhere.
+
 ## Context tags
 
 The `context` field says WHAT the bot was asking. Different contexts should use different regex tightness:
 
   * `date`      — day/month names. Broad morphological coverage (many cases used).
+  * `number`    — number words (cardinal + ordinal). ALWAYS apply space-injection + Cyrillic-alternation rules. Cover: space-split forms, Russian/Ukrainian spelling variants, double-consonant variants.
   * `plate`     — vehicle plate numbers. Tighten aggressively — false match is a real risk.
   * `city`, `address` — place names. Cover masc/fem/neuter endings.
   * `tire_size` — brand names, sizes. Narrow — brand hallucinations are rare and specific.
-  * `time`      — hours words. Cover full paradigm.
+  * `time`      — hours words. Cover full paradigm + space injection (Ukrainian/Russian endings differ).
   * `any`       — no context. Be conservative — narrow pattern preferred.
 
 ## Output — JSON only, no prose outside
@@ -153,11 +182,24 @@ def _build_user_message(
     if not sample_lines:
         sample_lines = "  (none provided)"
 
+    # Explicit hint when STT has clearly split a single word into fragments.
+    space_hint = ""
+    if " " in bad_token.strip():
+        fragments = bad_token.strip().split()
+        space_hint = (
+            f"\n[SPACE-INJECTION DETECTED: bad_token has {len(fragments)} fragments "
+            f"({', '.join(repr(f) for f in fragments)}). "
+            f"This is almost certainly one word that STT split. "
+            f"Apply \\s* between fragments and \\b only at the outer boundaries. "
+            f"Also apply Cyrillic alternation at fragment joints.]"
+        )
+
     return (
         f"Bad token (what STT heard): {bad_token!r}\n"
         f"Replacement (what the caller meant): {replacement!r}\n"
         f"Bot context (what was being asked): {context}\n"
         f"Real transcripts where this token appeared:\n{sample_lines}\n"
+        f"{space_hint}"
         f"\nProduce the regex per rules. JSON only."
     )
 
@@ -203,14 +245,22 @@ async def generate_regex(
     if not cleaned:
         return _fallback(bad_token, replacement)
 
-    # Sanity check: pattern must actually match the token we started from,
-    # otherwise the LLM went off-topic and produced something unrelated.
+    # Sanity check: pattern must match either:
+    #   (a) the bad_token verbatim, OR
+    #   (b) the bad_token with all internal spaces collapsed (space-injection case).
+    # This guards against the LLM going completely off-topic.
+    fused = re.sub(r"\s+", "", bad_token)  # "один над цать" → "однадцать"
     try:
-        if not re.search(cleaned["pattern"], bad_token, re.IGNORECASE):
+        matches_verbatim = re.search(cleaned["pattern"], bad_token, re.IGNORECASE)
+        matches_fused = fused != bad_token and re.search(
+            cleaned["pattern"], fused, re.IGNORECASE
+        )
+        if not matches_verbatim and not matches_fused:
             logger.warning(
-                "regex_generator: LLM pattern %r does not match bad_token %r — falling back",
+                "regex_generator: LLM pattern %r does not match bad_token %r or fused %r — falling back",
                 cleaned["pattern"],
                 bad_token,
+                fused,
             )
             return _fallback(bad_token, replacement)
     except re.error:
