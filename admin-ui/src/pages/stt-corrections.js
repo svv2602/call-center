@@ -233,17 +233,29 @@ function _renderSuggestionsTab() {
 
 // State for the approve modal — tracks which suggestion is open and whether
 // the preview has been generated (Create-rule button is disabled until it is).
+// `mode` starts as 'suggestion' (created from a pending suggestion), flips to
+// 'manual' if the manager clicks "+ Add another rule" after a successful
+// promote — subsequent rules go through the plain /corrections endpoint.
 let _approveState = {
     id: null,
+    mode: 'suggestion',
     previewShown: false,
-    generatedBy: null,  // 'ai' | 'manual' | null (unchanged from scanner default)
+    generatedBy: null,  // 'ai' | 'manual' | null
     regexEditedManually: false,
+    sourceCallId: null,  // for note ("from call abc123 ...")
 };
 
 function openApprove(id) {
     const s = _suggestions.find(x => x.id === id);
     if (!s) return;
-    _approveState = { id, previewShown: false, generatedBy: null, regexEditedManually: false };
+    _approveState = {
+        id,
+        mode: 'suggestion',
+        previewShown: false,
+        generatedBy: null,
+        regexEditedManually: false,
+        sourceCallId: (s.sample_transcripts && s.sample_transcripts[0] && s.sample_transcripts[0].call_id) || null,
+    };
 
     const samples = Array.isArray(s.sample_transcripts) ? s.sample_transcripts : [];
     const samplesHtml = samples.length ? `
@@ -276,9 +288,10 @@ function openApprove(id) {
     const html = `
         <div id="sttSuggestModal" class="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4 overflow-y-auto">
           <div class="bg-white dark:bg-neutral-900 rounded-lg p-6 shadow-xl w-full max-w-2xl my-8">
-            <h3 class="text-lg font-semibold mb-3">${t('sttCorrections.suggestions.approveTitle')}</h3>
+            <h3 id="suggModalTitle" class="text-lg font-semibold mb-3">${t('sttCorrections.suggestions.approveTitle')}</h3>
             <div class="text-xs text-neutral-500 mb-4">${t('sttCorrections.suggestions.approveHint', { token: escapeHtml(s.bad_token) })}</div>
 
+            <div id="suggSimilar"></div>
             ${samplesHtml}
 
             <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
@@ -323,6 +336,40 @@ function openApprove(id) {
           </div>
         </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
+    // Fire similar-rule check for the current bad_token — non-blocking.
+    _checkSimilarForToken(s.bad_token, s.detected_context || '');
+}
+
+async function _checkSimilarForToken(token, context) {
+    const el = document.getElementById('suggSimilar');
+    if (!el || !token) return;
+    try {
+        const params = new URLSearchParams({ token, context: context || '' });
+        const r = await api(`/admin/stt/corrections/check-similar?${params}`);
+        const matches = r.matches || [];
+        if (matches.length === 0) {
+            el.innerHTML = '';
+            return;
+        }
+        const rows = matches.map(m => `
+            <div class="text-xs py-0.5 flex items-baseline gap-2">
+                <code class="bg-white dark:bg-neutral-900 px-1 rounded">${escapeHtml(m.pattern)}</code>
+                <span class="text-neutral-500">→</span>
+                <code class="bg-white dark:bg-neutral-900 px-1 rounded">${escapeHtml(m.replacement)}</code>
+                ${m.context_hint ? `<span class="${tw.badgeBlue}">${escapeHtml(m.context_hint)}</span>` : ''}
+                ${m.note ? `<span class="text-neutral-400 italic truncate max-w-xs" title="${escapeHtml(m.note)}">${escapeHtml(m.note.slice(0, 60))}</span>` : ''}
+            </div>`).join('');
+        el.innerHTML = `
+            <div class="bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded-md p-2 mb-3 text-sm">
+                <div class="font-medium text-amber-800 dark:text-amber-300 mb-1">
+                    ⚠ ${t('sttCorrections.suggestions.similarFound', { n: matches.length, token: escapeHtml(token) })}
+                </div>
+                <div class="mb-1 text-xs text-amber-700 dark:text-amber-400">${t('sttCorrections.suggestions.similarHint')}</div>
+                <div class="space-y-0.5">${rows}</div>
+            </div>`;
+    } catch (_) {
+        el.innerHTML = '';
+    }
 }
 
 function closeApprove() {
@@ -512,20 +559,144 @@ async function submitApprove(id) {
         if (!confirm(t('sttCorrections.suggestions.emptyReplacementConfirm'))) return;
     }
     try {
-        await api(`/admin/stt/corrections/suggestions/${encodeURIComponent(id)}/approve`, {
-            method: 'POST',
-            body: JSON.stringify({
-                pattern, replacement, context_hint, note,
-                generated_by: _approveState.generatedBy,
-            }),
-            headers: { 'Content-Type': 'application/json' },
-        });
-        closeApprove();
-        showToast(t('sttCorrections.suggestions.promoted'), 'success');
+        // Two paths: (1) first rule from a pending suggestion → /approve;
+        // (2) subsequent rules added via "+ Ещё правило" → /corrections
+        // (manual create), keeping the call context visible.
+        if (_approveState.mode === 'suggestion' && id) {
+            await api(`/admin/stt/corrections/suggestions/${encodeURIComponent(id)}/approve`, {
+                method: 'POST',
+                body: JSON.stringify({
+                    pattern, replacement, context_hint, note,
+                    generated_by: _approveState.generatedBy,
+                }),
+                headers: { 'Content-Type': 'application/json' },
+            });
+        } else {
+            await api('/admin/stt/corrections', {
+                method: 'POST',
+                body: JSON.stringify({
+                    pattern, replacement, context_hint, note, flags: 'i', enabled: true,
+                }),
+                headers: { 'Content-Type': 'application/json' },
+            });
+        }
+        // Show inline success + "Add another" affordance instead of closing.
+        _renderApproveSuccess();
         await _reloadSuggestions();
-        await loadData();
     } catch (e) {
         showToast(t('sttCorrections.saveFailed', { error: e.message }), 'error');
+    }
+}
+
+function _renderApproveSuccess() {
+    // Replace the footer button row with a success banner + two actions.
+    // The modal body stays open so the manager can see the samples/call
+    // context and add another rule from the same source without hunting.
+    const btn = document.getElementById('suggApproveBtn');
+    if (!btn) return;
+    const footer = btn.parentElement;
+    if (!footer) return;
+    footer.outerHTML = `
+        <div class="flex items-center justify-between gap-2 mt-4 border-t border-neutral-200 dark:border-neutral-800 pt-3">
+            <div class="text-sm text-green-700 dark:text-green-400 font-medium">
+                ✅ ${t('sttCorrections.suggestions.promoted')}
+            </div>
+            <div class="flex gap-2">
+                <button onclick="window._pages.sttCorrections.closeApprove()" class="${tw.btnSecondary}">${t('common.close')}</button>
+                <button onclick="window._pages.sttCorrections.addAnotherRule()" class="${tw.btnPrimary}">+ ${t('sttCorrections.suggestions.addAnother')}</button>
+            </div>
+        </div>`;
+}
+
+function addAnotherRule() {
+    // Switch modal to manual-create mode and reset the input fields, but
+    // preserve the samples / call-context panel so the manager can keep
+    // referring to the transcript.
+    _approveState.id = null;
+    _approveState.mode = 'manual';
+    _approveState.previewShown = false;
+    _approveState.generatedBy = null;
+    _approveState.regexEditedManually = false;
+
+    const title = document.getElementById('suggModalTitle');
+    if (title) title.textContent = t('sttCorrections.suggestions.addAnotherTitle');
+
+    for (const id of ['suggReplacement', 'suggPattern']) {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+    }
+    const heardEl = document.getElementById('suggHeard');
+    if (heardEl) {
+        heardEl.readOnly = false;
+        heardEl.value = '';
+        heardEl.placeholder = t('sttCorrections.suggestions.heardPlaceholder');
+        heardEl.classList.remove('bg-neutral-50', 'dark:bg-neutral-800');
+        // Recheck similar rules whenever the manager changes the token.
+        heardEl.oninput = () => {
+            const tok = heardEl.value.trim();
+            const ctx = document.getElementById('suggContext').value;
+            if (tok.length >= 3) _checkSimilarForToken(tok, ctx);
+        };
+    }
+    const reasoningEl = document.getElementById('suggReasoning');
+    if (reasoningEl) reasoningEl.innerHTML = '';
+    const previewEl = document.getElementById('suggPreview');
+    if (previewEl) previewEl.innerHTML = `<span class="italic">${t('sttCorrections.suggestions.previewEmpty')}</span>`;
+    const similarEl = document.getElementById('suggSimilar');
+    if (similarEl) similarEl.innerHTML = '';
+
+    // Rewire the AI generate button — no suggestion_id in manual mode.
+    const genBtn = document.getElementById('suggGenBtn');
+    if (genBtn) {
+        genBtn.onclick = () => window._pages.sttCorrections.generateRegexManualMode();
+    }
+
+    // Restore the footer with Approve button (initially disabled).
+    const successBanner = document.querySelector('#sttSuggestModal .border-t.pt-3');
+    if (successBanner) {
+        successBanner.outerHTML = `
+            <div class="flex justify-end gap-2 mt-4 border-t border-neutral-200 dark:border-neutral-800 pt-3">
+                <button onclick="window._pages.sttCorrections.closeApprove()" class="${tw.btnSecondary}">${t('common.cancel')}</button>
+                <button id="suggApproveBtn" onclick="window._pages.sttCorrections.submitApprove('')" class="${tw.btnPrimary} opacity-50 cursor-not-allowed" disabled>${t('sttCorrections.suggestions.createRule')}</button>
+            </div>`;
+    }
+}
+
+async function generateRegexManualMode() {
+    // Same as generateRegexAI but doesn't require a suggestion_id — used
+    // by the "+ Add another rule" flow. Bypasses the /suggestions/{id}
+    // endpoint and calls the regex_generator internally by wrapping the
+    // token + replacement into the same request the backend expects.
+    const btn = document.getElementById('suggGenBtn');
+    const heard = document.getElementById('suggHeard').value.trim();
+    const replacement = document.getElementById('suggReplacement').value.trim();
+    const context_hint = document.getElementById('suggContext').value;
+    if (!heard) {
+        showToast(t('sttCorrections.suggestions.heardFirst'), 'error');
+        return;
+    }
+    if (!replacement) {
+        showToast(t('sttCorrections.suggestions.replacementFirst'), 'error');
+        return;
+    }
+    // No dedicated endpoint for token-only regex gen (LLM helper needs a
+    // suggestion for its sample transcripts). Fall back to a simple
+    // \bTOKEN\b pattern — same behaviour as the "fallback" branch of AI.
+    if (btn) { btn.disabled = true; btn.textContent = '⏳ ' + t('sttCorrections.suggestions.generating'); }
+    try {
+        const escaped = heard.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const pattern = `\\b${escaped}\\b`;
+        document.getElementById('suggPattern').value = pattern;
+        document.getElementById('suggReasoning').innerHTML = `
+            <span class="${tw.badgeYellow}">${t('sttCorrections.suggestions.fallbackBadge')}</span>
+            <span class="text-xs">${t('sttCorrections.suggestions.manualModeHint')}</span>`;
+        _approveState.generatedBy = 'manual';
+        _approveState.regexEditedManually = false;
+        _approveState.previewShown = false;
+        _updateApproveEnabled();
+        _clearPreview();
+    } finally {
+        if (btn) { btn.disabled = false; btn.textContent = '🤖 ' + t('sttCorrections.suggestions.generateAI'); }
     }
 }
 
@@ -868,4 +1039,5 @@ window._pages.sttCorrections = {
     openApprove, closeApprove, submitApprove, rejectSuggestion, rescan,
     generateRegexAI, runPreview, _onRegexEdit, _onFieldChange,
     toggleSampleContext,
+    addAnotherRule, generateRegexManualMode,
 };

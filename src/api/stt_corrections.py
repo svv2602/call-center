@@ -646,6 +646,59 @@ async def suggestion_generate_regex(
     return {**result_dict, "router_available": True}
 
 
+@router.get("/corrections/check-similar")
+async def check_similar_rules(
+    token: str,
+    context: str = "",
+    _: dict[str, Any] = _perm_r,
+) -> dict[str, Any]:
+    """Find already-existing rules whose pattern matches ``token``.
+
+    Used by the approve modal to warn the manager before they create a
+    potentially-duplicate rule. Returns up to 5 matches ordered by rule
+    position (older rules first — usually more general / longer-standing).
+
+    Context filtering: a rule whose context is 'any' or empty always
+    matches; a rule whose context differs from the caller's is skipped.
+    """
+    import re as re_mod
+
+    if not token:
+        return {"matches": []}
+
+    redis = await _get_redis()
+    rules = await load_corrections(redis, force=True)
+
+    caller_ctx = (context or "").strip().lower()
+    matches: list[dict[str, Any]] = []
+    for rule in rules:
+        if not rule.get("enabled", True):
+            continue
+        rule_ctx = str(rule.get("context_hint") or "").strip().lower()
+        if rule_ctx and rule_ctx != "any" and caller_ctx and rule_ctx != caller_ctx:
+            continue
+        pattern = rule.get("pattern") or ""
+        if not pattern:
+            continue
+        try:
+            if re_mod.search(pattern, token, re_mod.IGNORECASE):
+                matches.append(
+                    {
+                        "id": rule.get("id"),
+                        "pattern": pattern,
+                        "replacement": rule.get("replacement", ""),
+                        "context_hint": rule.get("context_hint") or "",
+                        "note": rule.get("note", ""),
+                    }
+                )
+                if len(matches) >= 5:
+                    break
+        except re_mod.error:
+            continue
+
+    return {"matches": matches, "token": token, "checked_context": caller_ctx}
+
+
 _SQL_CALL_CONTEXT = """
     SELECT turn_number, speaker,
            content AS text,

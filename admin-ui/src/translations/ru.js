@@ -747,6 +747,13 @@ export default {
     'sttCorrections.suggestions.samplesHideContext': '📞 Свернуть контекст',
     'sttCorrections.suggestions.samplesLoadingContext': 'Загружаем ±5 турна из звонка…',
     'sttCorrections.suggestions.samplesNoContext': 'Не удалось загрузить контекст (звонок мог быть удалён)',
+    'sttCorrections.suggestions.similarFound': '⚠ Уже есть похожее правило ({n}) для «{token}»',
+    'sttCorrections.suggestions.similarHint': 'Возможно, кто-то уже добавил правило на этот случай. Проверь список ниже — если оно покрывает твой сценарий, отклони эту подсказку и отредактируй существующее. Если нет — продолжай создавать новое.',
+    'sttCorrections.suggestions.addAnother': 'Ещё правило из этого же звонка',
+    'sttCorrections.suggestions.addAnotherTitle': 'Добавить ещё правило (из того же звонка)',
+    'sttCorrections.suggestions.heardPlaceholder': 'например: викторорок',
+    'sttCorrections.suggestions.heardFirst': 'Сначала заполни «что услышал бот»',
+    'sttCorrections.suggestions.manualModeHint': 'Быстрая заглушка (\\bTOKEN\\b). Отредактируй regex вручную если нужны падежи/варианты.',
     // STT Phrase Hints (standalone page)
     'nav.sttHints': 'Подсказки STT',
     'sttHints.base': 'Базовые',

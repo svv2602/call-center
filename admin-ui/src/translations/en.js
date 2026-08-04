@@ -747,6 +747,13 @@ export default {
     'sttCorrections.suggestions.samplesHideContext': '📞 Hide context',
     'sttCorrections.suggestions.samplesLoadingContext': 'Loading ±5 turns from the call…',
     'sttCorrections.suggestions.samplesNoContext': 'Failed to load context (call may have been deleted)',
+    'sttCorrections.suggestions.similarFound': '⚠ Existing rule found ({n}) for "{token}"',
+    'sttCorrections.suggestions.similarHint': 'A rule may already cover this case. Review below — if it does, reject this suggestion and edit the existing rule. Otherwise, proceed to create a new one.',
+    'sttCorrections.suggestions.addAnother': 'Another rule from the same call',
+    'sttCorrections.suggestions.addAnotherTitle': 'Add another rule (from the same call)',
+    'sttCorrections.suggestions.heardPlaceholder': 'e.g. викторорок',
+    'sttCorrections.suggestions.heardFirst': 'Fill in "what the bot heard" first',
+    'sttCorrections.suggestions.manualModeHint': 'Quick default (\\bTOKEN\\b). Edit the regex by hand if you need morphological variants.',
     // STT Phrase Hints (standalone page)
     'nav.sttHints': 'STT Hints',
     'sttHints.base': 'Base',
