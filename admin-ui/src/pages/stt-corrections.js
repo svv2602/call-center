@@ -130,16 +130,27 @@ function _renderRulesTab() {
     } else {
         for (const r of visible) {
             const ctx = r.context_hint || 'any';
-            const badge = ctx === 'any' ? tw.badgeNeutral : tw.badgeBlue;
+            const badge = ctx === 'any' ? tw.badgeGray : tw.badgeBlue;
             const statusBadge = r.enabled === false ? tw.badgeRed : tw.badgeGreen;
             const statusLabel = r.enabled === false ? t('sttCorrections.disabled') : t('sttCorrections.enabled');
+            const auditParts = [];
+            if (r.reviewer) auditParts.push(t('sttCorrections.audit.by', { user: escapeHtml(r.reviewer) }));
+            if (r.last_edited_by && r.last_edited_by !== r.reviewer) {
+                auditParts.push(t('sttCorrections.audit.editedBy', { user: escapeHtml(r.last_edited_by) }));
+            }
+            const auditLine = auditParts.length
+                ? `<div class="text-[10px] text-neutral-400 mt-0.5">${auditParts.join(' · ')}</div>`
+                : '';
             html += `
                 <tr>
                     <td class="${tw.td}"><code class="text-xs">${escapeHtml(r.pattern || '')}</code></td>
                     <td class="${tw.td}"><code class="text-xs">${escapeHtml(r.replacement || '')}</code></td>
                     <td class="${tw.td}"><span class="${badge}">${escapeHtml(ctx)}</span></td>
                     <td class="${tw.td}"><span class="${statusBadge}">${statusLabel}</span></td>
-                    <td class="${tw.td} text-xs text-neutral-500">${escapeHtml(r.note || '')}</td>
+                    <td class="${tw.td} text-xs text-neutral-500">
+                        ${escapeHtml(r.note || '')}
+                        ${auditLine}
+                    </td>
                     <td class="${tw.td} text-right whitespace-nowrap">
                         <button onclick="window._pages.sttCorrections.toggleEnabled('${escapeHtml(r.id)}')" class="text-blue-600 hover:underline text-sm cursor-pointer mr-2">${r.enabled === false ? t('sttCorrections.enable') : t('sttCorrections.disable')}</button>
                         <button onclick="window._pages.sttCorrections.openEdit('${escapeHtml(r.id)}')" class="text-blue-600 hover:underline text-sm cursor-pointer mr-2">${t('common.edit')}</button>

@@ -48,6 +48,19 @@ async def _get_redis() -> Redis:
     return await get_redis()
 
 
+def _who(user: dict[str, Any] | None) -> str:
+    """Extract the acting username from a JWT payload, safely.
+
+    Used as the ``reviewer`` field on any endpoint that mutates state.
+    Trusting the JWT is safe because require_permission has already
+    validated the token; using it (not a client-supplied field) prevents
+    spoofing the audit trail.
+    """
+    if not user:
+        return ""
+    return str(user.get("sub") or user.get("user_id") or "")
+
+
 class CorrectionRuleIn(BaseModel):
     """Input schema for create/update. ``id`` is server-generated on create."""
 
@@ -105,21 +118,29 @@ async def list_corrections(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
 
 @router.post("/corrections")
 async def create_correction(
-    body: CorrectionRuleIn, _: dict[str, Any] = _perm_w
+    body: CorrectionRuleIn, user: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Create a new rule. Server generates the ``id``."""
     redis = await _get_redis()
+    import time
+
+    payload = body.model_dump()
+    payload["reviewer"] = _who(user)
+    payload["created_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     try:
-        rule = await add_correction(redis, body.model_dump())
+        rule = await add_correction(redis, payload)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    logger.info("stt_corrections: created rule id=%s pattern=%s", rule["id"], rule["pattern"])
+    logger.info(
+        "stt_corrections: created rule id=%s by=%s pattern=%s",
+        rule["id"], payload["reviewer"], rule["pattern"],
+    )
     return {"rule": rule}
 
 
 @router.post("/corrections/bulk")
 async def bulk_create_corrections(
-    body: BulkRequest, _: dict[str, Any] = _perm_w
+    body: BulkRequest, user: dict[str, Any] = _perm_w
 ) -> dict[str, Any]:
     """Batch-insert rules. Each row is validated independently — a single bad
     row does not abort the rest. Returns per-row status plus totals.
@@ -162,11 +183,15 @@ async def bulk_create_corrections(
             )
             continue
 
+        import time as _time
+
         rule["id"] = uuid.uuid4().hex[:12]
         rule.setdefault("enabled", True)
         rule.setdefault("flags", "i")
         rule.setdefault("context_hint", "")
         rule.setdefault("note", "")
+        rule["reviewer"] = _who(user)
+        rule["created_at"] = _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime())
         to_add.append(rule)
         existing_patterns.add(rule["pattern"])
         results.append({"index": idx, "status": "created", "id": rule["id"]})
@@ -196,33 +221,41 @@ async def bulk_create_corrections(
 async def edit_correction(
     rule_id: str,
     body: CorrectionRulePatch,
-    _: dict[str, Any] = _perm_w,
+    user: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Merge non-None fields from ``body`` into the rule."""
+    import time
+
     redis = await _get_redis()
     patch = {k: v for k, v in body.model_dump().items() if v is not None}
     if not patch:
         raise HTTPException(status_code=400, detail="empty patch")
+    patch["last_edited_by"] = _who(user)
+    patch["last_edited_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     try:
         updated = await update_correction(redis, rule_id, patch)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if updated is None:
         raise HTTPException(status_code=404, detail="rule not found")
-    logger.info("stt_corrections: updated rule id=%s", rule_id)
+    logger.info(
+        "stt_corrections: updated rule id=%s by=%s", rule_id, patch["last_edited_by"]
+    )
     return {"rule": updated}
 
 
 @router.delete("/corrections/{rule_id}")
 async def remove_correction(
-    rule_id: str, _: dict[str, Any] = _perm_w
+    rule_id: str, user: dict[str, Any] = _perm_w
 ) -> dict[str, str]:
     """Delete a rule by id."""
     redis = await _get_redis()
     ok = await delete_correction(redis, rule_id)
     if not ok:
         raise HTTPException(status_code=404, detail="rule not found")
-    logger.info("stt_corrections: deleted rule id=%s", rule_id)
+    logger.info(
+        "stt_corrections: deleted rule id=%s by=%s", rule_id, _who(user)
+    )
     return {"status": "deleted", "id": rule_id}
 
 
@@ -410,7 +443,7 @@ _SQL_MARK_REJECTED = """
 async def approve_suggestion(
     suggestion_id: str,
     body: SuggestionApprove,
-    _: dict[str, Any] = _perm_w,
+    user: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Promote a suggestion into a real correction rule.
 
@@ -450,7 +483,10 @@ async def approve_suggestion(
             detail="pattern is empty — provide `pattern` in body or run rescan first",
         )
 
+    import time as _time
+
     redis = await _get_redis()
+    reviewer = _who(user)
     rule_payload = {
         "pattern": pattern,
         "replacement": replacement,
@@ -458,6 +494,8 @@ async def approve_suggestion(
         "enabled": True,
         "flags": "i",
         "note": body.note or f"auto-suggested from token '{row['bad_token']}'",
+        "reviewer": reviewer,
+        "created_at": _time.strftime("%Y-%m-%dT%H:%M:%SZ", _time.gmtime()),
     }
     try:
         rule = await add_correction(redis, rule_payload)
@@ -470,7 +508,7 @@ async def approve_suggestion(
             {
                 "id": suggestion_id,
                 "rule_id": rule["id"],
-                "reviewer": body.reviewer or "",
+                "reviewer": reviewer,
                 "generated_by": body.generated_by,
             },
         )
@@ -494,7 +532,7 @@ async def approve_suggestion(
 async def reject_suggestion(
     suggestion_id: str,
     body: SuggestionReject,
-    _: dict[str, Any] = _perm_w,
+    user: dict[str, Any] = _perm_w,
 ) -> dict[str, Any]:
     """Mark a suggestion as rejected — it won't be re-surfaced on rescan."""
     from sqlalchemy import text
@@ -506,7 +544,7 @@ async def reject_suggestion(
             {
                 "id": suggestion_id,
                 "reason": body.reason or "",
-                "reviewer": body.reviewer or "",
+                "reviewer": _who(user),
             },
         )
         if result.rowcount == 0:

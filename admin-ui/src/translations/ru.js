@@ -691,6 +691,8 @@ export default {
     'sttCorrections.importSkipped': 'Пропущено: {n}',
     'sttCorrections.importErrors': 'Ошибок: {n}',
     'sttCorrections.importDone': 'Импорт завершён: {n} правил',
+    'sttCorrections.audit.by': 'создал {user}',
+    'sttCorrections.audit.editedBy': 'изменил {user}',
     // Tabs + Auto-suggested corrections
     'sttCorrections.tabRules': 'Правила',
     'sttCorrections.tabSuggestions': 'Автоподсказки',

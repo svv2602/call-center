@@ -27,6 +27,13 @@ CONTENT_PERMISSIONS = [
     "prompts:read",
     "prompts:write",
     "prompts:delete",
+    # STT correction rules + auto-suggestions curation. Same tier as
+    # prompts — both shape bot behaviour on every call, and both benefit
+    # from the same review-by-content-manager workflow. The
+    # AI-generated regex + preview flow keeps blast radius manageable
+    # for non-experts.
+    "stt_corrections:read",
+    "stt_corrections:write",
 ]
 
 SYSTEM_PERMISSIONS = [
@@ -57,8 +64,8 @@ SYSTEM_PERMISSIONS = [
     "pronunciation:write",
     "stt_hints:read",
     "stt_hints:write",
-    "stt_corrections:read",
-    "stt_corrections:write",
+    # NOTE: stt_corrections:{read,write} intentionally moved to
+    # CONTENT_PERMISSIONS so the content_manager role gets them by default.
     "point_hints:read",
     "point_hints:write",
 ]

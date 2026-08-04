@@ -691,6 +691,8 @@ export default {
     'sttCorrections.importSkipped': 'Skipped: {n}',
     'sttCorrections.importErrors': 'Errors: {n}',
     'sttCorrections.importDone': 'Import done: {n} rules',
+    'sttCorrections.audit.by': 'by {user}',
+    'sttCorrections.audit.editedBy': 'edited by {user}',
     // Tabs + Auto-suggested corrections
     'sttCorrections.tabRules': 'Rules',
     'sttCorrections.tabSuggestions': 'Auto-suggested',
