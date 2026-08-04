@@ -255,6 +255,11 @@ function openApprove(id) {
         generatedBy: null,
         regexEditedManually: false,
         sourceCallId: (s.sample_transcripts && s.sample_transcripts[0] && s.sample_transcripts[0].call_id) || null,
+        // Retargeting: if manager clicks ✏ and edits "heard" to a different
+        // token, we switch behaviour on submit — create a manual rule for
+        // the new token AND reject the original suggestion with a note.
+        originalBadToken: s.bad_token || '',
+        heardChanged: false,
     };
 
     const samples = Array.isArray(s.sample_transcripts) ? s.sample_transcripts : [];
@@ -294,9 +299,12 @@ function openApprove(id) {
             <div id="suggSimilar"></div>
             ${samplesHtml}
 
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-3">
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-3 mb-1">
                 <div>
-                    <label class="block mb-1 text-sm font-medium">${t('sttCorrections.suggestions.heard')}</label>
+                    <label class="block mb-1 text-sm font-medium">
+                        ${t('sttCorrections.suggestions.heard')}
+                        <button id="suggHeardUnlock" onclick="window._pages.sttCorrections.unlockHeard()" class="ml-1 text-xs text-blue-600 hover:underline cursor-pointer" title="${t('sttCorrections.suggestions.heardUnlockTitle')}">✏ ${t('sttCorrections.suggestions.heardUnlock')}</button>
+                    </label>
                     <input id="suggHeard" class="${tw.formInput} w-full bg-neutral-50 dark:bg-neutral-800" value="${escapeHtml(s.bad_token || '')}" readonly/>
                 </div>
                 <div>
@@ -304,6 +312,7 @@ function openApprove(id) {
                     <input id="suggReplacement" class="${tw.formInput} w-full" value="${escapeHtml(s.proposed_replacement || '')}" placeholder="${t('sttCorrections.suggestions.replacementPlaceholder')}" oninput="window._pages.sttCorrections._onFieldChange()"/>
                 </div>
             </div>
+            <div id="suggHeardWarning" class="hidden mb-3 text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-300 dark:border-amber-700 rounded px-2 py-1"></div>
             <div class="mb-3">
                 <label class="block mb-1 text-sm font-medium">${t('sttCorrections.context')}</label>
                 <select id="suggContext" class="${tw.formInput} w-full" onchange="window._pages.sttCorrections._onFieldChange()">${_contextOptions(s.detected_context || 'any')}</select>
@@ -405,6 +414,27 @@ function _updateApproveEnabled() {
 function _clearPreview() {
     const el = document.getElementById('suggPreview');
     if (el) el.innerHTML = `<span class="italic">${t('sttCorrections.suggestions.previewStale')}</span>`;
+}
+
+function unlockHeard() {
+    const heardEl = document.getElementById('suggHeard');
+    const warnEl = document.getElementById('suggHeardWarning');
+    const unlockBtn = document.getElementById('suggHeardUnlock');
+    if (!heardEl) return;
+    heardEl.readOnly = false;
+    heardEl.classList.remove('bg-neutral-50', 'dark:bg-neutral-800');
+    heardEl.focus();
+    heardEl.select();
+    if (warnEl) {
+        warnEl.classList.remove('hidden');
+        warnEl.innerHTML = t('sttCorrections.suggestions.heardChangeWarning', {
+            original: escapeHtml(_approveState.originalBadToken || ''),
+        });
+    }
+    if (unlockBtn) unlockBtn.remove();
+    _approveState.heardChanged = true;
+    _approveState.previewShown = false;
+    _updateApproveEnabled();
 }
 
 async function toggleSampleContext(index, callId, turnNumber) {
@@ -559,10 +589,14 @@ async function submitApprove(id) {
         if (!confirm(t('sttCorrections.suggestions.emptyReplacementConfirm'))) return;
     }
     try {
-        // Two paths: (1) first rule from a pending suggestion → /approve;
-        // (2) subsequent rules added via "+ Ещё правило" → /corrections
-        // (manual create), keeping the call context visible.
-        if (_approveState.mode === 'suggestion' && id) {
+        // Three paths depending on mode + retargeting:
+        //   (1) suggestion mode, heard unchanged → /suggestions/{id}/approve
+        //       (creates rule + marks suggestion promoted in one shot)
+        //   (2) suggestion mode, heard CHANGED → /corrections (create rule
+        //       for the new token) THEN /suggestions/{id}/reject (drops
+        //       the misleading original with an explanation)
+        //   (3) manual mode ("+ Ещё правило" flow) → /corrections
+        if (_approveState.mode === 'suggestion' && id && !_approveState.heardChanged) {
             await api(`/admin/stt/corrections/suggestions/${encodeURIComponent(id)}/approve`, {
                 method: 'POST',
                 body: JSON.stringify({
@@ -579,6 +613,25 @@ async function submitApprove(id) {
                 }),
                 headers: { 'Content-Type': 'application/json' },
             });
+            // Retargeting path — also reject the original suggestion so it
+            // doesn't sit in the queue as a misleading pending item.
+            if (_approveState.mode === 'suggestion' && id && _approveState.heardChanged) {
+                const newHeard = document.getElementById('suggHeard').value.trim();
+                const reason = t('sttCorrections.suggestions.retargetRejectReason', {
+                    original: _approveState.originalBadToken || '?',
+                    newToken: newHeard || '?',
+                });
+                try {
+                    await api(`/admin/stt/corrections/suggestions/${encodeURIComponent(id)}/reject`, {
+                        method: 'POST',
+                        body: JSON.stringify({ reason }),
+                        headers: { 'Content-Type': 'application/json' },
+                    });
+                } catch (_) {
+                    // Non-fatal — rule was still created. Just log to console.
+                    console.warn('Retarget: rule created but original reject failed');
+                }
+            }
         }
         // Show inline success + "Add another" affordance instead of closing.
         _renderApproveSuccess();
@@ -1179,4 +1232,5 @@ window._pages.sttCorrections = {
     toggleSampleContext,
     addAnotherRule, generateRegexManualMode,
     runEditPreview, _onEditRegexChange,
+    unlockHeard,
 };
