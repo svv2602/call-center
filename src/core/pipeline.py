@@ -784,6 +784,47 @@ class CallPipeline:
             language=transcript.language,
         )
 
+    def _apply_entity_normalization(self, transcript: Transcript) -> Transcript:
+        """Normalize domain entities: tire sizes and brand phonetic aliases.
+
+        Runs unconditionally on every final transcript, independently of
+        whether Redis corrections fired. No-op when nothing matches.
+        """
+        if not transcript.text:
+            return transcript
+        try:
+            from src.stt.entity_normalizer import normalize_entities
+
+            context_hint: str | None = None
+            for turn in reversed(self._session.dialog_history):
+                if turn.speaker == "assistant" and turn.content:
+                    context_hint = _infer_context_hint(turn.content)
+                    break
+
+            new_text, n = normalize_entities(transcript.text, context_hint)
+            if n > 0 and new_text != transcript.text:
+                logger.info(
+                    "entity_normalizer: call=%s ctx=%s n=%d %r → %r",
+                    self._session.channel_uuid,
+                    context_hint,
+                    n,
+                    transcript.text[:120],
+                    new_text[:120],
+                )
+                return Transcript(
+                    text=new_text,
+                    is_final=transcript.is_final,
+                    confidence=transcript.confidence,
+                    language=transcript.language,
+                )
+        except Exception:
+            logger.warning(
+                "entity_normalizer: failed for call %s",
+                self._session.channel_uuid,
+                exc_info=True,
+            )
+        return transcript
+
     async def _transcript_processor_loop(self) -> None:
         """Process STT transcripts and drive the LLM → TTS flow."""
         logger.info(
@@ -843,6 +884,7 @@ class CallPipeline:
             # inferred from the bot's last utterance so rules like
             # "17:25 → 1725" only fire when we were asking for a plate.
             transcript = await self._apply_stt_corrections(transcript)
+            transcript = self._apply_entity_normalization(transcript)
 
             # Got a final transcript — reset timeout and track language
             self._session.timeout_count = 0
