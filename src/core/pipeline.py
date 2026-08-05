@@ -619,14 +619,21 @@ class CallPipeline:
             async for transcript in self._stt.get_transcripts():
                 if transcript.is_final and transcript.text.strip():
                     await self._final_transcript_queue.put(transcript)
-                elif not transcript.is_final and transcript.text.strip() and self._speaking:
-                    self._barge_in_event.set()
-                    barge_in_total.inc()
-                    logger.info(
-                        "Barge-in signal: interim '%s' while speaking: %s",
-                        transcript.text[:30],
-                        self._session.channel_uuid,
-                    )
+                elif not transcript.is_final and transcript.text.strip():
+                    if self._speaking:
+                        self._barge_in_event.set()
+                        barge_in_total.inc()
+                        logger.info(
+                            "Barge-in signal: interim '%s' while speaking: %s",
+                            transcript.text[:30],
+                            self._session.channel_uuid,
+                        )
+                    else:
+                        logger.info(
+                            "STT interim (listening): '%s' for %s",
+                            transcript.text[:50],
+                            self._session.channel_uuid,
+                        )
         finally:
             # Signal queue reader that STT stream has ended
             await self._final_transcript_queue.put(None)
