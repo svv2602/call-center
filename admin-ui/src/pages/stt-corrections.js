@@ -52,6 +52,15 @@ async function _reloadSuggestions() {
     }
 }
 
+async function _reloadRules() {
+    try {
+        const data = await api('/admin/stt/corrections');
+        _rules = data.rules || [];
+    } catch (_) {
+        // Non-fatal — keep old cache
+    }
+}
+
 function switchTab(tab) {
     _activeTab = tab;
     render();
@@ -696,7 +705,11 @@ async function submitApprove(id) {
         }
         // Show inline success + "Add another" affordance instead of closing.
         _renderApproveSuccess();
-        await _reloadSuggestions();
+        // Refresh both tables — a new rule was just created and (in the
+        // suggestion flow) the source suggestion was promoted/rejected.
+        // Modal lives at document.body level, so render() won't affect it.
+        await Promise.all([_reloadSuggestions(), _reloadRules()]);
+        render();
     } catch (e) {
         showToast(t('sttCorrections.saveFailed', { error: e.message }), 'error');
     }
