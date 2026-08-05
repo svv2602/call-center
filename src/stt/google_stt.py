@@ -26,6 +26,10 @@ _SESSION_RESTART_SECONDS = 290  # restart slightly before 5 min limit
 # Google STT v2 inline PhraseSet limit
 _MAX_PHRASE_HINTS = 1200
 
+# Process-level cache: (model, location) -> adaptation supported?
+# Populated on first call. Avoids a known-bad attempt 1 on every subsequent call.
+_adaptation_capability: dict[tuple[str, str], bool] = {}
+
 
 def _build_adaptation(
     phrase_hints: tuple[str, ...],
@@ -258,9 +262,22 @@ class GoogleSTTEngine:
         location = self._config.location if self._config else "global"
         recognizer = f"projects/{self._project_id}/locations/{location}/recognizers/_"
 
-        # Try with adaptation first; if recognizer doesn't support it, retry without
+        # Try with adaptation first; if recognizer doesn't support it, retry without.
+        # _adaptation_capability caches the result process-wide so subsequent calls
+        # skip the known-bad attempt 1 silently instead of logging an error each time.
         has_any_hints = bool(self._config.phrase_hints or self._config.boost_phrases)
-        for attempt, use_adaptation in enumerate((True, False)):
+        cache_key = (self._config.model, self._config.location)
+        adaptation_known_unsupported = _adaptation_capability.get(cache_key) is False
+
+        if adaptation_known_unsupported and has_any_hints:
+            logger.debug(
+                "STT skipping adaptation attempt (cached unsupported): model=%s, location=%s",
+                self._config.model,
+                self._config.location,
+            )
+
+        attempts = (True, False) if not adaptation_known_unsupported else (False,)
+        for attempt, use_adaptation in enumerate(attempts):
             if attempt > 0 and not has_any_hints:
                 # No point retrying without adaptation if there were no hints
                 break
@@ -290,16 +307,19 @@ class GoogleSTTEngine:
 
             try:
                 await self._run_streaming(recognizer, streaming_config)
+                if use_adaptation:
+                    _adaptation_capability[cache_key] = True
                 return  # normal exit
             except asyncio.CancelledError:
                 raise
             except Exception:
-                if attempt == 0 and has_any_hints:
+                if use_adaptation and has_any_hints:
+                    _adaptation_capability[cache_key] = False
                     logger.warning(
-                        "STT recognition failed with adaptation (%s), "
-                        "retrying with %s without phrase hints",
+                        "STT adaptation unsupported for model=%s location=%s — "
+                        "will skip adaptation on future calls this session",
                         model,
-                        self._config.model,
+                        self._config.location,
                     )
                     continue
                 logger.exception("STT recognition error")
