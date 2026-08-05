@@ -548,13 +548,14 @@ async function generateRegexAI(id) {
     try {
         const replacement = document.getElementById('suggReplacement').value.trim();
         const context_hint = document.getElementById('suggContext').value;
+        const bad_token = document.getElementById('suggHeard').value.trim();
         if (!replacement) {
             showToast(t('sttCorrections.suggestions.replacementFirst'), 'error');
             return;
         }
         const r = await api(`/admin/stt/corrections/suggestions/${encodeURIComponent(id)}/generate-regex`, {
             method: 'POST',
-            body: JSON.stringify({ replacement, context_hint }),
+            body: JSON.stringify({ bad_token, replacement, context_hint }),
             headers: { 'Content-Type': 'application/json' },
         });
         document.getElementById('suggPattern').value = r.pattern || '';

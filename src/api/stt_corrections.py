@@ -321,9 +321,12 @@ class GenerateRegexRequest(BaseModel):
 
     ``replacement`` is the human-readable "what the customer meant";
     ``context_hint`` narrows the morphology dictionary the LLM draws from.
-    Both are optional overrides — defaults come from the stored suggestion.
+    ``bad_token`` overrides the stored suggestion's token when the manager
+    retargets the rule to a different word (retargeting flow via ✏).
+    All fields are optional overrides — defaults come from the stored suggestion.
     """
 
+    bad_token: str | None = Field(default=None, max_length=500)
     replacement: str | None = Field(default=None, max_length=500)
     context_hint: str | None = Field(default=None)
 
@@ -623,6 +626,8 @@ async def suggestion_generate_regex(
     if row is None:
         raise HTTPException(status_code=404, detail="suggestion not found")
 
+    bad_token = ((body.bad_token or "").strip()) or row["bad_token"]
+
     router_obj = get_router()
     if router_obj is None:
         # Router not initialised (e.g. FF_LLM_ROUTING_ENABLED=false) —
@@ -633,7 +638,7 @@ async def suggestion_generate_regex(
 
         _ = re_mod  # keep import used
         return {
-            **_fallback(row["bad_token"], body.replacement or row["proposed_replacement"] or ""),
+            **_fallback(bad_token, body.replacement or row["proposed_replacement"] or ""),
             "router_available": False,
         }
 
@@ -646,7 +651,7 @@ async def suggestion_generate_regex(
 
     result_dict = await generate_regex(
         router_obj,
-        bad_token=row["bad_token"],
+        bad_token=bad_token,
         replacement=replacement,
         context=context,
         samples=samples,
