@@ -2336,7 +2336,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     continue
                 _text = _turn.content.lower()
                 for _kw, _wd in _weekday_map.items():
-                    if _kw in _text:
+                    if re.search(r"\b" + re.escape(_kw), _text):
                         _requested_wd = _wd
                         break
                 if _requested_wd is not None:
