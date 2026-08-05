@@ -374,7 +374,7 @@ function openApprove(id) {
 
             <label class="block mb-1 text-sm">${t('sttCorrections.note')}</label>
             <input id="suggNote" class="${tw.formInput} w-full mb-4" value="${escapeHtml(noteDefault)}" placeholder="${t('sttCorrections.suggestions.notePlaceholder')}"/>
-            <div class="flex justify-end gap-2">
+            <div id="suggFooter" class="flex justify-end gap-2">
                 <button onclick="window._pages.sttCorrections.closeApprove()" class="${tw.btnSecondary}">${t('common.cancel')}</button>
                 <button id="suggApproveBtn" onclick="${submitOnclick}" class="${tw.btnPrimary} opacity-50 cursor-not-allowed" disabled>${t('sttCorrections.suggestions.createRule')}</button>
             </div>
@@ -703,22 +703,19 @@ async function submitApprove(id) {
 }
 
 function _renderApproveSuccess() {
-    // Replace the footer button row with a success banner + two actions.
-    // The modal body stays open so the manager can see the samples/call
-    // context and add another rule from the same source without hunting.
-    const btn = document.getElementById('suggApproveBtn');
-    if (!btn) return;
-    const footer = btn.parentElement;
+    // Swap footer buttons for a success banner + two actions. The modal
+    // body (including the samples/call-context panel) stays intact so the
+    // manager can keep referring to the transcript.
+    const footer = document.getElementById('suggFooter');
     if (!footer) return;
-    footer.outerHTML = `
-        <div class="flex items-center justify-between gap-2 mt-4 border-t border-neutral-200 dark:border-neutral-800 pt-3">
-            <div class="text-sm text-green-700 dark:text-green-400 font-medium">
-                ✅ ${t('sttCorrections.suggestions.promoted')}
-            </div>
-            <div class="flex gap-2">
-                <button onclick="window._pages.sttCorrections.closeApprove()" class="${tw.btnSecondary}">${t('common.close')}</button>
-                <button onclick="window._pages.sttCorrections.addAnotherRule()" class="${tw.btnPrimary}">+ ${t('sttCorrections.suggestions.addAnother')}</button>
-            </div>
+    footer.className = 'flex items-center justify-between gap-2 mt-4 border-t border-neutral-200 dark:border-neutral-800 pt-3';
+    footer.innerHTML = `
+        <div class="text-sm text-green-700 dark:text-green-400 font-medium">
+            ✅ ${t('sttCorrections.suggestions.promoted')}
+        </div>
+        <div class="flex gap-2">
+            <button onclick="window._pages.sttCorrections.closeApprove()" class="${tw.btnSecondary}">${t('common.close')}</button>
+            <button onclick="window._pages.sttCorrections.addAnotherRule()" class="${tw.btnPrimary}">+ ${t('sttCorrections.suggestions.addAnother')}</button>
         </div>`;
 }
 
@@ -744,7 +741,11 @@ function addAnotherRule() {
         heardEl.readOnly = false;
         heardEl.value = '';
         heardEl.placeholder = t('sttCorrections.suggestions.heardPlaceholder');
-        heardEl.classList.remove('bg-neutral-50', 'dark:bg-neutral-800');
+        // Only drop the light-mode readonly tint; dark:bg-neutral-800 is
+        // shared with tw.formInput — removing it leaves bg-white in dark
+        // mode and makes the near-white text unreadable (same gotcha as
+        // unlockHeard()).
+        heardEl.classList.remove('bg-neutral-50');
         // Recheck similar rules whenever the manager changes the token.
         heardEl.oninput = () => {
             const tok = heardEl.value.trim();
@@ -765,14 +766,15 @@ function addAnotherRule() {
         genBtn.onclick = () => window._pages.sttCorrections.generateRegexManualMode();
     }
 
-    // Restore the footer with Approve button (initially disabled).
-    const successBanner = document.querySelector('#sttSuggestModal .border-t.pt-3');
-    if (successBanner) {
-        successBanner.outerHTML = `
-            <div class="flex justify-end gap-2 mt-4 border-t border-neutral-200 dark:border-neutral-800 pt-3">
-                <button onclick="window._pages.sttCorrections.closeApprove()" class="${tw.btnSecondary}">${t('common.cancel')}</button>
-                <button id="suggApproveBtn" onclick="window._pages.sttCorrections.submitApprove('')" class="${tw.btnPrimary} opacity-50 cursor-not-allowed" disabled>${t('sttCorrections.suggestions.createRule')}</button>
-            </div>`;
+    // Restore the footer with Approve button (initially disabled). Target
+    // by stable #suggFooter id — a class-based selector matches the samples
+    // panel first (same border-t/pt-3 classes) and would nuke it.
+    const footer = document.getElementById('suggFooter');
+    if (footer) {
+        footer.className = 'flex justify-end gap-2';
+        footer.innerHTML = `
+            <button onclick="window._pages.sttCorrections.closeApprove()" class="${tw.btnSecondary}">${t('common.cancel')}</button>
+            <button id="suggApproveBtn" onclick="window._pages.sttCorrections.submitApprove('')" class="${tw.btnPrimary} opacity-50 cursor-not-allowed" disabled>${t('sttCorrections.suggestions.createRule')}</button>`;
     }
 }
 
