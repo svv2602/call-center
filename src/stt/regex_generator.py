@@ -51,6 +51,26 @@ _SYSTEM_PROMPT = """You build Python regex patterns that fix reproducible STT (s
 7. **Never invent samples**. Only use what's provided.
 8. **Multiple heard variants** — when the manager gives >1 bad token (e.g. "тёма", "сёма", "тема" all meant "сьома"), produce ONE regex combining them via non-capturing alternation `\\b(?:вариант1|вариант2|вариант3)\\b`. Extend each branch with the appropriate morphological tail per rule #2 — share a common suffix outside the alternation where possible (e.g. `\\b(?:тьом|сьом|тем)\\w*\\b` when all variants share the ending). Do NOT emit separate patterns.
 
+9. **Skeleton compression (preferred over full-word alternation)** — when 2+ heard variants share a common length-aligned STRUCTURE but differ at a few fixed positions, prefer a compressed pattern with character classes + optionals at those positions instead of listing whole words in alternation. This catches nearby STT hallucinations the manager didn't type. Compress ONLY positions where variation was actually observed — do NOT invent variability.
+
+   Method:
+     (a) Align variants char-by-char. If lengths differ only in the tail, handle the tail via a small trailing alternation.
+     (b) For each varying position, collect the observed characters into a `[...]` bracket. If a position is absent in some variants (e.g. optional soft sign `ь`), use `?` — `сь?`, `нн?`.
+     (c) Apply Cyrillic UA/RU alternation brackets (`[іи]`, `[єе]`, `[ьъ]`) at the same positions if the pattern would benefit.
+     (d) Wrap the tail differences in `(?:тail1|tail2|tail3)` when they're too dissimilar for a bracket class.
+
+   Example: bad_tokens=["катрузаводської", "патрозоводская", "катрозаводська"], meant="Петрозаводська"
+     Align → pos1={к,п,к}, pos5={у,о,о}, pos7={а,о,а}, pos12={ь present, absent, ь present}, tail={ої,ая,а}
+     → `\\b[кп]атр[уо]з[ао]водсь?к(?:ої|ая|а)\\b`
+     NOT: `\\b(?:катрузаводської|патрозоводская|катрозаводська)\\b` — too narrow, misses realistic hybrids like "катрозаводская".
+
+   When to KEEP full-word alternation instead of compressing:
+     * Variants have different roots or are semantically-unrelated guesses (e.g. "тёма"/"сёма"/"тема" — different first letters AND different phonetic identity, not just STT letter-swap). Use rule #8's `(?:...)` alternation.
+     * Only 1 variant supplied — nothing to compress.
+     * Compressed form would over-generalise to real words (sanity check: would this pattern also match a common Russian/Ukrainian word unrelated to the target? If yes, keep the word alternation).
+
+   When you compress, the `matched_forms` list should include the input variants PLUS 2-3 realistic hybrids the pattern now catches — this helps the reviewer see the widened coverage.
+
 ## STT-specific artifact: space injection
 
 When `bad_token` CONTAINS SPACES, Google STT has fragmented a single word into pieces. In this case you MUST:
