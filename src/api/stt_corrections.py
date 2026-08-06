@@ -323,18 +323,28 @@ class GenerateRegexRequest(BaseModel):
     ``context_hint`` narrows the morphology dictionary the LLM draws from.
     ``bad_token`` overrides the stored suggestion's token when the manager
     retargets the rule to a different word (retargeting flow via ✏).
+    ``bad_tokens`` — multiple orthographic variants (e.g. "тёма", "сёма",
+    "тема") that all mean the same thing. When provided, the LLM combines
+    them into ONE alternation regex. Takes precedence over ``bad_token``.
     All fields are optional overrides — defaults come from the stored suggestion.
     """
 
     bad_token: str | None = Field(default=None, max_length=500)
+    bad_tokens: list[str] | None = Field(default=None, max_length=20)
     replacement: str | None = Field(default=None, max_length=500)
     context_hint: str | None = Field(default=None)
 
 
 class GenerateRegexDirectRequest(BaseModel):
-    """Generate regex directly from a bad_token without a stored suggestion."""
+    """Generate regex directly from bad_token(s) without a stored suggestion.
 
-    bad_token: str = Field(min_length=1, max_length=500)
+    Either ``bad_token`` (single) or ``bad_tokens`` (multi-variant) must
+    be non-empty. When both are provided, they are merged (order preserved,
+    duplicates dropped).
+    """
+
+    bad_token: str | None = Field(default=None, max_length=500)
+    bad_tokens: list[str] | None = Field(default=None, max_length=20)
     replacement: str = Field(default="", max_length=500)
     context_hint: str | None = Field(default=None)
 
@@ -626,19 +636,31 @@ async def suggestion_generate_regex(
     if row is None:
         raise HTTPException(status_code=404, detail="suggestion not found")
 
-    bad_token = ((body.bad_token or "").strip()) or row["bad_token"]
+    # Prefer explicit bad_tokens[] over single bad_token; fall back to the
+    # stored suggestion token when neither is provided.
+    stored_token = row["bad_token"]
+    override_single = (body.bad_token or "").strip()
+    override_multi = [t.strip() for t in (body.bad_tokens or []) if t and t.strip()]
+    if override_multi:
+        tokens_arg = override_multi
+    elif override_single:
+        tokens_arg = [override_single]
+    else:
+        tokens_arg = [stored_token] if stored_token else []
+    primary_token = tokens_arg[0] if tokens_arg else ""
 
     router_obj = get_router()
     if router_obj is None:
         # Router not initialised (e.g. FF_LLM_ROUTING_ENABLED=false) —
         # fall back to the deterministic default rather than 500ing.
-        import re as re_mod
-
         from src.stt.regex_generator import _fallback
 
-        _ = re_mod  # keep import used
         return {
-            **_fallback(bad_token, body.replacement or row["proposed_replacement"] or ""),
+            **_fallback(
+                primary_token,
+                body.replacement or row["proposed_replacement"] or "",
+                bad_tokens=tokens_arg,
+            ),
             "router_available": False,
         }
 
@@ -651,7 +673,7 @@ async def suggestion_generate_regex(
 
     result_dict = await generate_regex(
         router_obj,
-        bad_token=bad_token,
+        bad_tokens=tokens_arg,
         replacement=replacement,
         context=context,
         samples=samples,
@@ -672,11 +694,28 @@ async def generate_regex_direct(
     """
     from src.llm import get_router
 
+    # Combine both inputs — bad_tokens[] takes priority for order; single
+    # bad_token is appended if not already present.
+    tokens_arg = [t.strip() for t in (body.bad_tokens or []) if t and t.strip()]
+    if body.bad_token and body.bad_token.strip():
+        s = body.bad_token.strip()
+        if s not in tokens_arg:
+            tokens_arg.append(s)
+    if not tokens_arg:
+        raise HTTPException(
+            status_code=422,
+            detail="Provide bad_token or bad_tokens (at least one non-empty)",
+        )
+    primary_token = tokens_arg[0]
+
     router_obj = get_router()
     if router_obj is None:
         from src.stt.regex_generator import _fallback
 
-        return {**_fallback(body.bad_token, body.replacement), "router_available": False}
+        return {
+            **_fallback(primary_token, body.replacement, bad_tokens=tokens_arg),
+            "router_available": False,
+        }
 
     context = (body.context_hint or "any").strip() or "any"
 
@@ -684,7 +723,7 @@ async def generate_regex_direct(
 
     result_dict = await generate_regex(
         router_obj,
-        bad_token=body.bad_token,
+        bad_tokens=tokens_arg,
         replacement=body.replacement,
         context=context,
         samples=[],

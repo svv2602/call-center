@@ -17,6 +17,7 @@ from src.stt.regex_generator import (
     _extract_json,
     _fallback,
     _fix_space_injection,
+    _normalize_tokens,
     _validate_output,
     generate_regex,
 )
@@ -122,6 +123,70 @@ class TestFallback:
         import re as _re
         f = _fallback("один на дцать", "одинадцять")
         _re.compile(f["pattern"], _re.IGNORECASE)
+
+    def test_fallback_multi_token_uses_alternation(self) -> None:
+        import re as _re
+        f = _fallback("тьома", "сьома", bad_tokens=["тьома", "сьома", "тема"])
+        # Alternation branch with all three variants.
+        assert r"\b(?:" in f["pattern"]
+        assert r")\b" in f["pattern"]
+        # Each variant matches.
+        for tok in ["тьома", "сьома", "тема"]:
+            assert _re.search(f["pattern"], tok, _re.IGNORECASE), (
+                f"pattern {f['pattern']!r} did not match {tok!r}"
+            )
+        # matched_forms lists all three.
+        assert set(f["matched_forms"]) == {"тьома", "сьома", "тема"}
+        assert f["fallback"] is True
+
+    def test_fallback_list_positional_arg(self) -> None:
+        # Callers may pass the list directly instead of via the kwarg.
+        import re as _re
+        f = _fallback(["тьома", "сьома"], "сьома")
+        assert set(f["matched_forms"]) == {"тьома", "сьома"}
+        for tok in ["тьома", "сьома"]:
+            assert _re.search(f["pattern"], tok, _re.IGNORECASE)
+
+    def test_fallback_multi_token_dedups(self) -> None:
+        # Duplicates are dropped, order preserved.
+        f = _fallback("тьома", "сьома", bad_tokens=["тьома", "сьома", "тьома"])
+        assert f["matched_forms"] == ["тьома", "сьома"]
+
+    def test_fallback_multi_token_with_space_variant(self) -> None:
+        # Mixed: one variant has fragments, the other doesn't.
+        import re as _re
+        f = _fallback(
+            "одинадцять", "одинадцять",
+            bad_tokens=["одинадцять", "один на дцать"],
+        )
+        # Both spaced and fused forms must match.
+        assert _re.search(f["pattern"], "одинадцять", _re.IGNORECASE)
+        assert _re.search(f["pattern"], "один на дцать", _re.IGNORECASE)
+
+
+class TestNormalizeTokens:
+    def test_single_bad_token(self) -> None:
+        assert _normalize_tokens("foo", None) == ["foo"]
+
+    def test_bad_tokens_list_only(self) -> None:
+        assert _normalize_tokens(None, ["foo", "bar"]) == ["foo", "bar"]
+
+    def test_both_merged_order_preserved(self) -> None:
+        # bad_tokens[] comes first, single bad_token appended if not dup.
+        assert _normalize_tokens("baz", ["foo", "bar"]) == ["foo", "bar", "baz"]
+
+    def test_duplicates_removed(self) -> None:
+        assert _normalize_tokens("foo", ["foo", "bar", "foo"]) == ["foo", "bar"]
+
+    def test_whitespace_stripped(self) -> None:
+        assert _normalize_tokens("  foo  ", ["  bar  "]) == ["bar", "foo"]
+
+    def test_empty_and_none_dropped(self) -> None:
+        assert _normalize_tokens("", ["", None, "foo", "  "]) == ["foo"]
+
+    def test_all_empty_yields_empty_list(self) -> None:
+        assert _normalize_tokens(None, None) == []
+        assert _normalize_tokens("", []) == []
 
 
 @pytest.mark.asyncio
@@ -245,6 +310,81 @@ class TestGenerateRegex:
         assert re.search(result["pattern"], "одиннадцать", re.IGNORECASE)
         assert re.search(result["pattern"], "один надцять", re.IGNORECASE)
 
+    async def test_multi_token_llm_alternation_returned(self) -> None:
+        # LLM returns one alternation regex covering all heard variants.
+        router = AsyncMock()
+        router.complete.return_value = _StubResponse(
+            text='{"pattern": "\\\\b(?:тьом|сьом|тем)\\\\w*\\\\b", '
+                 '"matched_forms": ["тьома", "сьома", "тема", "тьомі"], '
+                 '"reasoning": "combined alternation with shared morphology"}'
+        )
+        result = await generate_regex(
+            router,
+            bad_tokens=["тьома", "сьома", "тема"],
+            replacement="сьома",
+            context="number",
+            samples=[],
+        )
+        assert result["fallback"] is False
+        import re
+        for tok in ["тьома", "сьома", "тема"]:
+            assert re.search(result["pattern"], tok, re.IGNORECASE), (
+                f"regex {result['pattern']!r} missed variant {tok!r}"
+            )
+
+    async def test_multi_token_falls_back_when_llm_pattern_matches_none(self) -> None:
+        # LLM went off-topic — pattern matches no variant. Must fall back.
+        router = AsyncMock()
+        router.complete.return_value = _StubResponse(
+            text='{"pattern": "\\\\bxyz\\\\b", "matched_forms": ["xyz"], "reasoning": "?"}'
+        )
+        result = await generate_regex(
+            router,
+            bad_tokens=["тьома", "сьома"],
+            replacement="сьома",
+            context="number",
+            samples=[],
+        )
+        assert result["fallback"] is True
+        # Fallback is the alternation over both variants.
+        import re
+        for tok in ["тьома", "сьома"]:
+            assert re.search(result["pattern"], tok, re.IGNORECASE)
+
+    async def test_multi_token_passes_when_at_least_one_matches(self) -> None:
+        # LLM covers "тьома" and "тема" but misses "сьома" — should still be
+        # accepted (partial match is better than the deterministic fallback).
+        router = AsyncMock()
+        router.complete.return_value = _StubResponse(
+            text='{"pattern": "\\\\b(?:тьом|тем)\\\\w*\\\\b", '
+                 '"matched_forms": ["тьома", "тема"], '
+                 '"reasoning": "covers 2 of 3"}'
+        )
+        result = await generate_regex(
+            router,
+            bad_tokens=["тьома", "сьома", "тема"],
+            replacement="сьома",
+            context="number",
+            samples=[],
+        )
+        assert result["fallback"] is False
+
+    async def test_backward_compat_single_bad_token_kwarg(self) -> None:
+        # Old callers using bad_token= still work.
+        router = AsyncMock()
+        router.complete.return_value = _StubResponse(
+            text='{"pattern": "\\\\bfoo\\\\b", "matched_forms": ["foo"], "reasoning": "?"}'
+        )
+        result = await generate_regex(
+            router,
+            bad_token="foo",
+            replacement="bar",
+            context="any",
+            samples=[],
+        )
+        assert result["fallback"] is False
+        assert result["pattern"] == r"\bfoo\b"
+
     async def test_fused_form_passes_sanity_check(self) -> None:
         """Pattern matching fused bad_token passes sanity even without spaces."""
         # "один над цать" fused = "однадцать"; LLM might generate pattern for the fused form
@@ -273,58 +413,66 @@ import re as _re
 class TestFixSpaceInjection:
     def test_noop_when_no_spaces_in_bad_token(self) -> None:
         pat = r"\bодин\b"
-        assert _fix_space_injection(pat, "один") == pat
+        assert _fix_space_injection(pat, ["один"]) == pat
 
     def test_noop_when_pattern_already_uses_s_star(self) -> None:
         pat = r"\bодин\s*над\s*цать\b"
-        result = _fix_space_injection(pat, "один над цать")
+        result = _fix_space_injection(pat, ["один над цать"])
         assert result == pat
 
     def test_noop_when_pattern_has_no_spaces(self) -> None:
         # bad_token has spaces but pattern somehow has none (unlikely but handled)
         pat = r"\bоднадцать\b"
-        result = _fix_space_injection(pat, "один над цать")
+        result = _fix_space_injection(pat, ["один над цать"])
         assert result == pat
 
     def test_gpt_plain_spaces_become_s_star(self) -> None:
         pat = r"\bодин на дцать\b"
-        fixed = _fix_space_injection(pat, "один на дцать")
+        fixed = _fix_space_injection(pat, ["один на дцать"])
         assert fixed == r"\bодин\s*на\s*дцать\b"
         assert _re.compile(fixed, _re.IGNORECASE)
 
     def test_gemini_escaped_spaces_become_s_star(self) -> None:
         # Build pattern with actual backslash-space sequences
         pat = "\x5cbодин\x5c над\x5c цать\x5cb"   # \bодин\ над\ цать\b
-        fixed = _fix_space_injection(pat, "один над цать")
+        fixed = _fix_space_injection(pat, ["один над цать"])
         assert fixed == r"\bодин\s*над\s*цать\b"
         assert _re.compile(fixed, _re.IGNORECASE)
 
     def test_result_matches_spaced_form(self) -> None:
         pat = r"\bодин на дцать\b"
-        fixed = _fix_space_injection(pat, "один на дцать")
+        fixed = _fix_space_injection(pat, ["один на дцать"])
         assert _re.search(fixed, "один на дцать", _re.IGNORECASE)
 
     def test_result_matches_fused_form(self) -> None:
         pat = r"\bодин на дцать\b"
-        fixed = _fix_space_injection(pat, "один на дцать")
+        fixed = _fix_space_injection(pat, ["один на дцать"])
         # Fused: "один" + "на" + "дцать" = "одиннадцать" (spaces removed)
         assert _re.search(fixed, "одиннадцать", _re.IGNORECASE)
 
     def test_result_matches_single_space_variant(self) -> None:
         pat = r"\bодин на дцать\b"
-        fixed = _fix_space_injection(pat, "один на дцать")
+        fixed = _fix_space_injection(pat, ["один на дцать"])
         assert _re.search(fixed, "один надцать", _re.IGNORECASE)
 
     def test_gemini_result_matches_fused_russian(self) -> None:
         pat = "\x5cbодин\x5c над\x5c цать\x5cb"
-        fixed = _fix_space_injection(pat, "один над цать")
+        fixed = _fix_space_injection(pat, ["один над цать"])
         assert _re.search(fixed, "одиннадцать", _re.IGNORECASE)
 
     def test_output_is_valid_regex(self) -> None:
         for bad in ["один на дцать", "два на дцять", "три над цять"]:
             pat = r"\b" + bad + r"\b"
-            fixed = _fix_space_injection(pat, bad)
+            fixed = _fix_space_injection(pat, [bad])
             _re.compile(fixed, _re.IGNORECASE)   # must not raise
+
+    def test_multi_token_triggers_fix_when_any_has_spaces(self) -> None:
+        # Alternation over a mix: one variant is space-split.
+        pat = r"\b(?:один на дцать|одинадцять)\b"
+        fixed = _fix_space_injection(pat, ["одинадцять", "один на дцать"])
+        assert r"\s*" in fixed
+        assert _re.search(fixed, "один на дцать", _re.IGNORECASE)
+        assert _re.search(fixed, "одинадцять", _re.IGNORECASE)
 
 
 # ---------------------------------------------------------------------------
@@ -334,38 +482,57 @@ class TestFixSpaceInjection:
 
 class TestBuildUserMessage:
     def test_no_spaces_no_hint(self) -> None:
-        msg = _build_user_message("приятный", "пʼятницю", "date", [])
+        msg = _build_user_message(["приятный"], "пʼятницю", "date", [])
         assert "SPACE-INJECTION" not in msg
 
     def test_spaces_trigger_hint(self) -> None:
-        msg = _build_user_message("один над цать", "одинадцять", "number", [])
+        msg = _build_user_message(["один над цать"], "одинадцять", "number", [])
         assert "SPACE-INJECTION DETECTED" in msg
 
     def test_hint_lists_fragments(self) -> None:
-        msg = _build_user_message("один над цать", "одинадцять", "number", [])
+        msg = _build_user_message(["один над цать"], "одинадцять", "number", [])
         assert "'один'" in msg
         assert "'над'" in msg
         assert "'цать'" in msg
 
     def test_hint_fragment_count(self) -> None:
-        msg = _build_user_message("один над цать", "одинадцять", "number", [])
+        msg = _build_user_message(["один над цать"], "одинадцять", "number", [])
         assert "3 fragments" in msg
 
     def test_samples_included_in_message(self) -> None:
         samples = ["він сказав один над цать"]
-        msg = _build_user_message("один над цать", "одинадцять", "any", samples)
+        msg = _build_user_message(["один над цать"], "одинадцять", "any", samples)
         assert "він сказав один над цать" in msg
 
     def test_samples_capped_at_5(self) -> None:
         samples = [f"sample {i}" for i in range(10)]
-        msg = _build_user_message("token", "rep", "any", samples)
+        msg = _build_user_message(["token"], "rep", "any", samples)
         assert "sample 4" in msg
         assert "sample 5" not in msg
 
     def test_context_appears_in_message(self) -> None:
-        msg = _build_user_message("bad", "good", "plate", [])
+        msg = _build_user_message(["bad"], "good", "plate", [])
         assert "plate" in msg
 
     def test_replacement_appears_in_message(self) -> None:
-        msg = _build_user_message("bad", "одинадцять", "any", [])
+        msg = _build_user_message(["bad"], "одинадцять", "any", [])
         assert "одинадцять" in msg
+
+    def test_single_token_uses_singular_wording(self) -> None:
+        msg = _build_user_message(["приятный"], "пʼятницю", "date", [])
+        assert "Bad token (what STT heard)" in msg
+        # No multi-variant marker.
+        assert "multiple orthographic variants" not in msg
+
+    def test_multi_token_uses_plural_wording_and_lists_all(self) -> None:
+        msg = _build_user_message(
+            ["тьома", "сьома", "тема"], "сьома", "number", []
+        )
+        # Multi-mode section header + all variants listed.
+        assert "multiple orthographic variants" in msg
+        assert "'тьома'" in msg
+        assert "'сьома'" in msg
+        assert "'тема'" in msg
+        # Explicit instruction to produce ONE regex.
+        assert "ONE regex" in msg
+        assert "alternation" in msg

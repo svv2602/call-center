@@ -49,6 +49,7 @@ _SYSTEM_PROMPT = """You build Python regex patterns that fix reproducible STT (s
 5. **Case-insensitive flag `i` is applied by the runtime** — do NOT emit `(?i)` in the pattern, and don't add capital-letter alternatives.
 6. **Replacement is literal** — no backreferences unless you also captured a group you want to preserve (rare — usually the prefix/suffix is discarded).
 7. **Never invent samples**. Only use what's provided.
+8. **Multiple heard variants** — when the manager gives >1 bad token (e.g. "тёма", "сёма", "тема" all meant "сьома"), produce ONE regex combining them via non-capturing alternation `\\b(?:вариант1|вариант2|вариант3)\\b`. Extend each branch with the appropriate morphological tail per rule #2 — share a common suffix outside the alternation where possible (e.g. `\\b(?:тьом|сьом|тем)\\w*\\b` when all variants share the ending). Do NOT emit separate patterns.
 
 ## STT-specific artifact: space injection
 
@@ -108,8 +109,39 @@ _MAX_SAMPLES_FOR_PROMPT = 5
 _FALLBACK_MAX_MATCHED = 12
 
 
-def _fix_space_injection(pattern: str, bad_token: str) -> str:
-    """Replace literal spaces in pattern with \\s* when bad_token was space-fragmented.
+def _normalize_tokens(
+    bad_token: str | None, bad_tokens: list[str] | None
+) -> list[str]:
+    """Merge the two input forms into a de-duped ordered list of non-empty tokens."""
+    result: list[str] = []
+    seen: set[str] = set()
+    for tok in (bad_tokens or []):
+        s = (tok or "").strip()
+        if s and s not in seen:
+            seen.add(s)
+            result.append(s)
+    if bad_token:
+        s = bad_token.strip()
+        if s and s not in seen:
+            result.append(s)
+            seen.add(s)
+    return result
+
+
+def _token_fragment_pattern(token: str) -> str:
+    """Build the inner pattern for a single token (no outer \\b, no group).
+
+    Space-injected tokens (containing whitespace) become fragments joined
+    by ``\\s*`` — matches both the STT-split form and the fused form.
+    """
+    if " " in token:
+        fragments = [re.escape(f) for f in token.strip().split()]
+        return r"\s*".join(fragments)
+    return re.escape(token)
+
+
+def _fix_space_injection(pattern: str, bad_tokens: list[str]) -> str:
+    """Replace literal spaces in pattern with \\s* when any token was space-fragmented.
 
     LLMs handle spaces in two ways:
       - Plain space:   \\bодин на дцать\\b   (GPT-style)
@@ -119,7 +151,7 @@ def _fix_space_injection(pattern: str, bad_token: str) -> str:
     case must be handled first: replacing \" \" first would turn \"\\ \" into
     \"\\\\s*\" (double-backslash) which breaks the regex.
     """
-    if " " not in bad_token:
+    if not any(" " in t for t in bad_tokens):
         return pattern
     has_escaped = "\\ " in pattern   # backslash + space (Gemini output)
     has_plain = " " in pattern        # plain space (GPT output)
@@ -136,27 +168,55 @@ def _fix_space_injection(pattern: str, bad_token: str) -> str:
         return pattern  # leave untouched if the substitution somehow breaks it
 
 
-def _fallback(bad_token: str, replacement: str) -> dict[str, Any]:
+def _fallback(
+    bad_token: str | list[str],
+    replacement: str,
+    bad_tokens: list[str] | None = None,
+) -> dict[str, Any]:
     """Safe default when the LLM cannot help.
 
-    When bad_token contains spaces the token was STT-fragmented; use \\s*
-    between fragments so the pattern matches both spaced and fused forms.
-    Python 3.12 re.escape() escapes spaces as "\\ " (for verbose-mode
-    safety), so we bypass re.escape for space-containing tokens.
+    Accepts either a single ``bad_token`` (str), a list via the ``bad_tokens``
+    kwarg, or a list directly as the first positional arg. Multiple tokens
+    are combined into one alternation: ``\\b(?:tok1|tok2)\\b``.
     """
-    if " " in bad_token:
-        fragments = [re.escape(f) for f in bad_token.strip().split()]
-        pattern = r"\b" + r"\s*".join(fragments) + r"\b"
+    # Normalise the positional arg — historical callers pass a string.
+    if isinstance(bad_token, list):
+        tokens = _normalize_tokens(None, bad_token)
+        primary_str = tokens[0] if tokens else ""
     else:
-        pattern = rf"\b{re.escape(bad_token)}\b"
+        tokens = _normalize_tokens(bad_token, bad_tokens)
+        primary_str = bad_token or (tokens[0] if tokens else "")
+
+    if not tokens:
+        # Degenerate case — return an impossible-to-match pattern rather than crash.
+        return {
+            "pattern": r"\b\Z\A\b",
+            "matched_forms": [],
+            "reasoning": "No heard-tokens provided.",
+            "fallback": True,
+        }
+
+    if len(tokens) == 1:
+        pattern = r"\b" + _token_fragment_pattern(tokens[0]) + r"\b"
+    else:
+        # Alternation: \b(?:tok1|tok2|tok3)\b — word boundaries at outer edges only.
+        branches = "|".join(_token_fragment_pattern(t) for t in tokens)
+        pattern = r"\b(?:" + branches + r")\b"
+
+    reasoning_suffix = (
+        " (single variant only)" if len(tokens) == 1
+        else f" ({len(tokens)} variants combined via alternation)"
+    )
     return {
         "pattern": pattern,
-        "matched_forms": [bad_token],
+        "matched_forms": tokens,
         "reasoning": (
-            "AI generation unavailable — using literal word-boundary match "
-            "for the observed token only."
+            "AI generation unavailable — using literal word-boundary match"
+            + reasoning_suffix
+            + "."
         ),
         "fallback": True,
+        "primary_token": primary_str,
     }
 
 
@@ -218,30 +278,54 @@ def _extract_json(text: str) -> dict[str, Any] | None:
 
 
 def _build_user_message(
-    bad_token: str,
+    bad_tokens: list[str],
     replacement: str,
     context: str,
     samples: list[str],
 ) -> str:
-    """Compose the concrete task the LLM sees."""
+    """Compose the concrete task the LLM sees.
+
+    ``bad_tokens`` — one or more heard variants that all mean the same thing.
+    When >1 the LLM must produce ONE regex covering all of them (alternation
+    plus shared morphology) rather than the first token only.
+    """
     sample_lines = "\n".join(f"  - {s!r}" for s in samples[:_MAX_SAMPLES_FOR_PROMPT])
     if not sample_lines:
         sample_lines = "  (none provided)"
 
     # Explicit hint when STT has clearly split a single word into fragments.
+    space_hint_parts = []
+    for tok in bad_tokens:
+        if " " in tok.strip():
+            fragments = tok.strip().split()
+            space_hint_parts.append(
+                f"{tok!r} has {len(fragments)} fragments "
+                f"({', '.join(repr(f) for f in fragments)})"
+            )
     space_hint = ""
-    if " " in bad_token.strip():
-        fragments = bad_token.strip().split()
+    if space_hint_parts:
         space_hint = (
-            f"\n[SPACE-INJECTION DETECTED: bad_token has {len(fragments)} fragments "
-            f"({', '.join(repr(f) for f in fragments)}). "
-            f"This is almost certainly one word that STT split. "
-            f"Apply \\s* between fragments and \\b only at the outer boundaries. "
-            f"Also apply Cyrillic alternation at fragment joints.]"
+            f"\n[SPACE-INJECTION DETECTED in: {'; '.join(space_hint_parts)}. "
+            f"STT split a single word. Apply \\s* between fragments and \\b "
+            f"only at the outer boundaries. Also apply Cyrillic alternation "
+            f"at fragment joints.]"
         )
 
+    if len(bad_tokens) > 1:
+        heard_block = (
+            "Bad tokens (multiple orthographic variants STT produced for the SAME meaning):\n"
+            + "\n".join(f"  - {t!r}" for t in bad_tokens)
+            + "\n"
+            + "→ Produce ONE regex covering ALL variants. Use non-capturing alternation "
+            + "`(?:variant1|variant2|...)` inside a single `\\b...\\b` pair. Extend each "
+            + "variant with the appropriate morphological tail per rule #2. Do NOT create "
+            + "separate regexes.\n"
+        )
+    else:
+        heard_block = f"Bad token (what STT heard): {bad_tokens[0]!r}\n"
+
     return (
-        f"Bad token (what STT heard): {bad_token!r}\n"
+        f"{heard_block}"
         f"Replacement (what the caller meant): {replacement!r}\n"
         f"Bot context (what was being asked): {context}\n"
         f"Real transcripts where this token appeared:\n{sample_lines}\n"
@@ -253,21 +337,30 @@ def _build_user_message(
 async def generate_regex(
     router: LLMRouter,
     *,
-    bad_token: str,
+    bad_token: str | None = None,
     replacement: str,
     context: str,
     samples: list[str] | None = None,
+    bad_tokens: list[str] | None = None,
 ) -> dict[str, Any]:
     """Ask the LLM to build a regex for a suggestion.
 
-    Returns a dict with keys: pattern, matched_forms, reasoning, fallback.
+    Accepts a single ``bad_token`` (back-compat) or a list ``bad_tokens``
+    of orthographic variants that all mean the same thing. When >1 variant
+    is supplied, the LLM is asked to combine them into ONE alternation
+    regex (still with shared morphology). Returns a dict with keys:
+    pattern, matched_forms, reasoning, fallback.
     Never raises — LLM failures degrade to _fallback() so the caller can
     still show *something* editable to the manager.
     """
     from src.llm.models import LLMTask
 
+    tokens = _normalize_tokens(bad_token, bad_tokens)
+    if not tokens:
+        return _fallback("", replacement)
+
     samples = samples or []
-    user_msg = _build_user_message(bad_token, replacement, context, samples)
+    user_msg = _build_user_message(tokens, replacement, context, samples)
 
     try:
         response = await router.complete(
@@ -278,44 +371,53 @@ async def generate_regex(
         )
     except Exception:
         logger.exception("regex_generator: LLM call failed")
-        return _fallback(bad_token, replacement)
+        return _fallback(tokens, replacement)
 
     raw = _extract_json(response.text)
     if not raw:
-        return _fallback(bad_token, replacement)
+        return _fallback(tokens, replacement)
 
     cleaned = _validate_output(raw)
     if not cleaned:
-        return _fallback(bad_token, replacement)
+        return _fallback(tokens, replacement)
 
     # Post-process: if LLM ignored the space-injection instruction and returned a
     # literal pattern with spaces, automatically replace them with \s*.
-    cleaned["pattern"] = _fix_space_injection(cleaned["pattern"], bad_token)
+    cleaned["pattern"] = _fix_space_injection(cleaned["pattern"], tokens)
 
-    # Sanity check: pattern must match either:
-    #   (a) the bad_token verbatim, OR
-    #   (b) the bad_token with all internal spaces collapsed (space-injection case).
-    # This guards against the LLM going completely off-topic.
-    fused = re.sub(r"\s+", "", bad_token)  # "один над цать" → "однадцать"
+    # Sanity check: pattern must match at least one input token, either:
+    #   (a) verbatim, OR
+    #   (b) with internal spaces collapsed (space-injection case).
+    # This guards against the LLM going completely off-topic. With multiple
+    # heard variants we accept the LLM's regex as long as SOME variant matches
+    # — a manual review still gates the create step.
     try:
-        matches_verbatim = re.search(cleaned["pattern"], bad_token, re.IGNORECASE)
-        matches_fused = fused != bad_token and re.search(
-            cleaned["pattern"], fused, re.IGNORECASE
-        )
-        if not matches_verbatim and not matches_fused:
-            logger.warning(
-                "regex_generator: LLM pattern %r does not match bad_token %r or fused %r — falling back",
-                cleaned["pattern"],
-                bad_token,
-                fused,
-            )
-            return _fallback(bad_token, replacement)
+        pattern_re = re.compile(cleaned["pattern"], re.IGNORECASE)
     except re.error:
-        return _fallback(bad_token, replacement)
+        return _fallback(tokens, replacement)
+
+    matched_any = False
+    for tok in tokens:
+        fused = re.sub(r"\s+", "", tok)
+        if pattern_re.search(tok):
+            matched_any = True
+            break
+        if fused != tok and pattern_re.search(fused):
+            matched_any = True
+            break
+
+    if not matched_any:
+        logger.warning(
+            "regex_generator: LLM pattern %r does not match any of %r — falling back",
+            cleaned["pattern"],
+            tokens,
+        )
+        return _fallback(tokens, replacement)
 
     logger.info(
-        "regex_generator: produced pattern %r (forms=%d, provider=%s)",
+        "regex_generator: produced pattern %r (tokens=%d, forms=%d, provider=%s)",
         cleaned["pattern"],
+        len(tokens),
         len(cleaned["matched_forms"]),
         response.provider,
     )

@@ -245,6 +245,12 @@ function _renderSuggestionsTab() {
 // `mode` starts as 'suggestion' (created from a pending suggestion), flips to
 // 'manual' if the manager clicks "+ Add another rule" after a successful
 // promote — subsequent rules go through the plain /corrections endpoint.
+//
+// `heardTokens` is the canonical list of "what the bot heard" variants.
+// Suggestion mode: pre-filled with the suggestion's bad_token; the manager
+// can add MORE variants (each becomes an alternation branch in one regex)
+// or hit ✏ to also remove/modify the original (retargeting flow).
+// Manual mode: starts empty, all chips fully removable.
 let _approveState = {
     id: null,
     mode: 'suggestion',
@@ -252,6 +258,10 @@ let _approveState = {
     generatedBy: null,  // 'ai' | 'manual' | null
     regexEditedManually: false,
     sourceCallId: null,  // for note ("from call abc123 ...")
+    heardTokens: [],
+    originalBadToken: '',
+    heardLocked: true,  // true = original chip has no ×, ✏ button visible
+    heardChanged: false,
 };
 
 function openApprove(id) {
@@ -262,6 +272,7 @@ function openApprove(id) {
     if (id && !s) return;  // stale click: suggestion gone from cache
     const isManual = !s;
 
+    const initialTokens = isManual ? [] : [(s.bad_token || '').trim()].filter(Boolean);
     _approveState = {
         id: s ? s.id : null,
         mode: isManual ? 'manual' : 'suggestion',
@@ -270,6 +281,8 @@ function openApprove(id) {
         regexEditedManually: false,
         sourceCallId: (s && s.sample_transcripts && s.sample_transcripts[0] && s.sample_transcripts[0].call_id) || null,
         originalBadToken: s ? (s.bad_token || '') : '',
+        heardTokens: initialTokens,
+        heardLocked: !isManual,  // suggestion mode locks the original chip until ✏
         heardChanged: false,
     };
 
@@ -308,19 +321,9 @@ function openApprove(id) {
     const hint = isManual
         ? t('sttCorrections.suggestions.manualCreateHint')
         : t('sttCorrections.suggestions.approveHint', { token: escapeHtml(s.bad_token) });
-    const heardValue = isManual ? '' : escapeHtml(s.bad_token || '');
-    const heardReadonly = isManual ? '' : 'readonly';
-    const heardBg = isManual ? '' : 'bg-neutral-50 dark:bg-neutral-800';
-    // Manual mode: no ✏ unlock button (field is already editable),
-    // but Heard input has an oninput that fires the similar-rule check.
+    // Manual mode: no ✏ unlock button (chips are already fully removable).
     const heardUnlockBtn = isManual ? '' : `
         <button id="suggHeardUnlock" onclick="window._pages.sttCorrections.unlockHeard()" class="ml-1 text-xs text-blue-600 hover:underline cursor-pointer" title="${t('sttCorrections.suggestions.heardUnlockTitle')}">✏ ${t('sttCorrections.suggestions.heardUnlock')}</button>`;
-    const heardOninput = isManual
-        ? `oninput="window._pages.sttCorrections._onManualHeardInput()"`
-        : '';
-    const heardPlaceholder = isManual
-        ? `placeholder="${t('sttCorrections.suggestions.heardPlaceholder')}"`
-        : '';
     const replacementValue = isManual ? '' : escapeHtml(s.proposed_replacement || '');
     const contextValue = isManual ? 'any' : (s.detected_context || 'any');
     const patternValue = isManual ? '' : escapeHtml(s.proposed_pattern || '');
@@ -350,7 +353,16 @@ function openApprove(id) {
                         ${t('sttCorrections.suggestions.heard')}
                         ${heardUnlockBtn}
                     </label>
-                    <input id="suggHeard" class="${tw.formInput} w-full ${heardBg}" value="${heardValue}" ${heardReadonly} ${heardPlaceholder} ${heardOninput}/>
+                    <div id="suggHeardBox" class="${tw.formInput} w-full min-h-[38px] flex flex-wrap items-center gap-1 cursor-text" onclick="document.getElementById('suggHeardInput').focus()">
+                        <span id="suggHeardChips" class="contents"></span>
+                        <input id="suggHeardInput" type="text"
+                               class="flex-1 min-w-[60px] bg-transparent outline-none border-none p-0 text-sm"
+                               onkeydown="window._pages.sttCorrections._onHeardKey(event)"
+                               onblur="window._pages.sttCorrections._commitHeardInput()"
+                               onpaste="window._pages.sttCorrections._onHeardPaste(event)"
+                               oninput="window._pages.sttCorrections._onHeardTyping()"/>
+                    </div>
+                    <div class="text-[10px] text-neutral-500 mt-0.5">${t('sttCorrections.suggestions.heardChipHint')}</div>
                 </div>
                 <div>
                     <label class="block mb-1 text-sm font-medium">${t('sttCorrections.suggestions.meant')} <span class="text-red-600">*</span></label>
@@ -390,30 +402,163 @@ function openApprove(id) {
           </div>
         </div>`;
     document.body.insertAdjacentHTML('beforeend', html);
+    // Render initial chips (may be empty in manual mode, one chip in suggestion mode).
+    _renderHeardChips();
     // In suggestion mode fire similar-rule check for the pre-filled token.
-    // In manual mode the check fires on typing via _onManualHeardInput.
-    if (!isManual) {
-        _checkSimilarForToken(s.bad_token, s.detected_context || '');
+    // In manual mode the check fires when the first chip is committed.
+    if (!isManual && _approveState.heardTokens.length > 0) {
+        _checkSimilarForToken(_approveState.heardTokens[0], s.detected_context || '');
     }
 }
 
-// Debounced similar-rule check invoked while the manager types in manual mode.
-let _manualHeardTimer = null;
-function _onManualHeardInput() {
+// ─── Chip helpers for the multi-variant "heard" input ─────────
+function _renderHeardChips() {
+    const container = document.getElementById('suggHeardChips');
+    if (!container) return;
+    const locked = _approveState.heardLocked;
+    container.innerHTML = _approveState.heardTokens.map((tok, i) => {
+        const isOriginal = locked && tok === _approveState.originalBadToken;
+        const removeBtn = isOriginal
+            ? ''
+            : `<button type="button" onclick="window._pages.sttCorrections._removeHeardChip(${i})"
+                 class="ml-1 text-blue-600 hover:text-red-600 font-bold leading-none cursor-pointer"
+                 aria-label="${t('sttCorrections.suggestions.heardChipRemove')}"
+                 title="${t('sttCorrections.suggestions.heardChipRemove')}">×</button>`;
+        const bg = isOriginal
+            ? 'bg-neutral-200 dark:bg-neutral-700 text-neutral-700 dark:text-neutral-200'
+            : 'bg-blue-100 dark:bg-blue-900/40 text-blue-800 dark:text-blue-200';
+        return `<span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-xs font-mono ${bg}">
+            <span>${escapeHtml(tok)}</span>${removeBtn}
+        </span>`;
+    }).join('');
+    // Placeholder on the free-text input adapts to whether chips exist.
+    const inputEl = document.getElementById('suggHeardInput');
+    if (inputEl) {
+        inputEl.placeholder = _approveState.heardTokens.length === 0
+            ? t('sttCorrections.suggestions.heardPlaceholder')
+            : t('sttCorrections.suggestions.heardAddMorePlaceholder');
+    }
+}
+
+function _addHeardChip(text) {
+    const raw = (text || '').trim();
+    if (!raw) return false;
+    // Split by comma so pasted "a, b, c" or a typed batch that bypassed the
+    // per-keystroke commit becomes separate chips instead of one long token.
+    // Spaces are preserved inside each part — space-fragmented STT tokens
+    // (e.g. "ме ни") are legitimate single variants.
+    const parts = raw.split(',').map(p => p.trim()).filter(Boolean);
+    let addedAny = false;
+    let lastAdded = null;
+    for (const s of parts) {
+        if (_approveState.heardTokens.includes(s)) continue;  // dedupe
+        _approveState.heardTokens.push(s);
+        addedAny = true;
+        lastAdded = s;
+    }
+    if (!addedAny) return false;
+    _renderHeardChips();
+    _approveState.previewShown = false;
+    _updateApproveEnabled();
+    // Similar-rule check runs for the last-added chip (most-recent user intent).
+    if (lastAdded) {
+        const ctxEl = document.getElementById('suggContext');
+        _checkSimilarForToken(lastAdded, ctxEl ? ctxEl.value : '');
+    }
+    return true;
+}
+
+function _removeHeardChip(index) {
+    const tok = _approveState.heardTokens[index];
+    _approveState.heardTokens.splice(index, 1);
+    // Removing the original chip counts as retargeting the rule.
+    if (tok && tok === _approveState.originalBadToken) {
+        _approveState.heardChanged = true;
+    }
+    _renderHeardChips();
+    _approveState.previewShown = false;
+    _updateApproveEnabled();
+    // Re-check similar rules against whatever chip is now first (if any).
+    if (_approveState.heardTokens.length > 0) {
+        const ctxEl = document.getElementById('suggContext');
+        _checkSimilarForToken(
+            _approveState.heardTokens[0],
+            ctxEl ? ctxEl.value : '',
+        );
+    } else {
+        const simEl = document.getElementById('suggSimilar');
+        if (simEl) simEl.innerHTML = '';
+    }
+}
+
+function _onHeardKey(ev) {
+    const input = ev.target;
+    // Commit on Enter or comma. Tab intentionally excluded — some managers
+    // rely on Tab to jump to the "meant" field.
+    if (ev.key === 'Enter' || ev.key === ',') {
+        if (input.value.trim()) {
+            ev.preventDefault();
+            _addHeardChip(input.value);
+            input.value = '';
+        } else if (ev.key === 'Enter') {
+            ev.preventDefault();  // avoid accidental form submit
+        }
+        return;
+    }
+    if (ev.key === 'Backspace' && input.value === '' && _approveState.heardTokens.length > 0) {
+        // Peek at what would be removed — respect the "original" chip's lock.
+        const lastIdx = _approveState.heardTokens.length - 1;
+        const lastTok = _approveState.heardTokens[lastIdx];
+        if (_approveState.heardLocked && lastTok === _approveState.originalBadToken) {
+            return;  // don't silently nuke a locked chip
+        }
+        _removeHeardChip(lastIdx);
+    }
+}
+
+function _onHeardTyping() {
+    // Debounced similar-check for what the user is TYPING (before commit).
+    // Reuse the manual-mode timer.
     if (_manualHeardTimer) clearTimeout(_manualHeardTimer);
     _manualHeardTimer = setTimeout(() => {
-        const heard = document.getElementById('suggHeard');
+        const inp = document.getElementById('suggHeardInput');
         const ctx = document.getElementById('suggContext');
-        if (!heard || !ctx) return;
-        const token = heard.value.trim();
+        if (!inp || !ctx) return;
+        const token = inp.value.trim();
         if (token.length >= 3) {
             _checkSimilarForToken(token, ctx.value);
-        } else {
-            const el = document.getElementById('suggSimilar');
-            if (el) el.innerHTML = '';
         }
     }, 300);
 }
+
+function _commitHeardInput() {
+    // Called on blur — if the manager typed a token but didn't press Enter,
+    // still commit it so the request payload is complete.
+    const inp = document.getElementById('suggHeardInput');
+    if (!inp) return;
+    if (inp.value.trim()) {
+        _addHeardChip(inp.value);
+        inp.value = '';
+    }
+}
+
+function _onHeardPaste(ev) {
+    // Intercept clipboard paste so "a, b, c" splits into chips immediately
+    // instead of landing as one long token. Only steal the event when the
+    // pasted text contains a separator — otherwise let the browser insert
+    // it normally so the user can keep editing.
+    const cd = ev.clipboardData || window.clipboardData;
+    if (!cd) return;
+    const txt = cd.getData('text');
+    if (!txt || !txt.includes(',')) return;
+    ev.preventDefault();
+    _addHeardChip(txt);
+    const inp = ev.target;
+    if (inp) inp.value = '';
+}
+
+// Shared debounce timer for similar-rule check while the manager types.
+let _manualHeardTimer = null;
 
 async function _checkSimilarForToken(token, context) {
     const el = document.getElementById('suggSimilar');
@@ -450,7 +595,11 @@ async function _checkSimilarForToken(token, context) {
 function closeApprove() {
     const el = document.getElementById('sttSuggestModal');
     if (el) el.remove();
-    _approveState = { id: null, previewShown: false, generatedBy: null, regexEditedManually: false };
+    _approveState = {
+        id: null, mode: 'suggestion', previewShown: false, generatedBy: null,
+        regexEditedManually: false, heardTokens: [], originalBadToken: '',
+        heardLocked: true, heardChanged: false,
+    };
 }
 
 function _onRegexEdit() {
@@ -483,17 +632,14 @@ function _clearPreview() {
 }
 
 function unlockHeard() {
-    const heardEl = document.getElementById('suggHeard');
+    // Enables × on the original suggestion chip AND flags the change as
+    // "retargeting" so submit routes through /corrections + /reject.
     const warnEl = document.getElementById('suggHeardWarning');
     const unlockBtn = document.getElementById('suggHeardUnlock');
-    if (!heardEl) return;
-    heardEl.readOnly = false;
-    // Only remove the light-mode readonly tint; dark:bg-neutral-800 must stay
-    // (it also comes from tw.formInput — removing it leaves bg-white in dark mode,
-    // making near-white text invisible on a white background).
-    heardEl.classList.remove('bg-neutral-50');
-    heardEl.focus();
-    heardEl.select();
+    _approveState.heardLocked = false;
+    _renderHeardChips();
+    const inp = document.getElementById('suggHeardInput');
+    if (inp) inp.focus();
     if (warnEl) {
         warnEl.classList.remove('hidden');
         warnEl.innerHTML = t('sttCorrections.suggestions.heardChangeWarning', {
@@ -555,16 +701,22 @@ async function generateRegexAI(id) {
     const btn = document.getElementById('suggGenBtn');
     if (btn) { btn.disabled = true; btn.textContent = '⏳ ' + t('sttCorrections.suggestions.generating'); }
     try {
+        // Commit any un-Enter'd typing into a chip before collecting.
+        _commitHeardInput();
         const replacement = document.getElementById('suggReplacement').value.trim();
         const context_hint = document.getElementById('suggContext').value;
-        const bad_token = document.getElementById('suggHeard').value.trim();
+        const bad_tokens = _approveState.heardTokens.slice();
         if (!replacement) {
             showToast(t('sttCorrections.suggestions.replacementFirst'), 'error');
             return;
         }
+        if (bad_tokens.length === 0) {
+            showToast(t('sttCorrections.suggestions.heardFirst'), 'error');
+            return;
+        }
         const r = await api(`/admin/stt/corrections/suggestions/${encodeURIComponent(id)}/generate-regex`, {
             method: 'POST',
-            body: JSON.stringify({ bad_token, replacement, context_hint }),
+            body: JSON.stringify({ bad_tokens, replacement, context_hint }),
             headers: { 'Content-Type': 'application/json' },
         });
         document.getElementById('suggPattern').value = r.pattern || '';
@@ -686,7 +838,7 @@ async function submitApprove(id) {
             // Retargeting path — also reject the original suggestion so it
             // doesn't sit in the queue as a misleading pending item.
             if (_approveState.mode === 'suggestion' && id && _approveState.heardChanged) {
-                const newHeard = document.getElementById('suggHeard').value.trim();
+                const newHeard = _approveState.heardTokens.join(', ');
                 const reason = t('sttCorrections.suggestions.retargetRejectReason', {
                     original: _approveState.originalBadToken || '?',
                     newToken: newHeard || '?',
@@ -741,6 +893,10 @@ function addAnotherRule() {
     _approveState.previewShown = false;
     _approveState.generatedBy = null;
     _approveState.regexEditedManually = false;
+    _approveState.heardTokens = [];
+    _approveState.originalBadToken = '';
+    _approveState.heardLocked = false;
+    _approveState.heardChanged = false;
 
     const title = document.getElementById('suggModalTitle');
     if (title) title.textContent = t('sttCorrections.suggestions.addAnotherTitle');
@@ -749,23 +905,10 @@ function addAnotherRule() {
         const el = document.getElementById(id);
         if (el) el.value = '';
     }
-    const heardEl = document.getElementById('suggHeard');
-    if (heardEl) {
-        heardEl.readOnly = false;
-        heardEl.value = '';
-        heardEl.placeholder = t('sttCorrections.suggestions.heardPlaceholder');
-        // Only drop the light-mode readonly tint; dark:bg-neutral-800 is
-        // shared with tw.formInput — removing it leaves bg-white in dark
-        // mode and makes the near-white text unreadable (same gotcha as
-        // unlockHeard()).
-        heardEl.classList.remove('bg-neutral-50');
-        // Recheck similar rules whenever the manager changes the token.
-        heardEl.oninput = () => {
-            const tok = heardEl.value.trim();
-            const ctx = document.getElementById('suggContext').value;
-            if (tok.length >= 3) _checkSimilarForToken(tok, ctx);
-        };
-    }
+    // Reset chip container to empty.
+    const heardInp = document.getElementById('suggHeardInput');
+    if (heardInp) heardInp.value = '';
+    _renderHeardChips();
     const reasoningEl = document.getElementById('suggReasoning');
     if (reasoningEl) reasoningEl.innerHTML = '';
     const previewEl = document.getElementById('suggPreview');
@@ -793,10 +936,11 @@ function addAnotherRule() {
 
 async function generateRegexManualMode() {
     const btn = document.getElementById('suggGenBtn');
-    const heard = document.getElementById('suggHeard').value.trim();
+    _commitHeardInput();
+    const bad_tokens = _approveState.heardTokens.slice();
     const replacement = document.getElementById('suggReplacement').value.trim();
     const context_hint = document.getElementById('suggContext').value;
-    if (!heard) {
+    if (bad_tokens.length === 0) {
         showToast(t('sttCorrections.suggestions.heardFirst'), 'error');
         return;
     }
@@ -808,7 +952,7 @@ async function generateRegexManualMode() {
     try {
         const r = await api('/admin/stt/corrections/generate-regex', {
             method: 'POST',
-            body: JSON.stringify({ bad_token: heard, replacement, context_hint }),
+            body: JSON.stringify({ bad_tokens, replacement, context_hint }),
             headers: { 'Content-Type': 'application/json' },
         });
         document.getElementById('suggPattern').value = r.pattern;
@@ -1316,5 +1460,6 @@ window._pages.sttCorrections = {
     addAnotherRule, generateRegexManualMode,
     runEditPreview, _onEditRegexChange,
     unlockHeard,
-    _onManualHeardInput,
+    _removeHeardChip, _onHeardKey, _onHeardTyping, _commitHeardInput,
+    _onHeardPaste,
 };
