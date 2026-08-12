@@ -148,6 +148,44 @@ _FILLER_SENTENCE_OPENERS = (
 _SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
 _LEAD_STRIP = " —–-«\"'*_"
 
+# --- Strip leaked system-prompt "Прогрес запису" block ---
+# The fitting-module builds a "## 📋 Прогрес запису … НАСТУПНИЙ КРОК: Крок N" block
+# in the system prompt to keep the LLM on track. Occasionally (observed in call
+# d6e034f2 on 2026-08-05) the LLM echoes this internal checklist verbatim into
+# its own reply, which would then be spoken by TTS as "решётка решётка Прогрес
+# запису, галочка галочка…". Detect and strip it, keeping only any real dialog
+# text that follows.
+# Full block: from "Прогрес запису" header through the "НАСТУПНИЙ КРОК: …"
+# closing line (with optional Markdown bold ** or leading ##). Non-greedy .*?
+# to prefer the earliest closing marker; DOTALL so . matches newlines.
+_LEAKED_PROGRESS_RE = re.compile(
+    r"(?:^|\n)[#\s]{0,4}(?:📋\s*)?Прогрес\s+запису"
+    r".*?"
+    r"\*{0,2}НАСТУПНИЙ\s+КРОК[^\n]*",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _strip_leaked_system_block(text: str) -> tuple[str, bool]:
+    """Strip a leaked "## 📋 Прогрес запису … НАСТУПНИЙ КРОК" block from LLM output.
+
+    Returns (cleaned_text, was_leaked). If the block is present but nothing
+    meaningful follows it, returns ("", True) so the caller falls back to a
+    soft re-ask instead of speaking the checklist.
+    """
+    if "Прогрес запису" not in text and "НАСТУПНИЙ КРОК" not in text:
+        return text, False
+    cleaned = _LEAKED_PROGRESS_RE.sub("\n", text, count=1)
+    # Handle case where only the header leaked without the closing marker.
+    if "Прогрес запису" in cleaned:
+        cleaned = re.sub(
+            r"(?:^|\n)[#\s]{0,4}(?:📋\s*)?Прогрес\s+запису[^\n]*",
+            "\n",
+            cleaned,
+        )
+    cleaned = cleaned.strip(" \n\t*—–-")
+    return cleaned, True
+
 
 def _strip_filler(text: str) -> tuple[str, list[tuple[str, str]]]:
     """Strip filler sentences that pad LLM output before/after tool calls.
@@ -1186,11 +1224,23 @@ class CallPipeline:
                     )
 
                 if result is not None and result.spoken_text:
+                    # Strip leaked Progress checklist from log / session for
+                    # consistency (audio was already filtered at sentence-buffer
+                    # level in streaming path).
+                    log_text = result.spoken_text
+                    log_text, was_leaked = _strip_leaked_system_block(log_text)
+                    if was_leaked:
+                        logger.warning(
+                            "Stripped leaked Progress checklist from streaming "
+                            "bot reply for %s (remainder %d chars)",
+                            self._session.channel_uuid,
+                            len(log_text),
+                        )
                     # Strip filler for DB log / session history consistency.
                     # Audio was already streamed to caller, so this only
                     # cleans the recorded turn — LLM's own history (kept in
                     # streaming loop's _llm_history) is unaffected.
-                    cleaned, stripped = _strip_filler(result.spoken_text)
+                    cleaned, stripped = _strip_filler(log_text or result.spoken_text)
                     if stripped:
                         logger.info(
                             "Stripped %d filler sentence(s) from streaming "
@@ -1304,6 +1354,16 @@ class CallPipeline:
                 if response_text:
                     # Strip duplicate greeting that LLM may produce
                     response_text = _strip_greeting(response_text)
+                    # Strip any leaked "## 📋 Прогрес запису … НАСТУПНИЙ КРОК"
+                    # system-prompt checklist that the LLM sometimes echoes.
+                    response_text, was_leaked = _strip_leaked_system_block(response_text)
+                    if was_leaked:
+                        logger.warning(
+                            "Stripped leaked Progress checklist from bot reply "
+                            "for %s (remainder %d chars)",
+                            self._session.channel_uuid,
+                            len(response_text),
+                        )
                     # Strip filler sentences ("Зараз перевірю...", "Чекайте,
                     # будь ласка", "Зрозуміла... Отже...") that pad LLM output.
                     cleaned, stripped = _strip_filler(response_text)

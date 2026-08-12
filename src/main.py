@@ -2879,6 +2879,22 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
 
     async def _update_customer_profile(**kwargs: Any) -> dict[str, Any]:
         """Update customer profile with merge-patch semantics."""
+        # Mirror new fields into fitting-progress session state so the
+        # «## 📋 Прогрес запису» block flips «⏳ Ім'я / Марка авто» to ✅
+        # immediately, without waiting for book_fitting. Prevents the
+        # «bot re-asks name after long dialog» regression (call d6e034f2).
+        new_name = (kwargs.get("name") or "").strip()
+        if new_name:
+            session.fitting_customer_name = new_name
+        vehicles = kwargs.get("vehicles") or []
+        if vehicles and isinstance(vehicles, list):
+            first = vehicles[0] if isinstance(vehicles[0], dict) else {}
+            plate = (first.get("plate") or "").strip()
+            brand = (first.get("brand") or "").strip()
+            if plate:
+                session.fitting_plate = plate
+            if brand:
+                session.fitting_vehicle_brand = brand
         if _call_logger is None or not session.caller_phone:
             return {"status": "unavailable"}
         return await _call_logger.update_customer_profile(

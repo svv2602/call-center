@@ -104,5 +104,35 @@ async def buffer_sentences(
 ) -> AsyncIterator[BufferEvent]:
     """Create SentenceBuffer and process stream."""
     buf = SentenceBuffer(min_clause_chars=min_clause_chars)
-    async for event in buf.process(stream):
+    async for event in _filter_leaked_progress(buf.process(stream)):
+        yield event
+
+
+# Markers of the internal "## 📋 Прогрес запису … НАСТУПНИЙ КРОК" fitting
+# checklist block that lives in the system prompt. If the LLM starts echoing
+# it into its own reply (observed in call d6e034f2 on 2026-08-05), we would
+# otherwise speak "решётка решётка Прогрес запису, галочка галочка…" to the
+# caller. Suppress every sentence between the start marker and the closing
+# «НАСТУПНИЙ КРОК» line inclusive; anything after (the real question) passes.
+_LEAK_START_MARKER = "Прогрес запису"
+_LEAK_END_MARKER = "НАСТУПНИЙ КРОК"
+
+
+async def _filter_leaked_progress(
+    stream: AsyncIterator[BufferEvent],
+) -> AsyncIterator[BufferEvent]:
+    """Drop sentences belonging to a leaked system-prompt Progress block."""
+    suppressing = False
+    async for event in stream:
+        if isinstance(event, SentenceReady):
+            text = event.text
+            if not suppressing and _LEAK_START_MARKER in text:
+                suppressing = True
+                if _LEAK_END_MARKER in text:
+                    suppressing = False
+                continue
+            if suppressing:
+                if _LEAK_END_MARKER in text:
+                    suppressing = False
+                continue
         yield event
