@@ -55,6 +55,74 @@ def _normalize_iso_dates(text: str) -> str:
     return _ISO_DATE_RE.sub(_sub, text)
 
 
+# ─── Tire size and house-number normalizers ────────────────────────────────
+# Testers 2026-08-11: "225/50 R18" is read by TTS with the slash and Latin
+# "R" pronounced literally («двісті двадцять п'ять слеш п'ятдесят ар»).
+# House numbers like "72Б"/"1Д"/"55К" are read with English/mixed letter
+# names ("сімдесят два бі"), not the Ukrainian conversational "бе/де/ка".
+# These normalisers keep the digits intact (Google TTS says them fine
+# in Ukrainian) and fix only the surrounding characters.
+
+# Match: "225/50 R18", "225/50R18", "225/50/R18" (STT variants). Groups: W, H, D.
+_TIRE_SIZE_RE = re.compile(
+    r"\b(\d{3})\s*/\s*(\d{2})\s*[/]?\s*[Rr]\s*(\d{2})\b"
+)
+
+# Letter → Ukrainian conversational pronunciation. Uses only the letters that
+# appear in Ukrainian house-number suffixes (DSTU vehicle-plate alphabet).
+_HOUSE_LETTER_UK: dict[str, str] = {
+    "А": "а", "Б": "бе", "В": "ве", "Г": "ге", "Д": "де",
+    "Е": "е", "Ж": "же", "З": "зе", "И": "и", "І": "і",
+    "К": "ка", "Л": "ел", "М": "ем", "Н": "ен", "О": "о",
+    "П": "пе", "Р": "ер", "С": "ес", "Т": "те", "У": "у",
+    "Ф": "еф", "Х": "ха", "Ц": "це", "Ч": "че", "Ш": "ша",
+    "Щ": "ща", "Ю": "ю", "Я": "я",
+}
+
+# Match: "72Б", "1Д", "55К", "24А" — digits followed by ONE Cyrillic letter,
+# as a whole token (surrounded by non-alphanumeric or line edges).
+_HOUSE_NUM_RE = re.compile(
+    r"(?<![A-Za-zА-Яа-яІіЇїЄєҐґ0-9])(\d{1,4})([А-ЯІЇЄҐ])(?![A-Za-zА-Яа-яІіЇїЄєҐґ0-9])"
+)
+
+
+def _normalize_tire_sizes(text: str) -> str:
+    """Rewrite "225/50 R18" → "225 50 ер 18" so TTS pronounces each number
+    naturally in Ukrainian and speaks "R" as «ер», not «ар»/«ес».
+    """
+    def _sub(m: re.Match[str]) -> str:
+        return f"{m.group(1)} {m.group(2)} ер {m.group(3)}"
+    return _TIRE_SIZE_RE.sub(_sub, text)
+
+
+def _normalize_house_letter(text: str) -> str:
+    """Rewrite "72Б" → "72 бе", "1Д" → "1 де" so TTS voices the letter
+    the way Ukrainians actually say it in an address, not as its English
+    or ISO name («бі» / «ди»).
+    """
+    def _sub(m: re.Match[str]) -> str:
+        digits, letter = m.group(1), m.group(2)
+        letter_upper = letter.upper()
+        replacement = _HOUSE_LETTER_UK.get(letter_upper)
+        if not replacement:
+            return m.group(0)
+        return f"{digits} {replacement}"
+    return _HOUSE_NUM_RE.sub(_sub, text)
+
+
+def _normalize_for_tts(text: str) -> str:
+    """Compose all last-mile normalisers before handing text to TTS.
+
+    Order matters: dates first (they contain only digits + dashes),
+    then tire sizes (may share digits with house numbers otherwise),
+    then house numbers (single-letter suffix on trailing digits).
+    """
+    text = _normalize_iso_dates(text)
+    text = _normalize_tire_sizes(text)
+    text = _normalize_house_letter(text)
+    return text
+
+
 @dataclass(frozen=True)
 class AudioReady:
     """Raw PCM audio for one sentence, ready for AudioSocket delivery."""
@@ -95,9 +163,9 @@ class StreamingTTSSynthesizer:
 
         async for event in stream:  # type: ignore[assignment]
             if isinstance(event, SentenceReady):
-                # Normalize ISO dates (YYYY-MM-DD → "N місяця") — testers
-                # explicitly asked to always speak the Ukrainian form.
-                normalized = _normalize_iso_dates(event.text)
+                # Last-mile normalisation (ISO dates, tire sizes, house
+                # numbers with letter suffix) so TTS speaks natural Ukrainian.
+                normalized = _normalize_for_tts(event.text)
                 # Launch new task FIRST so it runs while we await the old one
                 new_task = asyncio.create_task(self._tts.synthesize(normalized))
                 new_text = normalized
@@ -142,7 +210,7 @@ class StreamingTTSSynthesizer:
         """Sequential (no-prefetch) processing path."""
         async for event in stream:
             if isinstance(event, SentenceReady):
-                normalized = _normalize_iso_dates(event.text)
+                normalized = _normalize_for_tts(event.text)
                 audio = await self._tts.synthesize(normalized)
                 yield AudioReady(audio=audio, text=normalized)
             else:

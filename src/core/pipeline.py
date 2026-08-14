@@ -1474,6 +1474,12 @@ class CallPipeline:
         if self._conn.is_closed:
             return
 
+        # Last-mile TTS normalisation (ISO dates, tire sizes, house-number
+        # letter suffixes) — same rewriter the streaming path uses.
+        from src.tts.streaming_tts import _normalize_for_tts
+
+        text = _normalize_for_tts(text)
+
         # Track TTS character cost
         if self._cost is not None:
             self._cost.add_tts_usage(len(text))
