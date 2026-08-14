@@ -55,11 +55,15 @@ from src.tts.streaming_tts import synthesize_stream
 _TOOL_TIMEOUT_SEC = 15
 
 # Delay (seconds) before playing a filler phrase when LLM is slow to respond.
-# Tuned 2026-08-14 (call c11eae66): Asterisk was killing AudioSocket connections
-# mid-turn when the server went silent >2s during LLM inference. Reducing to
-# 1.0 makes the filler fire almost immediately after LLM start, sending real
-# audio down the socket and keeping Asterisk from marking the stream dead.
-_FILLER_DELAY_SEC = 1.0
+# Tuned 2026-08-14 (calls c11eae66, 8c85d7c5): mobile carriers / SIP trunk
+# were killing AudioSocket connections when the server went silent even ~2s
+# during LLM inference. The 1.0s value still lost calls because LLM emits
+# tool_call in <1s → stream ends → filler_task cancelled BEFORE its sleep
+# completed → 0 audio played. 0.3s is aggressive but survives the 1-3 sec
+# «client speech → first bot audio» window that carriers seem to enforce.
+# Cost: on every turn caller hears ~200-500ms of «Секундочку…» before
+# real audio. Acceptable price for calls not dropping.
+_FILLER_DELAY_SEC = 0.3
 
 # Hard cap on TTS pre-synthesis for the filler phrase. If TTS API is hung,
 # never block run_turn on it — proceed without filler.

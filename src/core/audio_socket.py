@@ -105,12 +105,22 @@ class AudioSocketConnection:
             return None
         try:
             packet = await read_packet(self.reader)
-        except (asyncio.IncompleteReadError, ConnectionResetError, OSError):
+        except (asyncio.IncompleteReadError, ConnectionResetError, OSError) as exc:
             self._closed = True
+            logger.info(
+                "AudioSocket read failed for %s: %s (%s) — connection closing",
+                self.channel_uuid,
+                type(exc).__name__,
+                str(exc)[:100] if str(exc) else "no message",
+            )
             return None
 
         if packet is not None and packet.type == PacketType.HANGUP:
             self._closed = True
+            logger.info(
+                "AudioSocket HANGUP packet received for %s",
+                self.channel_uuid,
+            )
 
         return packet
 
@@ -141,8 +151,16 @@ class AudioSocketConnection:
             self.writer.write(build_audio_packet(chunk))
             try:
                 await self.writer.drain()
-            except (ConnectionResetError, OSError):
+            except (ConnectionResetError, OSError) as exc:
                 self._closed = True
+                logger.info(
+                    "AudioSocket write failed for %s: %s (%s) — "
+                    "closing after %d bytes",
+                    self.channel_uuid,
+                    type(exc).__name__,
+                    str(exc)[:100] if str(exc) else "no message",
+                    offset,
+                )
                 return False
             offset += AUDIO_FRAME_BYTES
             frame_index += 1
