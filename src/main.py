@@ -3336,6 +3336,19 @@ async def main() -> None:
     else:
         logger.info("LLM routing disabled (FF_LLM_ROUTING_ENABLED=false)")
 
+    # Warm up Google STT client — establishes TLS/HTTP2 connection and
+    # session ticket so the first real caller doesn't pay ~1-2s of
+    # cold-connect silence. Non-blocking on failure.
+    try:
+        from src.stt.google_stt import warmup_stt_client
+
+        await warmup_stt_client(
+            project_id=settings.google_stt.project_id,
+            location=settings.google_stt.location,
+        )
+    except Exception:
+        logger.debug("STT warmup failed", exc_info=True)
+
     # Start AudioSocket server
     _audio_server = AudioSocketServer(
         host=settings.audio_socket.host,

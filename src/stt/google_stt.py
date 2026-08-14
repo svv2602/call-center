@@ -79,6 +79,40 @@ def _build_adaptation(
     return cloud_speech.SpeechAdaptation(phrase_sets=phrase_sets)
 
 
+async def warmup_stt_client(project_id: str = "", location: str = "global") -> None:
+    """Prime a SpeechAsyncClient at startup.
+
+    The first call of a fresh Python process pays ~500-1500ms for DNS
+    lookup, TLS handshake, and HTTP/2 connection setup to the Google
+    STT endpoint. Observed on 2026-08-12: first caller of the day
+    experienced ~2s of silence before the pipeline responded, while
+    subsequent calls were fast. Doing a cheap ``list_recognizers`` call
+    at startup warms the connection pool and TLS session ticket cache
+    so the first real caller does not pay the cold-start cost.
+
+    Errors are swallowed — warmup is best-effort. If credentials are
+    misconfigured, the real ``start_stream`` will fail loudly on the
+    first call, which is the correct place to surface that.
+    """
+    if not project_id:
+        logger.debug("STT warmup skipped: no project_id")
+        return
+    try:
+        if location and location != "global":
+            client_options = ClientOptions(
+                api_endpoint=f"{location}-speech.googleapis.com"
+            )
+            client = SpeechAsyncClient(client_options=client_options)
+        else:
+            client = SpeechAsyncClient()
+        parent = f"projects/{project_id}/locations/{location or 'global'}"
+        request = cloud_speech.ListRecognizersRequest(parent=parent, page_size=1)
+        await asyncio.wait_for(client.list_recognizers(request=request), timeout=5.0)
+        logger.info("STT warmup OK: %s (project=%s)", location or "global", project_id)
+    except Exception as exc:
+        logger.info("STT warmup non-fatal error (%s): %s", type(exc).__name__, exc)
+
+
 class GoogleSTTEngine:
     """Google Cloud Speech-to-Text v2 streaming engine.
 
