@@ -126,6 +126,11 @@ class CallSession:
         self.tenant_slug: str | None = None
         self.tenant_name: str | None = None
         self.network_id: str | None = None
+        # Station IDs that this tenant chooses to hide from the LLM
+        # (e.g. tvoya-shina excludes 000000022 Дніпрошина because it's
+        # truck-only). Populated from tenant.config.excluded_station_ids
+        # at call start; read by _get_fitting_stations to filter results.
+        self.excluded_station_ids: set[str] = set()
         # Tenant working-hours schedule (JSONB from tenants.working_hours).
         # None = no schedule → treat as 24/7 and never trigger after-hours flow.
         self.working_hours: dict[str, Any] | None = None

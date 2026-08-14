@@ -1098,6 +1098,13 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         if tenant and isinstance(tenant.get("config"), dict):
             tenant_config = tenant["config"]
 
+        # Mirror excluded_station_ids into session so _get_fitting_stations
+        # (defined in _build_tool_router, no closure over tenant_config)
+        # can filter them out.
+        _excl = tenant_config.get("excluded_station_ids") or []
+        if isinstance(_excl, list):
+            session.excluded_station_ids = {str(sid) for sid in _excl if sid}
+
         # Create per-tenant StoreClient if tenant has custom store config
         if tenant_config.get("store_api_url"):
             tenant_store_client = StoreClient(
@@ -2239,6 +2246,17 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                             if auto_query in searchable:
                                 filtered.append(s)
                         effective_query = auto_query
+
+            # Per-tenant exclusion list (session.excluded_station_ids, set
+            # by handle_call from tenant.config.excluded_station_ids). Hides
+            # stations that don't serve the tenant's vehicle class — e.g.
+            # tvoya-shina excludes 000000022 Дніпрошина (truck-only).
+            if session.excluded_station_ids:
+                filtered = [
+                    s for s in filtered
+                    if str(s.get("station_id", s.get("id", "")))
+                    not in session.excluded_station_ids
+                ]
 
             stations_out = []
             for s in filtered[:20]:
