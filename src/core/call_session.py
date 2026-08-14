@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 # Session constants
 SESSION_KEY_PREFIX = "call_session"
 SESSION_TTL = 1800  # 30 minutes
-SILENCE_TIMEOUT_SEC = 25
+SILENCE_TIMEOUT_SEC = 18
 MAX_TIMEOUTS_BEFORE_HANGUP = 3
 # Number of consecutive empty LLM responses before escalating to the
 # operator-transfer template. Below the threshold we ask the caller to
