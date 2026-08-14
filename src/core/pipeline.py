@@ -1154,6 +1154,35 @@ class CallPipeline:
                             self._session.channel_uuid,
                         )
 
+            # Deterministic pre-parser (Phase 3 2026-08-14): pull car brand
+            # and licence plate out of any user turn with regex/keyword match.
+            # Only writes to session when the field is empty — never trample
+            # an LLM-driven value from a later turn. Verbose callers who say
+            # everything at once («на завтра, лексус AA1234BB, свої») now
+            # skip 2-3 follow-up questions.
+            if not self._session.fitting_plate or not self._session.fitting_vehicle_brand:
+                try:
+                    from src.agent.preparse import preparse_fitting
+
+                    _extracted = preparse_fitting(transcript.text)
+                    if _extracted:
+                        if "plate" in _extracted and not self._session.fitting_plate:
+                            self._session.fitting_plate = _extracted["plate"]
+                        if "brand" in _extracted and not self._session.fitting_vehicle_brand:
+                            self._session.fitting_vehicle_brand = _extracted["brand"]
+                        logger.info(
+                            "Fitting preparse for call %s extracted %s from %r",
+                            self._session.channel_uuid,
+                            _extracted,
+                            transcript.text[:60],
+                        )
+                except Exception:
+                    logger.debug(
+                        "Fitting preparse failed for call %s",
+                        self._session.channel_uuid,
+                        exc_info=True,
+                    )
+
             # Fitting progress block: shows LLM what's already collected so it
             # doesn't loop back to Krok 2/3/4 after passing through them.
             fitting_progress: dict[str, Any] = {
