@@ -2283,7 +2283,51 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 [s.get("id") for s in stations_out[:5]],
             )
 
-            response: dict[str, Any] = {
+            # Server-side enforcement: when the LLM asks for all city
+            # stations (city set, no query) and gets 2+ back — hide the
+            # addresses. Return only district names so the LLM literally
+            # cannot list addresses; the only sane response then is
+            # «У [місто] є N точок у районах: …. У якому зручніше?».
+            # Prompts had this rule for weeks and LLM kept violating it
+            # under attention dilution (call 646dd90b 2026-08-14: bot
+            # started «У Дніпрі є п'ять точок: провулок Добровольців,
+            # один де;…» — 15s TTS, call dropped).
+            multi_no_query = (
+                effective_city
+                and not effective_query
+                and not query_returned_empty
+                and len(stations_out) >= 2
+            )
+            if multi_no_query:
+                districts = []
+                seen_d: set[str] = set()
+                for s in stations_out:
+                    # Take the first district phrase (comma-separated)
+                    raw_d = str(s.get("district") or "").strip()
+                    if not raw_d:
+                        continue
+                    primary = raw_d.split(",")[0].strip()
+                    if primary and primary.lower() not in seen_d:
+                        seen_d.add(primary.lower())
+                        districts.append(primary)
+                response: dict[str, Any] = {
+                    "total": len(stations_out),
+                    "city": stations_out[0].get("city", effective_city),
+                    "action_required": "ask_district",
+                    "district_options": districts,
+                    "hint": (
+                        f"⚠️ У місті {stations_out[0].get('city', effective_city)} "
+                        f"знайдено {len(stations_out)} точок. "
+                        "⛔ АДРЕСИ У ЦІЙ ВІДПОВІДІ НАВМИСНО ПРИХОВАНО. "
+                        "Клієнту скажи ТІЛЬКИ райони (district_options) і спитай "
+                        "«У якому районі зручніше?». НЕ вигадуй адреси — після "
+                        "відповіді клієнта виклич get_fitting_stations ЩЕ РАЗ з "
+                        "query=[район]."
+                    ),
+                }
+                return response
+
+            response = {
                 "total": len(filtered),
                 "stations": stations_out,
             }
