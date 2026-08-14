@@ -350,6 +350,16 @@ _CONFIRM_KEYWORDS: tuple[str, ...] = (
     "гаразд?",
     "все правильно",
     "все вірно",
+    # Fitting-flow confirmations that don't contain the explicit words
+    # above (call 78f185dc 2026-08-14: bot «Записуємо туди?» → generic
+    # «Я на зв'язку» filler played instead of targeted «скажіть так
+    # або ні», client complained «чем молчим?»).
+    "записуємо туди",
+    "туди?",
+    "обираєте",
+    "беремо?",
+    "погоджуєтесь",
+    "підходить?",
 )
 
 

@@ -27,6 +27,7 @@ from src.agent.prompts import (
     WAIT_FITTING_PRICE_POOL,
     WAIT_KNOWLEDGE_POOL,
     WAIT_SEARCH_POOL,
+    WAIT_STATIONS_POOL,
     WAIT_STATUS_POOL,
     WAIT_STORAGE_POOL,
     WAIT_THINKING_POOL,
@@ -81,8 +82,8 @@ _TOOL_WAIT_POOLS: dict[str, list[str]] = {
     "search_tires": WAIT_SEARCH_POOL,
     "check_availability": WAIT_AVAILABILITY_POOL,
     "get_order_status": WAIT_STATUS_POOL,
-    "get_fitting_stations": WAIT_FITTING_POOL,
-    "get_fitting_slots": WAIT_FITTING_POOL,
+    "get_fitting_stations": WAIT_STATIONS_POOL,  # search points/addresses
+    "get_fitting_slots": WAIT_FITTING_POOL,       # check schedule/slots
     "book_fitting": WAIT_BOOKING_POOL,
     "cancel_fitting": WAIT_CANCEL_POOL,
     "get_fitting_price": WAIT_FITTING_PRICE_POOL,

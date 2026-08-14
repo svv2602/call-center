@@ -1800,6 +1800,18 @@ WAIT_FITTING_POOL = [
     "Зараз перевірю розклад, одну мить.",
 ]
 
+# Station/point lookup wait phrases — kept separate from WAIT_FITTING_POOL
+# (which is about SLOTS/schedule). Call 78f185dc 2026-08-14 exposed the
+# mismatch: bot called get_fitting_stations but the filler said «Зараз
+# перевірю розклад» (schedule) — client heard the wrong context and got
+# confused. These phrases are about SEARCHING for addresses / points.
+WAIT_STATIONS_TEXT = "Секундочку, шукаю точки."
+WAIT_STATIONS_POOL = [
+    WAIT_STATIONS_TEXT,
+    "Одну мить, дивлюся адреси.",
+    "Зараз перевірю, де є.",
+]
+
 WAIT_BOOKING_TEXT = "Зачекайте, оформлюю ваш запис."
 WAIT_BOOKING_POOL = [
     WAIT_BOOKING_TEXT,
