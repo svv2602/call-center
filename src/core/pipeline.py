@@ -415,7 +415,12 @@ def _infer_context_hint(bot_utterance: str) -> str | None:
 _SCENARIO_GREETING_SUFFIX: dict[str, str] = {
     "tire_search": "Допоможу підібрати шини.",
     "order_status": "Перевірю статус вашого замовлення.",
-    "fitting": "Запишу вас на шиномонтаж.",
+    # NOTE 2026-08-14: fitting suffix removed. In Phase 2 we started
+    # defaulting session.scenario = "fitting" for all no-IVR calls, which
+    # made this suffix fire on every greeting — producing the double
+    # message «…чи маєте інше питання? Запишу вас на шиномонтаж.» that
+    # both contradicts the intent question and adds ~2s of dead air.
+    # Was: "fitting": "Запишу вас на шиномонтаж.",
     "consultation": "Готова відповісти на ваші питання.",
 }
 
