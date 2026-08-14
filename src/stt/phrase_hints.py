@@ -255,13 +255,22 @@ BASE_PLATE_REGION_CODES: list[str] = [
 # during normal Ukrainian conversation.
 PLATE_BOOST_VALUE = 15.0
 
+# City-name boost — lower than plates so we don't over-trigger on random
+# short words, but strong enough to keep "Київ" / "Дніпро" / "Запоріжжя"
+# in the top-K when STT hears a mumbled short phrase. Callers routinely
+# say only the city with no leading phrase ("Дніпро", "мисто Києві"),
+# and STT drops to boost-0 general vocab and often substitutes a
+# similar-sounding word (observed 63b8e234 2026-08-12: "мисто Києві"
+# → "Украины" conf 0.78; "Києві" → "Мистер"/"мистер" 3 turns in a row).
+CITY_BOOST_VALUE = 12.0
+
 
 def get_plate_boost_phrases() -> list[tuple[str, float]]:
-    """Return (phrase, boost) pairs for plate letters + region codes.
+    """Return (phrase, boost) pairs for plate letters, region codes, and cities.
 
     Kept separate from get_base_phrases() because these need a non-default
     boost value — the general vocab lives at boost=0 which is Google's
-    "no preference" default. Deduplicated across letters + prefixes.
+    "no preference" default. Deduplicated across letters + prefixes + cities.
     """
     seen: set[str] = set()
     out: list[tuple[str, float]] = []
@@ -270,6 +279,11 @@ def get_plate_boost_phrases() -> list[tuple[str, float]]:
             continue
         seen.add(phrase)
         out.append((phrase, PLATE_BOOST_VALUE))
+    for phrase in BASE_CITIES:
+        if phrase in seen:
+            continue
+        seen.add(phrase)
+        out.append((phrase, CITY_BOOST_VALUE))
     return out
 
 
