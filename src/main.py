@@ -749,6 +749,19 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         session.scenario = ivr_intent
         session.active_scenarios.add(ivr_intent)
         logger.info("IVR intent resolved: %s for call %s", ivr_intent, conn.channel_uuid)
+    else:
+        # Fitting-only scope (2026-08-14): no IVR + no persisted scenario →
+        # default to fitting. Every non-fitting intent is transferred to the
+        # operator by the _MOD_CORE scope rule anyway. Defaulting keeps prompt
+        # cache warm across all turns (compact→full upgrade would flush cache
+        # on turn 2 because the prefix changes).
+        if session.scenario is None:
+            session.scenario = "fitting"
+            session.active_scenarios.add("fitting")
+            logger.info(
+                "No IVR intent — defaulting scenario to 'fitting' for call %s",
+                conn.channel_uuid,
+            )
     if caller_id:
         session.caller_id = caller_id
         session.caller_phone = caller_id
@@ -1001,7 +1014,11 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             system_prompt = assemble_prompt(
                 scenario=session.scenario,
                 include_pronunciation=False,  # added separately via inject_pronunciation_rules
-                compact=(session.scenario is None),  # lightweight router when no IVR
+                # Compact router path is unused now that we default scenario
+                # to "fitting" on new calls (see main.py connection handler).
+                # Kept as backward-compat for the rare `session.scenario is None`
+                # path that survives session-restore edge cases.
+                compact=(session.scenario is None),
                 enabled_tools=tenant_tools_set,
             )
             is_modular = True

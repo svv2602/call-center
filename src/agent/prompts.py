@@ -1017,7 +1017,12 @@ def detect_scenario_from_text(text: str) -> str | None:
 
 
 SCENARIO_MODULES: dict[str | None, list[str]] = {
-    None: _ALL_SCENARIO_MODULES,  # no IVR, fallback → full prompt
+    # Fitting-only scope (2026-08-14): all non-fitting is transferred to
+    # the operator by the _MOD_CORE scope rule, so we don't need to load
+    # tire_search / consultation / order_flow modules at all.
+    # `None` = fallback for calls without any detected scenario — default
+    # to the fitting bundle (was: _ALL_SCENARIO_MODULES, ~15k tok).
+    None: [_MOD_FITTING, _MOD_STORAGE],
     "tire_search": [
         _MOD_TIRE_SEARCH,
         _MOD_ORDER_FLOW,
@@ -1029,12 +1034,12 @@ SCENARIO_MODULES: dict[str | None, list[str]] = {
         _MOD_ORDER_STATUS,
         _MOD_CONSULTATION,
     ],
+    # Fitting is our primary supported scenario. Trimmed from 5 → 2 modules
+    # (dropped _MOD_ORDER_FLOW / _MOD_CONSULTATION / _MOD_COMBINED_FLOW —
+    # ~4k tok saved per LLM call, ~30% cheaper attention on fitting rules).
     "fitting": [
         _MOD_FITTING,
         _MOD_STORAGE,
-        _MOD_ORDER_FLOW,
-        _MOD_CONSULTATION,
-        _MOD_COMBINED_FLOW,
     ],
     "consultation": [
         _MOD_CONSULTATION,
@@ -1423,7 +1428,11 @@ def build_system_prompt_with_context(
 
     # Topic switching: when customer changes topic mid-call, add modules
     # from newly detected scenarios (only add, never remove).
-    if is_modular and active_scenarios and scenario:
+    # Fitting-only scope 2026-08-14: skip expansion when scenario=="fitting"
+    # — non-fitting mentions are handled by _MOD_CORE's scope rule (transfer
+    # to operator), NOT by loading extra modules. This kept ~4k tok on calls
+    # where the client said e.g. «шини» after already being in fitting flow.
+    if is_modular and active_scenarios and scenario and scenario != "fitting":
         primary_mods = _modules_for_scenario(scenario, enabled_tools) or _ALL_SCENARIO_MODULES
         base_modules = set(primary_mods)
         extra: list[str] = []
