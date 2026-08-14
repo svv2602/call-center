@@ -2107,6 +2107,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 ]
 
             # Query search: match address + hint fields (district, landmarks, description)
+            query_returned_empty = False
             if effective_query:
                 query_matched = []
                 for s in filtered:
@@ -2123,7 +2124,22 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     )
                     if _query_matches(effective_query, searchable):
                         query_matched.append(s)
-                filtered = query_matched
+                if query_matched:
+                    filtered = query_matched
+                else:
+                    # Query with city → 0 matches. STT may have mangled the
+                    # landmark word ("речпорту" → "річці", call 7b44f036
+                    # 2026-08-14). Instead of returning empty (bot says
+                    # «не знайшла» and client hangs up), keep the city-filtered
+                    # list and set no_query_match=True so the LLM can offer
+                    # them explicitly: «За орієнтиром X точки не знайшла,
+                    # ось усі точки у [місто]: …».
+                    query_returned_empty = True
+                    logger.info(
+                        "get_fitting_stations: query=%r no matches in city=%r, "
+                        "returning all %d city stations as fallback",
+                        effective_query, effective_city, len(filtered),
+                    )
 
             # Last-resort fallback: if city filter gave 0 results and no query,
             # try searching the full city string in address/hint fields
@@ -2250,10 +2266,18 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 [s.get("id") for s in stations_out[:5]],
             )
 
-            return {
+            response: dict[str, Any] = {
                 "total": len(filtered),
                 "stations": stations_out,
             }
+            if query_returned_empty:
+                # Signal to the LLM that these stations came from the city
+                # fallback, not from the requested landmark match. The prompt
+                # rule tells the LLM to phrase this as «За орієнтиром X точки
+                # не знайшла, ось усі точки у [місто]: …».
+                response["no_query_match"] = True
+                response["requested_query"] = effective_query
+            return response
 
         # 5. Fallback to Store API
         return await client.get_fitting_stations(city)
@@ -3446,6 +3470,17 @@ async def main() -> None:
         from src.monitoring.pricing_cache import refresh_from_db as _refresh_pricing
 
         await _refresh_pricing(_db_engine)
+
+    # Warm the STT landmark boost cache from point_hints. Without this,
+    # get_plate_boost_phrases() would emit only plates+cities and Google
+    # STT would keep truncating district names like "Речпорт"/"Оболонь".
+    if _db_engine is not None:
+        try:
+            from src.stt.phrase_hints import refresh_landmark_cache
+
+            await refresh_landmark_cache(_db_engine)
+        except Exception:
+            logger.warning("STT landmark cache refresh failed", exc_info=True)
 
     # Initialize asyncpg pool for PatternSearch (pgvector direct queries)
     if settings.openai.api_key and _db_engine is not None:

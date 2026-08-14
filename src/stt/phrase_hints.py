@@ -264,13 +264,26 @@ PLATE_BOOST_VALUE = 15.0
 # → "Украины" conf 0.78; "Києві" → "Мистер"/"мистер" 3 turns in a row).
 CITY_BOOST_VALUE = 12.0
 
+# Landmark/district boost — same tier as plates. Landmarks are routing-
+# critical: caller says "Речпорт"/"Оболонь"/"Тополь", STT truncates the
+# tail ("речпорту" → "річці", call 7b44f036 2026-08-14) and the LLM can't
+# find the station in point_hints. Boosting each landmark keeps the full
+# word in top-K. Extracted from point_hints table at startup + refresh.
+LANDMARK_BOOST_VALUE = 15.0
+
+# Module-level cache of landmark boost phrases. Populated by
+# refresh_landmark_cache() at startup and refresh_phrase_hints().
+_landmark_boost_cache: tuple[tuple[str, float], ...] = ()
+
 
 def get_plate_boost_phrases() -> list[tuple[str, float]]:
-    """Return (phrase, boost) pairs for plate letters, region codes, and cities.
+    """Return (phrase, boost) pairs for plate letters, region codes, cities,
+    and landmarks/districts loaded from point_hints.
 
     Kept separate from get_base_phrases() because these need a non-default
     boost value — the general vocab lives at boost=0 which is Google's
-    "no preference" default. Deduplicated across letters + prefixes + cities.
+    "no preference" default. Deduplicated across letters + prefixes + cities
+    + landmarks.
     """
     seen: set[str] = set()
     out: list[tuple[str, float]] = []
@@ -284,7 +297,79 @@ def get_plate_boost_phrases() -> list[tuple[str, float]]:
             continue
         seen.add(phrase)
         out.append((phrase, CITY_BOOST_VALUE))
+    for phrase, boost in _landmark_boost_cache:
+        if phrase in seen:
+            continue
+        seen.add(phrase)
+        out.append((phrase, boost))
     return out
+
+
+# Regex for extracting Cyrillic words 4+ letters (short words like "ЖМ",
+# "у", "на" are noise). Matches both lower and upper case.
+_LANDMARK_WORD_RE = re.compile(r"[а-яёіїєґА-ЯЁІЇЄҐ]{4,}")
+
+# Words that appear in every district description but are not landmarks
+# themselves (would over-boost common vocabulary).
+_LANDMARK_STOPWORDS: frozenset[str] = frozenset({
+    "берег", "берегу", "також", "кажуть", "район", "поряд", "біля",
+    "виїзд", "місто", "точка", "точки", "магазин", "метро",
+    "напроти", "єдина", "тільки", "трохи",
+})
+
+
+async def extract_landmark_phrases(db_engine: Any) -> list[str]:
+    """Extract district + landmark words from point_hints.
+
+    Returns Cyrillic words (4+ letters, capitalized) that appear in
+    the ``district`` field of fitting_station rows in ``point_hints``.
+    These are routing keywords the caller uses to name a station
+    ("Речпорт", "Оболонь", "Тополь", "Караван", "Придніпровськ",
+    "Холодногірська", "ЖМ Перемога", "Правий берег", "Лівий берег").
+
+    Only ``district`` is scanned (not ``landmarks``/``description``) —
+    the latter two contain long free-form text (street addresses,
+    business names, transliterations) that would dilute the boost
+    beyond usefulness.
+    """
+    from sqlalchemy import text
+
+    phrases: set[str] = set()
+
+    try:
+        async with db_engine.begin() as conn:
+            result = await conn.execute(
+                text(
+                    "SELECT district FROM point_hints "
+                    "WHERE point_type = 'fitting_station' AND district IS NOT NULL"
+                )
+            )
+            for row in result:
+                district_text = row[0]
+                if not district_text:
+                    continue
+                for word in _LANDMARK_WORD_RE.findall(district_text):
+                    if word.lower() in _LANDMARK_STOPWORDS:
+                        continue
+                    phrases.add(word[0].upper() + word[1:].lower())
+    except Exception:
+        logger.exception("Failed to extract landmark phrases from point_hints")
+
+    return sorted(phrases)
+
+
+async def refresh_landmark_cache(db_engine: Any) -> int:
+    """Refresh the in-process landmark boost cache from point_hints.
+
+    Call at app startup and whenever point_hints is edited. Returns
+    the number of phrases loaded.
+    """
+    global _landmark_boost_cache
+
+    words = await extract_landmark_phrases(db_engine)
+    _landmark_boost_cache = tuple((w, LANDMARK_BOOST_VALUE) for w in words)
+    logger.info("Landmark boost cache refreshed: %d phrases", len(words))
+    return len(words)
 
 
 # ═══════════════════════════════════════════════════════════
@@ -592,6 +677,11 @@ async def refresh_phrase_hints(db_engine: Any, redis: Redis) -> dict[str, Any]:
     global _cache, _cache_ts
 
     auto = await extract_catalog_phrases(db_engine)
+
+    # Refresh landmark boost cache from point_hints (used by
+    # get_plate_boost_phrases at STTConfig build time — routing
+    # words like Речпорт/Оболонь/Тополь are boost=15).
+    await refresh_landmark_cache(db_engine)
 
     # Refresh word overrides cache alongside phrase hints
     await _ensure_word_overrides_loaded(redis)
