@@ -37,10 +37,19 @@ class ToolCall:
 
 @dataclass(frozen=True)
 class Usage:
-    """Token usage for an LLM response."""
+    """Token usage for an LLM response.
+
+    ``cached_input_tokens`` counts how many of the ``input_tokens`` were served
+    from the provider's automatic prompt cache — for OpenAI this comes from
+    ``usage.prompt_tokens_details.cached_tokens`` (enabled by default since
+    Oct 2024 for prefixes ≥1024 tokens, ~50% cheaper). Anthropic reports it
+    as ``usage.cache_read_input_tokens``. Field is 0 when the provider does
+    not report cache stats.
+    """
 
     input_tokens: int
     output_tokens: int
+    cached_input_tokens: int = 0
 
 
 @dataclass(frozen=True)

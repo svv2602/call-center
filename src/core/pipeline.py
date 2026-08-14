@@ -1221,6 +1221,7 @@ class CallPipeline:
                         result.total_usage.input_tokens,
                         result.total_usage.output_tokens,
                         provider_key=result.provider_key,
+                        cached_input_tokens=result.total_usage.cached_input_tokens,
                     )
 
                 if result is not None and result.spoken_text:
@@ -1328,6 +1329,7 @@ class CallPipeline:
                         self._agent.last_input_tokens,
                         self._agent.last_output_tokens,
                         provider_key=self._agent.last_provider_key,
+                        cached_input_tokens=self._agent.last_cached_input_tokens,
                     )
 
                 # Now record the user turn in session (for DB/analytics)

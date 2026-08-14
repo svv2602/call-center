@@ -123,11 +123,16 @@ class AnthropicProvider(AbstractProvider):
 
             # After stream completes, emit StreamDone
             final = await stream.get_final_message()
+            # Anthropic prompt caching: cache_read_input_tokens is populated
+            # only when the request declared cache_control breakpoints. When
+            # absent (or when SDK version predates the field) it's 0.
+            cached = int(getattr(final.usage, "cache_read_input_tokens", 0) or 0)
             yield StreamDone(
                 stop_reason=final.stop_reason or "end_turn",
                 usage=Usage(
                     input_tokens=final.usage.input_tokens,
                     output_tokens=final.usage.output_tokens,
+                    cached_input_tokens=cached,
                 ),
             )
 
@@ -150,6 +155,7 @@ class AnthropicProvider(AbstractProvider):
 
         stop_reason = response.stop_reason or "end_turn"
 
+        cached = int(getattr(response.usage, "cache_read_input_tokens", 0) or 0)
         return LLMResponse(
             text="".join(text_parts),
             tool_calls=tool_calls,
@@ -157,6 +163,7 @@ class AnthropicProvider(AbstractProvider):
             usage=Usage(
                 input_tokens=response.usage.input_tokens,
                 output_tokens=response.usage.output_tokens,
+                cached_input_tokens=cached,
             ),
             provider=self._provider_key,
             model=self._model,

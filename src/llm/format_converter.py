@@ -176,9 +176,13 @@ def openai_response_to_llm_response(
         stop_reason = "end_turn"
 
     usage_data = data.get("usage") or {}
+    # OpenAI reports cached prompt tokens under prompt_tokens_details.cached_tokens
+    # (automatic prompt caching, active for prefixes ≥1024 tokens since Oct 2024).
+    prompt_details = usage_data.get("prompt_tokens_details") or {}
     usage = Usage(
         input_tokens=usage_data.get("prompt_tokens", 0),
         output_tokens=usage_data.get("completion_tokens", 0),
+        cached_input_tokens=int(prompt_details.get("cached_tokens", 0) or 0),
     )
 
     return LLMResponse(
@@ -252,6 +256,7 @@ class OpenAIStreamParser:
         # OpenAI sends usage in a separate final chunk with choices=[].
         usage_data = chunk.get("usage")
         if usage_data and self._pending_stop_reason is not None:
+            prompt_details = usage_data.get("prompt_tokens_details") or {}
             events.append(
                 StreamDone(
                     stop_reason=self._pending_stop_reason,
@@ -259,6 +264,9 @@ class OpenAIStreamParser:
                     usage=Usage(
                         input_tokens=usage_data.get("prompt_tokens", 0),
                         output_tokens=usage_data.get("completion_tokens", 0),
+                        cached_input_tokens=int(
+                            prompt_details.get("cached_tokens", 0) or 0
+                        ),
                     ),
                 )
             )

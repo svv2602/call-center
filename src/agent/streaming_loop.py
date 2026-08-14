@@ -255,9 +255,17 @@ class StreamingAgentLoop:
         conversation_history.append({"role": "user", "content": user_text})
 
         # Compress/summarize old messages to save tokens (BEFORE trim so
-        # early context like customer name / topic is captured in the summary)
+        # early context like customer name / topic is captured in the summary).
+        # Tuned 2026-08-14: summary_threshold=9 + keep_recent=7 (was 10/10)
+        # to cut ~1-2k tok on fitting calls that hit 10+ turns (call 98ee0296
+        # had 34 turns / 28k input tokens). The last 7 messages still cover
+        # the current Krok context, so the state machine stays coherent.
         pre_len = len(conversation_history)
-        conversation_history[:] = summarize_old_messages(conversation_history)
+        conversation_history[:] = summarize_old_messages(
+            conversation_history,
+            summary_threshold=9,
+            keep_recent=7,
+        )
         post_len = len(conversation_history)
 
         # Record compression mode metric
@@ -316,6 +324,7 @@ class StreamingAgentLoop:
         wait_phrase_spoken = ""  # Tracked separately from spoken_parts for quality scoring
         total_input_tokens = 0
         total_output_tokens = 0
+        total_cached_input_tokens = 0
         tool_calls_made = 0
         stop_reason = "end_turn"
         provider_key = ""
@@ -382,7 +391,9 @@ class StreamingAgentLoop:
                     spoken_text=" ".join(spoken_parts),
                     tool_calls_made=tool_calls_made,
                     stop_reason="error",
-                    total_usage=Usage(total_input_tokens, total_output_tokens),
+                    total_usage=Usage(
+                total_input_tokens, total_output_tokens, total_cached_input_tokens
+            ),
                     interrupted=False,
                     disconnected=False,
                 )
@@ -395,6 +406,7 @@ class StreamingAgentLoop:
             # Accumulate usage
             total_input_tokens += result.usage.input_tokens
             total_output_tokens += result.usage.output_tokens
+            total_cached_input_tokens += result.usage.cached_input_tokens
             stop_reason = result.stop_reason
             provider_key = result.provider_key or provider_key
 
@@ -574,7 +586,9 @@ class StreamingAgentLoop:
             spoken_text=" ".join(spoken_parts),
             tool_calls_made=tool_calls_made,
             stop_reason=stop_reason,
-            total_usage=Usage(total_input_tokens, total_output_tokens),
+            total_usage=Usage(
+                total_input_tokens, total_output_tokens, total_cached_input_tokens
+            ),
             provider_key=provider_key,
             interrupted=interrupted,
             disconnected=disconnected,

@@ -35,6 +35,7 @@ async def _insert_usage(
     model_name: str,
     input_tokens: int,
     output_tokens: int,
+    cached_input_tokens: int,
     latency_ms: int | None,
     call_id: str | None,
     tenant_id: str | None,
@@ -47,12 +48,12 @@ async def _insert_usage(
                 text("""
                     INSERT INTO llm_usage_log
                         (task_type, provider_key, model_name,
-                         input_tokens, output_tokens, latency_ms,
-                         call_id, tenant_id)
+                         input_tokens, output_tokens, cached_input_tokens,
+                         latency_ms, call_id, tenant_id)
                     VALUES
                         (:task_type, :provider_key, :model_name,
-                         :input_tokens, :output_tokens, :latency_ms,
-                         :call_id, :tenant_id)
+                         :input_tokens, :output_tokens, :cached_input_tokens,
+                         :latency_ms, :call_id, :tenant_id)
                 """),
                 {
                     "task_type": task_type,
@@ -60,6 +61,7 @@ async def _insert_usage(
                     "model_name": model_name,
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
+                    "cached_input_tokens": cached_input_tokens,
                     "latency_ms": latency_ms,
                     "call_id": call_id,
                     "tenant_id": tenant_id,
@@ -67,11 +69,12 @@ async def _insert_usage(
             )
     except Exception:
         logger.warning(
-            "Failed to log LLM usage: task=%s provider=%s tokens=%d/%d",
+            "Failed to log LLM usage: task=%s provider=%s tokens=%d/%d cached=%d",
             task_type,
             provider_key,
             input_tokens,
             output_tokens,
+            cached_input_tokens,
             exc_info=True,
         )
 
@@ -82,6 +85,7 @@ def log_llm_usage(
     model_name: str,
     input_tokens: int,
     output_tokens: int,
+    cached_input_tokens: int = 0,
     latency_ms: int | None = None,
     call_id: str | None = None,
     tenant_id: str | None = None,
@@ -98,6 +102,7 @@ def log_llm_usage(
                 model_name=model_name,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                cached_input_tokens=cached_input_tokens,
                 latency_ms=latency_ms,
                 call_id=call_id,
                 tenant_id=tenant_id,

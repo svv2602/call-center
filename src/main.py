@@ -990,6 +990,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         # greeting has «Виктория, чим допомогти?» but Krok 0 later re-asks.
         if profile_name:
             session.fitting_customer_name = profile_name
+            session.name_from_profile = True
 
         # Modular prompt assembly: if no DB/A-B prompt, assemble from modules
         is_modular = False
@@ -2426,19 +2427,19 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 )
                 raw_slots = result.get("data", [])
                 count_posts = await _get_station_count_posts(station_id)
-                slots = []
+                # Build compact list of AVAILABLE times only. LLM never uses
+                # unavailable slots — dropping them (and the per-slot metadata:
+                # station_id/date/period/available) shaves ~900 chars per
+                # response for a typical 13-slot day (call 98ee0296: raw
+                # payload was 1182 chars → now ~250).
+                avail_times: list[str] = []
                 for s in raw_slots:
                     qty = int(s.get("Quantity", 0))
-                    slots.append(
-                        {
-                            "station_id": s.get("StationID", station_id),
-                            "date": s.get("Data", ""),
-                            "time": s.get("Time", ""),
-                            "period": s.get("Period", ""),
-                            "available": count_posts - qty > 0,
-                        }
-                    )
-                avail = [s for s in slots if s.get("available")]
+                    if count_posts - qty <= 0:
+                        continue
+                    t = _extract_time(s.get("Time", ""))
+                    if t:
+                        avail_times.append(t)
                 logger.info(
                     "get_fitting_slots for call %s: station=%s, date=%s..%s, "
                     "total=%d, available=%d, posts=%d, times=%s",
@@ -2446,19 +2447,17 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     station_id,
                     date_from,
                     date_to,
-                    len(slots),
-                    len(avail),
+                    len(raw_slots),
+                    len(avail_times),
                     count_posts,
-                    [s["time"] for s in avail[:10]],
+                    avail_times[:10],
                 )
                 # Snapshot offered slots for anti-hallucination: LLM cannot invent
                 # a date/time outside of what we returned from 1C.
                 session.selected_fitting_date = date_from
                 session.selected_fitting_time = None  # reset — client hasn't chosen yet
                 session.fitting_slots_offered = [
-                    {"date": date_from, "time": _extract_time(s.get("time", ""))}
-                    for s in avail
-                    if _extract_time(s.get("time", ""))
+                    {"date": date_from, "time": t} for t in avail_times
                 ]
                 # Client verbally picked this station — remember it so the LLM's
                 # follow-up confirmation cannot drift to another station's address.
@@ -2471,7 +2470,13 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     and not session.storage_contracts_found
                 ):
                     session.fitting_storage_choice = "own"
-                response: dict[str, Any] = {"station_id": station_id, "slots": slots}
+                response: dict[str, Any] = {
+                    "station_id": station_id,
+                    "date": date_from,
+                    "slots": avail_times,  # bare list of "HH:MM" strings
+                }
+                # Below-loop rename compat: preserve `avail` bool for empty-check
+                avail = avail_times
                 # Empty-slots hint: give the LLM concrete text so it doesn't
                 # improvise weird phrasing when there are 0 slots (calls 07-31
                 # Saturday-in-Zaporizhzhia + Friday-today-in-Cherkasy). Compute
@@ -2885,7 +2890,28 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         # «bot re-asks name after long dialog» regression (call d6e034f2).
         new_name = (kwargs.get("name") or "").strip()
         if new_name:
-            session.fitting_customer_name = new_name
+            # Guard: if the current session name came from a trusted profile
+            # lookup, refuse to silently overwrite it in-session — an LLM can
+            # be tricked into treating STT mishears ("Zeekr" heard as "Віктор")
+            # as a name correction (call 98ee0296 2026-08-14). We still let
+            # the DB update through in case the caller genuinely wants to
+            # correct their profile — but the running Krok 6 state stays
+            # anchored to the trusted name.
+            if (
+                session.name_from_profile
+                and session.fitting_customer_name
+                and new_name != session.fitting_customer_name
+            ):
+                logger.warning(
+                    "Blocked in-session name overwrite for call %s: "
+                    "profile=%r vs LLM-proposed=%r (likely STT-brand mishear)",
+                    session.channel_uuid,
+                    session.fitting_customer_name,
+                    new_name,
+                )
+                kwargs.pop("name", None)  # also drop from DB update
+            else:
+                session.fitting_customer_name = new_name
         vehicles = kwargs.get("vehicles") or []
         if vehicles and isinstance(vehicles, list):
             first = vehicles[0] if isinstance(vehicles[0], dict) else {}

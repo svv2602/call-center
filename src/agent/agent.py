@@ -136,6 +136,7 @@ class LLMAgent:
         # Accumulated usage from last process_message call (all LLM rounds)
         self.last_input_tokens: int = 0
         self.last_output_tokens: int = 0
+        self.last_cached_input_tokens: int = 0
         self.last_provider_key: str = ""
         # Last error message (if LLM call failed) — consumed by sandbox
         self.last_error: str | None = None
@@ -202,9 +203,14 @@ class LLMAgent:
             conversation_history.insert(0, {"role": "user", "content": "(початок дзвінка)"})
 
         # Compress/summarize old messages to save tokens (BEFORE trim so
-        # early context like customer name / topic is captured in the summary)
+        # early context like customer name / topic is captured in the summary).
+        # See streaming_loop.py for the rationale behind these thresholds.
         pre_len = len(conversation_history)
-        conversation_history[:] = summarize_old_messages(conversation_history)
+        conversation_history[:] = summarize_old_messages(
+            conversation_history,
+            summary_threshold=9,
+            keep_recent=7,
+        )
         post_len = len(conversation_history)
 
         # Record compression mode metric
@@ -263,6 +269,7 @@ class LLMAgent:
         stop_reason = "end_turn"
         self.last_input_tokens = 0
         self.last_output_tokens = 0
+        self.last_cached_input_tokens = 0
         self.last_provider_key = ""
         self.last_error = None
 
@@ -291,6 +298,7 @@ class LLMAgent:
                     latency_ms = int((time.monotonic() - start) * 1000)
                     self.last_input_tokens += llm_response.usage.input_tokens
                     self.last_output_tokens += llm_response.usage.output_tokens
+                    self.last_cached_input_tokens += llm_response.usage.cached_input_tokens
                     self.last_provider_key = llm_response.provider
                     stop_reason = llm_response.stop_reason or "end_turn"
                     logger.info(
@@ -347,6 +355,7 @@ class LLMAgent:
                 latency_ms = int((time.monotonic() - start) * 1000)
                 self.last_input_tokens += response.usage.input_tokens
                 self.last_output_tokens += response.usage.output_tokens
+                self.last_cached_input_tokens += response.usage.cached_input_tokens
                 stop_reason = response.stop_reason or "end_turn"
                 logger.info(
                     "Claude response: stop=%s, latency=%dms, tokens_in=%d, tokens_out=%d",

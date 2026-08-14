@@ -324,17 +324,16 @@ def _register_live_tools(
             )
             raw_slots = result.get("data", [])
             count_posts = await _get_station_count_posts(station_id)
-            slots = []
+            # Match production shape: compact list of available "HH:MM" strings.
+            avail_times: list[str] = []
             for s in raw_slots:
                 qty = int(s.get("Quantity", 0))
-                slots.append({
-                    "station_id": s.get("StationID", station_id),
-                    "date": s.get("Data", ""),
-                    "time": s.get("Time", ""),
-                    "period": s.get("Period", ""),
-                    "available": count_posts - qty > 0,
-                })
-            return {"station_id": station_id, "slots": slots}
+                if count_posts - qty <= 0:
+                    continue
+                t = str(s.get("Time", "")).strip()
+                if t:
+                    avail_times.append(t)
+            return {"station_id": station_id, "date": date_from, "slots": avail_times}
 
         async def _book_fitting_rest(**kwargs: Any) -> dict[str, Any]:
             result = await onec_client.book_fitting_rest(

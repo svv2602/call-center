@@ -38,6 +38,7 @@ class CostBreakdown:
     llm_model: str = ""
     _llm_input_tokens: int = 0
     _llm_output_tokens: int = 0
+    _llm_cached_input_tokens: int = 0
     _stt_seconds: float = 0.0
     _tts_characters: int = 0
     _tts_cached: int = 0
@@ -65,25 +66,35 @@ class CostBreakdown:
         input_tokens: int,
         output_tokens: int,
         provider_key: str = "",
+        cached_input_tokens: int = 0,
     ) -> None:
         """Record LLM token usage.
 
         Args:
-            input_tokens: Number of input tokens consumed.
+            input_tokens: Total prompt tokens (INCLUDES cached tokens).
             output_tokens: Number of output tokens generated.
             provider_key: LLM router provider key (e.g. "gemini-2.5-flash").
                 If empty, falls back to default pricing.
+            cached_input_tokens: Subset of ``input_tokens`` served from the
+                provider's automatic prompt cache. Billed at ~50% of standard
+                input rate (OpenAI/Anthropic default). Uncached portion =
+                ``input_tokens - cached_input_tokens`` billed at full rate.
         """
         if provider_key:
             self.llm_model = provider_key
         self._llm_input_tokens += input_tokens
         self._llm_output_tokens += output_tokens
+        self._llm_cached_input_tokens += cached_input_tokens
 
         inp_per_1m, out_per_1m = get_pricing(provider_key)
         self._llm_input_price_per_1m = inp_per_1m
         self._llm_output_price_per_1m = out_per_1m
+        # Cached input billed at 50% of standard rate (OpenAI/Anthropic default
+        # for automatic caching). Uncached portion at full rate.
+        uncached_input = max(0, input_tokens - cached_input_tokens)
         self.llm_cost += (
-            input_tokens / 1_000_000 * inp_per_1m
+            uncached_input / 1_000_000 * inp_per_1m
+            + cached_input_tokens / 1_000_000 * inp_per_1m * 0.5
             + output_tokens / 1_000_000 * out_per_1m
         )
 
@@ -106,6 +117,7 @@ class CostBreakdown:
             "llm_model": self.llm_model,
             "llm_input_tokens": self._llm_input_tokens,
             "llm_output_tokens": self._llm_output_tokens,
+            "llm_cached_input_tokens": self._llm_cached_input_tokens,
             "llm_input_price_per_1m": self._llm_input_price_per_1m,
             "llm_output_price_per_1m": self._llm_output_price_per_1m,
             "stt_seconds": round(self._stt_seconds, 1),

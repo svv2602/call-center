@@ -259,6 +259,7 @@ class LLMRouter:
                     self._log_usage(
                         task, provider_key, "", latency_ms,
                         event.usage.input_tokens, event.usage.output_tokens,
+                        cached_input_tokens=event.usage.cached_input_tokens,
                     )
             yield event
 
@@ -360,6 +361,7 @@ class LLMRouter:
             self._log_usage(
                 task, provider_key, response.model, latency_ms,
                 response.usage.input_tokens, response.usage.output_tokens,
+                cached_input_tokens=response.usage.cached_input_tokens,
             )
 
         return response
@@ -456,6 +458,7 @@ class LLMRouter:
         latency_ms: int,
         input_tokens: int,
         output_tokens: int,
+        cached_input_tokens: int = 0,
     ) -> None:
         """Fire-and-forget: persist LLM usage to llm_usage_log."""
         try:
@@ -467,6 +470,7 @@ class LLMRouter:
                 model_name=model_name,
                 input_tokens=input_tokens,
                 output_tokens=output_tokens,
+                cached_input_tokens=cached_input_tokens,
                 latency_ms=latency_ms,
                 call_id=llm_call_id_var.get(None),
                 tenant_id=llm_tenant_id_var.get(None),

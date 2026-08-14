@@ -107,6 +107,12 @@ class CallSession:
         # These surface state to the LLM as a "## 📋 Прогрес запису" block so
         # the model does not loop back to already-completed steps.
         self.fitting_customer_name: str | None = None      # Ім'я з профілю або питання
+        # True if fitting_customer_name was loaded from the caller's profile at
+        # call start. Used to block LLM-issued update_customer_profile(name=X)
+        # from silently overwriting a trusted profile name — a common failure
+        # when STT mishears a rare brand ("Zeekr" → "Віктор") and the LLM
+        # interprets "X правильно" as a name correction (call 98ee0296 2026-08-14).
+        self.name_from_profile: bool = False
         self.fitting_plate: str | None = None              # Держномер (нормалізований)
         self.fitting_vehicle_brand: str | None = None      # Марка/модель авто
         # storage_choice: None=pending, "own"=клієнт привезе свої, "contract"=зі зберігання
@@ -228,6 +234,7 @@ class CallSession:
             "storage_contracts_found": list(self.storage_contracts_found),
             "storage_contract_guard_triggered": self.storage_contract_guard_triggered,
             "fitting_customer_name": self.fitting_customer_name,
+            "name_from_profile": self.name_from_profile,
             "fitting_plate": self.fitting_plate,
             "fitting_vehicle_brand": self.fitting_vehicle_brand,
             "fitting_storage_choice": self.fitting_storage_choice,
@@ -286,6 +293,7 @@ class CallSession:
             "storage_contract_guard_triggered", False
         )
         session.fitting_customer_name = data.get("fitting_customer_name")
+        session.name_from_profile = data.get("name_from_profile", False)
         session.fitting_plate = data.get("fitting_plate")
         session.fitting_vehicle_brand = data.get("fitting_vehicle_brand")
         session.fitting_storage_choice = data.get("fitting_storage_choice")

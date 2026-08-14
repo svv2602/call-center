@@ -145,6 +145,9 @@ async def llm_complete(
                 model_name=response.model,
                 input_tokens=response.usage.input_tokens,
                 output_tokens=response.usage.output_tokens,
+                cached_input_tokens=int(
+                    getattr(response.usage, "cache_read_input_tokens", 0) or 0
+                ),
             )
         except Exception:
             pass
