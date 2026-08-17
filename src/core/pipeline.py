@@ -36,7 +36,7 @@ from src.agent.prompts import (
     compute_order_stage,
     detect_scenario_from_text,
 )
-from src.core.audio_socket import AudioSocketConnection, PacketType
+from src.core.audio_socket import AUDIO_FRAME_BYTES, AudioSocketConnection, PacketType
 from src.core.call_session import SILENCE_TIMEOUT_SEC, CallSession, CallState
 from src.monitoring.metrics import (
     audiosocket_to_stt_ms,
@@ -62,6 +62,13 @@ _TRANSCRIPT_BUFFER_SEC_DEFAULT = 1.2
 
 # Timeout for contextual farewell LLM call (seconds)
 _FAREWELL_LLM_TIMEOUT_SEC = 3
+
+# Keepalive silence interval (seconds) — mobile carriers / SIP trunks drop the
+# RTP session if no packets flow from our side for a few seconds. When the bot
+# is idle (STT listening, LLM inference, tool execution), we fill the gap with
+# 20 ms of silent PCM every _KEEPALIVE_INTERVAL_SEC. Anchors: calls 235aa6fa,
+# 63d11ab4, c11eae66, 8c85d7c5 — all ConnectionReset during between-turn silence.
+_KEEPALIVE_INTERVAL_SEC = 0.5
 
 # Minimum dialog turns before using contextual farewell
 _FAREWELL_MIN_TURNS = 3
@@ -571,6 +578,7 @@ class CallPipeline:
 
     async def run(self) -> None:
         """Run the full call pipeline until hangup or transfer."""
+        keepalive_task: asyncio.Task[None] | None = None
         try:
             # Start STT and audio reader BEFORE greeting so that incoming
             # caller audio is fed to STT in real-time.  Without this, audio
@@ -578,6 +586,7 @@ class CallPipeline:
             # then flushed in a burst — which breaks latest_short model.
             await self._stt.start_stream(self._stt_config)
             audio_task = asyncio.create_task(self._audio_reader_loop())
+            keepalive_task = asyncio.create_task(self._keepalive_loop())
 
             # Play greeting while STT is already consuming audio
             logger.info("Pipeline: starting greeting for %s", self._session.channel_uuid)
@@ -612,8 +621,37 @@ class CallPipeline:
             await self._log_turn("bot", error_msg)
             await self._speak(error_msg)
         finally:
+            if keepalive_task is not None:
+                keepalive_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await keepalive_task
             await self._stt.stop_stream()
             self._session.transition_to(CallState.ENDED)
+
+    async def _keepalive_loop(self) -> None:
+        """Send 20 ms of silent PCM every _KEEPALIVE_INTERVAL_SEC while the
+        bot is idle, to keep the SIP/RTP session alive between turns.
+
+        Skips when ``_speaking`` is True (real audio already flowing) or the
+        connection is closed. Interleaving with real audio is bounded to
+        at most one 20 ms silence frame per race, which is inaudible.
+        """
+        silence_frame = b"\x00" * AUDIO_FRAME_BYTES
+        try:
+            while not self._conn.is_closed:
+                await asyncio.sleep(_KEEPALIVE_INTERVAL_SEC)
+                if self._speaking or self._conn.is_closed:
+                    continue
+                try:
+                    await self._conn.send_audio(silence_frame)
+                except Exception:
+                    logger.debug(
+                        "keepalive silence send failed for %s",
+                        self._session.channel_uuid,
+                        exc_info=True,
+                    )
+        except asyncio.CancelledError:
+            return
 
     async def _play_greeting(self) -> None:
         """Play the greeting message, adapted to the time of day and agent name."""
