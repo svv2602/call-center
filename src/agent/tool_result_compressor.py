@@ -133,9 +133,25 @@ def _compress_check_availability(result: dict[str, Any]) -> str:
 
 
 def _compress_fitting_slots(result: dict[str, Any]) -> str:
-    """Keep date, time, available per slot; drop internal IDs."""
+    """Keep date, time, available per slot; drop internal IDs.
+
+    Handles both formats:
+    - Legacy: list of dicts (with date/time/available/id) → strip to essentials
+    - Current: list of bare "HH:MM" strings (as returned by _get_fitting_slots
+      in main.py) → pass through unchanged. Crashed the pipeline with
+      AttributeError("'str' object has no attribute 'items'") before this
+      guard (anchor: call f7555aac 2026-08-17 — bot died right after tool
+      returned, was misdiagnosed as SIP RST for hours).
+    """
     slots = result.get("slots", [])
-    compressed = [{k: v for k, v in s.items() if k in ("date", "time", "available")} for s in slots]
+    compressed: list[Any]
+    if slots and isinstance(slots[0], dict):
+        compressed = [
+            {k: v for k, v in s.items() if k in ("date", "time", "available")}
+            for s in slots
+        ]
+    else:
+        compressed = list(slots)  # bare strings, pass through
     out = {k: v for k, v in result.items() if k != "slots"}
     out["slots"] = compressed
     return _compact(out)
