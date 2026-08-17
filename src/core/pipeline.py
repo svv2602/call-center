@@ -63,12 +63,15 @@ _TRANSCRIPT_BUFFER_SEC_DEFAULT = 1.2
 # Timeout for contextual farewell LLM call (seconds)
 _FAREWELL_LLM_TIMEOUT_SEC = 3
 
-# Keepalive silence interval (seconds) — mobile carriers / SIP trunks drop the
-# RTP session if no packets flow from our side for a few seconds. When the bot
-# is idle (STT listening, LLM inference, tool execution), we fill the gap with
-# 20 ms of silent PCM every _KEEPALIVE_INTERVAL_SEC. Anchors: calls 235aa6fa,
-# 63d11ab4, c11eae66, 8c85d7c5 — all ConnectionReset during between-turn silence.
-_KEEPALIVE_INTERVAL_SEC = 0.5
+# Keepalive silence batch — mobile carriers / SIP trunks drop the RTP session
+# if audio flow becomes sparse. Asterisk app_audiosocket forwards our TCP audio
+# to the peer as RTP at 50 packets/sec (20 ms/frame). If we send only 1 frame
+# every 500 ms, there's 480 ms of TCP silence between keepalive packets — the
+# peer's carrier interprets that as end-of-call and RSTs. We instead send a
+# continuous batch of silence frames, using send_audio's built-in 20 ms pacing
+# to maintain the exact RTP cadence Asterisk expects.
+# _KEEPALIVE_BATCH_MS: how many ms of silence per batch (real-time pacing).
+_KEEPALIVE_BATCH_MS = 200
 
 # Minimum dialog turns before using contextual farewell
 _FAREWELL_MIN_TURNS = 3
@@ -629,27 +632,39 @@ class CallPipeline:
             self._session.transition_to(CallState.ENDED)
 
     async def _keepalive_loop(self) -> None:
-        """Send 20 ms of silent PCM every _KEEPALIVE_INTERVAL_SEC while the
-        bot is idle, to keep the SIP/RTP session alive between turns.
+        """Continuously stream silent PCM at native 20 ms RTP cadence while
+        the bot is idle, to keep the SIP peer's RTP session alive.
 
-        Skips when ``_speaking`` is True (real audio already flowing) or the
-        connection is closed. Interleaving with real audio is bounded to
-        at most one 20 ms silence frame per race, which is inaudible.
+        Batches of ``_KEEPALIVE_BATCH_MS`` are sent via ``_conn.send_audio``
+        whose per-frame pacing (20 ms) matches the native RTP rate that
+        Asterisk app_audiosocket forwards downstream. Between batches we
+        recheck ``_speaking`` and ``is_closed`` so real audio can take over.
         """
-        silence_frame = b"\x00" * AUDIO_FRAME_BYTES
+        frames_per_batch = _KEEPALIVE_BATCH_MS // 20
+        silence_batch = b"\x00" * (AUDIO_FRAME_BYTES * frames_per_batch)
+        first_send_logged = False
         try:
             while not self._conn.is_closed:
-                await asyncio.sleep(_KEEPALIVE_INTERVAL_SEC)
-                if self._speaking or self._conn.is_closed:
+                if self._speaking:
+                    # Bot audio pipeline owns the socket — check again in ~20 ms
+                    await asyncio.sleep(0.02)
                     continue
                 try:
-                    await self._conn.send_audio(silence_frame)
+                    await self._conn.send_audio(silence_batch)
+                    if not first_send_logged:
+                        logger.info(
+                            "keepalive silence stream started for %s (%d ms/batch)",
+                            self._session.channel_uuid,
+                            _KEEPALIVE_BATCH_MS,
+                        )
+                        first_send_logged = True
                 except Exception:
                     logger.debug(
                         "keepalive silence send failed for %s",
                         self._session.channel_uuid,
                         exc_info=True,
                     )
+                    await asyncio.sleep(0.1)
         except asyncio.CancelledError:
             return
 
