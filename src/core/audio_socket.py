@@ -94,6 +94,12 @@ class AudioSocketConnection:
         self.writer = writer
         self.channel_uuid = channel_uuid
         self._closed = False
+        # Wall-clock monotonic ts of the last successful send. Used by the
+        # pipeline's keepalive loop to detect in-turn silence gaps (between
+        # filler audio and real LLM audio) that the _speaking flag alone
+        # cannot catch — a turn holds _speaking=True for its whole duration
+        # but the actual audio flow may pause for hundreds of ms.
+        self.last_send_time: float = time.monotonic()
 
     @property
     def is_closed(self) -> bool:
@@ -164,6 +170,7 @@ class AudioSocketConnection:
                 return False
             offset += AUDIO_FRAME_BYTES
             frame_index += 1
+            self.last_send_time = time.monotonic()
             # Monotonic clock-based pacing: sleep until the next frame's
             # scheduled time to prevent cumulative drift from asyncio.sleep
             next_time = start_time + frame_index * frame_duration

@@ -63,15 +63,18 @@ _TRANSCRIPT_BUFFER_SEC_DEFAULT = 1.2
 # Timeout for contextual farewell LLM call (seconds)
 _FAREWELL_LLM_TIMEOUT_SEC = 3
 
-# Keepalive silence batch — mobile carriers / SIP trunks drop the RTP session
-# if audio flow becomes sparse. Asterisk app_audiosocket forwards our TCP audio
-# to the peer as RTP at 50 packets/sec (20 ms/frame). If we send only 1 frame
-# every 500 ms, there's 480 ms of TCP silence between keepalive packets — the
-# peer's carrier interprets that as end-of-call and RSTs. We instead send a
-# continuous batch of silence frames, using send_audio's built-in 20 ms pacing
-# to maintain the exact RTP cadence Asterisk expects.
-# _KEEPALIVE_BATCH_MS: how many ms of silence per batch (real-time pacing).
-_KEEPALIVE_BATCH_MS = 200
+# Keepalive silence — mobile carriers / SIP trunks drop the RTP session if
+# audio flow to Asterisk becomes sparse for longer than a few frames.
+# Asterisk app_audiosocket forwards our TCP audio to the peer as RTP at 50
+# packets/sec (20 ms/frame); any gap in our TCP audio becomes a gap in the
+# outbound RTP that the peer's mobile carrier can interpret as end-of-call.
+# We fill the gap by streaming silence frames whenever `AudioSocketConnection.
+# last_send_time` shows the flow has been quiet for `_KEEPALIVE_IDLE_MS`.
+# Time-based (not `_speaking`-based) so it also covers in-turn gaps between
+# filler audio, tool execution, and real LLM audio — the `_speaking` flag
+# stays True for the whole turn but the actual audio flow can pause.
+_KEEPALIVE_IDLE_MS = 40  # start silence stream after 40 ms without audio
+_KEEPALIVE_POLL_SEC = 0.02  # check idle every 20 ms (one frame)
 
 # Minimum dialog turns before using contextual farewell
 _FAREWELL_MIN_TURNS = 3
@@ -632,30 +635,32 @@ class CallPipeline:
             self._session.transition_to(CallState.ENDED)
 
     async def _keepalive_loop(self) -> None:
-        """Continuously stream silent PCM at native 20 ms RTP cadence while
-        the bot is idle, to keep the SIP peer's RTP session alive.
-
-        Batches of ``_KEEPALIVE_BATCH_MS`` are sent via ``_conn.send_audio``
-        whose per-frame pacing (20 ms) matches the native RTP rate that
-        Asterisk app_audiosocket forwards downstream. Between batches we
-        recheck ``_speaking`` and ``is_closed`` so real audio can take over.
+        """Fill any audio-flow gap longer than ``_KEEPALIVE_IDLE_MS`` with a
+        silence frame, so the outbound RTP stream to the SIP peer never
+        pauses. Time-based (uses ``conn.last_send_time``) so it covers both
+        between-turn gaps and in-turn gaps that the ``_speaking`` flag hides.
         """
-        frames_per_batch = _KEEPALIVE_BATCH_MS // 20
-        silence_batch = b"\x00" * (AUDIO_FRAME_BYTES * frames_per_batch)
+        silence_frame = b"\x00" * AUDIO_FRAME_BYTES
+        idle_threshold = _KEEPALIVE_IDLE_MS / 1000
         first_send_logged = False
+        keepalive_frames_sent = 0
         try:
             while not self._conn.is_closed:
-                if self._speaking:
-                    # Bot audio pipeline owns the socket — check again in ~20 ms
-                    await asyncio.sleep(0.02)
+                await asyncio.sleep(_KEEPALIVE_POLL_SEC)
+                if self._conn.is_closed:
+                    break
+                idle = time.monotonic() - self._conn.last_send_time
+                if idle < idle_threshold:
                     continue
                 try:
-                    await self._conn.send_audio(silence_batch)
+                    await self._conn.send_audio(silence_frame)
+                    keepalive_frames_sent += 1
                     if not first_send_logged:
                         logger.info(
-                            "keepalive silence stream started for %s (%d ms/batch)",
+                            "keepalive silence stream started for %s "
+                            "(idle threshold %d ms)",
                             self._session.channel_uuid,
-                            _KEEPALIVE_BATCH_MS,
+                            _KEEPALIVE_IDLE_MS,
                         )
                         first_send_logged = True
                 except Exception:
@@ -666,7 +671,14 @@ class CallPipeline:
                     )
                     await asyncio.sleep(0.1)
         except asyncio.CancelledError:
-            return
+            pass
+        finally:
+            if first_send_logged:
+                logger.info(
+                    "keepalive stats for %s: %d silence frames sent",
+                    self._session.channel_uuid,
+                    keepalive_frames_sent,
+                )
 
     async def _play_greeting(self) -> None:
         """Play the greeting message, adapted to the time of day and agent name."""
