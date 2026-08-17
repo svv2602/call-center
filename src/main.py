@@ -2293,6 +2293,18 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     session.fitting_stations_seen.append(s_out)
                     existing_ids.add(sid)
 
+            # If the LLM narrowed the search with a query (client named a
+            # district/landmark) and it resolved to exactly one station,
+            # pin that as the selected one. Prevents the LLM from re-asking
+            # for the district later when attention drifts (call aba61df2
+            # 2026-08-17: bot re-listed 4 districts at Krok 6 after date was
+            # already given because `last_fitting_station_id` was never set
+            # from a bare `get_fitting_stations` call).
+            if effective_query and len(stations_out) == 1:
+                only_id = stations_out[0].get("id")
+                if only_id:
+                    session.last_fitting_station_id = only_id
+
             logger.info(
                 "get_fitting_stations result for call %s: city=%s, found=%d, ids=%s",
                 session.channel_uuid,
