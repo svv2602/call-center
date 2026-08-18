@@ -1602,7 +1602,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         if not customer_name:
             missing.append("customer_name (ім'я клієнта)")
         if not auto_number:
-            missing.append("auto_number (державний номер авто)")
+            missing.append("auto_number (колір авто)")
         if missing:
             return {
                 "error": True,
@@ -1844,20 +1844,29 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     guid = data_list[0].get("GUID", "") if data_list else ""
                     if guid:
                         fittings_booked_total.inc()
-                        # Auto-update customer profile with vehicle data
+                        # Auto-update customer profile with vehicle data.
+                        # 2026-08-18: Krok 5 now collects COLOR (not plate) in
+                        # auto_number. Only save auto_number to profile.plate
+                        # if it actually looks like a plate (contains a digit) —
+                        # otherwise we'd stuff "красный" into the plate field,
+                        # which is meaningless to the operator and confuses
+                        # profile lookup on the next call.
                         vehicle_info = kwargs.get("vehicle_info", "")
                         auto_num = kwargs.get("auto_number", "")
-                        if _call_logger and session.caller_phone and (vehicle_info or auto_num):
+                        looks_like_plate = any(c.isdigit() for c in auto_num)
+                        plate_for_profile = auto_num if looks_like_plate else ""
+                        if _call_logger and session.caller_phone and (vehicle_info or plate_for_profile):
                             try:
-                                vehicles_update = [{"brand": vehicle_info, "plate": auto_num}]
+                                vehicles_update = [{"brand": vehicle_info, "plate": plate_for_profile}]
                                 await _call_logger.update_customer_profile(
                                     session.caller_phone,
                                     tenant_id=session.tenant_id,
                                     vehicles=vehicles_update,
                                 )
                                 logger.info(
-                                    "Auto-updated customer profile after booking: vehicle=%s, plate=%s",
+                                    "Auto-updated customer profile after booking: vehicle=%s, plate=%s (auto_num=%r)",
                                     vehicle_info,
+                                    plate_for_profile,
                                     auto_num,
                                 )
                             except Exception:
@@ -2705,11 +2714,18 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
 
         Handles multiple formats from 1C data: R16, r16, Р16 (cyrillic),
         R 16, bare "16" with word boundaries.
+
+        NOTE: only checks service description fields — NEVER `artikul`.
+        Артикул is a SKU code (e.g. "s14", "s16", "s23") that would
+        spuriously match tire diameters: for R14 the item with artikul="s14"
+        would match even though its service is "R21-22 легкового" (a
+        completely different price bucket). Same for R23 catching "Комплекс
+        Газель" via artikul="s23".
         """
         import re
 
         d = str(diameter)
-        for field in ("artikul", "service", "name", "description"):
+        for field in ("service", "name", "description"):
             val = price_item.get(field, "")
             if not val:
                 continue
@@ -2761,6 +2777,38 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             if tire_diameter:
                 by_diameter = [p for p in filtered if _matches_diameter(p, tire_diameter)]
                 if by_diameter:
+                    # Prefer "Комплекс" (шиномонтаж + балансування) entries when
+                    # the client asked about fitting price. 1C prices are split
+                    # into 3 separate service types per range: Комплекс (full
+                    # bundle), Демонтаж/монтаж (mount only), Баланс (balance
+                    # only). For a price consultation, "how much does
+                    # шиномонтаж cost" means the bundle. Returning all 3
+                    # confuses the LLM into reading a wall of prices.
+                    complex_only = [
+                        p for p in by_diameter
+                        if "комплекс" in (p.get("service") or "").lower()
+                    ]
+                    if complex_only:
+                        by_diameter = complex_only
+                    # Tag category (car/suv/other) so the LLM can group them
+                    # into "легкові — N грн, SUV — M грн" without parsing
+                    # Ukrainian service names itself.
+                    for p in by_diameter:
+                        svc = (p.get("service") or "").lower()
+                        if "suv" in svc or "позашлях" in svc or "джип" in svc:
+                            p["category"] = "suv"
+                        elif "легк" in svc:
+                            p["category"] = "car"
+                        elif "таврія" in svc or "таврия" in svc:
+                            p["category"] = "tavriya"
+                        elif "газель" in svc:
+                            p["category"] = "gazelle"
+                        elif "мікроавт" in svc or "мікро авт" in svc:
+                            p["category"] = "microcar"
+                        elif "atv" in svc or "квадроцикл" in svc:
+                            p["category"] = "atv"
+                        else:
+                            p["category"] = "other"
                     filtered = by_diameter
                 elif filtered:
                     # Diameter filter matched nothing — return all with hint

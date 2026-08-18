@@ -113,7 +113,7 @@ class CallSession:
         # when STT mishears a rare brand ("Zeekr" → "Віктор") and the LLM
         # interprets "X правильно" as a name correction (call 98ee0296 2026-08-14).
         self.name_from_profile: bool = False
-        self.fitting_plate: str | None = None              # Держномер (нормалізований)
+        self.fitting_plate: str | None = None              # Ідентифікатор авто. З 2026-08-18: колір (напр. "синій"). Історично: держномер. Preparse може ще писати сюди платити, якщо клієнт САМ добровільно назвав.
         self.fitting_vehicle_brand: str | None = None      # Марка/модель авто
         # storage_choice: None=pending, "own"=клієнт привезе свої, "contract"=зі зберігання
         self.fitting_storage_choice: str | None = None
