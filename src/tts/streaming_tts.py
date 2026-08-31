@@ -110,13 +110,33 @@ def _normalize_house_letter(text: str) -> str:
     return _HOUSE_NUM_RE.sub(_sub, text)
 
 
+# ─── Tool-call artifact stripper ────────────────────────────────────────────
+# Call 1d5f6d9c 2026-08-31: bot spoke aloud `update_customer_profile(name="Саша")`
+# because gpt-4.1-mini emitted the tool call in the message content instead of
+# the tool_use block. Strip any leftover `snake_case(...)` fragment that looks
+# like a function call so TTS never voices it.
+_TOOL_CALL_ARTIFACT_RE = re.compile(
+    r"^\s*[a-z][a-z0-9_]{3,}\s*\([^\n)]{0,400}\)\s*(?:\n|$)",
+    re.MULTILINE,
+)
+
+
+def _strip_tool_call_artifacts(text: str) -> str:
+    stripped = _TOOL_CALL_ARTIFACT_RE.sub("", text)
+    if stripped != text:
+        logger.warning("Stripped tool-call artifact from TTS text (before=%r)", text[:200])
+    return stripped.strip()
+
+
 def _normalize_for_tts(text: str) -> str:
     """Compose all last-mile normalisers before handing text to TTS.
 
-    Order matters: dates first (they contain only digits + dashes),
-    then tire sizes (may share digits with house numbers otherwise),
-    then house numbers (single-letter suffix on trailing digits).
+    Order matters: strip stray tool-call artifacts first so downstream
+    normalisers don't waste work on them; then dates (digits + dashes),
+    tire sizes (may share digits with house numbers otherwise), and
+    finally house numbers (single-letter suffix on trailing digits).
     """
+    text = _strip_tool_call_artifacts(text)
     text = _normalize_iso_dates(text)
     text = _normalize_tire_sizes(text)
     text = _normalize_house_letter(text)
