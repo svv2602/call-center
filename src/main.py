@@ -3538,6 +3538,37 @@ async def main() -> None:
     except Exception:
         logger.debug("STT warmup failed", exc_info=True)
 
+    # Periodic re-warmup of Google Cloud STT/TTS connections. The
+    # startup warmup above works only until the first idle window
+    # (~5-10 min) — after that HTTP/2 keepalive expires and the next
+    # call pays the cold-connect cost as ~2-3s of silence before the
+    # greeting starts. Observed 2026-08-28 in four cold-start calls
+    # (a28091e2, 9755231e, 3b359ddb, a8b3b809) — each lasted 6-7s
+    # because the caller heard silence and hung up. Best-effort ping
+    # every 5 minutes keeps both connections alive without meaningful
+    # cost (one `list_recognizers` + one synth of a single character).
+    async def _periodic_warmup_loop() -> None:
+        from src.stt.google_stt import warmup_stt_client as _warmup_stt
+
+        while True:
+            try:
+                await asyncio.sleep(300)
+                await _warmup_stt(
+                    project_id=settings.google_stt.project_id,
+                    location=settings.google_stt.location,
+                )
+                if _tts_engine is not None:
+                    await _tts_engine.warmup()
+                logger.debug("Periodic STT+TTS warmup ping OK")
+            except asyncio.CancelledError:
+                break
+            except Exception:
+                logger.debug("Periodic warmup ping failed", exc_info=True)
+
+    # Save reference so the task isn't garbage-collected mid-flight (RUF006)
+    _warmup_task = asyncio.create_task(_periodic_warmup_loop())
+    _warmup_task.set_name("periodic_warmup")
+
     # Start AudioSocket server
     _audio_server = AudioSocketServer(
         host=settings.audio_socket.host,

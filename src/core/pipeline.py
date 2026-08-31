@@ -696,7 +696,18 @@ class CallPipeline:
         if suffix:
             greeting = greeting.rstrip() + " " + suffix
         self._session.transition_to(CallState.GREETING)
+        _greet_t0 = time.monotonic()
         await self._speak(greeting)
+        _greet_ms = int((time.monotonic() - _greet_t0) * 1000)
+        # Total greeting duration — includes TTS synthesize + audio send.
+        # Watch this on cold-start incidents: if it's much >2500ms the
+        # HTTP/2 connection to Google Cloud TTS timed out during idle
+        # and the periodic warmup task in main.py may have died.
+        logger.info(
+            "Greeting complete (%d ms total) for %s",
+            _greet_ms,
+            self._session.channel_uuid,
+        )
         self._session.add_assistant_turn(greeting)
         await self._log_turn("bot", greeting)
         await self._persist_session()
@@ -1603,10 +1614,13 @@ class CallPipeline:
             logger.info(
                 "TTS synthesize start (%d chars) for %s", len(text), self._session.channel_uuid
             )
+            _synth_t0 = time.monotonic()
             audio = await self._tts.synthesize(text)
+            _synth_ms = int((time.monotonic() - _synth_t0) * 1000)
             logger.info(
-                "TTS synthesize done (%d bytes) for %s",
+                "TTS synthesize done (%d bytes, %d ms) for %s",
                 len(audio) if audio else 0,
+                _synth_ms,
                 self._session.channel_uuid,
             )
 

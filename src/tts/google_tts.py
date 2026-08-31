@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import logging
 import re
@@ -177,6 +178,26 @@ class GoogleTTSEngine:
                 logger.warning("Failed to pre-cache phrase: '%s'", phrase[:40])
 
         logger.info("TTS initialized, pre-cached %d phrases", len(self._cache))
+
+    async def warmup(self) -> None:
+        """Keep Google Cloud TTS HTTP/2 connection warm.
+
+        Calls the underlying synthesize endpoint directly (bypassing
+        cache) so the request actually crosses the wire and refreshes
+        the HTTP/2 session ticket. Without this, the connection can
+        idle out after ~5-10 min of no calls and the first synthesize
+        after the idle pays a ~1-2s cold-connect penalty — which
+        shows up as silence-before-greeting on the first call of a
+        quiet period (see call_drops project memory 2026-08-28).
+
+        Errors are swallowed — best-effort only.
+        """
+        if self._client is None:
+            return
+        try:
+            await asyncio.wait_for(self._synthesize_uncached("."), timeout=5.0)
+        except Exception as exc:
+            logger.debug("TTS warmup non-fatal error: %s", exc)
 
     async def synthesize(self, text: str) -> bytes:
         """Synthesize text into raw PCM audio bytes."""
