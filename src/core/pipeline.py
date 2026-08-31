@@ -1543,6 +1543,21 @@ class CallPipeline:
         if self._session.order_id:
             return FAREWELL_ORDER_TEXT
 
+        # If the caller never spoke (STT dropped all audio, or the caller
+        # went silent from the start), a warm LLM-generated «Була рада
+        # допомогти!» sounds sarcastic. Use a neutral hangup instead.
+        # Anchor: call 2026-08-28 — Наташа silence throughout, bot
+        # signed off with «Була рада допомогти! До побачення» after 3
+        # silence timeouts. Right response: acknowledge the audio issue.
+        user_turn_count = sum(
+            1 for t in self._session.dialog_history if t.speaker == "user"
+        )
+        if user_turn_count == 0:
+            return (
+                "На жаль, не чую вас — можливо, проблеми зі зв'язком. "
+                "Передзвоніть, будь ласка. До побачення."
+            )
+
         # Use _llm_history (full context) for better farewell quality.
         # Falls back to session.messages_for_llm if _llm_history is empty
         # (shouldn't happen in practice, but safe).
