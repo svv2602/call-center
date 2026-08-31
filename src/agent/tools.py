@@ -288,6 +288,15 @@ FITTING_TOOLS: list[dict] = [  # type: ignore[type-arg]
                         "(наприклад 'Епіцентр', 'шосе', 'лівий берег')"
                     ),
                 },
+                "for_price": {
+                    "type": "boolean",
+                    "description": (
+                        "Передавай true, якщо це price consultation "
+                        "(сценарій 4, get_fitting_price). Сервер пропускає "
+                        "district-ask — ціни у мережі однакові між "
+                        "точками того самого міста."
+                    ),
+                },
             },
             "required": [],
         },

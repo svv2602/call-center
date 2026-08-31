@@ -100,6 +100,32 @@ class CallLogger:
             },
         )
 
+    async def set_fitting_booking_id(
+        self, call_id: uuid.UUID, booking_id: str
+    ) -> None:
+        """Attach a fitting_booking_id to the call row.
+
+        Called right after book_fitting returns success — populates the
+        column that analytics/дашборды read to count successful bookings.
+        Without this, the column stays NULL and dashboards show 0
+        bookings even though 1С persisted them. Best-effort.
+        """
+        if not booking_id:
+            return
+        # Booking ID may not be a valid UUID (e.g. dev fixture) —
+        # analytics tolerates NULL, so swallow the error.
+        import contextlib
+
+        with contextlib.suppress(Exception):
+            await self._execute(
+                """
+                UPDATE calls
+                SET fitting_booking_id = CAST(:booking_id AS uuid)
+                WHERE id = :id
+                """,
+                {"id": str(call_id), "booking_id": booking_id},
+            )
+
     async def log_call_end(
         self,
         call_id: uuid.UUID,

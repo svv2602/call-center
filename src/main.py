@@ -1603,6 +1603,12 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             missing.append("customer_name (ім'я клієнта)")
         if not auto_number:
             missing.append("auto_number (колір авто)")
+        # Also require vehicle_info (марка) — LLM sometimes skips Krok 6
+        # entirely after a price consultation flow (call 66c8f00d
+        # 2026-08-31: booked without brand — operator at СТО can't
+        # identify the car).
+        if not vehicle_info:
+            missing.append("vehicle_info (марка авто)")
         if missing:
             return {
                 "error": True,
@@ -1886,6 +1892,20 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                             guid,
                         )
                         session.fitting_booked = True
+                        # Persist booking_id on the call row so analytics
+                        # can count successful bookings. Pre-existing gap
+                        # discovered 2026-08-31: 4/4 successful bookings
+                        # showed booked=false in DB because this column
+                        # was never populated.
+                        if _call_logger is not None:
+                            try:
+                                await _call_logger.set_fitting_booking_id(
+                                    uuid_mod.UUID(session.channel_uuid), guid
+                                )
+                            except Exception:
+                                logger.debug(
+                                    "set_fitting_booking_id failed", exc_info=True
+                                )
                         return {
                             "status": "confirmed",
                             "message": (
@@ -1999,7 +2019,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
     router.register("get_pickup_points", _get_pickup_points)
 
     async def _get_fitting_stations(
-        city: str = "", query: str = "", **_kwargs: Any
+        city: str = "", query: str = "", for_price: bool = False, **_kwargs: Any
     ) -> dict[str, Any]:
         cache_key = "onec:fitting_stations"
 
@@ -2337,6 +2357,25 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 and not query_returned_empty
                 and len(stations_out) >= 2
             )
+            # For a price consultation, chain prices are identical across
+            # points of the same city — asking district adds 2 useless
+            # turns. LLM is told to pass for_price=true in that flow.
+            # Anchor: call 66c8f00d 2026-08-31 — bot asked district in
+            # Дніпро AND Києві before quoting R13=300грн.
+            if multi_no_query and for_price:
+                # Return all stations with a hint so the LLM quotes the
+                # price against the first station (or any).
+                return {
+                    "total": len(stations_out),
+                    "stations": stations_out,
+                    "for_price": True,
+                    "hint": (
+                        "Це price consultation — район НЕ питай. Візьми "
+                        "будь-який station_id (напр. перший у списку) "
+                        "для get_fitting_price. Одразу переходь до "
+                        "Крок Ц-2 (діаметр)."
+                    ),
+                }
             if multi_no_query:
                 districts = []
                 seen_d: set[str] = set()
