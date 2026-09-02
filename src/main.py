@@ -2362,9 +2362,27 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             # turns. LLM is told to pass for_price=true in that flow.
             # Anchor: call 66c8f00d 2026-08-31 — bot asked district in
             # Дніпро AND Києві before quoting R13=300грн.
+            # Wave 3 (2026-09-02) — Price → Booking continuity backend pin.
+            # When for_price=true and we have at least one station in the
+            # requested city, pin the first as last_fitting_station_id. The
+            # state-guard checklist then shows ✅ Місто/точка for that city,
+            # so a later «записуємось» keeps the same city instead of
+            # falling back to profile.city (call c1e3792e regression on
+            # fcb86b7 — prompt-only escape hatch wasn't enough). Prices are
+            # identical across chain stations in the same city, so pinning
+            # the first matches the price-consult hint.
+            if for_price and stations_out:
+                first_id = stations_out[0].get("id")
+                if first_id:
+                    session.last_fitting_station_id = first_id
+                    logger.info(
+                        "get_fitting_stations(for_price): pinned "
+                        "last_fitting_station_id=%s for call %s",
+                        first_id,
+                        session.channel_uuid,
+                    )
+
             if multi_no_query and for_price:
-                # Return all stations with a hint so the LLM quotes the
-                # price against the first station (or any).
                 return {
                     "total": len(stations_out),
                     "stations": stations_out,
@@ -2782,6 +2800,21 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         service_type: str = "",
         **_kwargs: Any,
     ) -> dict[str, Any]:
+        # Wave 3 (2026-09-02) — Price → Booking continuity backend persist.
+        # When a price consultation targets a known station, pin it as
+        # session.last_fitting_station_id. State-guard reads this to render
+        # "city + station_address" in the checklist, so when the client
+        # says «так, записуємось» the LLM sees ✅ Місто/точка already set
+        # and doesn't fall back to profile.city (call c1e3792e regression
+        # on fcb86b7 — prompt-only escape hatch wasn't enough).
+        if station_id and station_id in session.fitting_station_ids:
+            session.last_fitting_station_id = station_id
+            logger.info(
+                "get_fitting_price: pinned last_fitting_station_id=%s for call %s "
+                "(price → booking continuity)",
+                station_id,
+                session.channel_uuid,
+            )
         cache_key = "onec:fitting_prices"
 
         # 1. Redis cache
