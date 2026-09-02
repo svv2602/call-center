@@ -553,3 +553,84 @@ class TestTopicSwitching:
         )
         # _MOD_CONSULTATION should appear only once
         assert result.count("## Сценарій: консультація та інформація") == 1
+
+
+# ---------------------------------------------------------------------------
+# TestFittingSplit — Phase 1 of Level 2 refactor (2026-09-02)
+# ---------------------------------------------------------------------------
+
+
+class TestFittingSplit:
+    """Verify _MOD_FITTING structural split into step-scoped fragments.
+
+    Phase 1 is a no-op split (byte-equal reconstitution). Phase 2 will use
+    the individual fragments to load only the relevant Krok per turn.
+    """
+
+    def test_reconstitution_is_byte_equal(self) -> None:
+        """Concatenating all split fragments reproduces _MOD_FITTING exactly."""
+        from src.agent.prompts import (
+            _MOD_FITTING,
+            _MOD_FITTING_CORE,
+            _MOD_FITTING_STEP_1,
+            _MOD_FITTING_STEP_2,
+            _MOD_FITTING_STEP_3,
+            _MOD_FITTING_STEP_4,
+            _MOD_FITTING_STEP_5,
+            _MOD_FITTING_STEP_6,
+            _MOD_FITTING_STEP_7,
+            _MOD_FITTING_STEP_8,
+            _MOD_FITTING_TAIL,
+        )
+        recon = (
+            _MOD_FITTING_CORE
+            + _MOD_FITTING_STEP_1
+            + _MOD_FITTING_STEP_2
+            + _MOD_FITTING_STEP_3
+            + _MOD_FITTING_STEP_4
+            + _MOD_FITTING_STEP_5
+            + _MOD_FITTING_STEP_6
+            + _MOD_FITTING_STEP_7
+            + _MOD_FITTING_STEP_8
+            + _MOD_FITTING_TAIL
+        )
+        assert recon == _MOD_FITTING
+
+    def test_each_step_contains_its_marker(self) -> None:
+        """Each STEP_N starts with the expected «Крок N» header."""
+        from src.agent.prompts import (
+            _MOD_FITTING_STEP_1,
+            _MOD_FITTING_STEP_2,
+            _MOD_FITTING_STEP_3,
+            _MOD_FITTING_STEP_4,
+            _MOD_FITTING_STEP_5,
+            _MOD_FITTING_STEP_6,
+            _MOD_FITTING_STEP_7,
+            _MOD_FITTING_STEP_8,
+        )
+        assert "Крок 1 — Місто/точка" in _MOD_FITTING_STEP_1
+        assert "Крок 2 — Зберігання шин" in _MOD_FITTING_STEP_2
+        assert "Крок 3 — Дата:" in _MOD_FITTING_STEP_3
+        assert "Крок 4 — Час:" in _MOD_FITTING_STEP_4
+        assert "Крок 5 — Колір" in _MOD_FITTING_STEP_5
+        assert "Крок 6 STT-guard" in _MOD_FITTING_STEP_6
+        assert "Крок 7 — Телефон:" in _MOD_FITTING_STEP_7
+        assert "Крок 8 — Підтвердження" in _MOD_FITTING_STEP_8
+
+    def test_core_ends_before_krok_1(self) -> None:
+        """CORE contains the STOP-block and checklist intro but not Krok 1+."""
+        from src.agent.prompts import _MOD_FITTING_CORE
+        assert "STOP-БЛОК ПЕРЕД book_fitting" in _MOD_FITTING_CORE
+        assert "### Чекліст" in _MOD_FITTING_CORE
+        # Krok 1+ content must NOT leak into CORE
+        assert "Крок 1 — Місто/точка" not in _MOD_FITTING_CORE
+        assert "Крок 2 — Зберігання" not in _MOD_FITTING_CORE
+
+    def test_tail_has_cancel_reschedule_price(self) -> None:
+        """TAIL contains cancellation, rescheduling, and price consultation."""
+        from src.agent.prompts import _MOD_FITTING_TAIL
+        assert "### Скасування" in _MOD_FITTING_TAIL
+        assert "### Перенесення" in _MOD_FITTING_TAIL
+        assert "### Консультація про вартість шиномонтажу" in _MOD_FITTING_TAIL
+        # Krok content must NOT leak into TAIL
+        assert "Крок 8 — Підтвердження" not in _MOD_FITTING_TAIL

@@ -697,6 +697,92 @@ success=true → «{ім'я}, ви записані. СМС підтвердже
 - Прощання: «{ім'я}, дякуємо за звернення! Всього найкращого!»\
 """
 
+# ---------------------------------------------------------------------------
+# Phase 1 of Level 2 refactor (2026-09-02): split _MOD_FITTING into
+# step-scoped fragments so Phase 2 can load only the relevant Krok per turn.
+#
+# This block is a STRUCTURAL SPLIT ONLY — no behavior change. The split
+# happens at module load time via string.index() on well-known Krok markers,
+# and the assertion below guarantees byte-equal reconstitution. If any
+# marker moves or content is edited across a boundary, the assertion fails
+# loudly at import time (better than silent divergence in production).
+#
+# Mapping to fitting_progress step_idx (see _render_fitting_progress):
+#   step 0 (name)    → CORE only (no dedicated Krok section)
+#   step 1 (city)    → CORE + STEP_1
+#   step 2 (storage) → CORE + STEP_2
+#   step 3 (date)    → CORE + STEP_3
+#   step 4 (time)    → CORE + STEP_4
+#   step 5 (color)   → CORE + STEP_5
+#   step 6 (brand)   → CORE + STEP_6
+#   step 7 (phone)   → CORE + STEP_7
+#   step 8 (confirm) → CORE + STEP_8
+# TAIL (cancel/reschedule/price-consult) is always available in Phase 1;
+# Phase 3 may make it conditional on intent detection.
+# ---------------------------------------------------------------------------
+
+_FITTING_SPLIT_MARKERS: list[tuple[str, str | None]] = [
+    ("_MOD_FITTING_CORE",    "\n**Крок 1 — Місто/точка"),
+    ("_MOD_FITTING_STEP_1",  "\n**Крок 2 — Зберігання шин"),
+    ("_MOD_FITTING_STEP_2",  "\n**Крок 3 — Дата:"),
+    ("_MOD_FITTING_STEP_3",  "\n**Крок 4 — Час:"),
+    ("_MOD_FITTING_STEP_4",  "\n**Крок 5 — Колір"),
+    ("_MOD_FITTING_STEP_5",  "\n**Крок 6 STT-guard"),
+    ("_MOD_FITTING_STEP_6",  "\n**Крок 7 — Телефон:"),
+    ("_MOD_FITTING_STEP_7",  "\n**Крок 8 — Підтвердження"),
+    ("_MOD_FITTING_STEP_8",  "\n### Скасування"),
+    ("_MOD_FITTING_TAIL",    None),
+]
+
+
+def _split_fitting_by_markers(source: str) -> dict[str, str]:
+    parts: dict[str, str] = {}
+    offset = 0
+    for name, marker in _FITTING_SPLIT_MARKERS:
+        if marker is None:
+            parts[name] = source[offset:]
+        else:
+            end = source.index(marker, offset)
+            parts[name] = source[offset:end]
+            offset = end
+    return parts
+
+
+_FITTING_PARTS = _split_fitting_by_markers(_MOD_FITTING)
+
+_MOD_FITTING_CORE   = _FITTING_PARTS["_MOD_FITTING_CORE"]
+_MOD_FITTING_STEP_1 = _FITTING_PARTS["_MOD_FITTING_STEP_1"]
+_MOD_FITTING_STEP_2 = _FITTING_PARTS["_MOD_FITTING_STEP_2"]
+_MOD_FITTING_STEP_3 = _FITTING_PARTS["_MOD_FITTING_STEP_3"]
+_MOD_FITTING_STEP_4 = _FITTING_PARTS["_MOD_FITTING_STEP_4"]
+_MOD_FITTING_STEP_5 = _FITTING_PARTS["_MOD_FITTING_STEP_5"]
+_MOD_FITTING_STEP_6 = _FITTING_PARTS["_MOD_FITTING_STEP_6"]
+_MOD_FITTING_STEP_7 = _FITTING_PARTS["_MOD_FITTING_STEP_7"]
+_MOD_FITTING_STEP_8 = _FITTING_PARTS["_MOD_FITTING_STEP_8"]
+_MOD_FITTING_TAIL   = _FITTING_PARTS["_MOD_FITTING_TAIL"]
+
+# Byte-equality guarantee: concatenation of parts MUST equal the original.
+# If a rule is edited across a Krok boundary and this breaks — fix the
+# marker order or move the edit inside a single step's fragment.
+_FITTING_RECONSTITUTED = (
+    _MOD_FITTING_CORE
+    + _MOD_FITTING_STEP_1
+    + _MOD_FITTING_STEP_2
+    + _MOD_FITTING_STEP_3
+    + _MOD_FITTING_STEP_4
+    + _MOD_FITTING_STEP_5
+    + _MOD_FITTING_STEP_6
+    + _MOD_FITTING_STEP_7
+    + _MOD_FITTING_STEP_8
+    + _MOD_FITTING_TAIL
+)
+assert _FITTING_RECONSTITUTED == _MOD_FITTING, (
+    "_MOD_FITTING split reconstitution mismatch — a marker in "
+    "_FITTING_SPLIT_MARKERS is stale or a rule was edited across a Krok "
+    "boundary. Fix the marker or move the edit."
+)
+del _FITTING_RECONSTITUTED
+
 _MOD_FITTING_UNAVAILABLE = """\
 
 ## Сценарій: шиномонтаж — послуга НЕДОСТУПНА через бот
