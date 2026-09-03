@@ -109,6 +109,13 @@ transfer_attempts_total = Counter(
     ["result"],  # success, error, unavailable
 )
 
+false_transfer_blocked_total = Counter(
+    "callcenter_false_transfer_blocked_total",
+    "Hallucinated transfer_to_operator calls blocked by backend guard "
+    "(customer_request/cannot_help with insufficient context)",
+    ["reason"],
+)
+
 # --- Business metrics ---
 
 calls_resolved_by_bot_total = Counter(

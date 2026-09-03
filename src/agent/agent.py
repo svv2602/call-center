@@ -81,9 +81,16 @@ class ToolRouter:
                 name,
                 duration_ms,
             )
+            # Persist tool_call log even if the outer task is cancelled
+            # (e.g. transfer_to_operator triggers AMI redirect → AudioSocket
+            # disconnect → streaming_loop cancellation). Without shield the
+            # DB write races with cancellation and is silently dropped, so
+            # transferred calls appear in `calls` but not `call_tool_calls`.
             if self._on_execute is not None:
                 with contextlib.suppress(Exception):
-                    await self._on_execute(name, args, result, duration_ms, True)
+                    await asyncio.shield(
+                        self._on_execute(name, args, result, duration_ms, True)
+                    )
             return result
         except Exception as exc:
             duration_ms = int((time.monotonic() - start) * 1000)
@@ -91,7 +98,9 @@ class ToolRouter:
             tool_call_errors_total.labels(tool_name=name, error_type="exception").inc()
             if self._on_execute is not None:
                 with contextlib.suppress(Exception):
-                    await self._on_execute(name, args, {"error": str(exc)}, duration_ms, False)
+                    await asyncio.shield(
+                        self._on_execute(name, args, {"error": str(exc)}, duration_ms, False)
+                    )
             return {"error": str(exc)}
 
 

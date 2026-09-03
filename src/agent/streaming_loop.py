@@ -39,6 +39,7 @@ from src.core.audio_sender import send_audio_stream
 from src.core.sentence_buffer import buffer_sentences
 from src.llm.models import LLMTask, Usage
 from src.monitoring.metrics import (
+    false_transfer_blocked_total,
     history_compression_mode,
     history_messages_count,
     llm_stop_reason_total,
@@ -108,6 +109,91 @@ def _pick_tool_wait_phrase(tool_names: list[str]) -> str:
         if pool:
             return random.choice(pool)
     return random.choice(WAIT_DEFAULT_POOL)
+
+
+# Backend guard against LLM hallucinating a customer-request/cannot-help
+# transfer when the customer has said nothing that could justify it.
+# See prompts.py lines 108-109 (calls 21f61d17, Wave 4 #7): LLM invents
+# reason="customer_request" after customer only says their name.
+# Prompt-level rules keep regressing; a hard backend gate is the only fix.
+
+# Substrings (case-insensitive, UA/RU/EN) that signal a real request for
+# a human. If ANY user text turn contains one, customer_request is allowed.
+_OPERATOR_KEYWORDS = (
+    "оператор", "менеджер", "консультант",
+    "жива людина", "живою людиною", "живий",
+    "живой", "живого", "живому",
+    "человек", "людин",
+    "manager", "operator",
+)
+
+# Substrings that signal frustration / can't-help legitimacy.
+_ESCALATION_KEYWORDS = (
+    "не працює", "не работает", "не могу", "не можу",
+    "погано", "плохо", "жах", "ужас", "скарг", "жалоб",
+    "не хочу з тобою", "не хочу с тобой", "переключи", "перекл",
+    "живого", "живую", "живий", "жива",
+)
+
+
+def _extract_user_text_turns(history: list[dict[str, Any]]) -> list[str]:
+    """Return only free-text customer turns (excludes tool_result content)."""
+    turns: list[str] = []
+    for msg in history:
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str) and content.strip():
+            turns.append(content.strip())
+    return turns
+
+
+def _should_block_false_transfer(
+    tool_args: dict[str, Any], history: list[dict[str, Any]]
+) -> str | None:
+    """If the transfer_to_operator call looks like a hallucination, return
+    a synthetic tool_result message telling the LLM to continue. Otherwise
+    return None (transfer is allowed).
+
+    Blocks:
+    - reason=customer_request when NO user turn contains an operator keyword.
+    - reason=cannot_help when there are fewer than 3 user text turns
+      (LLM cannot legitimately conclude cannot_help on turn 1-2).
+    """
+    reason = str(tool_args.get("reason", "")).strip().lower()
+    if reason not in ("customer_request", "cannot_help"):
+        return None
+
+    user_turns = _extract_user_text_turns(history)
+    joined = " ".join(user_turns).lower()
+
+    if reason == "customer_request":
+        # Only allow if the customer actually asked for a human somewhere.
+        if any(kw in joined for kw in _OPERATOR_KEYWORDS):
+            return None
+        last = user_turns[-1] if user_turns else ""
+        return (
+            "⛔ HALLUCINATION_GUARD: transfer_to_operator(reason=\"customer_request\") "
+            "заблокований бекендом. Клієнт НЕ просив оператора. "
+            f"Останнє повідомлення клієнта: {last!r} (усього реплік клієнта: {len(user_turns)}). "
+            "Якщо клієнт назвав ім'я — виклич update_customer_profile(name=...) і продовжи fitting-чекліст "
+            "(Крок 1: запитай місто). Не виклик transfer_to_operator знову з цією ж причиною."
+        )
+
+    # reason == "cannot_help"
+    if len(user_turns) >= 3 and any(kw in joined for kw in _ESCALATION_KEYWORDS):
+        return None
+    if len(user_turns) >= 5:
+        # After 5 real customer turns, trust the LLM's cannot_help judgement.
+        return None
+    last = user_turns[-1] if user_turns else ""
+    return (
+        "⛔ HALLUCINATION_GUARD: transfer_to_operator(reason=\"cannot_help\") "
+        "заблокований бекендом — замало контексту. "
+        f"Реплік клієнта: {len(user_turns)}, остання: {last!r}. "
+        "Спочатку пройди чекліст (місто → номер авто → шини → дата → час → станція). "
+        "cannot_help дозволено ТІЛЬКИ після кількох реплік клієнта, які показують, що ти справді не можеш допомогти."
+    )
 
 
 @dataclass(frozen=True)
@@ -517,6 +603,24 @@ class StreamingAgentLoop:
                     args = {}
                 if self._pii_vault is not None:
                     args = self._pii_vault.restore_in_args(args)
+                # Guard against hallucinated transfer_to_operator on early turns
+                if tc.name == "transfer_to_operator":
+                    block_msg = _should_block_false_transfer(args, conversation_history)
+                    if block_msg is not None:
+                        reason_label = str(args.get("reason", "unknown"))
+                        false_transfer_blocked_total.labels(reason=reason_label).inc()
+                        logger.warning(
+                            "Blocked hallucinated transfer_to_operator "
+                            "(reason=%s, user_turns=%d): %r",
+                            reason_label,
+                            len(_extract_user_text_turns(conversation_history)),
+                            args.get("summary", "")[:120],
+                        )
+                        return {
+                            "type": "tool_result",
+                            "tool_use_id": tc.id,
+                            "content": block_msg,
+                        }
                 try:
                     raw = await asyncio.wait_for(
                         self._tool_router.execute(tc.name, args),
