@@ -108,15 +108,30 @@ class CallLogger:
         Called right after book_fitting returns success — populates the
         column that analytics/дашборды read to count successful bookings.
         Without this, the column stays NULL and dashboards show 0
-        bookings even though 1С persisted them. Best-effort.
+        bookings even though 1С persisted them.
+
+        Wave 7 (2026-09-03): removed the silent-swallow. Previously
+        `contextlib.suppress(Exception)` hid all failures, so the
+        2026-09-03 regression (3/3 bookings not persisted) was
+        invisible in logs. Now validate UUID up-front, log successful
+        writes at INFO, log DB errors at WARNING.
         """
         if not booking_id:
+            logger.warning(
+                "set_fitting_booking_id: empty booking_id for call %s "
+                "(1C returned success but no GUID?)", call_id,
+            )
             return
-        # Booking ID may not be a valid UUID (e.g. dev fixture) —
-        # analytics tolerates NULL, so swallow the error.
-        import contextlib
-
-        with contextlib.suppress(Exception):
+        try:
+            uuid.UUID(booking_id)
+        except (ValueError, TypeError) as exc:
+            logger.warning(
+                "set_fitting_booking_id: booking_id=%r for call %s is "
+                "not a valid UUID (%s). Dashboard row will stay NULL.",
+                booking_id, call_id, exc,
+            )
+            return
+        try:
             await self._execute(
                 """
                 UPDATE calls
@@ -124,6 +139,15 @@ class CallLogger:
                 WHERE id = :id
                 """,
                 {"id": str(call_id), "booking_id": booking_id},
+            )
+            logger.info(
+                "Persisted fitting_booking_id=%s for call %s",
+                booking_id, call_id,
+            )
+        except Exception as exc:
+            logger.warning(
+                "set_fitting_booking_id: DB write raised for call %s "
+                "booking_id=%s (%s)", call_id, booking_id, exc,
             )
 
     async def log_call_end(

@@ -1686,6 +1686,84 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 "Поверніся до чеклісту і запитай у клієнта відсутні дані.",
             }
 
+        # Wave 7 (2026-09-03) — type-as-brand guard. LLM sometimes
+        # passes vehicle_info="позашляховик"/"SUV"/"легкове" as a
+        # placeholder for missing brand (call 6eca6877 turn 5). The
+        # type fallback is legit ONLY after the bot explicitly asked
+        # «Уточніть тип авто?» — signaled by a real brand having been
+        # captured earlier OR the last bot utterance containing the
+        # type-fallback question. Here we reject if brand-slot value
+        # looks like a type keyword AND no real brand was ever set.
+        _type_keywords = {
+            "легкове", "легковое", "легкове авто", "легковое авто",
+            "suv", "позашляховик", "позашляховый",
+            "мікроавтобус", "микроавтобус", "минивэн",
+            "вантажне", "грузовое", "вантажівка", "грузовик",
+        }
+        if vehicle_info.lower().strip() in _type_keywords:
+            # Type value in vehicle_info — only allow if bot's last
+            # utterance actually asked the type-fallback question.
+            _last_bot = ""
+            for _t in reversed(session.dialog_history):
+                if _t.speaker == "assistant" and _t.content:
+                    _last_bot = _t.content.lower()
+                    break
+            _asked_type = (
+                "тип автомобіл" in _last_bot
+                or "тип авто" in _last_bot
+                or ("легкове" in _last_bot and "позашлях" in _last_bot)
+            )
+            if not _asked_type:
+                logger.warning(
+                    "book_fitting: type-as-brand guard for call %s — "
+                    "vehicle_info=%r is a type keyword but bot never "
+                    "asked type fallback",
+                    session.channel_uuid, vehicle_info,
+                )
+                return {
+                    "error": True,
+                    "message": (
+                        f"⛔ vehicle_info={vehicle_info!r} — це ТИП авто, "
+                        "не марка. Тип-fallback дозволено ТІЛЬКИ якщо ти щойно "
+                        "запитав «Уточніть тип автомобіля: легкове/SUV/…?» "
+                        "після 2 невдалих перепитувань справжньої марки. "
+                        "Спитай спочатку марку: «Яка марка вашого авто?»."
+                    ),
+                }
+
+        # Wave 7 (2026-09-03) — Krok 3/4 guard. book_fitting is only
+        # legitimate after the LLM has called get_fitting_slots and the
+        # client picked a slot from the returned list. Otherwise the
+        # date/time in kwargs are hallucinated (call 6eca6877 turn 5:
+        # LLM did `book_fitting(date="2026-09-04", time="09:00")` after
+        # price-consult «Записуємо?»→«так» with zero slots lookup —
+        # tomorrow 9am is not guaranteed to be an actual free slot).
+        # Force LLM to always go through get_fitting_slots.
+        if (
+            not session.selected_fitting_date
+            or not session.fitting_slots_offered
+        ):
+            logger.warning(
+                "book_fitting: Krok 3/4 guard triggered — date/slots not "
+                "pinned by get_fitting_slots for call %s (date=%r, "
+                "offered=%d slots)",
+                session.channel_uuid,
+                session.selected_fitting_date,
+                len(session.fitting_slots_offered),
+            )
+            return {
+                "error": True,
+                "message": (
+                    "⛔ Не можу записати без пройденого Кроку 3 (дата) та "
+                    "Кроку 4 (час). Спочатку виклич `get_fitting_slots"
+                    "(station_id=…, date_from=…)`, озвуч клієнту доступні "
+                    "часи, дочекайся вибору, і тільки ТОДІ виклич "
+                    "book_fitting з тими самими датою і часом, які клієнт "
+                    "справді назвав. ⛔ НЕ ВИГАДУЙ date/time — використовуй "
+                    "тільки значення зі списку get_fitting_slots."
+                ),
+            }
+
         # Server-side guard: storage_contract must be passed if find_storage
         # matched a contract earlier in the call (LLM tends to forget after
         # long dialogs — call 07-30 16:25, 07-31). We block ONCE per call
@@ -1934,10 +2012,16 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                         if _call_logger and session.caller_phone and (vehicle_info or plate_for_profile):
                             try:
                                 vehicles_update = [{"brand": vehicle_info, "plate": plate_for_profile}]
-                                await _call_logger.update_customer_profile(
-                                    session.caller_phone,
-                                    tenant_id=session.tenant_id,
-                                    vehicles=vehicles_update,
+                                # Wave 7 (2026-09-03): shield the DB
+                                # write against streaming-loop cancel
+                                # (same class of race that lost 3/3
+                                # fitting_booking_id writes today).
+                                await asyncio.shield(
+                                    _call_logger.update_customer_profile(
+                                        session.caller_phone,
+                                        tenant_id=session.tenant_id,
+                                        vehicles=vehicles_update,
+                                    )
                                 )
                                 logger.info(
                                     "Auto-updated customer profile after booking: vehicle=%s, plate=%s (auto_num=%r)",
@@ -1945,9 +2029,13 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                                     plate_for_profile,
                                     auto_num,
                                 )
-                            except Exception:
-                                logger.debug(
-                                    "Failed to update customer profile after booking", exc_info=True
+                            except Exception as _exc:
+                                # Wave 7: promoted DEBUG → WARNING for
+                                # regression visibility.
+                                logger.warning(
+                                    "Failed to update customer profile after "
+                                    "booking for call %s: %s",
+                                    session.channel_uuid, _exc,
                                 )
                         # NOTE: booking_id is deliberately NOT included in the
                         # LLM-visible response. Bot has repeatedly leaked the
@@ -1964,18 +2052,45 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                         session.fitting_booked = True
                         # Persist booking_id on the call row so analytics
                         # can count successful bookings. Pre-existing gap
-                        # discovered 2026-08-31: 4/4 successful bookings
-                        # showed booked=false in DB because this column
-                        # was never populated.
+                        # discovered 2026-08-31 (fixed), regressed
+                        # 2026-09-03 (0/4 bookings persisted despite
+                        # 1С success). Wave 7: asyncio.shield so a
+                        # streaming-loop cancellation (customer hangs up
+                        # right after «Готово, записала» triggers TTS +
+                        # audiosocket close) cannot abort the DB write
+                        # mid-await. Also promoted DEBUG → WARNING for
+                        # visibility, and log an INFO trace BEFORE the
+                        # await so we can prove the code path was
+                        # reached even if the shield swallows.
                         if _call_logger is not None:
                             try:
-                                await _call_logger.set_fitting_booking_id(
-                                    uuid_mod.UUID(session.channel_uuid), guid
+                                call_uuid = uuid_mod.UUID(session.channel_uuid)
+                            except (ValueError, TypeError):
+                                call_uuid = None
+                                logger.warning(
+                                    "book_fitting: session.channel_uuid=%r not "
+                                    "parseable as UUID — skipping "
+                                    "set_fitting_booking_id (dashboard NULL)",
+                                    session.channel_uuid,
                                 )
-                            except Exception:
-                                logger.debug(
-                                    "set_fitting_booking_id failed", exc_info=True
+                            if call_uuid is not None:
+                                logger.info(
+                                    "book_fitting: persisting fitting_booking_id"
+                                    "=%s for call %s (guid from 1C)",
+                                    guid, session.channel_uuid,
                                 )
+                                try:
+                                    await asyncio.shield(
+                                        _call_logger.set_fitting_booking_id(
+                                            call_uuid, guid
+                                        )
+                                    )
+                                except Exception as _exc:
+                                    logger.warning(
+                                        "book_fitting: set_fitting_booking_id "
+                                        "raised for call %s (guid=%s): %s",
+                                        session.channel_uuid, guid, _exc,
+                                    )
                         return {
                             "status": "confirmed",
                             "message": (
