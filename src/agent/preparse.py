@@ -95,6 +95,33 @@ _CAR_BRANDS: dict[str, str] = {
     "lada": "Lada", "лада": "Lada",
     "vaz": "ВАЗ", "ваз": "ВАЗ",
     "gaz": "ГАЗ", "газ": "ГАЗ",
+    # Wave 4B (2026-09-03) — Daewoo + friends. Common Ukrainian budget
+    # brands that were missing. Preparser miss on «Daewoo Matiz» meant
+    # session.fitting_vehicle_brand stayed None → book_fitting
+    # auto-inject couldn't rescue LLM dropping vehicle_info (call
+    # 1a799364 Wave 4B #1: false «У якому районі?» re-ask).
+    "daewoo": "Daewoo", "деу": "Daewoo", "деву": "Daewoo",
+    "даво": "Daewoo", "дауво": "Daewoo",
+    # Nissan Juke STT variants — call 2026-09-03 Wave 4 #3: bot heard
+    # «не стал жук» / «не сам жук» → guessed Škoda / VW Beetle. Longer
+    # multi-word keys must come before their prefixes so `_CAR_BRAND_KEYS_
+    # LONGEST_FIRST` picks the full model over the bare brand.
+    "nissan juke": "Nissan Juke", "нісан джук": "Nissan Juke",
+    "ниссан джук": "Nissan Juke", "жук нісан": "Nissan Juke",
+    "juke": "Nissan Juke", "джук": "Nissan Juke",
+    # Chevrolet family — Aveo/Lacetti often mis-STT'd; add model tokens
+    # so «Шевроле авео» triggers Chevrolet regardless of the model word.
+    "aveo": "Chevrolet", "лачетти": "Chevrolet", "лачетті": "Chevrolet",
+    # Renault Logan / Duster common in UA
+    "logan": "Renault", "логан": "Renault",
+    "duster": "Renault", "дастер": "Renault",
+    # Volkswagen models often heard as brand
+    "polo": "Volkswagen", "поло": "Volkswagen",
+    "passat": "Volkswagen", "пассат": "Volkswagen",
+    "golf": "Volkswagen", "гольф": "Volkswagen",
+    # Škoda Octavia / Fabia — common
+    "octavia": "Škoda", "октавія": "Škoda", "октавия": "Škoda",
+    "fabia": "Škoda", "фабія": "Škoda", "фабия": "Škoda",
 }
 
 # Sort keys by descending length so multi-word brands («range rover»,

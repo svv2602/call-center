@@ -1253,6 +1253,62 @@ class CallPipeline:
                             self._session.channel_uuid,
                         )
 
+            # Wave 4B (2026-09-03) — Color auto-detect. session.fitting_plate
+            # (semantically now = color per 2026-08-18 refactor) stays None
+            # unless preparser matches a DSTU plate. When the client answers
+            # Krok 5 «Назвіть колір авто» with «червоний» / «сірий», preparser
+            # sees nothing → checklist stays ⏳ → LLM sometimes drops
+            # auto_number on book_fitting → server rejects → LLM invents
+            # transfer or re-asks Krok 1 (call 1a799364 Wave 4B #1: ✅ was
+            # missing so book_fitting got auto_number="" → «У якому районі?»
+            # re-ask). Same defense pattern as storage own-detect below.
+            if not self._session.fitting_plate:
+                _text_lc = transcript.text.lower()
+                # Scope to Krok 5: bot's last utterance mentions «колір» or
+                # «марк». Avoids false-positive on «сірий» as unrelated
+                # descriptor earlier in the call.
+                _last_bot_color = ""
+                for _t in reversed(self._session.dialog_history):
+                    if _t.speaker == "assistant" and _t.content:
+                        _last_bot_color = _t.content.lower()
+                        break
+                _asking_color = (
+                    "колір" in _last_bot_color
+                    or "цвет" in _last_bot_color
+                    or "марк" in _last_bot_color
+                )
+                if _asking_color:
+                    # Curated palette: base UA + RU (STT hybrid) + fancy.
+                    # Longest first so «мокрий асфальт» matches before «асфальт».
+                    _color_hints = (
+                        "мокрий асфальт", "мокрый асфальт",
+                        # Fancy — one/two words
+                        "перламутр", "антрацит", "маренго", "шампань",
+                        "піщаний", "песочный", "пісочний",
+                        "шоколад", "графіт", "графит", "олива", "оливкового",
+                        "титан", "платина", "металік", "металлик",
+                        "гранат", "вишня", "вишневий",
+                        # UA base 15
+                        "білий", "чорний", "сірий", "срібний", "срібляст",
+                        "синій", "червоний", "зелений", "жовтий",
+                        "помаранчев", "коричнев", "бежевий", "бежовий",
+                        "бордовий", "фіолетов", "рожевий", "бирюзов", "блакитн",
+                        # RU base 15 (STT hybrid output)
+                        "белый", "черный", "серый", "серебрист",
+                        "синий", "красный", "зеленый", "желтый",
+                        "оранжев", "коричнев", "розовый", "бирюзов",
+                        "голуб",
+                    )
+                    for _c in _color_hints:
+                        if _c in _text_lc:
+                            self._session.fitting_plate = _c
+                            logger.info(
+                                "Color auto-detected %r for call=%s "
+                                "(prevents LLM auto_number drop)",
+                                _c, self._session.channel_uuid,
+                            )
+                            break
+
             # Deterministic pre-parser (Phase 3 2026-08-14): pull car brand
             # and licence plate out of any user turn with regex/keyword match.
             # Only writes to session when the field is empty — never trample
