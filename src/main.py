@@ -1590,6 +1590,27 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         customer_name = (kwargs.get("customer_name") or "").strip()
         auto_number = (kwargs.get("auto_number") or "").strip()
         vehicle_info = (kwargs.get("vehicle_info") or "").strip()
+        # Wave 4 (2026-09-03) auto-inject from session — LLM sometimes drops
+        # a field on book_fitting even when the progress checklist showed ✅
+        # (call be21352c: ✅ Mitsubishi Pajero in checklist, but
+        # vehicle_info="" on the call). Without this, server rejects → LLM
+        # invents transfer_to_operator(customer_request) → false hangup on
+        # a fully-confirmed booking. Session values are the authoritative
+        # source once the LLM has confirmed them earlier in the dialog.
+        if not customer_name and session.fitting_customer_name:
+            customer_name = session.fitting_customer_name.strip()
+            kwargs["customer_name"] = customer_name
+        if not auto_number and session.fitting_plate:
+            auto_number = session.fitting_plate.strip()
+            kwargs["auto_number"] = auto_number
+        if not vehicle_info and session.fitting_vehicle_brand:
+            vehicle_info = session.fitting_vehicle_brand.strip()
+            kwargs["vehicle_info"] = vehicle_info
+            logger.info(
+                "book_fitting auto-injected vehicle_info=%r from session "
+                "for call %s (LLM dropped field despite ✅ in checklist)",
+                vehicle_info, session.channel_uuid,
+            )
         # Progress tracking: save whatever we know so the LLM's progress block
         # reflects the latest state — even if the call is rejected below.
         if customer_name:
