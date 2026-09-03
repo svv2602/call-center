@@ -14,6 +14,8 @@ import datetime
 import logging
 from typing import Any
 
+from src.agent.ua_datetime import date_to_words, time_to_words
+
 logger = logging.getLogger(__name__)
 
 # Current prompt version
@@ -1964,8 +1966,19 @@ def _render_fitting_progress(p: dict[str, Any]) -> str:
         )
         checklist.append(("Дата", False, date_desc))
     else:
-        checklist.append(("Дата", bool(date), date or "не обрано"))
-    checklist.append(("Час", bool(time_), time_ or "не обрано"))
+        # Wave 3 (2026-09-02) — surface canonical UA phrase alongside ISO,
+        # so the LLM cites «сьоме вересня» verbatim in the Krok 8
+        # confirmation instead of confabulating a different day.
+        date_word = date_to_words(date)
+        date_desc = (
+            f"{date} ({date_word})" if date and date_word else (date or "не обрано")
+        )
+        checklist.append(("Дата", bool(date), date_desc))
+    time_word = time_to_words(time_)
+    time_desc = (
+        f"{time_} ({time_word})" if time_ and time_word else (time_ or "не обрано")
+    )
+    checklist.append(("Час", bool(time_), time_desc))
     checklist.append(("Колір авто", bool(plate), plate or "не назвали"))
     checklist.append(("Марка авто", bool(brand), brand or "не назвали"))
     checklist.append(("Телефон", bool(caller_phone), caller_phone or "нема CallerID"))
