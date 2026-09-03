@@ -23,6 +23,8 @@ from src.agent.prompts import (
     GREETING_TEXT,
     SILENCE_CONFIRM_REPROMPT_TEXT,
     SILENCE_PROMPT_TEXT,
+    SILENCE_BRAND_REPROMPT_TEXT,
+    SILENCE_COLOR_REPROMPT_TEXT,
     SILENCE_TIMEOUT_1_TEXT,
     SILENCE_TIMEOUT_2_TEXT,
     TRANSFER_TEXT,
@@ -995,8 +997,27 @@ class CallPipeline:
                             last_bot_text = turn.content or ""
                             break
                     pending_confirm = _is_pending_confirmation(last_bot_text)
+                    # Wave 5 (2026-09-03) — targeted re-prompt when the
+                    # bot's last question was Крок 5 (колір) or Крок 6
+                    # (марка). Call dd3dd368 played the generic «Я на
+                    # зв'язку» 3× while stuck on color; a direct nudge
+                    # speeds recovery.
+                    _last_bot_lc = last_bot_text.lower()
+                    _asking_color_now = (
+                        "колір" in _last_bot_lc
+                        and "автомобіл" in _last_bot_lc
+                    )
+                    _asking_brand_now = (
+                        "марка" in _last_bot_lc
+                        and ("автомобіл" in _last_bot_lc or "авто" in _last_bot_lc)
+                        and "колір" not in _last_bot_lc
+                    )
                     if pending_confirm and self._session.timeout_count <= 1:
                         silence_msg = SILENCE_CONFIRM_REPROMPT_TEXT
+                    elif _asking_color_now and self._session.timeout_count <= 1:
+                        silence_msg = SILENCE_COLOR_REPROMPT_TEXT
+                    elif _asking_brand_now and self._session.timeout_count <= 1:
+                        silence_msg = SILENCE_BRAND_REPROMPT_TEXT
                     elif self._session.timeout_count <= 1:
                         silence_msg = SILENCE_TIMEOUT_1_TEXT
                     else:
@@ -1262,6 +1283,13 @@ class CallPipeline:
             # transfer or re-asks Krok 1 (call 1a799364 Wave 4B #1: ✅ was
             # missing so book_fitting got auto_number="" → «У якому районі?»
             # re-ask). Same defense pattern as storage own-detect below.
+            #
+            # Wave 5 (2026-09-03) — regex with word-boundary + Cyrillic tail
+            # replaces the substring list. Call dd3dd368 showed «Червоны»
+            # / «червона» / «біла» / «чорна» / «серая» were all missed
+            # because the old hints stored only nominative masculine forms
+            # («червоний», «білий», «чорний», «серый»). Now every root
+            # matches all UA/RU gender/case inflections + STT mutations.
             if not self._session.fitting_plate:
                 _text_lc = transcript.text.lower()
                 # Scope to Krok 5: bot's last utterance mentions «колір» or
@@ -1278,36 +1306,16 @@ class CallPipeline:
                     or "марк" in _last_bot_color
                 )
                 if _asking_color:
-                    # Curated palette: base UA + RU (STT hybrid) + fancy.
-                    # Longest first so «мокрий асфальт» matches before «асфальт».
-                    _color_hints = (
-                        "мокрий асфальт", "мокрый асфальт",
-                        # Fancy — one/two words
-                        "перламутр", "антрацит", "маренго", "шампань",
-                        "піщаний", "песочный", "пісочний",
-                        "шоколад", "графіт", "графит", "олива", "оливкового",
-                        "титан", "платина", "металік", "металлик",
-                        "гранат", "вишня", "вишневий",
-                        # UA base 15
-                        "білий", "чорний", "сірий", "срібний", "срібляст",
-                        "синій", "червоний", "зелений", "жовтий",
-                        "помаранчев", "коричнев", "бежевий", "бежовий",
-                        "бордовий", "фіолетов", "рожевий", "бирюзов", "блакитн",
-                        # RU base 15 (STT hybrid output)
-                        "белый", "черный", "серый", "серебрист",
-                        "синий", "красный", "зеленый", "желтый",
-                        "оранжев", "коричнев", "розовый", "бирюзов",
-                        "голуб",
-                    )
-                    for _c in _color_hints:
-                        if _c in _text_lc:
-                            self._session.fitting_plate = _c
-                            logger.info(
-                                "Color auto-detected %r for call=%s "
-                                "(prevents LLM auto_number drop)",
-                                _c, self._session.channel_uuid,
-                            )
-                            break
+                    from src.agent.color_detect import detect_color
+
+                    _matched = detect_color(_text_lc)
+                    if _matched:
+                        self._session.fitting_plate = _matched
+                        logger.info(
+                            "Color auto-detected %r for call=%s "
+                            "(prevents LLM auto_number drop)",
+                            _matched, self._session.channel_uuid,
+                        )
 
             # Deterministic pre-parser (Phase 3 2026-08-14): pull car brand
             # and licence plate out of any user turn with regex/keyword match.
@@ -1338,6 +1346,36 @@ class CallPipeline:
                         exc_info=True,
                     )
 
+            # Wave 5 (2026-09-03) — Krok 8 auto-book detection.
+            # If bot's LAST utterance contains "Підтверджуєте" and the
+            # customer answered with a short affirmation, set a marker so
+            # the state guard renders an EMERGENCY banner forcing the
+            # LLM to call book_fitting on this turn. Prompt-only rules
+            # regress at 70+ turns (call dd3dd368 turn 77-78: «так» →
+            # «Перепрошую, не розчула»).
+            _krok8_confirmed = False
+            _last_bot_msg = ""
+            for _t in reversed(self._session.dialog_history):
+                if _t.speaker == "assistant" and _t.content:
+                    _last_bot_msg = _t.content.lower()
+                    break
+            if "підтверджуєте" in _last_bot_msg or "підтверджує" in _last_bot_msg:
+                _confirm_pat = re.compile(
+                    r"^\s*(так|да|ок|окей|okey|підтверджую|підтверджу|"
+                    r"підтверджаю|вірно|правильно|згоден|згодна|згодні|"
+                    r"добре|підходить|yes|ага|давай|давайте|звісно|"
+                    r"звичайно|конечно|точно|таково|таки так|воно так)\s*[,.\!?]*\s*$",
+                    re.IGNORECASE,
+                )
+                _text_stripped = transcript.text.strip()
+                if _confirm_pat.match(_text_stripped):
+                    _krok8_confirmed = True
+                    logger.info(
+                        "Krok 8 auto-book marker set for call=%s "
+                        "(bot: «...Підтверджуєте?», customer: %r)",
+                        self._session.channel_uuid, _text_stripped,
+                    )
+
             # Fitting progress block: shows LLM what's already collected so it
             # doesn't loop back to Krok 2/3/4 after passing through them.
             fitting_progress: dict[str, Any] = {
@@ -1353,6 +1391,7 @@ class CallPipeline:
                 "caller_phone": self._session.caller_phone,
                 "booked": self._session.fitting_booked,
                 "requested_weekday": self._session.fitting_requested_weekday,
+                "krok8_confirmed": _krok8_confirmed,
             }
 
             if self._streaming_loop is not None:

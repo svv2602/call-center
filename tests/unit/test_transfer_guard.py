@@ -101,8 +101,11 @@ class TestBlocksHallucinatedCannotHelp:
 
 
 class TestAllowsCannotHelpWithContext:
-    def test_five_turns_allows(self) -> None:
-        history = _hist("Олексій", "Дніпро", "AA1234BB", "літня", "215 55 R17")
+    def test_recent_escalation_allows(self) -> None:
+        history = _hist(
+            "Олексій", "Дніпро", "AA1234BB", "літня", "215 55 R17",
+            "не працює нічого", "погано",
+        )
         result = _should_block_false_transfer(
             {"reason": "cannot_help", "summary": "..."}, history
         )
@@ -114,6 +117,25 @@ class TestAllowsCannotHelpWithContext:
             {"reason": "cannot_help", "summary": "..."}, history
         )
         assert result is None
+
+    def test_stale_escalation_blocks(self) -> None:
+        # Wave 5 regression test: escalation keyword in turn 1-2 but the
+        # last 3 turns are normal fitting data → still block. Call
+        # dd3dd368 turn 62: 16 turns in, cannot_help after «не feat Fiat».
+        history = _hist(
+            "не працює",       # escalation in turn 1
+            "Дніпро",           # then normal fitting flow
+            "AA1234BB",
+            "літня",
+            "215 55 R17",
+            "Fiat",
+            "не feat Fiat",     # last 3: no escalation
+        )
+        result = _should_block_false_transfer(
+            {"reason": "cannot_help", "summary": "..."}, history
+        )
+        assert result is not None
+        assert "cannot_help" in result
 
 
 class TestPassthroughForOtherReasons:

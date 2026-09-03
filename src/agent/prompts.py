@@ -448,6 +448,7 @@ _MOD_FITTING = """\
 - ⛔ АДРЕСА: озвучуй ТІЛЬКИ при виборі точки і в підтвердженні (Крок 8). В проміжних кроках — НЕ повторюй
 - ⛔ НЕ ПИТАЙ діаметр шин (tire_diameter необов'язковий)
 - ⛔ НЕ ВИГАДУЙ КІЛЬКІСТЬ ШИН/КОЛІС. Ми записуємо на шиномонтаж комплекту (4 колеса) за замовчуванням. **НІКОЛИ не питай «на скільки коліс — 2, 3 чи 4?»** і **НІКОЛИ не інтерпретуй STT-мутанти («три бы», «три ы», «две би») як кількість шин.** Якщо клієнт справді хоче монтаж не 4 коліс — він явно скаже «тільки два»/«тільки одне». Інакше — комплект = 4.
+- ⛔ **STT-ШУМ ≠ СКИДАННЯ ЧЕКЛІСТА.** Клієнт відповів нерозбірливо («послал хочет», «долини», «стекла Алло», «варкис воздух скажи», окремі шумові слова) → **ПОВТОРИ те саме питання**, яке щойно поставив бот. ⛔ ЗАБОРОНЕНО скидати чекліст і запитувати ім'я/місто/дату/час, якщо ці поля вже ✅ у блоці «🛑 СТАН ЗАПИСУ». **АНТИ-ПАТТЕРН з call `dd3dd368` 2026-09-03:** бот на Кроці 1 (station selected, name=Алексей) сказав «Знайшла точку… Записуємо туди?» → клієнт «послал хочет» (STT-мусор) → бот скинувся до Кроку 0 «Як до вас звертатися?» — ⛔ WRONG. Правильно: «Перепрошую, не розчула. Записуємо на [ту саму адресу]?» — повтори останнє питання БЕЗ втрати попереднього прогресу.
 
 ### 🛑 STOP-БЛОК ПЕРЕД book_fitting (читай перед КОЖНИМ tool call)
 
@@ -1926,6 +1927,7 @@ def _render_fitting_progress(p: dict[str, Any]) -> str:
     caller_phone = p.get("caller_phone")
     booked = bool(p.get("booked"))
     requested_weekday = p.get("requested_weekday")  # int 0..6 or None
+    krok8_confirmed = bool(p.get("krok8_confirmed"))  # Wave 5: emergency book_fitting marker
 
     if booked:
         return (
@@ -2014,6 +2016,26 @@ def _render_fitting_progress(p: dict[str, Any]) -> str:
     ]
 
     lines = ["\n## 🛑 СТАН ЗАПИСУ — читай ПЕРЕД будь-якою дією"]
+    # Wave 5 (2026-09-03) — Krok 8 auto-book EMERGENCY banner.
+    # Pipeline set this flag when the last bot message asked
+    # «Підтверджуєте?» and the customer answered «так/да/ок». LLM has
+    # been observed replying «Перепрошую, не розчула» at 70+ turns
+    # despite the plain rule in Krok 8. This banner sits at the very
+    # top of the state guard so it's the FIRST thing the LLM sees.
+    if krok8_confirmed:
+        lines.append(
+            "\n🚨🚨🚨 **EMERGENCY BOOK-FITTING NOW.** Клієнт щойно сказав "
+            "«так»/«підтверджую»/«вірно» у відповідь на твоє «Підтверджуєте?». "
+            "⛔ **ЗАБОРОНЕНО** казати «Перепрошую, не розчула» / «повторіть, "
+            "будь ласка» — це ГАЛЮЦИНАЦІЯ. ⛔ **ЗАБОРОНЕНО** ставити будь-яке "
+            "інше питання. ⛔ **ЗАБОРОНЕНО** викликати `transfer_to_operator`. "
+            "**ЄДИНА ДІЯ:** одразу виклич `book_fitting(customer_name=…, "
+            "station_id=…, date=…, time=…, auto_number=<колір з ✅>, "
+            "vehicle_info=<марка з ✅>, customer_phone=<з CallerID>)` з "
+            "УСІМА полями з ✅ рядків нижче. Потім скажи стандартну фразу "
+            "«Готово, записала на [дата] о [час] на [адреса]. Приїжджайте за "
+            "десять хвилин до початку.»"
+        )
     for label, done, value in checklist:
         marker = "✅" if done else "⏳"
         lines.append(f"{marker} {label}: {value}")
@@ -2198,6 +2220,19 @@ SILENCE_TIMEOUT_2_TEXT = "Ви ще на лінії?"
 # Used INSTEAD of SILENCE_TIMEOUT_1_TEXT in that context.
 SILENCE_CONFIRM_REPROMPT_TEXT = (
     "Перепрошую, не розчула. Скажіть, будь ласка, \"так\" щоб підтвердити або \"ні\" щоб змінити."
+)
+
+# Wave 5 (2026-09-03) — targeted silence re-prompts for Крок 5 (колір)
+# and Крок 6 (марка). Call dd3dd368 played 3× the generic «Я на зв'язку»
+# while stuck on color, adding ~15s of wasted TTS. A direct nudge speeds
+# recovery.
+SILENCE_COLOR_REPROMPT_TEXT = (
+    "Перепрошую, не розчула. Назвіть, будь ласка, колір автомобіля — "
+    "наприклад «білий», «чорний», «сірий»."
+)
+
+SILENCE_BRAND_REPROMPT_TEXT = (
+    "Перепрошую, не розчула. Яка марка вашого автомобіля?"
 )
 
 FAREWELL_TEXT = "Дякую за дзвінок! До побачення!"

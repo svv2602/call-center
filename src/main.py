@@ -1611,6 +1611,55 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 "for call %s (LLM dropped field despite ✅ in checklist)",
                 vehicle_info, session.channel_uuid,
             )
+        # Wave 5 (2026-09-03) — escape hatch guard for color.
+        # Prompt (Крок 5) allows «колір не назвали» ONLY if customer
+        # explicitly says «не пам'ятаю»/«не знаю»/«забув»/«у дружини»,
+        # etc. But under attention dilution LLM applies it to any
+        # unrecognized color STT (call dd3dd368 turn 57-58: customer said
+        # «Червоны», bot said «передам як "колір не назвали"»). Reject
+        # the escape-hatch when it lacks a legitimate «forget» signal in
+        # the last 3 customer turns — force LLM to ask again.
+        auto_num_lc = auto_number.lower()
+        is_escape_hatch = (
+            "не назвали" in auto_num_lc
+            or "не розчула" in auto_num_lc
+            or "не розчули" in auto_num_lc
+            or "не знаю" in auto_num_lc
+            or "не вказано" in auto_num_lc
+        )
+        if is_escape_hatch:
+            _forget_kw = (
+                "не пам'ята", "не памята", "не помню", "не знаю",
+                "забув", "забула", "забыл", "забыла",
+                "у дружини", "у жінки", "у дружины", "у жены",
+                "все одно", "не важлив", "не важно",
+                "яко забув", "яко забула",
+            )
+            _recent_user = [
+                t.content.lower()
+                for t in session.dialog_history
+                if t.speaker == "user" and t.content
+            ][-3:]
+            _joined = " ".join(_recent_user)
+            _has_forget = any(kw in _joined for kw in _forget_kw)
+            if not _has_forget:
+                logger.warning(
+                    "book_fitting: rejected escape-hatch color %r for call %s "
+                    "(no forget-keyword in last 3 customer turns: %r)",
+                    auto_number, session.channel_uuid, _recent_user,
+                )
+                return {
+                    "error": True,
+                    "message": (
+                        f"⛔ auto_number={auto_number!r} — це escape-hatch «колір не назвали». "
+                        "Клієнт НЕ казав «не пам'ятаю»/«не знаю»/«забув». "
+                        "Спитай колір ЩЕ РАЗ короткою фразою: «Перепрошую, назвіть, будь ласка, "
+                        "колір автомобіля.» Приймай будь-яке слово-колір (укр. або рос., "
+                        "у будь-якому роді/числі). Якщо клієнт скаже «не пам'ятаю» — тоді "
+                        "передай escape-hatch."
+                    ),
+                }
+
         # Progress tracking: save whatever we know so the LLM's progress block
         # reflects the latest state — even if the call is rejected below.
         if customer_name:
@@ -2759,9 +2808,42 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
 
     async def _cancel_fitting(**kwargs: Any) -> Any:
         """Cancel fitting: try 1C REST, fallback to Store API."""
+        # Wave 5 (2026-09-03) — guard against LLM-invented booking_id.
+        # Call dd3dd368 turn 9 tool call: LLM invoked
+        # cancel_fitting(booking_id="000000000") without any prior
+        # get_customer_bookings result. 1C returned parse error → LLM
+        # chained into transfer_to_operator.
+        # Only accept cancel_fitting after get_customer_bookings has run
+        # (session.tools_called contains it) so LLM has real IDs to work
+        # with. Also reject obviously invented placeholder IDs.
+        booking_id = str(kwargs.get("booking_id", "")).strip()
+        _looks_invented = (
+            not booking_id
+            or booking_id in {"000000000", "0", "unknown", "none", "null"}
+            or booking_id == "00000000-0000-0000-0000-000000000000"
+            or all(c in "0-" for c in booking_id)
+        )
+        _bookings_lookup_ran = "get_customer_bookings" in session.tools_called
+        if _looks_invented or not _bookings_lookup_ran:
+            logger.warning(
+                "cancel_fitting: rejected booking_id=%r (invented=%s, "
+                "get_customer_bookings ran=%s) for call %s",
+                booking_id, _looks_invented, _bookings_lookup_ran,
+                session.channel_uuid,
+            )
+            return {
+                "error": True,
+                "message": (
+                    f"⛔ Не можу скасувати запис з booking_id={booking_id!r}. "
+                    "Спочатку ОБОВ'ЯЗКОВО виклич `get_customer_bookings(phone=...)`, "
+                    "щоб отримати справжні `id` записів клієнта. Потім використай "
+                    "`id` з результату (тільки якщо клієнт справді хоче скасувати "
+                    "запис і назвав його). ⛔ НЕ ВИГАДУЙ ID (000000000, 0, "
+                    "unknown, тощо)."
+                ),
+            }
         if _onec_client is not None:
             try:
-                booking_id = kwargs.get("booking_id", "")
                 result = await _onec_client.cancel_fitting_rest(booking_id)
                 if result.get("success"):
                     data_list = result.get("data", [])

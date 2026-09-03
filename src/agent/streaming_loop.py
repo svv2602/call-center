@@ -181,18 +181,27 @@ def _should_block_false_transfer(
         )
 
     # reason == "cannot_help"
-    if len(user_turns) >= 3 and any(kw in joined for kw in _ESCALATION_KEYWORDS):
-        return None
-    if len(user_turns) >= 5:
-        # After 5 real customer turns, trust the LLM's cannot_help judgement.
+    # Wave 5 (2026-09-03) — tightened: require escalation keyword in the
+    # LAST 3 customer turns (not any turn in history). Call dd3dd368
+    # turn 62: 16 turns in, LLM invoked cannot_help after customer said
+    # «не feat Fiat» (pronunciation clarification). Old logic passed
+    # because len>=5; new logic checks that a REAL escalation happened
+    # recently. Escalation from turn 3 doesn't justify a transfer 40
+    # turns later — that context was resolved long ago.
+    recent = " ".join(user_turns[-3:]).lower()
+    if any(kw in recent for kw in _ESCALATION_KEYWORDS):
         return None
     last = user_turns[-1] if user_turns else ""
     return (
         "⛔ HALLUCINATION_GUARD: transfer_to_operator(reason=\"cannot_help\") "
-        "заблокований бекендом — замало контексту. "
-        f"Реплік клієнта: {len(user_turns)}, остання: {last!r}. "
-        "Спочатку пройди чекліст (місто → номер авто → шини → дата → час → станція). "
-        "cannot_help дозволено ТІЛЬКИ після кількох реплік клієнта, які показують, що ти справді не можеш допомогти."
+        "заблокований бекендом — немає escalation-сигналу від клієнта "
+        f"в ОСТАННІХ 3 репліках. Реплік клієнта усього: {len(user_turns)}, "
+        f"остання: {last!r}. "
+        "cannot_help дозволено ТІЛЬКИ якщо клієнт у останніх 3 репліках "
+        "сказав щось на кшталт «не працює», «не розумію», «переключи», "
+        "«не хочу з тобою», «погано». Просте уточнення марки/номера/дати "
+        "НЕ є escalation'ом. Продовжи чекліст, перепитай коротко якщо "
+        "щось не зрозумів."
     )
 
 
