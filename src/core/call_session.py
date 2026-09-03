@@ -113,6 +113,16 @@ class CallSession:
         # when STT mishears a rare brand ("Zeekr" → "Віктор") and the LLM
         # interprets "X правильно" as a name correction (call 98ee0296 2026-08-14).
         self.name_from_profile: bool = False
+        # Wave 6 (2026-09-03) — True if fitting_customer_name was
+        # captured by the Krok 0 backend auto-detect (parallel to
+        # name_from_profile). Same overwrite protection.
+        self.name_from_krok0: bool = False
+        # Wave 6 (2026-09-03) — True if the last bot turn contained a
+        # «Перевіримо: …, Підтверджуєте?» while a checklist field was
+        # still ⏳ (LLM invented values). Pipeline sets it; state guard
+        # renders a correction banner on the NEXT turn to tell the LLM
+        # its confirmation was hallucinated and to ask the ⏳ field.
+        self.krok8_confabulation_pending: bool = False
         self.fitting_plate: str | None = None              # Ідентифікатор авто. З 2026-08-18: колір (напр. "синій"). Історично: держномер. Preparse може ще писати сюди платити, якщо клієнт САМ добровільно назвав.
         self.fitting_vehicle_brand: str | None = None      # Марка/модель авто
         # storage_choice: None=pending, "own"=клієнт привезе свої, "contract"=зі зберігання

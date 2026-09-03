@@ -3236,15 +3236,17 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             # correct their profile — but the running Krok 6 state stays
             # anchored to the trusted name.
             if (
-                session.name_from_profile
+                (session.name_from_profile or session.name_from_krok0)
                 and session.fitting_customer_name
                 and new_name != session.fitting_customer_name
             ):
                 logger.warning(
                     "Blocked in-session name overwrite for call %s: "
-                    "profile=%r vs LLM-proposed=%r (likely STT-brand mishear)",
+                    "trusted=%r (source=%s) vs LLM-proposed=%r "
+                    "(likely STT mishear or anti-pattern example leak)",
                     session.channel_uuid,
                     session.fitting_customer_name,
+                    "profile" if session.name_from_profile else "krok0",
                     new_name,
                 )
                 kwargs.pop("name", None)  # also drop from DB update

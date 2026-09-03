@@ -116,6 +116,19 @@ false_transfer_blocked_total = Counter(
     ["reason"],
 )
 
+krok8_confabulation_total = Counter(
+    "callcenter_krok8_confabulation_total",
+    "Bot produced «Перевіримо: …, Підтверджуєте?» while a checklist "
+    "field was still ⏳ (LLM invented date/time/color/brand).",
+    ["missing_field"],
+)
+
+phone_asked_despite_caller_id_total = Counter(
+    "callcenter_phone_asked_despite_caller_id_total",
+    "Bot asked customer for phone number even though CallerID was set. "
+    "Attention-dilution regression from prompt rule Крок 7.",
+)
+
 # --- Business metrics ---
 
 calls_resolved_by_bot_total = Counter(

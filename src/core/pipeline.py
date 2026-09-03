@@ -1317,6 +1317,33 @@ class CallPipeline:
                             _matched, self._session.channel_uuid,
                         )
 
+            # Wave 6 (2026-09-03) — Name auto-persist. LLM sometimes
+            # skips update_customer_profile after Krok 0 (call fcfb26a9
+            # turn 1 «Юра» → tools=0). Without a persisted name, state
+            # guard shows ⏳ Ім'я for the entire call, and LLM later
+            # confabulates «Марина» (bot's name) or leaks example names
+            # from prompt anti-patterns («Василь», «Наталя»).
+            if not self._session.fitting_customer_name:
+                from src.agent.name_detect import detect_name, is_name_question
+
+                _last_bot_for_name = ""
+                for _t in reversed(self._session.dialog_history):
+                    if _t.speaker == "assistant" and _t.content:
+                        _last_bot_for_name = _t.content
+                        break
+                if is_name_question(_last_bot_for_name):
+                    _name = detect_name(transcript.text)
+                    if _name:
+                        self._session.fitting_customer_name = _name
+                        # Mark as Krok-0-sourced so LLM overwrites via
+                        # update_customer_profile(name=X) can be flagged.
+                        self._session.name_from_krok0 = True
+                        logger.info(
+                            "Name auto-detected %r for call=%s "
+                            "(prevents LLM name confabulation)",
+                            _name, self._session.channel_uuid,
+                        )
+
             # Deterministic pre-parser (Phase 3 2026-08-14): pull car brand
             # and licence plate out of any user turn with regex/keyword match.
             # Only writes to session when the field is empty — never trample
@@ -1369,12 +1396,36 @@ class CallPipeline:
                 )
                 _text_stripped = transcript.text.strip()
                 if _confirm_pat.match(_text_stripped):
-                    _krok8_confirmed = True
-                    logger.info(
-                        "Krok 8 auto-book marker set for call=%s "
-                        "(bot: «...Підтверджуєте?», customer: %r)",
-                        self._session.channel_uuid, _text_stripped,
+                    # Wave 6 (2026-09-03) — sanity check: only fire the
+                    # EMERGENCY book-fitting banner if ALL checklist
+                    # fields are actually ✅. Wave 5 fired regardless of
+                    # state, which contradicted the state guard when
+                    # fields were ⏳ (call fcfb26a9 turn 78-80 loop).
+                    _all_fields_ready = bool(
+                        self._session.fitting_customer_name
+                        and (selected_station or {}).get("city")
+                        and (selected_station or {}).get("address")
+                        and self._session.fitting_storage_choice is not None
+                        and self._session.selected_fitting_date
+                        and self._session.selected_fitting_time
+                        and self._session.fitting_plate
+                        and self._session.fitting_vehicle_brand
+                        and self._session.caller_phone
                     )
+                    if _all_fields_ready:
+                        _krok8_confirmed = True
+                        logger.info(
+                            "Krok 8 auto-book marker set for call=%s "
+                            "(bot: «...Підтверджуєте?», customer: %r, all ✅)",
+                            self._session.channel_uuid, _text_stripped,
+                        )
+                    else:
+                        logger.warning(
+                            "Krok 8 «так» arrived but fields still ⏳ for "
+                            "call=%s (LLM hallucinated confirmation). "
+                            "Suppressing emergency banner.",
+                            self._session.channel_uuid,
+                        )
 
             # Fitting progress block: shows LLM what's already collected so it
             # doesn't loop back to Krok 2/3/4 after passing through them.
@@ -1392,7 +1443,12 @@ class CallPipeline:
                 "booked": self._session.fitting_booked,
                 "requested_weekday": self._session.fitting_requested_weekday,
                 "krok8_confirmed": _krok8_confirmed,
+                "krok8_confabulation_pending": (
+                    self._session.krok8_confabulation_pending
+                ),
             }
+            # Consume the flag: reset after passing to guard (one-shot signal).
+            self._session.krok8_confabulation_pending = False
 
             if self._streaming_loop is not None:
                 # STREAMING PATH — add user turn to session (streaming loop uses separate _llm_history)
@@ -1458,6 +1514,66 @@ class CallPipeline:
                     )
 
                 if result is not None and result.spoken_text:
+                    # Wave 6 (2026-09-03) — detect Krok 8 confabulation.
+                    # Bot said «Перевіримо: …, Підтверджуєте?» while some
+                    # checklist field was still ⏳. LLM invented values.
+                    # Track as metric and set a session flag so the next
+                    # state guard can render a correction banner.
+                    _spoken_lower = result.spoken_text.lower()
+                    # Wave 6 (2026-09-03) — CallerID phone regression metric.
+                    # Bot should never ask for phone when caller_phone set.
+                    if (
+                        self._session.caller_phone
+                        and (
+                            "номер телефон" in _spoken_lower
+                            or "продиктуйте номер" in _spoken_lower
+                            or "назвіть номер" in _spoken_lower
+                            or "назвіть телефон" in _spoken_lower
+                            or "ваш телефон" in _spoken_lower
+                            or "який ваш номер" in _spoken_lower
+                        )
+                        # Exclude confirmations like «Ваш номер X, вірно?»
+                        and "вірно?" not in _spoken_lower
+                    ):
+                        from src.monitoring.metrics import (
+                            phone_asked_despite_caller_id_total,
+                        )
+                        phone_asked_despite_caller_id_total.inc()
+                        logger.warning(
+                            "Bot asked for phone despite CallerID=%s for "
+                            "call=%s (LLM ignored Крок 7 rule). Text: %r",
+                            self._session.caller_phone,
+                            self._session.channel_uuid,
+                            result.spoken_text[:200],
+                        )
+                    if (
+                        "перевіримо" in _spoken_lower
+                        and "підтверджує" in _spoken_lower
+                    ):
+                        _missing: list[str] = []
+                        if not self._session.selected_fitting_date:
+                            _missing.append("date")
+                        if not self._session.selected_fitting_time:
+                            _missing.append("time")
+                        if not self._session.fitting_plate:
+                            _missing.append("color")
+                        if not self._session.fitting_vehicle_brand:
+                            _missing.append("brand")
+                        if _missing:
+                            from src.monitoring.metrics import (
+                                krok8_confabulation_total,
+                            )
+                            for _f in _missing:
+                                krok8_confabulation_total.labels(missing_field=_f).inc()
+                            self._session.krok8_confabulation_pending = True
+                            logger.warning(
+                                "Krok 8 confabulation for call=%s — bot said "
+                                "«Перевіримо: …, Підтверджуєте?» while ⏳ %s. "
+                                "Text: %r",
+                                self._session.channel_uuid,
+                                _missing,
+                                result.spoken_text[:200],
+                            )
                     # Strip leaked Progress checklist from log / session for
                     # consistency (audio was already filtered at sentence-buffer
                     # level in streaming path).
