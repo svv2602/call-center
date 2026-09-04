@@ -129,6 +129,13 @@ phone_asked_despite_caller_id_total = Counter(
     "Attention-dilution regression from prompt rule Крок 7.",
 )
 
+krok1_regression_blocked_total = Counter(
+    "callcenter_krok1_regression_blocked_total",
+    "Bot tried to call get_fitting_stations after station was already pinned "
+    "and Krok 2+ progress was made — Wave 9 backend guard rejected the call. "
+    "Typical trigger: LLM recovers wrong from Krok 3/4 book_fitting rejection.",
+)
+
 # --- Business metrics ---
 
 calls_resolved_by_bot_total = Counter(

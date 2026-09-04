@@ -93,6 +93,7 @@ from src.monitoring.metrics import (
     calls_total,
     fittings_booked_total,
     get_metrics,
+    krok1_regression_blocked_total,
     orders_created_total,
     tenant_resolution_fallback_total,
 )
@@ -1751,16 +1752,23 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 session.selected_fitting_date,
                 len(session.fitting_slots_offered),
             )
+            pinned_station = session.last_fitting_station_id or "…"
             return {
                 "error": True,
+                "action_required": "call_get_fitting_slots",
                 "message": (
                     "⛔ Не можу записати без пройденого Кроку 3 (дата) та "
-                    "Кроку 4 (час). Спочатку виклич `get_fitting_slots"
-                    "(station_id=…, date_from=…)`, озвуч клієнту доступні "
-                    "часи, дочекайся вибору, і тільки ТОДІ виклич "
-                    "book_fitting з тими самими датою і часом, які клієнт "
-                    "справді назвав. ⛔ НЕ ВИГАДУЙ date/time — використовуй "
-                    "тільки значення зі списку get_fitting_slots."
+                    "Кроку 4 (час). НАСТУПНИЙ КРОК — виклич САМЕ "
+                    f"`get_fitting_slots(station_id='{pinned_station}', "
+                    "date_from='YYYY-MM-DD')`, озвуч клієнту доступні часи, "
+                    "дочекайся вибору, і тільки ТОДІ виклич book_fitting з "
+                    "тими самими датою і часом, які клієнт справді назвав. "
+                    "⛔ НЕ ВИГАДУЙ date/time — використовуй тільки значення "
+                    "зі списку get_fitting_slots. "
+                    "⛔ ⛔ ⛔ НЕ виклич `get_fitting_stations` — станцію "
+                    "вже обрано в Кроці 1, повертатися до вибору "
+                    "міста/району ЗАБОРОНЕНО (регресія Кроку 1). "
+                    "Wave 9 backend guard заблокує такий виклик."
                 ),
             }
 
@@ -2206,6 +2214,37 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
     async def _get_fitting_stations(
         city: str = "", query: str = "", for_price: bool = False, **_kwargs: Any
     ) -> dict[str, Any]:
+        # === Wave 9: Krok 1 regression guard ===
+        # See src/agent/regression_guards.check_krok1_regression for the full
+        # rationale + root-case call log. In one line: LLM sometimes calls
+        # get_fitting_stations() as an incorrect recovery from a Wave 7
+        # Krok 3/4 rejection of book_fitting — regressing the customer
+        # to district selection after they already picked a station.
+        from src.agent.regression_guards import check_krok1_regression
+
+        _regression = check_krok1_regression(
+            last_fitting_station_id=session.last_fitting_station_id,
+            storage_contract_guard_triggered=session.storage_contract_guard_triggered,
+            fitting_storage_contract=session.fitting_storage_contract,
+            selected_fitting_date=session.selected_fitting_date,
+            fitting_slots_offered_count=len(session.fitting_slots_offered),
+        )
+        if _regression is not None:
+            krok1_regression_blocked_total.inc()
+            logger.warning(
+                "get_fitting_stations: Wave 9 Krok 1 regression guard "
+                "triggered for call %s (station_id=%s already pinned; "
+                "signals: storage_guard=%s, storage_selected=%s, "
+                "date=%s, slots_offered=%d)",
+                session.channel_uuid,
+                session.last_fitting_station_id,
+                session.storage_contract_guard_triggered,
+                session.fitting_storage_contract is not None,
+                session.selected_fitting_date,
+                len(session.fitting_slots_offered),
+            )
+            return _regression
+
         cache_key = "onec:fitting_stations"
 
         # 1. Redis cache
