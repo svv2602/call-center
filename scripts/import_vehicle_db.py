@@ -328,101 +328,461 @@ def read_tire_sizes(csv_dir: Path) -> list[dict[str, Any]]:
     return rows
 
 
-async def import_data(engine: AsyncEngine, csv_dir: Path) -> None:
-    """Truncate tables and import all CSV data."""
-    logger.info("Starting import from %s", csv_dir)
+async def _load_existing_brands(conn: Any) -> dict[int, dict[str, Any]]:
+    """Return {id: {name, source}} for every existing brand."""
+    result = await conn.execute(text("SELECT id, name, source FROM vehicle_brands"))
+    return {row.id: {"name": row.name, "source": row.source} for row in result}
 
-    # Truncate in FK order
-    async with engine.begin() as conn:
+
+async def _load_existing_models(conn: Any) -> dict[int, dict[str, Any]]:
+    """Return {id: {brand_id, name, source}} for every existing model."""
+    result = await conn.execute(text("SELECT id, brand_id, name, source FROM vehicle_models"))
+    return {
+        row.id: {"brand_id": row.brand_id, "name": row.name, "source": row.source}
+        for row in result
+    }
+
+
+def _diff_brands(
+    csv_brands: list[dict[str, Any]], existing: dict[int, dict[str, Any]]
+) -> dict[str, list[dict[str, Any]]]:
+    """Compare CSV rows to current DB state.
+
+    Returns dict with keys:
+      added            — rows in CSV, not in DB (will INSERT)
+      updated          — rows in both, name changed, DB source != 'manual' (will UPDATE)
+      skipped_manual   — rows in both, DB source == 'manual' (SKIP — preserve manual edits)
+      missing_in_source — DB rows (source='auto_import') absent from CSV — NOT deleted, just reported
+    """
+    csv_ids: set[int] = set()
+    added: list[dict[str, Any]] = []
+    updated: list[dict[str, Any]] = []
+    skipped_manual: list[dict[str, Any]] = []
+
+    for row in csv_brands:
+        bid = row["id"]
+        csv_ids.add(bid)
+        current = existing.get(bid)
+        if current is None:
+            added.append(row)
+        elif current["source"] == "manual":
+            skipped_manual.append(row)
+        elif current["name"] != row["name"]:
+            updated.append(row)
+
+    missing_in_source = [
+        {"id": bid, "name": info["name"]}
+        for bid, info in existing.items()
+        if bid > 0 and bid not in csv_ids and info["source"] != "manual"
+    ]
+
+    return {
+        "added": added,
+        "updated": updated,
+        "skipped_manual": skipped_manual,
+        "missing_in_source": missing_in_source,
+    }
+
+
+def _diff_models(
+    csv_models: list[dict[str, Any]], existing: dict[int, dict[str, Any]]
+) -> dict[str, list[dict[str, Any]]]:
+    """Compare CSV rows to current DB state (analogous to _diff_brands, adds brand_id compare)."""
+    csv_ids: set[int] = set()
+    added: list[dict[str, Any]] = []
+    updated: list[dict[str, Any]] = []
+    skipped_manual: list[dict[str, Any]] = []
+
+    for row in csv_models:
+        mid = row["id"]
+        csv_ids.add(mid)
+        current = existing.get(mid)
+        if current is None:
+            added.append(row)
+        elif current["source"] == "manual":
+            skipped_manual.append(row)
+        elif current["name"] != row["name"] or current["brand_id"] != row["brand_id"]:
+            updated.append(row)
+
+    missing_in_source = [
+        {"id": mid, "name": info["name"], "brand_id": info["brand_id"]}
+        for mid, info in existing.items()
+        if mid > 0 and mid not in csv_ids and info["source"] != "manual"
+    ]
+
+    return {
+        "added": added,
+        "updated": updated,
+        "skipped_manual": skipped_manual,
+        "missing_in_source": missing_in_source,
+    }
+
+
+async def _apply_brand_diff(conn: Any, diff: dict[str, list[dict[str, Any]]]) -> None:
+    """Upsert brands: insert new + update changed. skipped_manual and missing_in_source untouched."""
+    if diff["added"]:
         await conn.execute(
             text(
-                "TRUNCATE vehicle_tire_sizes, vehicle_kits, vehicle_models, vehicle_brands CASCADE"
-            )
+                "INSERT INTO vehicle_brands (id, name, source) "
+                "VALUES (:id, :name, 'auto_import')"
+            ),
+            diff["added"],
         )
-    logger.info("Tables truncated")
-
-    # 1. Brands
-    brands, corrupted_brand_ids = read_brands(csv_dir)
-    brand_names = {b["name"] for b in brands}
-    async with engine.begin() as conn:
+    if diff["updated"]:
         await conn.execute(
-            text("INSERT INTO vehicle_brands (id, name) VALUES (:id, :name)"),
-            brands,
+            text(
+                "UPDATE vehicle_brands SET name = :name, updated_at = now() "
+                "WHERE id = :id AND source != 'manual'"
+            ),
+            diff["updated"],
         )
-    logger.info("Inserted %d brands", len(brands))
 
-    # 2. Models (filter out bogus rows where brand names appear as model names)
-    models = read_models(csv_dir, brand_names, corrupted_brand_ids)
-    async with engine.begin() as conn:
+
+async def _apply_model_diff(conn: Any, diff: dict[str, list[dict[str, Any]]]) -> None:
+    """Upsert models: insert new + update changed. skipped_manual and missing_in_source untouched."""
+    if diff["added"]:
         await conn.execute(
-            text("INSERT INTO vehicle_models (id, brand_id, name) VALUES (:id, :brand_id, :name)"),
-            models,
+            text(
+                "INSERT INTO vehicle_models (id, brand_id, name, source) "
+                "VALUES (:id, :brand_id, :name, 'auto_import')"
+            ),
+            diff["added"],
         )
-    logger.info("Inserted %d models", len(models))
+    if diff["updated"]:
+        await conn.execute(
+            text(
+                "UPDATE vehicle_models SET name = :name, brand_id = :brand_id, updated_at = now() "
+                "WHERE id = :id AND source != 'manual'"
+            ),
+            diff["updated"],
+        )
 
-    # 3. Kits
-    kits = read_kits(csv_dir)
+
+async def _refresh_kits_and_sizes(
+    conn: Any, kits: list[dict[str, Any]], tire_sizes: list[dict[str, Any]]
+) -> tuple[int, int]:
+    """Delete all source-imported kits (id>0) and reinsert from CSV.
+
+    Kits + tire_sizes have no 'manual' concept in Wave 8 — they're source-only.
+    CASCADE on kit_id wipes tire_sizes automatically.
+
+    Returns (kit_count, tire_size_count) inserted.
+    """
+    # CASCADE deletes tire_sizes tied to these kits
+    await conn.execute(text("DELETE FROM vehicle_kits WHERE id > 0"))
+
     for i in range(0, len(kits), BATCH_SIZE):
         batch = kits[i : i + BATCH_SIZE]
-        async with engine.begin() as conn:
-            await conn.execute(
-                text("""
-                    INSERT INTO vehicle_kits
-                        (id, model_id, year, name, pcd, bolt_count, dia, bolt_size)
-                    VALUES
-                        (:id, :model_id, :year, :name, :pcd, :bolt_count, :dia, :bolt_size)
-                """),
-                batch,
-            )
-        logger.info("Inserted kits batch %d-%d", i, i + len(batch))
-    logger.info("Inserted %d kits total", len(kits))
-
-    # 4. Tire sizes (large — batch insert)
-    tire_sizes = read_tire_sizes(csv_dir)
-    for i in range(0, len(tire_sizes), BATCH_SIZE):
-        batch = tire_sizes[i : i + BATCH_SIZE]
-        async with engine.begin() as conn:
-            await conn.execute(
-                text("""
-                    INSERT INTO vehicle_tire_sizes
-                        (id, kit_id, width, height, diameter, type, axle, axle_group)
-                    VALUES
-                        (:id, :kit_id, :width, :height, :diameter, :type, :axle, :axle_group)
-                """),
-                batch,
-            )
-        if (i // BATCH_SIZE) % 10 == 0:
-            logger.info("Inserted tire_sizes batch %d-%d", i, i + len(batch))
-    logger.info("Inserted %d tire sizes total", len(tire_sizes))
-
-    # 5. Metadata
-    async with engine.begin() as conn:
         await conn.execute(
             text("""
-                INSERT INTO vehicle_db_metadata
-                    (brand_count, model_count, kit_count, tire_size_count, source_path)
-                VALUES (:brands, :models, :kits, :tire_sizes, :source)
+                INSERT INTO vehicle_kits
+                    (id, model_id, year, name, pcd, bolt_count, dia, bolt_size)
+                VALUES
+                    (:id, :model_id, :year, :name, :pcd, :bolt_count, :dia, :bolt_size)
             """),
-            {
-                "brands": len(brands),
-                "models": len(models),
-                "kits": len(kits),
-                "tire_sizes": len(tire_sizes),
-                "source": str(csv_dir),
-            },
+            batch,
         )
-    logger.info(
-        "Import complete: %d brands, %d models, %d kits, %d tire sizes",
-        len(brands),
-        len(models),
-        len(kits),
-        len(tire_sizes),
+
+    for i in range(0, len(tire_sizes), BATCH_SIZE):
+        batch = tire_sizes[i : i + BATCH_SIZE]
+        await conn.execute(
+            text("""
+                INSERT INTO vehicle_tire_sizes
+                    (id, kit_id, width, height, diameter, type, axle, axle_group)
+                VALUES
+                    (:id, :kit_id, :width, :height, :diameter, :type, :axle, :axle_group)
+            """),
+            batch,
+        )
+
+    return len(kits), len(tire_sizes)
+
+
+async def _record_import_history(
+    conn: Any,
+    mode: str,
+    status: str,
+    source_path: str,
+    archive_name: str | None,
+    triggered_by: str | None,
+    counts: dict[str, int],
+    error_message: str | None = None,
+    diff_report: dict[str, Any] | None = None,
+) -> int:
+    """Insert vehicle_import_history row and return its id."""
+    import json as _json
+
+    result = await conn.execute(
+        text("""
+            INSERT INTO vehicle_import_history (
+                mode, status, source_path, archive_name, triggered_by,
+                brand_added, brand_updated, brand_skipped_manual, brand_missing_in_source,
+                model_added, model_updated, model_skipped_manual, model_missing_in_source,
+                kit_added, kit_deleted, tire_size_added, tire_size_deleted,
+                aliases_regenerated, error_message, diff_report_json,
+                finished_at
+            )
+            VALUES (
+                :mode, :status, :source_path, :archive_name, :triggered_by,
+                :b_add, :b_upd, :b_skip, :b_miss,
+                :m_add, :m_upd, :m_skip, :m_miss,
+                :k_add, :k_del, :t_add, :t_del,
+                :aliases, :err, CAST(:diff AS JSONB),
+                CASE WHEN :status = 'running' THEN NULL ELSE now() END
+            )
+            RETURNING id
+        """),
+        {
+            "mode": mode,
+            "status": status,
+            "source_path": source_path,
+            "archive_name": archive_name,
+            "triggered_by": triggered_by,
+            "b_add": counts.get("brand_added", 0),
+            "b_upd": counts.get("brand_updated", 0),
+            "b_skip": counts.get("brand_skipped_manual", 0),
+            "b_miss": counts.get("brand_missing_in_source", 0),
+            "m_add": counts.get("model_added", 0),
+            "m_upd": counts.get("model_updated", 0),
+            "m_skip": counts.get("model_skipped_manual", 0),
+            "m_miss": counts.get("model_missing_in_source", 0),
+            "k_add": counts.get("kit_added", 0),
+            "k_del": counts.get("kit_deleted", 0),
+            "t_add": counts.get("tire_size_added", 0),
+            "t_del": counts.get("tire_size_deleted", 0),
+            "aliases": counts.get("aliases_regenerated", 0),
+            "err": error_message,
+            "diff": _json.dumps(diff_report) if diff_report else None,
+        },
     )
+    return int(result.scalar_one())
+
+
+def _summarise_diff(
+    brand_diff: dict[str, list[dict[str, Any]]],
+    model_diff: dict[str, list[dict[str, Any]]],
+    kits_count: int,
+    tire_sizes_count: int,
+) -> dict[str, Any]:
+    """Produce compact JSON-serialisable diff summary (samples, not full lists)."""
+    _SAMPLE = 20  # cap examples so history JSON stays small
+
+    return {
+        "brands": {
+            "added_count": len(brand_diff["added"]),
+            "updated_count": len(brand_diff["updated"]),
+            "skipped_manual_count": len(brand_diff["skipped_manual"]),
+            "missing_in_source_count": len(brand_diff["missing_in_source"]),
+            "added_sample": [b["name"] for b in brand_diff["added"][:_SAMPLE]],
+            "updated_sample": [
+                {"id": b["id"], "new_name": b["name"]} for b in brand_diff["updated"][:_SAMPLE]
+            ],
+            "missing_in_source_sample": [
+                {"id": b["id"], "name": b["name"]}
+                for b in brand_diff["missing_in_source"][:_SAMPLE]
+            ],
+        },
+        "models": {
+            "added_count": len(model_diff["added"]),
+            "updated_count": len(model_diff["updated"]),
+            "skipped_manual_count": len(model_diff["skipped_manual"]),
+            "missing_in_source_count": len(model_diff["missing_in_source"]),
+            "added_sample": [m["name"] for m in model_diff["added"][:_SAMPLE]],
+            "updated_sample": [
+                {"id": m["id"], "new_name": m["name"]} for m in model_diff["updated"][:_SAMPLE]
+            ],
+        },
+        "kits": {"csv_count": kits_count},
+        "tire_sizes": {"csv_count": tire_sizes_count},
+    }
+
+
+async def import_data(
+    engine: AsyncEngine,
+    csv_dir: Path,
+    mode: str = "apply",
+    triggered_by: str | None = None,
+    archive_name: str | None = None,
+) -> dict[str, Any]:
+    """Import (or dry-run) vehicle DB from CSV files.
+
+    Preserves rows with ``source='manual'`` (added or edited via admin UI).
+    Kits and tire_sizes have no manual concept — they're always fully refreshed.
+
+    Args:
+        engine: Async SQLAlchemy engine.
+        csv_dir: Directory with the 4 required CSVs (see EXPECTED_CSV_FILES).
+        mode: ``"apply"`` (default) applies changes; ``"dryrun"`` computes diff only.
+        triggered_by: UUID of admin user who initiated the import (for audit log).
+        archive_name: Original filename of uploaded ZIP (for display in history).
+
+    Returns:
+        dict with ``history_id``, ``mode``, ``status``, and per-entity ``counts``
+        plus a compact ``diff_report`` for UI display.
+    """
+    if mode not in ("apply", "dryrun"):
+        raise ValueError(f"mode must be 'apply' or 'dryrun', got {mode!r}")
+
+    logger.info("Starting %s import from %s", mode, csv_dir)
+
+    # Read CSVs (same helpers as before — Cyrillic decoding untouched)
+    brands, corrupted_brand_ids = read_brands(csv_dir)
+    brand_names = {b["name"] for b in brands}
+    models = read_models(csv_dir, brand_names, corrupted_brand_ids)
+    kits = read_kits(csv_dir)
+    tire_sizes = read_tire_sizes(csv_dir)
+
+    async with engine.begin() as conn:
+        existing_brands = await _load_existing_brands(conn)
+        existing_models = await _load_existing_models(conn)
+
+        brand_diff = _diff_brands(brands, existing_brands)
+        model_diff = _diff_models(models, existing_models)
+
+        # Count of kit/tire_size rows that would be removed (source-imported only)
+        result = await conn.execute(text("SELECT COUNT(*) FROM vehicle_kits WHERE id > 0"))
+        kit_to_delete = int(result.scalar_one() or 0)
+        result = await conn.execute(
+            text("SELECT COUNT(*) FROM vehicle_tire_sizes ts "
+                 "WHERE ts.kit_id IN (SELECT id FROM vehicle_kits WHERE id > 0)")
+        )
+        tire_size_to_delete = int(result.scalar_one() or 0)
+
+        counts = {
+            "brand_added": len(brand_diff["added"]),
+            "brand_updated": len(brand_diff["updated"]),
+            "brand_skipped_manual": len(brand_diff["skipped_manual"]),
+            "brand_missing_in_source": len(brand_diff["missing_in_source"]),
+            "model_added": len(model_diff["added"]),
+            "model_updated": len(model_diff["updated"]),
+            "model_skipped_manual": len(model_diff["skipped_manual"]),
+            "model_missing_in_source": len(model_diff["missing_in_source"]),
+            "kit_added": len(kits) if mode == "apply" else 0,
+            "kit_deleted": kit_to_delete if mode == "apply" else 0,
+            "tire_size_added": len(tire_sizes) if mode == "apply" else 0,
+            "tire_size_deleted": tire_size_to_delete if mode == "apply" else 0,
+            "aliases_regenerated": 0,  # populated by generate_aliases.py in Phase 2
+        }
+
+        diff_summary = _summarise_diff(brand_diff, model_diff, len(kits), len(tire_sizes))
+
+        if mode == "dryrun":
+            history_id = await _record_import_history(
+                conn=conn,
+                mode="dryrun",
+                status="dryrun",
+                source_path=str(csv_dir),
+                archive_name=archive_name,
+                triggered_by=triggered_by,
+                counts=counts,
+                diff_report=diff_summary,
+            )
+            logger.info(
+                "Dry-run complete: brands +%d/~%d (skip manual %d, missing %d), "
+                "models +%d/~%d (skip manual %d, missing %d)",
+                counts["brand_added"], counts["brand_updated"],
+                counts["brand_skipped_manual"], counts["brand_missing_in_source"],
+                counts["model_added"], counts["model_updated"],
+                counts["model_skipped_manual"], counts["model_missing_in_source"],
+            )
+            return {
+                "history_id": history_id,
+                "mode": "dryrun",
+                "status": "dryrun",
+                "counts": counts,
+                "diff_report": diff_summary,
+            }
+
+    # mode == "apply" — record 'running' first, then do work in its own transactions
+    async with engine.begin() as conn:
+        history_id = await _record_import_history(
+            conn=conn,
+            mode="apply",
+            status="running",
+            source_path=str(csv_dir),
+            archive_name=archive_name,
+            triggered_by=triggered_by,
+            counts=counts,
+            diff_report=diff_summary,
+        )
+
+    try:
+        async with engine.begin() as conn:
+            await _apply_brand_diff(conn, brand_diff)
+            await _apply_model_diff(conn, model_diff)
+        logger.info(
+            "Applied brands: +%d added, %d updated (skipped %d manual, %d missing in source)",
+            counts["brand_added"], counts["brand_updated"],
+            counts["brand_skipped_manual"], counts["brand_missing_in_source"],
+        )
+        logger.info(
+            "Applied models: +%d added, %d updated (skipped %d manual, %d missing in source)",
+            counts["model_added"], counts["model_updated"],
+            counts["model_skipped_manual"], counts["model_missing_in_source"],
+        )
+
+        # Kits + tire_sizes: full refresh (source-only, no manual). Own transaction
+        # because bulk-delete + 1.2M row insert takes 30-60s.
+        async with engine.begin() as conn:
+            k_inserted, ts_inserted = await _refresh_kits_and_sizes(conn, kits, tire_sizes)
+        logger.info("Refreshed kits: %d, tire_sizes: %d", k_inserted, ts_inserted)
+
+        # Legacy metadata (still read by /admin/vehicles/stats fallback)
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("""
+                    INSERT INTO vehicle_db_metadata
+                        (brand_count, model_count, kit_count, tire_size_count, source_path)
+                    VALUES (:b, :m, :k, :t, :s)
+                """),
+                {
+                    "b": len(brands), "m": len(models),
+                    "k": len(kits), "t": len(tire_sizes), "s": str(csv_dir),
+                },
+            )
+
+            # Mark history complete
+            await conn.execute(
+                text(
+                    "UPDATE vehicle_import_history SET status='completed', finished_at=now() "
+                    "WHERE id=:id"
+                ),
+                {"id": history_id},
+            )
+    except Exception as exc:
+        logger.exception("Import failed after history_id=%s", history_id)
+        async with engine.begin() as conn:
+            await conn.execute(
+                text(
+                    "UPDATE vehicle_import_history "
+                    "SET status='failed', finished_at=now(), error_message=:err "
+                    "WHERE id=:id"
+                ),
+                {"id": history_id, "err": str(exc)[:2000]},
+            )
+        raise
+
+    logger.info(
+        "Import complete (history_id=%d): %d brands, %d models, %d kits, %d tire sizes",
+        history_id, len(brands), len(models), len(kits), len(tire_sizes),
+    )
+    return {
+        "history_id": history_id,
+        "mode": "apply",
+        "status": "completed",
+        "counts": counts,
+        "diff_report": diff_summary,
+    }
 
 
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Import vehicle tire size DB from CSV")
     parser.add_argument("--csv-dir", default=DEFAULT_CSV_DIR, help="Path to CSV directory")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Compute diff report without applying changes. Records a 'dryrun' history row.",
+    )
     args = parser.parse_args()
 
     csv_dir = Path(args.csv_dir)
@@ -433,7 +793,10 @@ async def main() -> None:
     settings = get_settings()
     engine = create_async_engine(settings.database.url, pool_size=5)
     try:
-        await import_data(engine, csv_dir)
+        result = await import_data(
+            engine, csv_dir, mode="dryrun" if args.dry_run else "apply"
+        )
+        logger.info("Result: %s", {k: v for k, v in result.items() if k != "diff_report"})
     finally:
         await engine.dispose()
 
