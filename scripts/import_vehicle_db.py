@@ -603,6 +603,7 @@ async def import_data(
     mode: str = "apply",
     triggered_by: str | None = None,
     archive_name: str | None = None,
+    reuse_history_id: int | None = None,
 ) -> dict[str, Any]:
     """Import (or dry-run) vehicle DB from CSV files.
 
@@ -615,6 +616,9 @@ async def import_data(
         mode: ``"apply"`` (default) applies changes; ``"dryrun"`` computes diff only.
         triggered_by: UUID of admin user who initiated the import (for audit log).
         archive_name: Original filename of uploaded ZIP (for display in history).
+        reuse_history_id: Reuse an existing dryrun history row when mode='apply'
+            (upload→dryrun→apply flow). Row is updated in place; no new row.
+            Ignored for mode='dryrun'.
 
     Returns:
         dict with ``history_id``, ``mode``, ``status``, and per-entity ``counts``
@@ -695,16 +699,36 @@ async def import_data(
 
     # mode == "apply" — record 'running' first, then do work in its own transactions
     async with engine.begin() as conn:
-        history_id = await _record_import_history(
-            conn=conn,
-            mode="apply",
-            status="running",
-            source_path=str(csv_dir),
-            archive_name=archive_name,
-            triggered_by=triggered_by,
-            counts=counts,
-            diff_report=diff_summary,
-        )
+        if reuse_history_id is not None:
+            # Upgrade a previous dryrun row → running (upload→dryrun→apply flow)
+            await conn.execute(
+                text("""
+                    UPDATE vehicle_import_history
+                    SET mode='apply', status='running', started_at=now(),
+                        finished_at=NULL, error_message=NULL,
+                        triggered_by=COALESCE(:tb, triggered_by),
+                        source_path=:sp, archive_name=COALESCE(:an, archive_name)
+                    WHERE id=:id
+                """),
+                {
+                    "id": reuse_history_id,
+                    "tb": triggered_by,
+                    "sp": str(csv_dir),
+                    "an": archive_name,
+                },
+            )
+            history_id = reuse_history_id
+        else:
+            history_id = await _record_import_history(
+                conn=conn,
+                mode="apply",
+                status="running",
+                source_path=str(csv_dir),
+                archive_name=archive_name,
+                triggered_by=triggered_by,
+                counts=counts,
+                diff_report=diff_summary,
+            )
 
     try:
         async with engine.begin() as conn:
