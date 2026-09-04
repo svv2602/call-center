@@ -646,10 +646,12 @@ class StoreClient:
 
     @staticmethod
     async def _find_vehicle_brand(conn: Any, name: str) -> Any:
-        """Find vehicle brand by exact match, then fuzzy."""
+        """Find vehicle brand: exact → aliases → pg_trgm fuzzy."""
         from sqlalchemy import text
 
-        # Exact (case-insensitive)
+        from src.agent.vehicle_alias_lookup import find_brand_by_alias
+
+        # 1. Exact (case-insensitive)
         result = await conn.execute(
             text("SELECT id, name FROM vehicle_brands WHERE LOWER(name) = LOWER(:name)"),
             {"name": name},
@@ -658,7 +660,12 @@ class StoreClient:
         if row:
             return row
 
-        # Fuzzy via pg_trgm
+        # 2. vehicle_aliases (Wave 8) — catches "Тойота" → Toyota, "Фольксваген" → Volkswagen
+        alias_row = await find_brand_by_alias(conn, name)
+        if alias_row:
+            return alias_row
+
+        # 3. Fuzzy via pg_trgm — last resort for typos not covered by aliases
         result = await conn.execute(
             text("""
                 SELECT id, name, similarity(LOWER(name), LOWER(:name)) AS sim
@@ -672,10 +679,12 @@ class StoreClient:
 
     @staticmethod
     async def _find_vehicle_model(conn: Any, brand_id: int, name: str) -> Any:
-        """Find vehicle model by exact match, then fuzzy."""
+        """Find vehicle model: exact → aliases (brand-scoped) → pg_trgm fuzzy."""
         from sqlalchemy import text
 
-        # Exact
+        from src.agent.vehicle_alias_lookup import find_model_by_alias
+
+        # 1. Exact
         result = await conn.execute(
             text("""
                 SELECT id, name FROM vehicle_models
@@ -687,7 +696,12 @@ class StoreClient:
         if row:
             return row
 
-        # Fuzzy
+        # 2. vehicle_aliases (Wave 8) — catches "Дастер" → Duster within Renault
+        alias_row = await find_model_by_alias(conn, brand_id, name)
+        if alias_row:
+            return alias_row
+
+        # 3. Fuzzy
         result = await conn.execute(
             text("""
                 SELECT id, name, similarity(LOWER(name), LOWER(:name)) AS sim
