@@ -2214,13 +2214,19 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
     async def _get_fitting_stations(
         city: str = "", query: str = "", for_price: bool = False, **_kwargs: Any
     ) -> dict[str, Any]:
-        # === Wave 9: Krok 1 regression guard ===
+        # === Wave 9/10: Krok 1 regression guard ===
         # See src/agent/regression_guards.check_krok1_regression for the full
-        # rationale + root-case call log. In one line: LLM sometimes calls
-        # get_fitting_stations() as an incorrect recovery from a Wave 7
-        # Krok 3/4 rejection of book_fitting — regressing the customer
-        # to district selection after they already picked a station.
+        # rationale + root-case call log. Two triggers:
+        #  (A) cross-city — station pinned in city X, LLM asks city Y
+        #  (B) past-Krok-2 signals (storage/date/slots present)
         from src.agent.regression_guards import check_krok1_regression
+
+        pinned_city: str | None = None
+        if session.last_fitting_station_id:
+            for _s in session.fitting_stations_seen:
+                if _s.get("id") == session.last_fitting_station_id:
+                    pinned_city = _s.get("city")
+                    break
 
         _regression = check_krok1_regression(
             last_fitting_station_id=session.last_fitting_station_id,
@@ -2228,18 +2234,28 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             fitting_storage_contract=session.fitting_storage_contract,
             selected_fitting_date=session.selected_fitting_date,
             fitting_slots_offered_count=len(session.fitting_slots_offered),
+            pinned_station_city=pinned_city,
+            incoming_city=city,
+            fitting_storage_choice=session.fitting_storage_choice,
+            storage_contracts_found_count=len(session.storage_contracts_found),
         )
         if _regression is not None:
             krok1_regression_blocked_total.inc()
             logger.warning(
-                "get_fitting_stations: Wave 9 Krok 1 regression guard "
-                "triggered for call %s (station_id=%s already pinned; "
-                "signals: storage_guard=%s, storage_selected=%s, "
+                "get_fitting_stations: Wave 9/10 Krok 1 regression guard "
+                "triggered (%s) for call %s (station_id=%s pinned in %r; "
+                "incoming city=%r; signals: storage_guard=%s, "
+                "storage_selected=%s, storage_choice=%s, storage_found=%d, "
                 "date=%s, slots_offered=%d)",
+                _regression.get("reason", "unknown"),
                 session.channel_uuid,
                 session.last_fitting_station_id,
+                pinned_city,
+                city,
                 session.storage_contract_guard_triggered,
                 session.fitting_storage_contract is not None,
+                session.fitting_storage_choice,
+                len(session.storage_contracts_found),
                 session.selected_fitting_date,
                 len(session.fitting_slots_offered),
             )
