@@ -1324,21 +1324,95 @@
                     <button onclick="window._app.openHelp('vehicles')" class="w-6 h-6 rounded-full border border-neutral-300 dark:border-neutral-600 text-neutral-400 hover:text-blue-600 hover:border-blue-400 dark:hover:text-blue-400 dark:hover:border-blue-400 text-xs font-bold transition-colors flex items-center justify-center" title="Help">?</button>
                 </div>
                 <div id="vehiclesStats" class="grid grid-cols-[repeat(auto-fill,minmax(180px,1fr))] gap-4 mb-6 max-md:grid-cols-2 max-[480px]:grid-cols-1"></div>
-                <div class="flex flex-wrap items-center gap-2 mb-4">
-                    <input type="text" id="vehiclesSearch" placeholder="Поиск по названию..."
-                        onkeydown="if(event.key==='Enter')window._pages.vehicles.search()"
-                        class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full"
-                        data-i18n-placeholder="vehicles.searchPlaceholder">
-                    <button onclick="window._pages.vehicles.search()"
-                        class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.search">Поиск</button>
-                    <button onclick="window._pages.vehicles.openImportModal()"
-                        class="admin-only inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-violet-600 text-white hover:bg-violet-700 max-md:w-full" data-i18n="vehicles.importButton">Обновить БД</button>
+
+                <!-- Tabs -->
+                <div class="flex flex-wrap gap-1 mb-4 border-b border-neutral-200 dark:border-neutral-800">
+                    <button id="vehiclesTab-browse" onclick="window._pages.vehicles.switchTab('browse')"
+                        class="px-3 py-2 text-sm font-medium border-b-2 border-blue-600 text-blue-600 -mb-px" data-i18n="vehicles.tabBrowse">Обзор</button>
+                    <button id="vehiclesTab-aliases" onclick="window._pages.vehicles.switchTab('aliases')"
+                        class="px-3 py-2 text-sm font-medium border-b-2 border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200" data-i18n="vehicles.tabAliases">Алиасы</button>
+                    <button id="vehiclesTab-import" onclick="window._pages.vehicles.switchTab('import')"
+                        class="admin-only px-3 py-2 text-sm font-medium border-b-2 border-transparent text-neutral-500 hover:text-neutral-800 dark:hover:text-neutral-200" data-i18n="vehicles.tabImport">Импорт БД</button>
                 </div>
-                <div id="vehiclesBreadcrumb" class="text-xs text-neutral-500 dark:text-neutral-400 mb-3" style="display:none"></div>
-                <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="vehiclesContainer">
-                    <div class="flex justify-center py-8"><div class="spinner"></div></div>
+
+                <!-- Browse pane -->
+                <div id="vehiclesPane-browse">
+                    <div class="flex flex-wrap items-center gap-2 mb-4">
+                        <input type="text" id="vehiclesSearch" placeholder="Поиск по названию..."
+                            onkeydown="if(event.key==='Enter')window._pages.vehicles.search()"
+                            class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full"
+                            data-i18n-placeholder="vehicles.searchPlaceholder">
+                        <button onclick="window._pages.vehicles.search()"
+                            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700 max-md:w-full" data-i18n="common.search">Поиск</button>
+                    </div>
+                    <div id="vehiclesBreadcrumb" class="text-xs text-neutral-500 dark:text-neutral-400 mb-3" style="display:none"></div>
+                    <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="vehiclesContainer">
+                        <div class="flex justify-center py-8"><div class="spinner"></div></div>
+                    </div>
+                    <div class="pagination flex justify-center gap-1 mt-4" id="vehiclesPagination"></div>
                 </div>
-                <div class="pagination flex justify-center gap-1 mt-4" id="vehiclesPagination"></div>
+
+                <!-- Aliases pane -->
+                <div id="vehiclesPane-aliases" style="display:none">
+                    <!-- Lookup tester widget -->
+                    <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-4 mb-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <div class="text-sm font-medium text-neutral-800 dark:text-neutral-200" data-i18n="vehicles.lookupTitle">Проверка распознавания</div>
+                            <div class="text-xs text-neutral-500" data-i18n="vehicles.lookupHint">Введите слово так, как его сказал бы клиент</div>
+                        </div>
+                        <div class="flex gap-2 mb-3">
+                            <input type="text" id="lookupInput" placeholder="Дастер, Тойота, Тігуан..."
+                                onkeydown="if(event.key==='Enter')window._pages.vehicles.testLookup()"
+                                class="flex-1 px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                            <button onclick="window._pages.vehicles.testLookup()"
+                                class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" data-i18n="vehicles.lookupBtn">Проверить</button>
+                        </div>
+                        <div id="lookupResult"></div>
+                    </div>
+
+                    <!-- Filters + actions -->
+                    <div class="flex flex-wrap items-center gap-2 mb-4">
+                        <input type="text" id="aliasSearchInput" placeholder="Поиск по алиасу..."
+                            onkeydown="if(event.key==='Enter')window._pages.vehicles.applyAliasFilters()"
+                            class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 max-md:w-full"
+                            data-i18n-placeholder="vehicles.aliasSearchPlaceholder">
+                        <select id="aliasSourceFilter" onchange="window._pages.vehicles.applyAliasFilters()"
+                            class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100">
+                            <option value="" data-i18n="vehicles.filterAllSources">Все источники</option>
+                            <option value="manual">manual</option>
+                            <option value="auto_import">auto_import</option>
+                            <option value="auto_translit">auto_translit</option>
+                            <option value="auto_model_name">auto_model_name</option>
+                        </select>
+                        <input type="number" id="aliasBrandFilter" placeholder="brand_id"
+                            onchange="window._pages.vehicles.applyAliasFilters()"
+                            class="px-2.5 py-1.5 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 w-28">
+                        <button onclick="window._pages.vehicles.applyAliasFilters()"
+                            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700" data-i18n="common.filter">Фильтр</button>
+                        <button onclick="window._pages.vehicles.openAliasModal(null)"
+                            class="admin-only inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-green-600 text-white hover:bg-green-700" data-i18n="vehicles.addAlias">Добавить алиас</button>
+                        <button onclick="window._pages.vehicles.regenerateAliases()"
+                            class="admin-only inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-violet-600 text-white hover:bg-violet-700" data-i18n="vehicles.regenerate">Перегенерировать</button>
+                    </div>
+                    <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="vehiclesAliasesContainer">
+                        <div class="flex justify-center py-8"><div class="spinner"></div></div>
+                    </div>
+                    <div class="pagination flex justify-center gap-1 mt-4" id="vehiclesAliasesPagination"></div>
+                </div>
+
+                <!-- Import pane -->
+                <div id="vehiclesPane-import" style="display:none" class="admin-only">
+                    <div class="flex flex-wrap items-center gap-2 mb-4">
+                        <button onclick="window._pages.vehicles.openImportModal()"
+                            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-violet-600 text-white hover:bg-violet-700" data-i18n="vehicles.uploadZipButton">Загрузить ZIP-архив</button>
+                        <button onclick="window._pages.vehicles.loadImportHistory()"
+                            class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-neutral-600 text-white hover:bg-neutral-700" data-i18n="common.refresh">Обновить</button>
+                    </div>
+                    <div class="text-sm text-neutral-700 dark:text-neutral-300 mb-2" data-i18n="vehicles.historyTitle">История импортов</div>
+                    <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-lg p-5 mb-4" id="vehiclesHistoryContainer">
+                        <div class="flex justify-center py-8"><div class="spinner"></div></div>
+                    </div>
+                </div>
             </div>
         </main>
     </div>
@@ -1632,31 +1706,124 @@
         </div>
     </div>
 
-    <!-- Vehicle Import Modal -->
+    <!-- Vehicle Import Modal (ZIP upload workflow, Wave 8) -->
     <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" role="dialog" aria-modal="true" id="vehicleImportModal">
-        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl max-w-[700px] w-[90%] max-h-[80vh] overflow-hidden flex flex-col max-md:w-[95%]">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl max-w-[720px] w-[90%] max-h-[90vh] overflow-hidden flex flex-col max-md:w-[95%]">
             <div class="modal-fixed-header">
                 <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" data-i18n="vehicles.importTitle">Обновление базы автомобилей</h2>
                 <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('vehicleImportModal')">&times;</span>
             </div>
             <div class="modal-body">
             <div class="mb-3 p-3 bg-neutral-50 dark:bg-neutral-800 rounded-md text-sm text-neutral-600 dark:text-neutral-400">
-                <p class="mb-2 font-medium text-neutral-700 dark:text-neutral-300" data-i18n="vehicles.importInstructions">Разместите 4 CSV-файла в директории на сервере:</p>
+                <p class="mb-2 font-medium text-neutral-700 dark:text-neutral-300" data-i18n="vehicles.importInstructions2">Загрузите ZIP-архив со следующими файлами:</p>
                 <ul class="list-disc ml-5 mb-2 space-y-0.5 font-mono text-xs">
                     <li>test_table_car2_brand.csv</li>
                     <li>test_table_car2_model.csv</li>
-                    <li>test_table_car2_kit.csv <span class="text-neutral-400">(latin-1)</span></li>
+                    <li>test_table_car2_kit.csv</li>
                     <li>test_table_car2_kit_tyre_size.csv</li>
+                    <li class="text-neutral-400">test_table_car2_kit_disk_size.csv (опционально)</li>
                 </ul>
-                <p class="text-xs text-neutral-500 dark:text-neutral-500" data-i18n="vehicles.importWarning">Импорт удалит текущие данные и загрузит новые. Операция занимает ~30-60 секунд.</p>
+                <p class="text-xs text-neutral-500 dark:text-neutral-500" data-i18n="vehicles.importWarning2">Сначала выполним dry-run — покажем что изменится. Ручные записи (source=manual) сохранятся.</p>
             </div>
             <div class="mb-3">
-                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="vehicles.importPathLabel">Путь к директории с CSV</label>
-                <input type="text" id="vehicleImportPath" placeholder="/path/to/csv/files"
-                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="vehicles.uploadZipLabel">ZIP-архив с CSV-файлами (макс 30 МБ)</label>
+                <input type="file" id="vehicleImportZipInput" accept=".zip"
+                    class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500 file:mr-3 file:py-1 file:px-3 file:rounded-md file:border-0 file:bg-blue-600 file:text-white hover:file:bg-blue-700 file:cursor-pointer">
             </div>
-            <button class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-violet-600 text-white hover:bg-violet-700"
-                id="vehicleImportBtn" onclick="window._pages.vehicles.runImport()" data-i18n="vehicles.importBtn">Импортировать</button>
+            <div id="vehicleImportPreview" class="mb-3"></div>
+            <div class="flex gap-2 flex-wrap">
+                <button id="vehicleImportUploadBtn" onclick="window._pages.vehicles.uploadImportZip()"
+                    class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-blue-600 text-white hover:bg-blue-700"
+                    data-i18n="vehicles.dryRunBtn">Запустить dry-run</button>
+                <button id="vehicleImportApplyBtn" onclick="window._pages.vehicles.applyStagedImport()" style="display:none"
+                    class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-green-600 text-white hover:bg-green-700"
+                    data-i18n="vehicles.applyBtn">Применить</button>
+                <button id="vehicleImportDiscardBtn" onclick="window._pages.vehicles.discardStagedImport()" style="display:none"
+                    class="inline-flex items-center justify-center px-3 py-1.5 text-sm font-medium rounded-md transition-colors cursor-pointer bg-neutral-500 text-white hover:bg-neutral-600"
+                    data-i18n="vehicles.discardBtn">Отменить</button>
+            </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Vehicle Brand Modal (Wave 8) -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" role="dialog" aria-modal="true" id="vehicleBrandModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl max-w-md w-[90%] max-h-[80vh] overflow-hidden flex flex-col">
+            <div class="modal-fixed-header">
+                <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" id="vehicleBrandModalTitle">Марка</h3>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('vehicleBrandModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="vehicleBrandId">
+                <div class="mb-3">
+                    <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="vehicles.brandNameLabel">Название марки</label>
+                    <input type="text" id="vehicleBrandName" placeholder="Toyota, Renault..."
+                        onkeydown="if(event.key==='Enter')window._pages.vehicles.saveBrand()"
+                        class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <button onclick="window._pages.vehicles.saveBrand()"
+                    class="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="common.save">Сохранить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Vehicle Model Modal (Wave 8) -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" role="dialog" aria-modal="true" id="vehicleModelModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl max-w-md w-[90%] max-h-[80vh] overflow-hidden flex flex-col">
+            <div class="modal-fixed-header">
+                <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" id="vehicleModelModalTitle">Модель</h3>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('vehicleModelModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="vehicleModelId">
+                <div class="mb-3">
+                    <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="vehicles.brandIdLabel">brand_id</label>
+                    <input type="number" id="vehicleModelBrandId"
+                        class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div class="mb-3">
+                    <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="vehicles.modelNameLabel">Название модели</label>
+                    <input type="text" id="vehicleModelName" placeholder="Camry, Duster..."
+                        onkeydown="if(event.key==='Enter')window._pages.vehicles.saveModel()"
+                        class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <button onclick="window._pages.vehicles.saveModel()"
+                    class="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="common.save">Сохранить</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Vehicle Alias Modal (Wave 8) -->
+    <div class="modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center" role="dialog" aria-modal="true" id="vehicleAliasModal">
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl max-w-md w-[90%] max-h-[80vh] overflow-hidden flex flex-col">
+            <div class="modal-fixed-header">
+                <h3 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" id="vehicleAliasModalTitle">Алиас</h3>
+                <span class="cursor-pointer text-lg text-neutral-400 hover:text-neutral-600 dark:hover:text-neutral-200 transition-colors leading-none shrink-0" onclick="window._app.closeModal('vehicleAliasModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="vehicleAliasId">
+                <div class="mb-3">
+                    <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="vehicles.aliasTextLabel">Alias (то, что говорит клиент)</label>
+                    <input type="text" id="vehicleAliasText" placeholder="Дастер, Тойота Камри..."
+                        class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div class="mb-3">
+                    <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="vehicles.brandIdLabel">brand_id (обязательно)</label>
+                    <input type="number" id="vehicleAliasBrandId"
+                        class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div class="mb-3">
+                    <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="vehicles.modelIdOptLabel">model_id (пусто = алиас для бренда)</label>
+                    <input type="number" id="vehicleAliasModelId"
+                        class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <div class="mb-3">
+                    <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1" data-i18n="vehicles.confidenceLabel">Confidence (0.00-1.00, опционально)</label>
+                    <input type="number" step="0.01" min="0" max="1" id="vehicleAliasConfidence"
+                        class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100 focus:outline-none focus:ring-2 focus:ring-blue-500">
+                </div>
+                <button onclick="window._pages.vehicles.saveAlias()"
+                    class="w-full py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700 transition-colors cursor-pointer" data-i18n="common.save">Сохранить</button>
             </div>
         </div>
     </div>
