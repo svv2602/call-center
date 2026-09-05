@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import uuid
 from typing import Any
 
 import aiohttp
@@ -206,7 +207,36 @@ class OneCClient:
         Returns:
             Dict with booking result: {success, data: [{GUID}]}.
         """
+        # Wave 11 (2026-09-04): 1C rejected book_fitting for 24h with
+        # {"success":false, "errors":["Ошибка записи на шиномонтаж",
+        # "empty JSON"]}. Empirical bisect against 1C team's working
+        # reference payload found three schema issues:
+        #
+        # (1) IdTelegram must be non-empty; 1C validates it and may also
+        #     dedup on the value. IdViber can be empty. Use a UUID so
+        #     it's guaranteed unique per booking (safe against dedup).
+        # (2) AutoNumber accepts empty OR ASCII plate, but NOT Cyrillic
+        #     free-text color like "білий". Krok 5 stuffs color into
+        #     auto_number (2026-08-18 pattern). Detect Cyrillic input,
+        #     transliterate char-by-char to Latin (see color_translit).
+        #     «білий» → «biliy», «пурпурный» → «purpurniy». Station
+        #     operator sees the phonetic tag at reception. Not a
+        #     translation dictionary — preserves customer's exact word.
+        # (3) StoreTires must be true when NumberContract is present
+        #     (contract booking) — 1C team's reference had it True.
+        from src.agent.color_translit import translit_color_to_latin
+
+        color_or_plate = (auto_number or "").strip()
+        has_cyrillic = any("а" <= c.lower() <= "я" or c in "іїєґёыъь"
+                           for c in color_or_plate)
+        auto_number_field = (
+            translit_color_to_latin(color_or_plate)
+            if has_cyrillic
+            else color_or_plate
+        )
+
         comment = _build_comment(vehicle_info, tire_diameter, service_type)
+
         body: dict[str, Any] = {
             "PhoneNumber": _normalize_phone_plus(phone),
             "StationID": station_id,
@@ -214,14 +244,16 @@ class OneCClient:
             "Time": _to_1c_time(time),
             "Person": person,
             "AutoType": vehicle_info,
-            "AutoNumber": auto_number,
-            "StoreTires": False,
+            "AutoNumber": auto_number_field,
+            "StoreTires": bool(storage_contract),
             "Status": "Записан",
             "Comment": comment,
             "NumberContract": storage_contract,
             "CallBack": False,
             "ClientMode": 0,
             "CheckBalance": True,
+            "IdTelegram": str(uuid.uuid4()),
+            "IdViber": "",
         }
         return await self._post("/Trade/hs/site/TireService/TireRecording", json_data=body)
 
