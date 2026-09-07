@@ -123,6 +123,13 @@ krok8_confabulation_total = Counter(
     ["missing_field"],
 )
 
+false_booking_claim_total = Counter(
+    "callcenter_false_booking_claim_total",
+    "Bot told the customer the fitting was booked («ви записані» / «СМС "
+    "підтвердження») while book_fitting had never returned success. The "
+    "customer hangs up believing a slot is reserved — see call 7462c08b.",
+)
+
 phone_asked_despite_caller_id_total = Counter(
     "callcenter_phone_asked_despite_caller_id_total",
     "Bot asked customer for phone number even though CallerID was set. "

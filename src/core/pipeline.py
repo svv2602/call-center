@@ -15,6 +15,7 @@ import time
 import zoneinfo
 from typing import TYPE_CHECKING, Any
 
+from src.agent.confirm_detect import asked_for_confirmation, is_confirmation
 from src.agent.prompts import (
     EMPTY_RESPONSE_SOFT_TEXT,
     ERROR_TEXT,
@@ -44,6 +45,7 @@ from src.monitoring.metrics import (
     audiosocket_to_stt_ms,
     barge_in_total,
     bot_filler_stripped_total,
+    false_booking_claim_total,
     tts_delivery_ms,
 )
 from src.stt.base import STTConfig, STTEngine, Transcript
@@ -200,6 +202,23 @@ def _strip_leaked_system_block(text: str) -> tuple[str, bool]:
         )
     cleaned = cleaned.strip(" \n\t*—–-")
     return cleaned, True
+
+
+# Wave 15 (2026-09-07) — phrasings the LLM only ever gets to use after
+# book_fitting returns success (Krok 9 template, prompts.py). If one of these
+# reaches the caller while nothing was booked, the caller hangs up believing a
+# slot is held — call 7462c08b ended exactly this way.
+_BOOKING_CLAIM_RE = re.compile(
+    r"ви\s+записан|вас\s+записан|записала\s+вас|записала\s+на\s+"
+    r"|запис\s+(?:створено|оформлено|підтверджено)"
+    r"|смс\s+підтвердження",
+    re.IGNORECASE,
+)
+
+
+def _claims_booking_done(text: str) -> bool:
+    """True when the bot's reply tells the caller the fitting is booked."""
+    return bool(text) and bool(_BOOKING_CLAIM_RE.search(text))
 
 
 def _strip_filler(text: str) -> tuple[str, list[tuple[str, str]]]:
@@ -522,6 +541,24 @@ class CallPipeline:
         from src.tts import get_engine
 
         return get_engine() or self._tts_initial
+
+    def _flag_false_booking_claim(self, bot_text: str) -> None:
+        """Record that the bot promised a booking that was never made.
+
+        Detection only — the caller has already heard the sentence by the time
+        we get here, and rewriting it mid-stream would put customer-facing text
+        under a guard's control. The actual prevention is the Krok 8 marker
+        upstream; this exists so a recurrence is visible instead of silent.
+        """
+        if not _claims_booking_done(bot_text) or self._session.fitting_booked:
+            return
+        false_booking_claim_total.inc()
+        logger.error(
+            "FALSE BOOKING CLAIM for call=%s — bot told the caller the fitting "
+            "is booked but book_fitting never succeeded. Text: %r",
+            self._session.channel_uuid,
+            bot_text[:200],
+        )
 
     async def _log_turn(
         self,
@@ -1442,28 +1479,27 @@ class CallPipeline:
                     )
 
             # Wave 5 (2026-09-03) — Krok 8 auto-book detection.
-            # If bot's LAST utterance contains "Підтверджуєте" and the
-            # customer answered with a short affirmation, set a marker so
-            # the state guard renders an EMERGENCY banner forcing the
-            # LLM to call book_fitting on this turn. Prompt-only rules
-            # regress at 70+ turns (call dd3dd368 turn 77-78: «так» →
-            # «Перепрошую, не розчула»).
+            # If the bot asked "Підтверджуєте?" and the customer answered
+            # with an affirmation, set a marker so the state guard renders
+            # an EMERGENCY banner forcing the LLM to call book_fitting on
+            # this turn. Prompt-only rules regress at 70+ turns (call
+            # dd3dd368 turn 77-78: «так» → «Перепрошую, не розчула»).
+            # Wave 15 (2026-09-07) — both halves of the match were too
+            # narrow and call 7462c08b slipped through, ending with the bot
+            # telling the customer «ви записані» while book_fitting was
+            # never called. Look back two assistant turns, because the
+            # «Перепрошую, не розчула» re-ask sits between the question and
+            # the answer without closing it.
             _krok8_confirmed = False
-            _last_bot_msg = ""
+            _recent_bot_msgs: list[str] = []
             for _t in reversed(self._session.dialog_history):
                 if _t.speaker == "assistant" and _t.content:
-                    _last_bot_msg = _t.content.lower()
-                    break
-            if "підтверджуєте" in _last_bot_msg or "підтверджує" in _last_bot_msg:
-                _confirm_pat = re.compile(
-                    r"^\s*(так|да|ок|окей|okey|підтверджую|підтверджу|"
-                    r"підтверджаю|вірно|правильно|згоден|згодна|згодні|"
-                    r"добре|підходить|yes|ага|давай|давайте|звісно|"
-                    r"звичайно|конечно|точно|таково|таки так|воно так)\s*[,.\!?]*\s*$",
-                    re.IGNORECASE,
-                )
+                    _recent_bot_msgs.append(_t.content)
+                    if len(_recent_bot_msgs) == 2:
+                        break
+            if asked_for_confirmation(_recent_bot_msgs):
                 _text_stripped = transcript.text.strip()
-                if _confirm_pat.match(_text_stripped):
+                if is_confirmation(_text_stripped):
                     # Wave 6 (2026-09-03) — sanity check: only fire the
                     # EMERGENCY book-fitting banner if ALL checklist
                     # fields are actually ✅. Wave 5 fired regardless of
@@ -1670,6 +1706,7 @@ class CallPipeline:
                         for pattern, _snippet in stripped:
                             bot_filler_stripped_total.labels(pattern=pattern).inc()
                     logged_text = cleaned or result.spoken_text
+                    self._flag_false_booking_claim(logged_text)
                     self._session.reset_empty_response()
                     self._session.add_assistant_turn(logged_text)
                     await self._log_turn("bot", logged_text, llm_latency_ms=llm_latency_ms)
@@ -1799,6 +1836,7 @@ class CallPipeline:
                         # Fall back to original if stripping emptied the text
                         # (defensive: never send empty text to TTS).
                         response_text = cleaned or response_text
+                    self._flag_false_booking_claim(response_text)
                     self._session.reset_empty_response()
                     self._session.add_assistant_turn(response_text)
                     await self._log_turn("bot", response_text, llm_latency_ms=llm_latency_ms)
