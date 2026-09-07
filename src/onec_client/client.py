@@ -607,16 +607,40 @@ def _normalize_phone_plus(phone: str) -> str:
 
 
 def _build_comment(vehicle_info: str, tire_diameter: int, service_type: str) -> str:
-    """Build a comment string from optional booking parameters."""
+    """Build a comment string from optional booking parameters.
+
+    Wave 12C (2026-09-07): must be ASCII. 1С rejects Cyrillic in the
+    Comment field with "empty JSON" (empirical bisect: same booking
+    payload succeeds with ASCII Comment, fails with "Авто: Renault"
+    Cyrillic prefix). AutoType and Person accept Cyrillic; Status
+    requires the exact Cyrillic literal "Записан". So the incompatible
+    field is Comment specifically.
+
+    Vehicle brand names are usually Latin (Toyota, Renault, BMW). If a
+    brand comes in Cyrillic ("Рено", "Тойота"), transliterate it via
+    the same helper Wave 11 uses for AutoNumber so the operator still
+    sees a phonetic representation.
+    """
+    from src.agent.color_translit import translit_color_to_latin
+
     parts: list[str] = []
     if vehicle_info:
-        parts.append(f"Авто: {vehicle_info}")
+        has_cyrillic = any(
+            "а" <= c.lower() <= "я" or c in "іїєґёыъь"
+            for c in vehicle_info
+        )
+        veh_field = (
+            translit_color_to_latin(vehicle_info)
+            if has_cyrillic
+            else vehicle_info
+        )
+        parts.append(f"Auto: {veh_field}")
     if tire_diameter:
         parts.append(f"R{tire_diameter}")
     if service_type and service_type != "tire_change":
         service_labels = {
-            "balancing": "балансування",
-            "full_service": "повний сервіс",
+            "balancing": "balancing",
+            "full_service": "full_service",
         }
         parts.append(service_labels.get(service_type, service_type))
     return "; ".join(parts)
