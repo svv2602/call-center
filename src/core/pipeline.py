@@ -15,16 +15,21 @@ import time
 import zoneinfo
 from typing import TYPE_CHECKING, Any
 
+from src.agent.intent_classifier import classify_intent
+from src.agent.interrupts import (
+    handle_cancel_interrupt,
+    handle_price_interrupt,
+)
 from src.agent.prompts import (
     EMPTY_RESPONSE_SOFT_TEXT,
     ERROR_TEXT,
     FAREWELL_ORDER_TEXT,
     FAREWELL_TEXT,
     GREETING_TEXT,
-    SILENCE_CONFIRM_REPROMPT_TEXT,
-    SILENCE_PROMPT_TEXT,
     SILENCE_BRAND_REPROMPT_TEXT,
     SILENCE_COLOR_REPROMPT_TEXT,
+    SILENCE_CONFIRM_REPROMPT_TEXT,
+    SILENCE_PROMPT_TEXT,
     SILENCE_TIMEOUT_1_TEXT,
     SILENCE_TIMEOUT_2_TEXT,
     TRANSFER_TEXT,
@@ -963,6 +968,285 @@ class CallPipeline:
             )
         return transcript
 
+    # ------------------------------------------------------------------
+    # Wave 13 FSM refactor — T6 (Wave 2-A pipeline wire).
+    # Intent classifier + side-door interrupt handlers.
+    # ------------------------------------------------------------------
+    def _get_llm_router(self) -> Any | None:
+        """Resolve LLMRouter from streaming loop or blocking agent.
+
+        Both `StreamingAgentLoop` and `LLMAgent` receive it via ctor and
+        stash it on `_llm_router`. Returns None if neither is available
+        (fresh test wiring, no LLM configured yet).
+        """
+        if self._streaming_loop is not None:
+            router = getattr(self._streaming_loop, "_llm_router", None)
+            if router is not None:
+                return router
+        if self._agent is not None:
+            router = getattr(self._agent, "_llm_router", None)
+            if router is not None:
+                return router
+        return None
+
+    def _get_tool_router(self) -> Any | None:
+        """Resolve ToolRouter from streaming loop or blocking agent."""
+        if self._streaming_loop is not None:
+            router = getattr(self._streaming_loop, "_tool_router", None)
+            if router is not None:
+                return router
+        if self._agent is not None:
+            router = getattr(self._agent, "tool_router", None)
+            if router is not None:
+                return router
+        return None
+
+    def _build_fitting_progress_snapshot(self) -> dict[str, Any]:
+        """Compact fitting-progress snapshot for the intent classifier.
+
+        Only include keys with truthy values so classifier prompt stays
+        short. Wave 4-A will replace this with the real FSM state view.
+        """
+        snapshot: dict[str, Any] = {}
+        s = self._session
+        pairs: tuple[tuple[str, Any], ...] = (
+            ("customer_name", s.fitting_customer_name),
+            ("date", s.selected_fitting_date),
+            ("time", s.selected_fitting_time),
+            ("plate", s.fitting_plate),
+            ("brand", s.fitting_vehicle_brand),
+            ("storage_choice", s.fitting_storage_choice),
+            ("storage_contract", s.fitting_storage_contract),
+            ("station_id", s.last_fitting_station_id),
+            ("booked", s.fitting_booked or None),
+            ("diameter", s.fitting_diameter_client),
+        )
+        for key, value in pairs:
+            if value:
+                snapshot[key] = value
+        return snapshot
+
+    async def _maybe_handle_intent(self, transcript: Transcript) -> bool:
+        """Run the intent classifier and dispatch PRICE/CANCEL/TRANSFER.
+
+        Returns:
+            True if this turn was fully served by an interrupt handler or
+            marked as a transfer — caller must `continue` (skip the
+            normal LLM turn). False → fall through to the normal streaming
+            path.
+
+        Safety-first:
+          - Any exception → False (fall through to LLM, log warning).
+          - `classify_intent` fallback returns confidence=0.0 → False.
+          - `confidence < 0.5` → False (low-signal turns skip the router).
+        """
+        text = (transcript.text or "").strip()
+        if not text:
+            return False
+
+        llm_router = self._get_llm_router()
+        if llm_router is None:
+            # No LLM router wired → we cannot classify. Fall through so the
+            # normal path (which will hit the same limitation) keeps working.
+            return False
+
+        # Compact session context — the classifier prompt intentionally
+        # stays under ~2K chars, so we ship only the fields it needs.
+        fitting_snapshot = self._build_fitting_progress_snapshot()
+        dialog_tail: list[str] = []
+        for turn in self._session.dialog_history[-5:]:
+            if turn.content:
+                dialog_tail.append(f"{turn.speaker}: {turn.content}")
+
+        session_context: dict[str, Any] = {
+            # Wave 4-A will populate `fsm_state`; None is the honest value now.
+            "current_step": getattr(self._session, "fsm_state", None),
+            "filled_fields": fitting_snapshot,
+            "dialog_history_tail": dialog_tail,
+            "tenant": self._session.tenant_slug or "",
+        }
+
+        try:
+            intent_result = await classify_intent(
+                customer_text=text,
+                session_context=session_context,
+                llm_router=llm_router,
+            )
+        except Exception:
+            logger.warning(
+                "intent_classifier: raised for call=%s → fallback to LLM",
+                self._session.channel_uuid,
+                exc_info=True,
+            )
+            return False
+
+        primary = intent_result.primary_intent
+        confidence = intent_result.confidence
+        logger.info(
+            "intent_classifier: call=%s primary=%s conf=%.2f",
+            self._session.channel_uuid,
+            primary,
+            confidence,
+        )
+        # Wave 2-B metric (activated 2026-09-07 after metrics scaffold merged).
+        try:
+            from src.monitoring.metrics import intent_classifier_calls_total
+            intent_classifier_calls_total.labels(
+                primary_intent=primary,
+                requires_clarification=str(intent_result.requires_clarification).lower(),
+            ).inc()
+        except Exception:
+            pass  # metrics never break the flow
+
+        # Safety net: low confidence or explicit fallback marker → let the
+        # existing LLM agent handle the turn unchanged. This is the guard
+        # that keeps the wire-up non-breaking until Wave 4-C adds a real
+        # feature flag.
+        if confidence < 0.5:
+            return False
+
+        # ------------------------------------------------------------------
+        # TRANSFER — escalate to operator using the existing session path.
+        # The main loop already watches `session.transferred` at the tail
+        # of every iteration and speaks the transfer template, so we just
+        # mark and let the loop finish this turn cleanly.
+        # ------------------------------------------------------------------
+        if primary == "TRANSFER":
+            logger.info(
+                "interrupt_handled: type=TRANSFER outcome=marked call=%s",
+                self._session.channel_uuid,
+            )
+            self._session.add_user_turn(
+                content=transcript.text,
+                stt_confidence=transcript.confidence,
+                detected_language=transcript.language,
+            )
+            await self._log_turn(
+                "customer",
+                transcript.text,
+                stt_confidence=transcript.confidence,
+                language=transcript.language,
+            )
+            self._session.mark_transfer(reason="intent_classifier_transfer")
+            await self._persist_session()
+            return True
+
+        # For PRICE / CANCEL we need the tool router.
+        tool_router = self._get_tool_router()
+        if tool_router is None:
+            return False
+
+        # ------------------------------------------------------------------
+        # PRICE — only intercept when the customer is mid-booking (has
+        # some fitting-progress state). A cold PRICE at call start goes
+        # to the LLM which knows how to greet and ask context first.
+        # ------------------------------------------------------------------
+        if primary == "PRICE" and fitting_snapshot:
+            try:
+                ir = await handle_price_interrupt(
+                    text, self._session, tool_router
+                )
+            except Exception:
+                logger.warning(
+                    "handle_price_interrupt raised for call=%s → fallback to LLM",
+                    self._session.channel_uuid,
+                    exc_info=True,
+                )
+                return False
+
+            if ir.handled:
+                await self._dispatch_interrupt_reply(transcript, ir, kind="PRICE")
+                return True
+            # handled=False → handler explicitly asked to fall through
+            # (e.g. missing city, tool_router error). Give LLM the turn.
+            logger.info(
+                "interrupt_handled: type=PRICE outcome=fallthrough call=%s",
+                self._session.channel_uuid,
+            )
+            return False
+
+        # ------------------------------------------------------------------
+        # CANCEL — accept at any time (side-door or primary). Handler owns
+        # multi-turn state via session `pending_cancel_*` attrs.
+        # ------------------------------------------------------------------
+        if primary == "CANCEL":
+            try:
+                ir = await handle_cancel_interrupt(
+                    text, self._session, tool_router
+                )
+            except Exception:
+                logger.warning(
+                    "handle_cancel_interrupt raised for call=%s → fallback to LLM",
+                    self._session.channel_uuid,
+                    exc_info=True,
+                )
+                return False
+
+            if ir.handled:
+                await self._dispatch_interrupt_reply(transcript, ir, kind="CANCEL")
+                return True
+            logger.info(
+                "interrupt_handled: type=CANCEL outcome=fallthrough call=%s",
+                self._session.channel_uuid,
+            )
+            return False
+
+        # BOOK / RESCHEDULE / anything else → normal streaming loop.
+        return False
+
+    async def _dispatch_interrupt_reply(
+        self,
+        transcript: Transcript,
+        ir: Any,
+        *,
+        kind: str,
+    ) -> None:
+        """Speak an interrupt handler reply and mirror both turns into state.
+
+        Called only when `ir.handled` is True. Mirrors the bookkeeping
+        the normal streaming/blocking paths do (user turn + assistant
+        turn + persist) so downstream analytics and Redis session state
+        remain consistent.
+        """
+        # 1. Record the customer turn we are answering.
+        self._session.add_user_turn(
+            content=transcript.text,
+            stt_confidence=transcript.confidence,
+            detected_language=transcript.language,
+        )
+        await self._log_turn(
+            "customer",
+            transcript.text,
+            stt_confidence=transcript.confidence,
+            language=transcript.language,
+        )
+
+        # 2. Apply handler-requested session mutations. Kept explicit
+        #    (dict → setattr) so interrupts can be unit-tested without
+        #    touching real session objects.
+        for key, value in (ir.session_updates or {}).items():
+            setattr(self._session, key, value)
+
+        # 3. Speak and record the bot reply.
+        reply = ir.reply_to_customer or ""
+        if reply:
+            self._session.reset_empty_response()
+            self._session.add_assistant_turn(reply)
+            await self._log_turn("bot", reply)
+            await self._persist_session()
+            await self._speak(reply)
+        else:
+            # Handler returned handled=True with empty reply — defensive:
+            # nothing to say, but still persist any session updates.
+            await self._persist_session()
+
+        logger.info(
+            "interrupt_handled: type=%s outcome=spoken call=%s resume_state=%s",
+            kind,
+            self._session.channel_uuid,
+            ir.resume_state,
+        )
+
     async def _transcript_processor_loop(self) -> None:
         """Process STT transcripts and drive the LLM → TTS flow."""
         logger.info(
@@ -1047,6 +1331,32 @@ class CallPipeline:
             self._session.timeout_count = 0
             if transcript.language:
                 self._session.detected_language = transcript.language
+
+            # ------------------------------------------------------------------
+            # Wave 13 FSM refactor — T6 (Wave 2-A pipeline wire).
+            # Intent classifier + side-door interrupt handlers.
+            #
+            # After STT correction, before we hand the turn to the LLM agent,
+            # run a lightweight intent classifier. If we get a high-confidence
+            # PRICE (mid-booking) or CANCEL intent, route it to a dedicated
+            # interrupt handler that bypasses the LLM entirely — cheaper,
+            # faster, no confabulation risk. TRANSFER routes into the existing
+            # `mark_transfer` path.
+            #
+            # Fallback path: classifier failure / low confidence / anything
+            # else → we fall through to the normal streaming loop unchanged.
+            # This is intentional: Wave 4-C will add a proper feature flag; for
+            # now the safety net is `confidence < 0.5`.
+            #
+            # NOTE (Wave 2-B): the `intent_classifier_calls_total` counter is
+            # being wired in a parallel wave. Once merged, increment it here
+            # with `labels(result=<primary_intent>)`. See TODO below.
+            # ------------------------------------------------------------------
+            intent_handled = await self._maybe_handle_intent(transcript)
+            if intent_handled:
+                # Interrupt handler (or TRANSFER) fully served this turn.
+                # Skip the normal streaming/blocking LLM path.
+                continue
 
             # Auto-detect scenario from customer text (every turn).
             # First detection sets session.scenario; subsequent detections
