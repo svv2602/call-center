@@ -1982,8 +1982,9 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 kwargs.get("vehicle_info", ""),
                 kwargs.get("auto_number", ""),
             )
+            onec_result: dict[str, Any] | None = None
             try:
-                result = await _onec_client.book_fitting_rest(
+                onec_result = await _onec_client.book_fitting_rest(
                     person=kwargs.get("customer_name", ""),
                     phone=kwargs.get("customer_phone", ""),
                     station_id=kwargs.get("station_id", ""),
@@ -1995,121 +1996,120 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     tire_diameter=kwargs.get("tire_diameter", 0),
                     service_type=kwargs.get("service_type", "tire_change"),
                 )
-                # REST returns {success: true, data: [{GUID: "..."}]}
                 logger.info(
                     "1C book_fitting response for call %s: %s",
                     session.channel_uuid,
-                    str(result)[:500],
+                    str(onec_result)[:500],
                 )
-                if result.get("success"):
-                    data_list = result.get("data", [])
-                    guid = data_list[0].get("GUID", "") if data_list else ""
-                    if guid:
-                        fittings_booked_total.inc()
-                        # Auto-update customer profile with vehicle data.
-                        # 2026-08-18: Krok 5 now collects COLOR (not plate) in
-                        # auto_number. Only save auto_number to profile.plate
-                        # if it actually looks like a plate (contains a digit) —
-                        # otherwise we'd stuff "красный" into the plate field,
-                        # which is meaningless to the operator and confuses
-                        # profile lookup on the next call.
-                        vehicle_info = kwargs.get("vehicle_info", "")
-                        auto_num = kwargs.get("auto_number", "")
-                        looks_like_plate = any(c.isdigit() for c in auto_num)
-                        plate_for_profile = auto_num if looks_like_plate else ""
-                        if _call_logger and session.caller_phone and (vehicle_info or plate_for_profile):
-                            try:
-                                vehicles_update = [{"brand": vehicle_info, "plate": plate_for_profile}]
-                                # Wave 7 (2026-09-03): shield the DB
-                                # write against streaming-loop cancel
-                                # (same class of race that lost 3/3
-                                # fitting_booking_id writes today).
-                                await asyncio.shield(
-                                    _call_logger.update_customer_profile(
-                                        session.caller_phone,
-                                        tenant_id=session.tenant_id,
-                                        vehicles=vehicles_update,
-                                    )
+            except Exception:
+                # Wave 12 (2026-09-07): only network/protocol errors reach here.
+                # Post-processing failures (DB writes, uuid coercion) are
+                # handled below in isolated try/excepts so they NEVER cause
+                # a Store API fallback after 1С has already confirmed a
+                # booking. The Wave 11 → Wave 12 regression: outer catch
+                # was swallowing an AttributeError from `uuid.UUID(session.
+                # channel_uuid)` (channel_uuid is already a UUID object,
+                # not a str) that fired AFTER 1С success — resulting in
+                # duplicate bookings + LLM saying «не вдалося» to the
+                # customer when the booking existed in 1С.
+                logger.warning(
+                    "1C REST book_fitting network/protocol exception for call %s",
+                    session.channel_uuid,
+                    exc_info=True,
+                )
+                onec_result = None
+
+            if onec_result is not None and onec_result.get("success"):
+                data_list = onec_result.get("data", [])
+                guid = data_list[0].get("GUID", "") if data_list else ""
+                if guid:
+                    fittings_booked_total.inc()
+                    session.fitting_booked = True
+                    logger.info(
+                        "book_fitting success (booking_id withheld from LLM) "
+                        "for call %s: guid=%s",
+                        session.channel_uuid,
+                        guid,
+                    )
+                    # --- Best-effort post-processing (never blocks confirmation) ---
+                    # Auto-update customer profile with vehicle data.
+                    # 2026-08-18: Krok 5 now collects COLOR (not plate) in
+                    # auto_number. Only save auto_number to profile.plate
+                    # if it actually looks like a plate (contains a digit).
+                    vehicle_info = kwargs.get("vehicle_info", "")
+                    auto_num = kwargs.get("auto_number", "")
+                    looks_like_plate = any(c.isdigit() for c in auto_num)
+                    plate_for_profile = auto_num if looks_like_plate else ""
+                    if _call_logger and session.caller_phone and (vehicle_info or plate_for_profile):
+                        try:
+                            vehicles_update = [{"brand": vehicle_info, "plate": plate_for_profile}]
+                            # Wave 7 (2026-09-03): shield DB write against
+                            # streaming-loop cancel (same race that lost
+                            # 3/3 fitting_booking_id writes on that day).
+                            await asyncio.shield(
+                                _call_logger.update_customer_profile(
+                                    session.caller_phone,
+                                    tenant_id=session.tenant_id,
+                                    vehicles=vehicles_update,
                                 )
-                                logger.info(
-                                    "Auto-updated customer profile after booking: vehicle=%s, plate=%s (auto_num=%r)",
-                                    vehicle_info,
-                                    plate_for_profile,
-                                    auto_num,
-                                )
-                            except Exception as _exc:
-                                # Wave 7: promoted DEBUG → WARNING for
-                                # regression visibility.
-                                logger.warning(
-                                    "Failed to update customer profile after "
-                                    "booking for call %s: %s",
-                                    session.channel_uuid, _exc,
-                                )
-                        # NOTE: booking_id is deliberately NOT included in the
-                        # LLM-visible response. Bot has repeatedly leaked the
-                        # UUID to callers ("b1486d3c-8cca-...") despite anti-
-                        # patterns in the prompt (calls 07-31 12:59, 13:xx).
-                        # The GUID is still persisted (logs above + call_logger
-                        # via _log_tool_call downstream). SMS delivery is 1С's job.
-                        logger.info(
-                            "book_fitting success (booking_id withheld from LLM) "
-                            "for call %s: guid=%s",
-                            session.channel_uuid,
-                            guid,
-                        )
-                        session.fitting_booked = True
-                        # Persist booking_id on the call row so analytics
-                        # can count successful bookings. Pre-existing gap
-                        # discovered 2026-08-31 (fixed), regressed
-                        # 2026-09-03 (0/4 bookings persisted despite
-                        # 1С success). Wave 7: asyncio.shield so a
-                        # streaming-loop cancellation (customer hangs up
-                        # right after «Готово, записала» triggers TTS +
-                        # audiosocket close) cannot abort the DB write
-                        # mid-await. Also promoted DEBUG → WARNING for
-                        # visibility, and log an INFO trace BEFORE the
-                        # await so we can prove the code path was
-                        # reached even if the shield swallows.
-                        if _call_logger is not None:
-                            try:
-                                call_uuid = uuid_mod.UUID(session.channel_uuid)
-                            except (ValueError, TypeError):
-                                call_uuid = None
-                                logger.warning(
-                                    "book_fitting: session.channel_uuid=%r not "
-                                    "parseable as UUID — skipping "
-                                    "set_fitting_booking_id (dashboard NULL)",
-                                    session.channel_uuid,
-                                )
-                            if call_uuid is not None:
-                                logger.info(
-                                    "book_fitting: persisting fitting_booking_id"
-                                    "=%s for call %s (guid from 1C)",
-                                    guid, session.channel_uuid,
-                                )
-                                try:
-                                    await asyncio.shield(
-                                        _call_logger.set_fitting_booking_id(
-                                            call_uuid, guid
-                                        )
-                                    )
-                                except Exception as _exc:
-                                    logger.warning(
-                                        "book_fitting: set_fitting_booking_id "
-                                        "raised for call %s (guid=%s): %s",
-                                        session.channel_uuid, guid, _exc,
-                                    )
-                        return {
-                            "status": "confirmed",
-                            "message": (
-                                "Запис створено. Клієнту скажи: «Готово, записала "
-                                "на [дата] о [час] на [адреса]. Приїжджайте за десять "
-                                "хвилин до початку.» БЕЗ згадки «номер броні», «код "
-                                "запису», «bookingid» — цих полів у результаті немає."
-                            ),
-                        }
-                # 1C returned success=false or no GUID
-                errors = result.get("errors", [])
+                            )
+                            logger.info(
+                                "Auto-updated customer profile after booking: vehicle=%s, plate=%s (auto_num=%r)",
+                                vehicle_info,
+                                plate_for_profile,
+                                auto_num,
+                            )
+                        except Exception as _exc:
+                            logger.warning(
+                                "Post-book update_customer_profile failed for call %s: %s",
+                                session.channel_uuid, _exc,
+                            )
+                    # Persist booking_id on the call row so analytics can
+                    # count successful bookings. Wave 12: coerce to str
+                    # first — channel_uuid is a UUID object, and
+                    # uuid.UUID(uuid_obj) raises AttributeError inside CPython.
+                    if _call_logger is not None:
+                        try:
+                            call_uuid: uuid_mod.UUID | None
+                            if isinstance(session.channel_uuid, uuid_mod.UUID):
+                                call_uuid = session.channel_uuid
+                            else:
+                                call_uuid = uuid_mod.UUID(str(session.channel_uuid))
+                            await asyncio.shield(
+                                _call_logger.set_fitting_booking_id(call_uuid, guid)
+                            )
+                            logger.info(
+                                "book_fitting: persisted fitting_booking_id=%s for call %s",
+                                guid, session.channel_uuid,
+                            )
+                        except Exception as _exc:
+                            logger.warning(
+                                "Post-book set_fitting_booking_id failed for call %s (guid=%s): %s",
+                                session.channel_uuid, guid, _exc,
+                            )
+                    # NOTE: booking_id is deliberately NOT in the LLM-visible
+                    # response. Bot has repeatedly leaked UUIDs to callers
+                    # despite prompt anti-patterns (calls 07-31 12:59, 13:xx).
+                    return {
+                        "status": "confirmed",
+                        "message": (
+                            "Запис створено. Клієнту скажи: «Готово, записала "
+                            "на [дата] о [час] на [адреса]. Приїжджайте за десять "
+                            "хвилин до початку.» БЕЗ згадки «номер броні», «код "
+                            "запису», «bookingid» — цих полів у результаті немає."
+                        ),
+                    }
+                # 1C said success but returned no GUID — treat as error.
+                logger.warning(
+                    "1C REST book_fitting returned success=true but empty GUID "
+                    "for call %s, station=%s, date=%s",
+                    session.channel_uuid,
+                    kwargs.get("station_id"),
+                    kwargs.get("date"),
+                )
+            elif onec_result is not None:
+                # 1C returned success=false.
+                errors = onec_result.get("errors", [])
                 error_msg = errors[0] if errors else "1С відмовив у записі"
                 logger.warning(
                     "1C REST book_fitting returned error for call %s: %s, station=%s, date=%s",
@@ -2118,13 +2118,9 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     kwargs.get("station_id"),
                     kwargs.get("date"),
                 )
-            except Exception:
-                logger.warning(
-                    "1C REST book_fitting exception for call %s, falling back to Store API",
-                    session.channel_uuid,
-                    exc_info=True,
-                )
 
+        # Fallback to Store API (mock/legacy — only reached when 1C is
+        # completely unreachable or returned an unusable response).
         result = await client.book_fitting(**kwargs)
         if isinstance(result, dict) and result.get("id"):
             fittings_booked_total.inc()
