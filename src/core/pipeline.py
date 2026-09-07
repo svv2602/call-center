@@ -1138,14 +1138,19 @@ class CallPipeline:
             # progress block reminds LLM. Call 2026-08-03: bot re-asked date
             # after storage question, ignoring earlier «пʼятницю».
             if self._session.fitting_requested_weekday is None:
+                # Wave 12 (2026-09-07) — extended with Russian day names.
+                # Root case ebe7dfcb: turn 20 «запад на среду по 12» — «среду»
+                # doesn't share the «серед» prefix, so guard missed →
+                # session.fitting_requested_weekday stayed None → LLM freely
+                # computed date_from=2026-09-08 (Tue) instead of 09-09 (Wed).
                 _wd_kw = {
-                    "понеділок": 0, "понеділка": 0,
-                    "вівторок": 1, "вівторка": 1,
-                    "серед": 2,
-                    "четвер": 3, "четвр": 3,
+                    "понеділок": 0, "понеділка": 0, "понедельник": 0,
+                    "вівторок": 1, "вівторка": 1, "вторник": 1,
+                    "серед": 2, "среду": 2, "среды": 2, "среда": 2,
+                    "четвер": 3, "четвр": 3, "четверг": 3,
                     "п'ятниц": 4, "пʼятниц": 4, "пятниц": 4,
-                    "субот": 5,
-                    "неділ": 6,
+                    "субот": 5, "суббот": 5,
+                    "неділ": 6, "воскресен": 6,
                 }
                 _text_wd = transcript.text.lower()
                 for _kw, _wd in _wd_kw.items():
@@ -1342,6 +1347,33 @@ class CallPipeline:
                             "Name auto-detected %r for call=%s "
                             "(prevents LLM name confabulation)",
                             _name, self._session.channel_uuid,
+                        )
+
+            # Wave 12 (2026-09-07) — Tire diameter auto-detect. Backend guard
+            # for `_get_fitting_price` rejects LLM calls where the customer
+            # never mentioned a diameter (root case ebe7dfcb: bot output R16
+            # default price hallucination pre-question). We record the client
+            # answer only when bot's last question was about diameter to avoid
+            # false-positives on slot times («на 14:30» → 14 ≠ diameter).
+            if self._session.fitting_diameter_client is None:
+                from src.agent.diameter_detect import (
+                    detect_diameter,
+                    is_diameter_question,
+                )
+
+                _last_bot_dia = ""
+                for _t in reversed(self._session.dialog_history):
+                    if _t.speaker == "assistant" and _t.content:
+                        _last_bot_dia = _t.content
+                        break
+                if is_diameter_question(_last_bot_dia):
+                    _d = detect_diameter(transcript.text)
+                    if _d is not None:
+                        self._session.fitting_diameter_client = _d
+                        logger.info(
+                            "Diameter auto-detected R%d for call=%s "
+                            "(unlocks get_fitting_price guard)",
+                            _d, self._session.channel_uuid,
                         )
 
             # Deterministic pre-parser (Phase 3 2026-08-14): pull car brand

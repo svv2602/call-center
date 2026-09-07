@@ -132,6 +132,13 @@ class CallSession:
         # call — carried across intervening turns so the bot doesn't re-ask
         # "На яку дату?" after storage/city clarifications (call 2026-08-03).
         self.fitting_requested_weekday: int | None = None
+        # Wave 12 (2026-09-07) — Tire diameter last mentioned by the customer
+        # (13-24 inclusive). Set by pipeline when bot's last utterance asked
+        # about diameter AND customer answered with a number/word. Read by
+        # `_get_fitting_price` to reject LLM hallucinations where the model
+        # invents an R16 default price before the customer stated a diameter
+        # (Wave 3 P0 regression, call ebe7dfcb 2026-09-07).
+        self.fitting_diameter_client: int | None = None
         self.tenant_id: str | None = None
         self.tenant_slug: str | None = None
         self.tenant_name: str | None = None
@@ -255,6 +262,7 @@ class CallSession:
             "fitting_storage_choice": self.fitting_storage_choice,
             "fitting_storage_contract": self.fitting_storage_contract,
             "fitting_requested_weekday": self.fitting_requested_weekday,
+            "fitting_diameter_client": self.fitting_diameter_client,
             "tools_called": sorted(self.tools_called),
             "active_scenarios": sorted(self.active_scenarios),
             "tenant_id": self.tenant_id,
@@ -314,6 +322,7 @@ class CallSession:
         session.fitting_storage_choice = data.get("fitting_storage_choice")
         session.fitting_storage_contract = data.get("fitting_storage_contract")
         session.fitting_requested_weekday = data.get("fitting_requested_weekday")
+        session.fitting_diameter_client = data.get("fitting_diameter_client")
         session.tools_called = set(data.get("tools_called", []))
         session.active_scenarios = set(data.get("active_scenarios", []))
         session.tenant_id = data.get("tenant_id")

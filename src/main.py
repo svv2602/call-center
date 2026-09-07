@@ -2737,14 +2737,22 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         # date_from=6 серпня (четвер) → offered slots for wrong day.
         try:
             d_from_check = date_type.fromisoformat(date_from)
+            # Wave 12 (2026-09-07) — extended with Russian day names to
+            # catch «на среду»/«в четверг» etc. (call ebe7dfcb turn 20).
             _weekday_map = {
                 "понеділок": 0, "понеділка": 0, "пн": 0, "monday": 0,
+                "понедельник": 0,
                 "вівторок": 1, "вівторка": 1, "вт": 1, "tuesday": 1,
+                "вторник": 1,
                 "серед": 2, "середу": 2, "wednesday": 2,
+                "среду": 2, "среды": 2, "среда": 2,
                 "четвер": 3, "четвр": 3, "чт": 3, "thursday": 3,
+                "четверг": 3,
                 "п'ятниц": 4, "пʼятниц": 4, "пятниц": 4, "пт": 4, "friday": 4,
                 "субот": 5, "сб": 5, "saturday": 5,
+                "суббот": 5,
                 "неділ": 6, "нд": 6, "sunday": 6,
+                "воскресен": 6,
             }
             _requested_wd: int | None = None
             # Scan last 3 user turns for a weekday keyword
@@ -3069,6 +3077,33 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         service_type: str = "",
         **_kwargs: Any,
     ) -> dict[str, Any]:
+        # Wave 12 (2026-09-07) — Diameter guard for Wave 3 P0 regression.
+        # Root case ebe7dfcb: bot immediately quoted «R16 у Києві — 354 грн»
+        # right after the client's first STT-mangled turn, without ever
+        # asking for the diameter. Wave 3 HARD GUARD in prompt failed
+        # under attention dilution (same class as Wave 4C→7→9→10 pattern).
+        # Backend now hard-rejects `get_fitting_price` calls where the
+        # customer has NOT mentioned a diameter yet — pipeline sets
+        # session.fitting_diameter_client after a bot «Який діаметр?»
+        # question receives a numeric answer. LLM must ask first.
+        if tire_diameter and session.fitting_diameter_client is None:
+            logger.warning(
+                "get_fitting_price: Wave 12 diameter guard triggered for "
+                "call %s (tire_diameter=%d supplied but client never named "
+                "one). Rejecting price hallucination.",
+                session.channel_uuid, tire_diameter,
+            )
+            return {
+                "error": True,
+                "reason": "diameter_not_asked",
+                "message": (
+                    "⛔ Клієнт ще НЕ називав діаметр коліс. "
+                    "Спочатку спитай: «Який діаметр коліс?» — і чекай "
+                    "відповіді (число 13-24 або словом). Після того як "
+                    "клієнт назве діаметр, виклич `get_fitting_price` "
+                    "з отриманим значенням. Не вигадуй R16 за замовчуванням."
+                ),
+            }
         # Wave 3 (2026-09-02) — Price → Booking continuity backend persist.
         # When a price consultation targets a known station, pin it as
         # session.last_fitting_station_id. State-guard reads this to render
