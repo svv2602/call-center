@@ -1,0 +1,7 @@
+pattern	replacement	context_hint	flags	enabled	note
+(?:в\s+)?кассоват\w*\s+запуск	скасувати запис		i	true	Wave 14 2026-09-07 call «Добрый день а можно в кассоватый запуск» — cancel intent missed, call ended after 21s
+кассоват\w*	скасувати		i	true	Wave 14 2026-09-07 STT mangles «скасувати» into «кассоватый»
+что\s+в\s+этой\s+монтаж	скільки коштує монтаж		i	true	Wave 14 2026-09-07 call «что в этой монтаж там» — price question after station pick was not recognised
+не\s+песка\s+жить	підкажіть		i	true	Wave 14 2026-09-07 STT mangles «підкажіть»
+монтажкой\s+жить	монтаж, підкажіть		i	true	Wave 14 2026-09-07 same «підкажіть» mangling glued to «монтаж»
+\bэрви\s*(1[3-9]|2[0-4])\b	R\1		i	true	Wave 14 2026-09-07 «монтажу эрви 17» — «эрви N» is R-diameter, not a word

@@ -139,6 +139,11 @@ class CallSession:
         # invents an R16 default price before the customer stated a diameter
         # (Wave 3 P0 regression, call ebe7dfcb 2026-09-07).
         self.fitting_diameter_client: int | None = None
+        # Wave 14 (2026-09-07) — set once `_get_fitting_slots` has already
+        # bounced the LLM for picking a date the customer never named. One
+        # bounce per call only: a client who answers vaguely («будь-коли»)
+        # must not be trapped in a re-ask loop.
+        self.fitting_date_guard_fired: bool = False
         self.tenant_id: str | None = None
         self.tenant_slug: str | None = None
         self.tenant_name: str | None = None
@@ -263,6 +268,7 @@ class CallSession:
             "fitting_storage_contract": self.fitting_storage_contract,
             "fitting_requested_weekday": self.fitting_requested_weekday,
             "fitting_diameter_client": self.fitting_diameter_client,
+            "fitting_date_guard_fired": self.fitting_date_guard_fired,
             "tools_called": sorted(self.tools_called),
             "active_scenarios": sorted(self.active_scenarios),
             "tenant_id": self.tenant_id,
@@ -323,6 +329,9 @@ class CallSession:
         session.fitting_storage_contract = data.get("fitting_storage_contract")
         session.fitting_requested_weekday = data.get("fitting_requested_weekday")
         session.fitting_diameter_client = data.get("fitting_diameter_client")
+        session.fitting_date_guard_fired = bool(
+            data.get("fitting_date_guard_fired", False)
+        )
         session.tools_called = set(data.get("tools_called", []))
         session.active_scenarios = set(data.get("active_scenarios", []))
         session.tenant_id = data.get("tenant_id")

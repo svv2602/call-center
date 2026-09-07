@@ -2712,6 +2712,43 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             kwargs,
         )
 
+        # Wave 14 (2026-09-07) — the date must come from the client, not from
+        # the model. Call add8354b: the LLM jumped straight to
+        # get_fitting_slots(date_from="2026-09-08") having never asked, and the
+        # client first learned which day they were booked on at confirmation.
+        # Fires at most once per call — a client who answers «будь-коли» must
+        # not be trapped in a re-ask loop.
+        if not session.fitting_date_guard_fired:
+            from src.agent.date_detect import mentions_date
+
+            # fitting_requested_weekday is set by the pipeline before the LLM
+            # runs, so it covers the blocking path where the current user turn
+            # is not yet in dialog_history.
+            if session.fitting_requested_weekday is None and not any(
+                mentions_date(t.content)
+                for t in session.dialog_history
+                if t.speaker == "user" and t.content
+            ):
+                session.fitting_date_guard_fired = True
+                logger.warning(
+                    "get_fitting_slots: Wave 14 date guard triggered for call %s "
+                    "(date_from=%s supplied but client never named a date).",
+                    session.channel_uuid,
+                    date_from,
+                )
+                return {
+                    "station_id": station_id,
+                    "error": True,
+                    "reason": "date_not_asked",
+                    "message": (
+                        "⛔ Клієнт ще НЕ називав дату запису. Спочатку спитай: "
+                        "«На яку дату вас записати?» — і чекай відповіді. "
+                        "Після того як клієнт назве день, виклич get_fitting_slots "
+                        "ЩЕ РАЗ із цією датою. Не обирай дату самостійно."
+                    ),
+                    "slots": [],
+                }
+
         # Validate booking date range: tomorrow .. +21 days
         try:
             d_from = date_type.fromisoformat(date_from)

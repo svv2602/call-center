@@ -1376,6 +1376,42 @@ class CallPipeline:
                             _d, self._session.channel_uuid,
                         )
 
+            # Wave 14 (2026-09-07) — Slot pin. Between get_fitting_slots and
+            # book_fitting nothing recorded the client's verbal pick, so the
+            # LLM could deny a time it had just offered (call 2026-09-07: bot
+            # read a truncated list, client said «14 это 20», bot answered
+            # «Слота на чотирнадцяту двадцять немає»). A pin can only ever
+            # select a slot already present in fitting_slots_offered.
+            if self._session.fitting_slots_offered:
+                from src.agent.time_detect import bot_listed_slots, detect_time_choice
+
+                _last_bot_slot = ""
+                for _t in reversed(self._session.dialog_history):
+                    if _t.speaker == "assistant" and _t.content:
+                        _last_bot_slot = _t.content
+                        break
+                _offered_times = [
+                    s["time"] for s in self._session.fitting_slots_offered
+                ]
+                # A bare hour is only unambiguous right after the bot read the
+                # list out; later in the dialog «17» is far more likely a
+                # diameter, so restrict widening to the unpinned case.
+                _picked = detect_time_choice(
+                    transcript.text,
+                    _offered_times,
+                    allow_hour_only=(
+                        not self._session.selected_fitting_time
+                        and bot_listed_slots(_last_bot_slot)
+                    ),
+                )
+                if _picked and _picked != self._session.selected_fitting_time:
+                    self._session.selected_fitting_time = _picked
+                    logger.info(
+                        "Slot auto-pinned %s for call=%s (client picked from "
+                        "offered list; bot can no longer claim it is taken)",
+                        _picked, self._session.channel_uuid,
+                    )
+
             # Deterministic pre-parser (Phase 3 2026-08-14): pull car brand
             # and licence plate out of any user turn with regex/keyword match.
             # Only writes to session when the field is empty — never trample
