@@ -15,10 +15,11 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from src.agent.agent import LLMAgent
+from src.agent.parsers.date_parser import resolve_tool_date
 from src.agent.prompt_manager import (
     PromptManager,
     fetch_tenant_promotions,
@@ -71,19 +72,11 @@ class SandboxTurnResult:
     error: str | None = None
 
 
-def _resolve_date(value: str) -> str:
-    """Resolve 'today'/'tomorrow' to YYYY-MM-DD."""
-    if not value:
-        return ""
-    low = value.strip().lower()
-    today = datetime.now(tz=UTC).date()
-    if low in {"today", "сьогодні", "сегодня"}:
-        return today.isoformat()
-    if low in {"tomorrow", "завтра"}:
-        return (today + timedelta(days=1)).isoformat()
-    if low in {"послезавтра", "після завтра", "післязавтра"}:
-        return (today + timedelta(days=2)).isoformat()
-    return value.strip()
+# A third copy of `_resolve_date` used to live here, byte-for-byte the same
+# calendar as the one in `src/main.py`. Wave 6-B collapsed both into
+# `src.agent.parsers.date_parser.resolve_tool_date`; the sandbox must resolve
+# dates exactly the way the live tool layer does, or a scenario replayed here
+# would book a different day than the same words on a real call.
 
 
 def _register_live_tools(
@@ -317,8 +310,8 @@ def _register_live_tools(
         async def _get_fitting_slots_rest(**kwargs: Any) -> dict[str, Any]:
             station_id = kwargs.get("station_id", "")
             today = datetime.now(tz=UTC).date().isoformat()
-            date_from = _resolve_date(kwargs.get("date_from", "")) or today
-            date_to = _resolve_date(kwargs.get("date_to", "")) or date_from
+            date_from = resolve_tool_date(kwargs.get("date_from", "")) or today
+            date_to = resolve_tool_date(kwargs.get("date_to", "")) or date_from
             result = await onec_client.get_station_schedule(
                 station_id=station_id, date_from=date_from, date_to=date_to
             )

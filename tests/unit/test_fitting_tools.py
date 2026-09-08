@@ -237,45 +237,165 @@ class TestFindStorageSchema:
 
 
 class TestResolveDateHelper:
-    """Test _resolve_date helper from main.py."""
+    """`resolve_tool_date` — the one calendar the tool layer is allowed to use.
+
+    Was `main.py:_resolve_date` until Wave 6-B, with a byte-identical twin in
+    `src/sandbox/agent_runner.py`. The cases below are the originals, so a
+    regression in the shared implementation reads as a failure here, plus the
+    ones that document where the new implementation is deliberately *wider*.
+    """
 
     def test_empty_returns_empty(self) -> None:
-        from src.main import _resolve_date
+        from src.agent.parsers.date_parser import resolve_tool_date
 
-        assert _resolve_date("") == ""
+        assert resolve_tool_date("") == ""
 
     def test_today_returns_iso_date(self) -> None:
         from datetime import UTC, datetime
 
-        from src.main import _resolve_date
+        from src.agent.parsers.date_parser import resolve_tool_date
 
-        result = _resolve_date("today")
+        result = resolve_tool_date("today")
         assert result == datetime.now(tz=UTC).date().isoformat()
 
     def test_tomorrow_returns_next_day(self) -> None:
         from datetime import UTC, datetime, timedelta
 
-        from src.main import _resolve_date
+        from src.agent.parsers.date_parser import resolve_tool_date
 
-        result = _resolve_date("tomorrow")
+        result = resolve_tool_date("tomorrow")
         expected = (datetime.now(tz=UTC).date() + timedelta(days=1)).isoformat()
         assert result == expected
 
     def test_zavtra_returns_next_day(self) -> None:
         from datetime import UTC, datetime, timedelta
 
-        from src.main import _resolve_date
+        from src.agent.parsers.date_parser import resolve_tool_date
 
-        result = _resolve_date("завтра")
+        result = resolve_tool_date("завтра")
         expected = (datetime.now(tz=UTC).date() + timedelta(days=1)).isoformat()
         assert result == expected
 
     def test_iso_date_passthrough(self) -> None:
-        from src.main import _resolve_date
+        from src.agent.parsers.date_parser import resolve_tool_date
 
-        assert _resolve_date("2026-02-25") == "2026-02-25"
+        assert resolve_tool_date("2026-02-25") == "2026-02-25"
 
     def test_strips_whitespace(self) -> None:
-        from src.main import _resolve_date
+        from src.agent.parsers.date_parser import resolve_tool_date
 
-        assert _resolve_date("  2026-03-01  ") == "2026-03-01"
+        assert resolve_tool_date("  2026-03-01  ") == "2026-03-01"
+
+    @pytest.mark.parametrize(
+        "iso",
+        ["2026-03-01", "2026-01-02", "2027-12-31", "2028-02-29", "2026-09-08"],
+    )
+    def test_an_iso_date_is_never_re_read_as_a_day_month_hint(self, iso: str) -> None:
+        """The trap that makes the ISO passthrough load-bearing, not cosmetic.
+
+        `_detect_date_hint` scans for *substrings*, so on `"2026-03-01"` it
+        matches the tail `"03-01"` → day 3, month 1 → **2027-01-03**. Routing an
+        already-resolved date through the hint detector books a different year
+        without any error anywhere. The LLM passes ISO on almost every call, so
+        this is the common path, not an edge.
+        """
+        from datetime import UTC, datetime
+
+        from src.agent.parsers.date_parser import resolve_tool_date
+
+        # A reference date far from every case, so a hint-based resolution
+        # could not accidentally land on the right answer.
+        now = datetime(2026, 6, 15, 12, 0, tzinfo=UTC)
+        assert resolve_tool_date(iso, now=now) == iso
+
+    def test_a_reference_date_may_be_supplied(self) -> None:
+        """`now=` exists so a caller (and a test) is not at the clock's mercy."""
+        from datetime import UTC, datetime
+
+        from src.agent.parsers.date_parser import resolve_tool_date
+
+        now = datetime(2026, 3, 5, 10, 0, tzinfo=UTC)  # a Thursday
+        assert resolve_tool_date("today", now=now) == "2026-03-05"
+        assert resolve_tool_date("tomorrow", now=now) == "2026-03-06"
+        assert resolve_tool_date("післязавтра", now=now) == "2026-03-07"
+
+    def test_the_case_bug_in_the_old_aftertomorrow_alias_is_gone(self) -> None:
+        """`_resolve_date` had `"afterTomorrow"` inside a lowercase-compared set.
+
+        `low = value.strip().lower()` can never equal `"afterTomorrow"`, so the
+        alias was dead code and the value fell through to the passthrough
+        branch, handing the SOAP layer the literal string. It resolves now.
+        """
+        from datetime import UTC, datetime
+
+        from src.agent.parsers.date_parser import resolve_tool_date
+
+        now = datetime(2026, 3, 5, 10, 0, tzinfo=UTC)
+        assert resolve_tool_date("afterTomorrow", now=now) == "2026-03-07"
+
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            ("п'ятниця", "2026-03-06"),  # strictly future — Thursday is «today»
+            ("четвер", "2026-03-12"),  # today is Thursday → next week
+            ("15 березня", "2026-03-15"),
+            ("20.03", "2026-03-20"),
+            ("20.03.2026", "2026-03-20"),
+        ],
+    )
+    def test_it_is_wider_than_the_helper_it_replaced(
+        self, value: str, expected: str
+    ) -> None:
+        """Weekdays, «15 березня» and `dd.mm` used to pass through untouched.
+
+        The SOAP layer then rejected them, and the LLM was told the date was
+        bad rather than being given the date the client actually named. This is
+        a behaviour change and it is deliberate.
+        """
+        from datetime import UTC, datetime
+
+        from src.agent.parsers.date_parser import resolve_tool_date
+
+        now = datetime(2026, 3, 5, 10, 0, tzinfo=UTC)  # a Thursday
+        assert resolve_tool_date(value, now=now) == expected
+
+    @pytest.mark.parametrize("value", ["найближча", "next week", "абракадабра", "01.13"])
+    def test_what_it_cannot_resolve_it_hands_back_rather_than_drops(
+        self, value: str
+    ) -> None:
+        """Same contract as the original: never turn a bad date into no date.
+
+        Rejecting belongs to the SOAP layer, which answers with a reason. An
+        empty string here would read downstream as «no date was requested».
+        """
+        from datetime import UTC, datetime
+
+        from src.agent.parsers.date_parser import resolve_tool_date
+
+        now = datetime(2026, 3, 5, 10, 0, tzinfo=UTC)
+        assert resolve_tool_date(value, now=now) == value
+
+    def test_there_is_exactly_one_implementation_left(self) -> None:
+        """`main.py` and `sandbox/agent_runner.py` had a copy each.
+
+        Two calendars in a repo drift — the sandbox copy had already lost the
+        `"сегодня"` alias the live one carried. Scanned from source rather than
+        by import, because both modules pull in the whole FastAPI/SQLAlchemy
+        stack and this assertion must hold in any environment.
+        """
+        import ast
+        import pathlib
+
+        import src.agent.parsers.date_parser as dp
+
+        src_root = pathlib.Path(dp.__file__).parents[3]
+        definitions = []
+        for path in sorted(src_root.rglob("*.py")):
+            tree = ast.parse(path.read_text(encoding="utf-8"))
+            definitions += [
+                f"{path}:{node.name}"
+                for node in ast.walk(tree)
+                if isinstance(node, ast.FunctionDef)
+                and node.name in {"_resolve_date", "resolve_tool_date"}
+            ]
+        assert definitions == [f"{pathlib.Path(dp.__file__)}:resolve_tool_date"]

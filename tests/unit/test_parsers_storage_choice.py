@@ -16,12 +16,13 @@ The separation is expressed as confidence against the single threshold (§3.6):
 that stays green when the wide list is graded like the narrow one proves
 nothing at all.
 
-`TestLegacyEquivalence` compares the two copies that are alive in the tree
-right now — `src/core/pipeline.py` and this module — on a corpus built from
-their own marker lists plus the phrases quoted in their comments.
-**`pytest.importorskip` is banned here on purpose:** when Wave 6-B deletes the
-`pipeline.py` copy, this file has to fail with a readable message rather than
-skip and lose the coverage without anyone noticing.
+`TestLegacyNudgeUnchanged` is what Wave 6-B left in place of Wave 6-A's
+`TestLegacyEquivalence`. There is no second copy left to compare against —
+`src/core/pipeline.py` now imports from this module — so the guarantee is
+carried by a **frozen golden**: the same corpus, with the answers captured off
+the old `pipeline.py` implementation before it was deleted. A golden
+recomputed from the code under test would be a tautology; these literals are
+not.
 
 Corpus provenance
 -----------------
@@ -44,8 +45,13 @@ from src.agent.parsers.base import APPLY_THRESHOLD
 from src.agent.parsers.storage_choice_parser import (
     _ASKED_CONFIDENCE,
     _SELF_EVIDENT_CONFIDENCE,
+    _STORAGE_OWN_HINTS,
+    _STORAGE_OWN_HINTS_WHEN_ASKED,
     _UNASKED_CONFIDENCE,
     PARSER,
+    _bot_is_asking_storage,
+    detect_own_tires,
+    detect_storage_choice,
 )
 
 #: The Krok 2 question as the bot actually phrases it — it carries two of the
@@ -252,64 +258,74 @@ class TestNotMentioned:
         assert outcome.value is None
 
 
-class TestLegacyEquivalence:
-    """Two copies are alive in the tree. They must behave identically.
+class TestLegacyNudgeUnchanged:
+    """Wave 6-B: `TestLegacyEquivalence` is gone, and this is what replaced it.
 
-    `pytest.importorskip` is deliberately not used: when Wave 6-B removes the
-    `pipeline.py` copy, these tests must fail with the message below rather
-    than skip. A skipped equivalence test is a silently lost guarantee.
+    The old class compared `src/core/pipeline.py`'s copy of the detector with
+    this module's. Wave 6-B deleted that copy and repointed the pipeline here,
+    so there is nothing left to compare — and its own `assert` message said to
+    delete it in the same commit rather than skip it.
+
+    What must not be lost with it is the guarantee it stood for: with
+    `FSM_ENABLED=false` the storage nudge behaves **exactly** as before. So the
+    corpus stays and the expected answers are frozen as literals, captured from
+    `pipeline.detect_own_tires` *before* the move. A golden recomputed from the
+    code under test proves nothing; these numbers came from the old
+    implementation and are now the contract.
+
+    The phrases are the STT mangles quoted in the marker lists with the calls
+    they came off (2026-08-03 14:55/14:56, 2026-09-03 10:37/10:38), plus the
+    negative controls.
     """
 
-    @staticmethod
-    def _legacy():
+    #: phrase → (own when the bot just asked, own when it did not, choice)
+    GOLDEN: tuple[tuple[str, bool, bool, str | None], ...] = (
+        ("шины будут любую", True, True, None),
+        ("приложишь с собой", True, True, "own"),
+        ("в мене нема сина зберігає", True, True, None),
+        ("Шини будуть з собою", True, True, "own"),
+        ("ТОБОЮ", True, True, None),
+        ("за собою", True, True, None),
+        ("с собою", True, True, None),
+        ("Свої привезу, чи те що у вас на зберіганні?", True, True, "contract"),
+        ("привезу з собою", True, True, "own"),
+        ("везу свої", True, True, None),
+        ("свій комплект", True, True, "own"),
+        ("мої шини", True, True, None),
+        ("нема зберігання", True, True, None),
+        ("ніколи не здавав", True, True, None),
+        ("не здавали на зберігання", True, True, None),
+        # Context-scoped: these four are «own» only right after the question.
+        ("в мене нема", True, False, None),
+        ("у мене немає", True, False, None),
+        ("не маю", True, False, None),
+        ("нема у мене", True, False, None),
+        ("зі зберігання", False, False, "contract"),
+        ("у вас на зберіганні", False, False, "contract"),
+        ("зі складу", False, False, "contract"),
+        ("на зберіганні", False, False, "contract"),
+        ("", False, False, None),
+        ("   ", False, False, None),
+        ("білий Nissan", False, False, None),
+        ("завтра о 14:00", False, False, None),
+        ("Оболонь", False, False, None),
+        ("хочу записатися", False, False, None),
+    )
+
+    #: bot utterance → does it count as the Krok 2 storage question?
+    ASKING_GOLDEN: tuple[tuple[str, bool], ...] = (
+        ("Шини привозите з собою чи вони у нас на зберіганні?", True),
+        ("Чи є у вас зберігання?", True),
+        ("Ви привозите свої шини?", True),
+        ("Шини з собою чи у нас?", True),
+        ("Зберігання у вас є?", True),
+        ("У якому місті вам зручно?", False),
+        ("Який колір вашого авто?", False),
+    )
+
+    def test_the_pipeline_no_longer_carries_its_own_copy(self) -> None:
         from src.core import pipeline
 
-        assert hasattr(pipeline, "detect_own_tires"), (
-            "src/core/pipeline.py no longer exports detect_own_tires. If Wave 6-B "
-            "removed the legacy copy on purpose, delete TestLegacyEquivalence in "
-            "the same commit that proves the nudge stayed identical with "
-            "FSM_ENABLED=false — do not silence this by skipping."
-        )
-        return pipeline
-
-    @staticmethod
-    def _corpus() -> list[str]:
-        """Every marker from both copies, plus the quoted STT mangles."""
-        from src.agent.parsers import storage_choice_parser as moved
-
-        phrases: list[str] = []
-        for group in (
-            moved._STORAGE_OWN_HINTS,
-            moved._STORAGE_OWN_HINTS_WHEN_ASKED,
-            moved._STORAGE_SELF_EVIDENT_OWN,
-            moved._STORAGE_SELF_EVIDENT_CONTRACT,
-            moved._STORAGE_ASKING_MARKERS,
-        ):
-            phrases.extend(group)
-
-        phrases.extend(
-            [
-                # Quoted in the comments, with the calls they came off.
-                "шины будут любую",
-                "приложишь с собой",
-                "в мене нема сина зберігає",
-                "Шини будуть з собою",
-                "ТОБОЮ",
-                "Свої привезу, чи те що у вас на зберіганні?",
-                # Negative controls.
-                "",
-                "   ",
-                "білий Nissan",
-                "завтра о 14:00",
-                "Оболонь",
-            ]
-        )
-        return phrases
-
-    def test_the_five_marker_lists_are_identical(self) -> None:
-        from src.agent.parsers import storage_choice_parser as moved
-
-        legacy = self._legacy()
         for name in (
             "_STORAGE_OWN_HINTS",
             "_STORAGE_OWN_HINTS_WHEN_ASKED",
@@ -317,55 +333,61 @@ class TestLegacyEquivalence:
             "_STORAGE_SELF_EVIDENT_OWN",
             "_STORAGE_SELF_EVIDENT_CONTRACT",
         ):
-            assert getattr(legacy, name) == getattr(moved, name), name
-
-    def test_detect_own_tires_agrees_on_the_whole_corpus(self) -> None:
-        from src.agent.parsers import storage_choice_parser as moved
-
-        legacy = self._legacy()
-        for phrase in self._corpus():
-            for asking in (True, False):
-                assert legacy.detect_own_tires(
-                    phrase, asking_storage=asking
-                ) == moved.detect_own_tires(phrase, asking_storage=asking), (
-                    phrase,
-                    asking,
-                )
-
-    def test_detect_storage_choice_agrees_on_the_whole_corpus(self) -> None:
-        from src.agent.parsers import storage_choice_parser as moved
-
-        legacy = self._legacy()
-        for phrase in self._corpus():
-            assert legacy.detect_storage_choice(phrase) == moved.detect_storage_choice(phrase), (
-                phrase
+            assert name not in vars(pipeline), (
+                f"{name} is back in pipeline.py — two copies drift, that is the "
+                "whole reason Wave 6-A wrote an equivalence test"
             )
 
-    def test_bot_is_asking_storage_agrees_on_the_whole_corpus(self) -> None:
-        from src.agent.parsers import storage_choice_parser as moved
+    def test_the_pipeline_calls_this_module(self) -> None:
+        from src.core import pipeline
 
-        legacy = self._legacy()
-        utterances = [
-            *self._corpus(),
-            STORAGE_QUESTION,
-            "Чи є у вас зберігання?",
-            "Ви привозите свої шини?",
-            "Шини з собою чи у нас?",
-            "У якому місті вам зручно?",
-        ]
-        for utterance in utterances:
-            assert legacy._bot_is_asking_storage(utterance) == moved._bot_is_asking_storage(
-                utterance
-            ), utterance
+        # Identity, not equality: a re-implementation that merely agrees today
+        # is exactly what the move was meant to make impossible.
+        assert pipeline.detect_own_tires is detect_own_tires
+        assert pipeline.detect_storage_choice is detect_storage_choice
+        assert pipeline._bot_is_asking_storage is _bot_is_asking_storage
 
-    def test_the_corpus_actually_exercises_both_answers(self) -> None:
+    @pytest.mark.parametrize(("phrase", "asked", "unasked", "choice"), GOLDEN)
+    def test_the_nudge_answers_exactly_as_before(
+        self, phrase: str, asked: bool, unasked: bool, choice: str | None
+    ) -> None:
+        from src.core import pipeline
+
+        assert pipeline.detect_own_tires(phrase, asking_storage=True) is asked
+        assert pipeline.detect_own_tires(phrase, asking_storage=False) is unasked
+        assert pipeline.detect_storage_choice(phrase) == choice
+
+    @pytest.mark.parametrize(("utterance", "expected"), ASKING_GOLDEN)
+    def test_the_krok_2_gate_answers_exactly_as_before(
+        self, utterance: str, expected: bool
+    ) -> None:
+        from src.core import pipeline
+
+        assert pipeline._bot_is_asking_storage(utterance) is expected
+
+    def test_the_golden_exercises_both_answers(self) -> None:
         """A corpus on which everything returns False proves nothing."""
-        from src.agent.parsers import storage_choice_parser as moved
+        assert {row[1] for row in self.GOLDEN} == {True, False}
+        assert {row[2] for row in self.GOLDEN} == {True, False}
+        assert {row[3] for row in self.GOLDEN} == {"own", "contract", None}
+        assert {row[1] for row in self.ASKING_GOLDEN} == {True, False}
 
-        results = {moved.detect_own_tires(p, asking_storage=True) for p in self._corpus()}
-        assert results == {True, False}
-        choices = {moved.detect_storage_choice(p) for p in self._corpus()}
-        assert choices == {"own", "contract", None}
+    def test_the_context_scoped_phrases_are_the_only_difference(self) -> None:
+        """asked-but-not-unasked == exactly `_STORAGE_OWN_HINTS_WHEN_ASKED`.
+
+        The two lists exist because «в мене нема» is a storage denial after the
+        Krok 2 question and nothing in particular before it. If the split ever
+        collapses, this is where it shows.
+        """
+        only_when_asked = {row[0] for row in self.GOLDEN if row[1] and not row[2]}
+        assert only_when_asked == {"в мене нема", "у мене немає", "не маю", "нема у мене"}
+        assert all(
+            any(h in phrase for h in _STORAGE_OWN_HINTS_WHEN_ASKED)
+            for phrase in only_when_asked
+        )
+        assert not any(
+            any(h in phrase for h in _STORAGE_OWN_HINTS) for phrase in only_when_asked
+        )
 
 
 class TestContract:

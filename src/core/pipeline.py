@@ -16,6 +16,11 @@ import zoneinfo
 from typing import TYPE_CHECKING, Any
 
 from src.agent.confirm_detect import asked_for_confirmation, is_confirmation
+from src.agent.parsers.storage_choice_parser import (
+    _bot_is_asking_storage,
+    detect_own_tires,
+    detect_storage_choice,
+)
 from src.agent.prompts import (
     EMPTY_RESPONSE_SOFT_TEXT,
     ERROR_TEXT,
@@ -555,148 +560,16 @@ _FSM_APPLY_THRESHOLD = 0.7
 
 # --- storage detection ---
 #
-# Legacy list, extracted verbatim from the inline tuple that used to live in
-# _transcript_processor_loop. Behaviour must stay bit-for-bit identical when
-# FSM_ENABLED=false, so nothing here may be reordered or reworded.
-_STORAGE_OWN_HINTS: tuple[str, ...] = (
-    "привезу з собою",
-    "привезли з собою",
-    "привозим з собою",
-    "привозимо з собою",
-    "привожу з собою",
-    "привожу с собой",
-    "привозим с собой",
-    "везу з собою",
-    "везу свої",
-    "свої привезу",
-    "свій комплект",
-    "шини в мене",
-    "шини мої",
-    "мої шини",
-    "з собою везу",
-    # Wave 4 (2026-09-03) — STT mangles «з собою» → «за собою»
-    # (calls 10:37, 10:38 with Kusaeva). Also drops the «з»
-    # entirely leaving «собою». And Russian preposition drift
-    # «с собой» → «за собой». All → own tires.
-    "за собою",
-    "за собой",
-    "с собою",
-    # Wave 4 STT: «привезу» → «приложу»/«приложишь»/«прикладу»
-    # (rare word-level mangle; call 10:38 «приложишь с собой»).
-    "приложу з собою",
-    "приложу с собой",
-    "приложишь з собою",
-    "приложишь с собой",
-    "прикладу з собою",
-    "прикладу с собой",
-    # Short affirmations to the storage question — STT often
-    # cuts «з собою» down to «тобою» / «з тобою» (call 2026-08-03
-    # 14:56). And the rus/ukr mix «Шины будут любую» is real STT
-    # output for «шини будуть з собою».
-    "тобою",
-    "з тобою",
-    "шини будуть з собою",
-    "шини будуть с собой",
-    "шины будут с собой",
-    "шины будут з собою",
-    "шины будут любую",
-    "будуть з собою",
-    "будут с собой",
-    # Explicit "no storage" phrasings — client denies having a
-    # storage contract, implicitly = own tires. Call 2026-08-03:
-    # STT «в мене нема сина зберігає» (mangled) → repeat loop.
-    "нема зберігання",
-    "немає зберігання",
-    "нема ніякого зберігання",
-    "немає ніякого зберігання",
-    "не здавав на зберігання",
-    "не здавали на зберігання",
-    "ніколи не здавав",
-    "нема сина зберіга",  # STT mangle of «немає жодного зберігання»/«немає нашого»
-    "немає сина зберіга",
-)
-
-# Context-scoped: «в мене нема»/«у мене немає» = storage denial ONLY if the bot
-# just asked the storage question (Krok 2).
-_STORAGE_OWN_HINTS_WHEN_ASKED: tuple[str, ...] = (
-    "в мене нема",
-    "у мене немає",
-    "в мене немає",
-    "у мене нема",
-    "не маю",
-    "немає у мене",
-    "нема у мене",
-)
-
-_STORAGE_ASKING_MARKERS: tuple[str, ...] = (
-    "зберіган",
-    "привозите свої",
-    "з собою чи",
-)
-
-# FSM-only, deliberately narrower than the legacy list above: phrases that are
-# self-evident *without* the bot having asked anything. The legacy list is full
-# of context-dependent STT mangles («тобою») that are safe as a nudge to the
-# LLM but not safe as an FSM state skip.
-_STORAGE_SELF_EVIDENT_OWN: tuple[str, ...] = (
-    "з собою",
-    "с собой",
-    "свої шини",
-    "свои шины",
-    "власні шини",
-    "свій комплект",
-)
-_STORAGE_SELF_EVIDENT_CONTRACT: tuple[str, ...] = (
-    "зі зберігання",
-    "з зберігання",
-    "на зберіганні",
-    "у вас на зберіганні",
-    "зберігання у вас",
-    "зі складу",
-)
-
-
-def _bot_is_asking_storage(last_bot_utterance: str) -> bool:
-    """True if the bot's last utterance was the Krok 2 storage question."""
-    lowered = (last_bot_utterance or "").lower()
-    return any(marker in lowered for marker in _STORAGE_ASKING_MARKERS)
-
-
-def detect_own_tires(text: str, *, asking_storage: bool) -> bool:
-    """Legacy 'client brought their own tires' detector.
-
-    Extracted verbatim from _transcript_processor_loop so the FSM mapping layer
-    and the legacy nudge share one list instead of drifting apart. Semantics are
-    unchanged: the context-scoped extras only apply right after the bot asked
-    the storage question.
-    """
-    lowered = (text or "").lower()
-    hints = _STORAGE_OWN_HINTS
-    if asking_storage:
-        hints = (*hints, *_STORAGE_OWN_HINTS_WHEN_ASKED)
-    return any(h in lowered for h in hints)
-
-
-def detect_storage_choice(text: str) -> str | None:
-    """Self-evident storage choice for the FSM mapping layer.
-
-    Returns "own", "contract" or None. Unlike :func:`detect_own_tires` this is
-    context-free — it must be safe to run on any utterance without knowing what
-    the bot just said, because it is allowed to *skip an FSM state*.
-
-    An utterance mentioning both is ambiguous and yields None rather than a
-    coin flip.
-    """
-    lowered = (text or "").lower()
-    own = any(h in lowered for h in _STORAGE_SELF_EVIDENT_OWN)
-    contract = any(h in lowered for h in _STORAGE_SELF_EVIDENT_CONTRACT)
-    if own and contract:
-        return None
-    if own:
-        return "own"
-    if contract:
-        return "contract"
-    return None
+# Wave 6-B: the five marker lists and the three functions used to live here as
+# a byte-identical copy of `src/agent/parsers/storage_choice_parser`. Wave 6-A
+# proved the two copies agreed on the whole corpus; this is the import that
+# collapses them into one. Nothing is rewritten — the names are re-exported so
+# the legacy nudge below and the FSM mapping layer call the same code.
+#
+# The three names come in with the module imports at the top of the file and
+# stay part of `pipeline`'s surface on purpose: the nudge in
+# `_transcript_processor_loop` calls `detect_own_tires` by that name, and so
+# does the golden test that pins the FSM_ENABLED=false behaviour.
 
 
 def map_compound_fields_to_fsm(

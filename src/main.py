@@ -25,6 +25,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 
 from src.agent.agent import LLMAgent, ToolRouter
+from src.agent.parsers.date_parser import resolve_tool_date
 from src.agent.prompt_manager import (
     PromptManager,
     fetch_tenant_promotions,
@@ -1362,25 +1363,11 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     )
 
 
-def _resolve_date(value: str) -> str:
-    """Resolve 'today'/'tomorrow'/relative strings to YYYY-MM-DD.
-
-    The LLM may pass literal 'today', 'tomorrow', 'послезавтра', or a
-    proper YYYY-MM-DD date. We normalise everything to YYYY-MM-DD so the
-    SOAP layer receives a valid date.
-    """
-    if not value:
-        return ""
-    low = value.strip().lower()
-    today = datetime.now(tz=UTC).date()
-    if low in {"today", "сьогодні", "сегодня"}:
-        return today.isoformat()
-    if low in {"tomorrow", "завтра"}:
-        return (today + timedelta(days=1)).isoformat()
-    if low in {"послезавтра", "afterTomorrow", "після завтра", "післязавтра"}:
-        return (today + timedelta(days=2)).isoformat()
-    # Already a date string — return as-is
-    return value.strip()
+# `_resolve_date` used to live here. Wave 6-B moved it to
+# `src.agent.parsers.date_parser.resolve_tool_date` — same contract, one
+# calendar implementation instead of three (this one and the byte-identical
+# copy in `src/sandbox/agent_runner.py`). It is wider now: weekdays,
+# «15 березня» and `dd.mm` resolve too, through the parser the FSM uses.
 
 
 # Mapping of alternative / Russian / old city names → canonical 1C names.
@@ -1883,7 +1870,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     f"Використай station_id з результату get_fitting_stations: {known}",
                 }
 
-        booking_date_str = _resolve_date(kwargs.get("date", ""))
+        booking_date_str = resolve_tool_date(kwargs.get("date", ""))
 
         # Anti-hallucination guard #1 (highest priority): date/time must come
         # from the last get_fitting_slots response. Runs BEFORE the today/max
@@ -2701,8 +2688,8 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         station_id = kwargs.get("station_id", "")
         today_date = datetime.now(tz=UTC).date()
         today = today_date.isoformat()
-        date_from = _resolve_date(kwargs.get("date_from", "")) or today
-        date_to = _resolve_date(kwargs.get("date_to", "")) or date_from
+        date_from = resolve_tool_date(kwargs.get("date_from", "")) or today
+        date_to = resolve_tool_date(kwargs.get("date_to", "")) or date_from
         logger.info(
             "get_fitting_slots request for call %s: station=%s, date_from=%s, date_to=%s (raw: %s)",
             session.channel_uuid,

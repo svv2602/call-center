@@ -42,12 +42,15 @@ already does this for the narrow lists; §3.6 extends it to the wide one, so a
 wide «own» hit next to a self-evident «contract» hit resolves to nothing and
 the question gets asked.
 
-Wave 6-B debt (§Scope forbids touching `src/core/pipeline.py` in this wave):
-`pipeline.detect_own_tires` / `pipeline.detect_storage_choice` still exist and
-are still what the legacy nudge calls. Wave 6-B removes them, points the
-pipeline at this module (or at a `src/agent/storage_detect.py` re-export, as
-§3.6 step 1 describes), and proves the nudge stayed bit-for-bit identical with
-`FSM_ENABLED=false` on the corpus quoted in the comments below.
+Wave 5-A's debt, paid in Wave 6-B: the marker lists and the three functions
+below used to have a second, hand-copied home in `src/core/pipeline.py`, which
+is what the legacy `FSM_ENABLED=false` nudge called. Wave 6-B deleted that copy
+and made the pipeline import these names, so `pipeline.detect_own_tires is
+detect_own_tires` — identity, not a look-alike. The nudge is therefore
+bit-for-bit what it was; `TestLegacyNudgeUnchanged` in
+`tests/unit/test_parsers_storage_choice.py` pins the answers to a frozen golden
+recorded *before* the move, so a later edit to these lists cannot quietly
+change the live path.
 """
 
 from __future__ import annotations

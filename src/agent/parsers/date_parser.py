@@ -57,33 +57,40 @@ specific day, not a recurring label.
 
 Relationship to `main.py:_resolve_date`
 ---------------------------------------
-`src/main.py:_resolve_date` covers сьогодні/завтра/післязавтра only, has no
-weekday or day-month handling, and reads the wall clock itself, so it cannot
-be imported into a parser that must stay a function of `ctx`. This module is
-the complete implementation; `_resolve_date` becomes a removal candidate in
-Wave 6-B, which owns `main.py` and can switch its callers over. Two
-implementations must not survive past that wave.
+`src/main.py:_resolve_date` covered сьогодні/завтра/післязавтра only, had no
+weekday or day-month handling, and read the wall clock itself, so it could not
+be imported into a parser that must stay a function of `ctx`. Wave 6-B removed
+it, together with the third copy nobody had noticed in
+`src/sandbox/agent_runner.py`, and pointed both call sites at
+:func:`resolve_tool_date` below. One calendar implementation, three callers.
+
+`resolve_tool_date` is **not** `parse()` with a different name
+--------------------------------------------------------------
+It is a thin tool-layer adapter, and the ISO passthrough in it is load-bearing
+rather than an optimisation. `_detect_date_hint` scans for substrings, so on
+the ISO string the LLM normally passes it matches the *tail*:
+`"2026-03-01"` → hint `"03-01"` → day 3, month 1 → **2027-01-03**. Handing a
+date the LLM already resolved to the hint detector silently books a different
+year. So: ISO first, then the two English aliases `_resolve_date` accepted and
+`_detect_date_hint` does not know, and only then the parser.
 """
 
 from __future__ import annotations
 
 import logging
 import re
+from datetime import UTC, datetime, timedelta
 from datetime import date as _date
-from datetime import timedelta
-from typing import TYPE_CHECKING
 
 from src.agent.compound_parse import _MONTHS_RU, _MONTHS_UA, _detect_date_hint, _normalize
 from src.agent.parsers.base import (
     APPLY_THRESHOLD,
     NOT_MENTIONED,
+    ParseContext,
     ParseOutcome,
     graded,
     unresolved,
 )
-
-if TYPE_CHECKING:
-    from src.agent.parsers.base import ParseContext
 
 logger = logging.getLogger(__name__)
 
@@ -213,3 +220,53 @@ class DateParser:
 
 
 PARSER = DateParser()
+
+
+#: Aliases `main.py:_resolve_date` accepted and `_detect_date_hint` does not
+#: know. Dropping them would be a silent behaviour change on the tool layer:
+#: the LLM does emit bare English `today` / `tomorrow`.
+_TOOL_ALIASES: dict[str, str] = {
+    "today": "сьогодні",
+    "сегодня": "сьогодні",
+    "tomorrow": "завтра",
+    "aftertomorrow": "післязавтра",
+    "послезавтра": "післязавтра",
+    "після завтра": "післязавтра",
+}
+
+
+def resolve_tool_date(value: str, now: datetime | None = None) -> str:
+    """Normalise a date argument coming from an LLM tool call to `YYYY-MM-DD`.
+
+    Replaces `main.py:_resolve_date` and its copy in
+    `sandbox/agent_runner.py`. Same contract as the original: `""` in, `""`
+    out; anything it cannot resolve is returned stripped rather than dropped,
+    because the SOAP layer's own validation is the one that should reject it,
+    and swallowing the value here would turn a bad date into no date.
+
+    Wider than the original by design — weekdays, `«15 березня»` and `dd.mm`
+    now resolve too, through the same parser the FSM uses. The wall clock is
+    read **here**, once, when the caller does not supply `now`; the parser
+    itself stays a function of its context.
+    """
+    if not value:
+        return ""
+    text = value.strip()
+
+    # ISO first. See the module docstring: feeding an already-resolved date to
+    # the hint detector matches its tail and moves it to another year.
+    try:
+        return _date.fromisoformat(text).isoformat()
+    except ValueError:
+        pass
+
+    hint = _TOOL_ALIASES.get(text.lower(), text)
+    if now is None:
+        now = datetime.now(tz=UTC)
+
+    outcome = PARSER.parse(ParseContext(customer_text=hint, now=now))
+    if outcome.status == "value" and outcome.value:
+        return str(outcome.value)
+
+    logger.debug("resolve_tool_date: %r did not resolve — passing through", value)
+    return text
