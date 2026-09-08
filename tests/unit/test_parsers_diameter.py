@@ -8,15 +8,14 @@ is gone and the same «16» is worth `1.0`.
 
 That confidence flip is the whole parser, so it is the first thing tested here.
 
-Wave 6-A finding, pinned below rather than fixed
-------------------------------------------------
-`compound_parse` blanks the date/time spans out of the text before it runs
-`detect_diameter` (`_blank()`), which is why «на 18 вересня» yields no diameter
-there. **This parser does not blank anything** — it calls `detect_diameter` on
-the raw utterance. So «на 18 вересня» does come back with `value=18`, held
-`unresolved` by the `0.6` grade, and «о 14 годині» with `value=14`. Worse, when
-`is_diameter_question` is true the same date reads `1.0` and becomes a value.
-Handed to Wave 6-B; the tests below record what the code does today.
+Wave 6-A finding, fixed in the same batch
+-----------------------------------------
+`compound_parse` blanks the date/time spans before running `detect_diameter`,
+which is why «на 18 вересня» yields no diameter there. The parser used to skip
+that step and read the raw utterance, so the two passes disagreed: 18 here,
+`None` there — and at confidence 1.0 with the diameter question open, meaning
+applied silently. `_mask_when()` closes it; `TestDatesAndHoursDoNotLeak`
+asserts the two passes agree rather than restating the expected numbers.
 """
 
 from __future__ import annotations
@@ -115,35 +114,45 @@ class TestNotMentioned:
         assert outcome.status == "not_mentioned"
 
 
-class TestDatesAndHoursLeakThrough:
-    """Wave 6-A finding — see the module docstring. Pinned, not fixed.
+class TestDatesAndHoursDoNotLeak:
+    """Found by Wave 6-A, fixed in the same batch.
 
-    `compound_parse` hides date/time spans from `detect_diameter` with
-    `_blank()`; the parser does not. These assertions describe today's
-    behaviour so that a Wave 6-B fix breaks them loudly instead of silently
-    changing what the FSM believes.
+    The parser used to call `detect_diameter` on the raw text while
+    `compound_parse` blanked date/time spans first, so the two passes
+    disagreed on the same utterance — and with the diameter question open the
+    wrong number arrived at confidence 1.0, i.e. applied without a re-ask.
     """
 
-    def test_a_named_date_still_produces_a_number(self) -> None:
-        outcome = PARSER.parse(ctx("запишіть на 18 вересня"))
-        assert outcome.value == 18, "current behaviour: the day of month leaks in"
-        assert outcome.status == "unresolved", "held below the threshold by 0.6"
+    def test_a_named_date_is_not_a_diameter(self) -> None:
+        assert PARSER.parse(ctx("запишіть на 18 вересня")).status == "not_mentioned"
 
-    def test_an_hour_still_produces_a_number(self) -> None:
-        outcome = PARSER.parse(ctx("о 14 годині"))
-        assert outcome.value == 14
-        assert outcome.status == "unresolved"
+    def test_an_hour_is_not_a_diameter(self) -> None:
+        assert PARSER.parse(ctx("о 14 годині")).status == "not_mentioned"
 
-    def test_a_date_read_as_a_value_when_the_bot_asked_for_a_diameter(self) -> None:
-        """The sharp edge: `1.0` on a number that is a calendar day.
-
-        Reachable only when the bot's previous turn was the diameter question
-        and the caller answered with a date. Recorded for Wave 6-B — the fix is
-        to blank the date/time spans the way the broad pass does.
-        """
+    def test_a_date_is_not_a_diameter_even_when_the_bot_asked(self) -> None:
+        """The sharp edge: this used to be `value` at 1.0."""
         outcome = PARSER.parse(ctx("запишіть на 18 вересня", bot=DIAMETER_QUESTION))
+        assert outcome.status == "not_mentioned"
+        assert outcome.value is None
+
+    def test_the_two_passes_now_agree(self) -> None:
+        """The invariant the fix restores, asserted against the broad pass itself."""
+        from src.agent.compound_parse import compound_parse
+
+        for text in ("запишіть на 18 вересня", "о 14 годині", "мій білий Toyota R17"):
+            broad = compound_parse(text).fields.get("diameter")
+            targeted = PARSER.parse(ctx(text)).value
+            assert broad == targeted, text
+
+    def test_a_real_diameter_survives_a_date_in_the_same_utterance(self) -> None:
+        outcome = PARSER.parse(ctx("R17 запишіть на 18 вересня"))
+        assert outcome.value == 17
+
+    def test_na_plus_number_is_still_a_diameter(self) -> None:
+        """«на 16» must not be masked: the hour patterns take «о/об», never «на»."""
+        outcome = PARSER.parse(ctx("на 16", bot=DIAMETER_QUESTION))
         assert outcome.status == "value"
-        assert outcome.value == 18
+        assert outcome.value == 16
 
 
 class TestContract:
