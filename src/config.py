@@ -174,6 +174,28 @@ class FeatureFlagSettings(BaseSettings):
     model_config = {"env_prefix": "FF_"}
 
 
+class FsmSettings(BaseSettings):
+    """Wave 13 FSM refactor feature flags.
+
+    Defaults are deliberately safe: the engine is off, and even when switched
+    on it starts in shadow mode (runs in parallel, never affects the customer).
+    A prior attempt at this refactor shipped without a flag and had to be rolled
+    back with `git revert`; these vars are the rollback path.
+    """
+
+    enabled: bool = False
+    shadow_mode: bool = True  # runs in parallel, doesn't affect the customer
+    log_transitions: bool = True
+    # Comma-separated tenant ids; empty + enabled=true means "all tenants".
+    enabled_tenants: str = ""
+
+    model_config = {"env_prefix": "FSM_"}
+
+    @property
+    def enabled_tenant_list(self) -> list[str]:
+        return [t.strip() for t in self.enabled_tenants.split(",") if t.strip()]
+
+
 class AdminSettings(BaseSettings):
     jwt_secret: str = "change-me-in-production"
     jwt_ttl_hours: int = 24
@@ -313,6 +335,7 @@ class Settings(BaseSettings):
     admin: AdminSettings = AdminSettings()
     whisper: WhisperSettings = WhisperSettings()
     feature_flags: FeatureFlagSettings = FeatureFlagSettings()
+    fsm: FsmSettings = FsmSettings()
     smtp: SMTPSettings = SMTPSettings()
     backup: BackupSettings = BackupSettings()
     deepseek: DeepSeekSettings = DeepSeekSettings()

@@ -30,6 +30,9 @@ MAX_TIMEOUTS_BEFORE_HANGUP = 3
 # operator-transfer template. Below the threshold we ask the caller to
 # repeat with a gentle prompt instead of announcing a transfer.
 MAX_EMPTY_RESPONSES_BEFORE_ESCALATE = 3
+# Ring-buffer cap for CallSession.fsm_history. Keeps the Redis payload bounded —
+# the history is a debugging/regression-detection aid, not an audit log.
+FSM_HISTORY_LIMIT = 20
 
 
 class CallState(enum.StrEnum):
@@ -156,6 +159,24 @@ class CallSession:
         # Tenant working-hours schedule (JSONB from tenants.working_hours).
         # None = no schedule → treat as 24/7 and never trigger after-hours flow.
         self.working_hours: dict[str, Any] | None = None
+        # --- FSM refactor (Wave 1-A, 2026-09-08) ---
+        # Deterministic fitting-flow state machine (`src/agent/fitting_fsm.py`).
+        # The engine never starts on its own — the pipeline enables it explicitly
+        # (Wave 4-B). Until then these fields stay at their empty defaults.
+        # Current FSM state name (value of FsmState, e.g. "CITY"). None = FSM not
+        # started for this call. Persisted so a mid-call Redis recovery on another
+        # Call Processor instance resumes from the right step.
+        self.fsm_state: str | None = None
+        # field name → parsed value ({"city": "Київ", "date": "2026-09-10", …}).
+        # Authoritative source for required_context checks and for building the
+        # book_fitting payload once the migration path (§2.7) completes.
+        self.fsm_filled_fields: dict[str, Any] = {}
+        # Main-flow state frozen while a side-state (PRICE_INTERRUPT /
+        # CANCEL_INTERRUPT) is active. Wave 4-B resumes into it.
+        self.fsm_prev_state: str | None = None
+        # Ring buffer of the last FSM_HISTORY_LIMIT transitions:
+        # {"t": float, "from": str|None, "to": str, "event": str, "payload": dict|None}
+        self.fsm_history: list[dict[str, Any]] = []
 
     # --- State transitions ---
 
@@ -276,6 +297,10 @@ class CallSession:
             "tenant_name": self.tenant_name,
             "network_id": self.network_id,
             "working_hours": self.working_hours,
+            "fsm_state": self.fsm_state,
+            "fsm_filled_fields": dict(self.fsm_filled_fields),
+            "fsm_prev_state": self.fsm_prev_state,
+            "fsm_history": list(self.fsm_history[-FSM_HISTORY_LIMIT:]),
             "dialog_history": [
                 {
                     "speaker": t.speaker,
@@ -339,6 +364,28 @@ class CallSession:
         session.tenant_name = data.get("tenant_name")
         session.network_id = data.get("network_id")
         session.working_hours = data.get("working_hours")
+        session.fsm_state = data.get("fsm_state")
+        session.fsm_prev_state = data.get("fsm_prev_state")
+        filled = data.get("fsm_filled_fields") or {}
+        if isinstance(filled, dict):
+            session.fsm_filled_fields = dict(filled)
+        else:
+            # Never silently drop collected fields — a wrong type here means the
+            # writer is buggy and the caller would be re-asked every field.
+            logger.warning(
+                "Call %s: fsm_filled_fields has unexpected type %s — ignoring",
+                data.get("channel_uuid"),
+                type(filled).__name__,
+            )
+        history = data.get("fsm_history") or []
+        if isinstance(history, list):
+            session.fsm_history = [h for h in history if isinstance(h, dict)][-FSM_HISTORY_LIMIT:]
+        else:
+            logger.warning(
+                "Call %s: fsm_history has unexpected type %s — ignoring",
+                data.get("channel_uuid"),
+                type(history).__name__,
+            )
         session.dialog_history = [
             DialogTurn(
                 speaker=t["speaker"],

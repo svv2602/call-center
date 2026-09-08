@@ -445,6 +445,66 @@ bot_filler_stripped_total = Counter(
 )
 
 
+# --- Wave 13 FSM refactor ---
+
+intent_classifier_calls_total = Counter(
+    "callcenter_intent_classifier_calls_total",
+    "Total calls to intent classifier",
+    ["primary_intent", "requires_clarification"],
+)
+
+intent_classifier_latency_ms = Histogram(
+    "callcenter_intent_classifier_latency_ms",
+    "Latency of intent classifier LLM call",
+    buckets=[50, 100, 200, 300, 500, 1000, 2000],
+)
+
+intent_classifier_fallback_total = Counter(
+    "callcenter_intent_classifier_fallback_total",
+    "Times classifier returned confidence=0 (fallback path)",
+    ["reason"],  # timeout, json_error, low_confidence
+)
+
+interrupt_handled_total = Counter(
+    "callcenter_interrupt_handled_total",
+    "Times an interrupt was handled by side-door",
+    # type: PRICE, CANCEL; outcome: success, needs_more_info, failed
+    ["type", "outcome"],
+)
+
+# --- FSM (Phase 2-3) ---
+
+fsm_state_entered_total = Counter(
+    "callcenter_fsm_state_entered_total",
+    "Times an FSM state was entered",
+    ["state"],
+)
+
+fsm_transition_total = Counter(
+    "callcenter_fsm_transition_total",
+    "FSM state transitions",
+    ["from_state", "to_state"],
+)
+
+fsm_interrupt_total = Counter(
+    "callcenter_fsm_interrupt_total",
+    "FSM interrupts (freeze current state)",
+    ["interrupt_type"],
+)
+
+fsm_parser_null_total = Counter(
+    "callcenter_fsm_parser_null_total",
+    "Field parser returned null (couldn't extract)",
+    ["field", "state"],
+)
+
+fsm_compound_preparse_fields_total = Counter(
+    "callcenter_fsm_compound_preparse_fields_total",
+    "Fields extracted from first customer utterance via compound pre-parse",
+    ["field"],
+)
+
+
 def get_metrics() -> bytes:
     """Generate Prometheus metrics output."""
     return generate_latest()
