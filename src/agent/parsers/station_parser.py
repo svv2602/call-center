@@ -6,23 +6,39 @@ canonical landmark label the caller used («Оболонь», «Харківсь
 longest-stem-first at build time so «жм перемог» wins over «перемог» and
 «харківськ» is tried before the bare city stem.
 
-**The sync pass can never reach `status="value"`, and that is the point.**
+**`parse()` can never reach `status="value"`, and that is the point.**
 This parser's `field_name` is `station_id`; a landmark is not one. Pinning it
 would let the FSM skip STATION with a value `book_fitting` cannot use — the
 exact reason `station_hint` is deliberately absent from
 `COMPOUND_TO_FSM_FIELD` today, and the same defect class as `c8c6601`. So the
 landmark comes back as `unresolved` with the hint visible in `value` and a
-confidence held below the apply threshold. In `shadow` that is the end of it:
-shadow sees the hint and never a `station_id`, as designed (§3.2 rule 3).
+confidence held below the apply threshold.
 
-`aresolve()` turns the hint into an id from `session.fitting_stations_seen` —
-the snapshot `get_fitting_stations` already wrote when the state was entered.
-The spec (§3.5) names those session fields as this parser's context, and
-resolving from them needs no network at all. Calling the tool router directly
-is **not** possible from here: `ParseContext` carries a DB connection and no
-tool router, so `get_fitting_stations(query=…)` has no route into a parser.
-That gap is recorded for Wave 6-B rather than papered over with a global
-import.
+:func:`resolve_station_from_session` is the second half, and the only route to
+`status="value"`: it turns the hint into an id using
+`session.fitting_stations_seen` — the snapshot `get_fitting_stations` already
+wrote when the state was entered. The spec (§3.5) names those session fields as
+this parser's context.
+
+Why this one is legal in shadow (Wave 6-C)
+------------------------------------------
+§3.2 rule 3 — «`aresolve` never runs in shadow» — is a rule about *network*,
+not about the word `aresolve`. It exists to keep «no await → no network» true
+for `_run_fsm_deterministic_step`. Resolving a landmark reads a dict that is
+already in the session: no connection, no tool router, nothing to await. So the
+seam calls :func:`resolve_station_from_session` **synchronously**, in shadow as
+in live, and shadow does now see a `station_id`.
+
+`brand_parser` is the contrasting case and stays live-only: its resolver needs
+`ctx.conn` for the alias table, that is real I/O, and `ParseContext.conn` is
+pinned to `None` in the seam precisely to forbid it.
+
+Until Wave 6-C the id had no reachable path at all — `aresolve` had zero call
+sites, so STATION was a structural dead end (12 of 16 replayed calls died
+there). Calling the tool router from here is still **not** possible:
+`ParseContext` carries a DB connection and no tool router, so
+`get_fitting_stations(query=…)` has no route into a parser. It does not need
+one — the snapshot is enough.
 """
 
 from __future__ import annotations
@@ -56,12 +72,17 @@ def _matches(station: dict, needle: str) -> bool:
     return False
 
 
-async def _aresolve_station(ctx: ParseContext, outcome: ParseOutcome) -> ParseOutcome:
+def resolve_station_from_session(ctx: ParseContext, outcome: ParseOutcome) -> ParseOutcome:
     """Landmark → `station_id`, using the stations already offered.
 
     Ambiguity is left unresolved rather than guessed: «Перемоги» exists in two
     cities, and picking one of them silently is how a caller ends up driving to
     the wrong address.
+
+    Synchronous on purpose. Every input comes from
+    `ctx.session.fitting_stations_seen`, so there is nothing to await — see the
+    module docstring for why that makes this callable from the shadow seam
+    while a *network* resolver stays shut.
     """
     if not isinstance(outcome.value, str) or not outcome.value:
         return outcome
@@ -90,8 +111,18 @@ async def _aresolve_station(ctx: ParseContext, outcome: ParseOutcome) -> ParseOu
     return graded(str(station_id), _RESOLVED_CONFIDENCE)
 
 
+async def _aresolve_station(ctx: ParseContext, outcome: ParseOutcome) -> ParseOutcome:
+    """`FieldParser.aresolve` shape over :func:`resolve_station_from_session`.
+
+    A thin wrapper, and deliberately nothing more: the protocol says `aresolve`
+    is awaitable, the resolution itself is not I/O. Two copies of the matching
+    rules is how «Перемоги» gets picked in one of them and refused in the other.
+    """
+    return resolve_station_from_session(ctx, outcome)
+
+
 class StationParser:
-    """STATION. Sync gives a hint; `aresolve` gives the id."""
+    """STATION. `parse` gives a hint; the resolver gives the id."""
 
     name = "station_parser"
     field_name = "station_id"

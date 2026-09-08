@@ -7,12 +7,16 @@ value `book_fitting` cannot use — the same defect class as `c8c6601`, and the
 reason `station_hint` is deliberately absent from `COMPOUND_TO_FSM_FIELD`.
 
 So the landmark comes back `unresolved`, visible in `value` and held below the
-apply threshold. In `shadow` that is the end of it: shadow sees the hint and
-never an id.
+apply threshold.
 
-`aresolve()` resolves against `session.fitting_stations_seen` — the snapshot
-`get_fitting_stations` wrote when the state was entered. It needs no tool
-router (there is none on `ParseContext`) and therefore no `AsyncMock`.
+`resolve_station_from_session` is the only route to `value`. It resolves
+against `session.fitting_stations_seen` — the snapshot `get_fitting_stations`
+wrote when the state was entered — so it needs no tool router (there is none on
+`ParseContext`), no connection and, since Wave 6-C, no `await`: the shadow seam
+calls it synchronously. `aresolve` is the same function behind the protocol's
+awaitable shape, and `TestTheWrapperAndTheCoreAgree` pins that they cannot
+drift apart.
+
 Ambiguity is left unresolved rather than guessed: «Перемоги» exists in more
 than one city, and picking silently is how a caller drives to the wrong
 address.
@@ -22,7 +26,11 @@ Landmarks below are read out of `compound_parse._LANDMARKS`.
 
 from __future__ import annotations
 
+import inspect
+import logging
 import uuid
+from typing import ClassVar
+from unittest.mock import patch
 
 import pytest
 
@@ -32,6 +40,7 @@ from src.agent.parsers.station_parser import (
     _HINT_CONFIDENCE,
     _RESOLVED_CONFIDENCE,
     PARSER,
+    resolve_station_from_session,
 )
 from src.core.call_session import CallSession
 
@@ -211,3 +220,121 @@ class TestContract:
         sync_statuses = {PARSER.parse(ctx(text)).status for text in ("на Оболоні", "білий Nissan")}
         assert sync_statuses == {"unresolved", "not_mentioned"}
         assert stations, "value is reached only through aresolve — see TestAresolve"
+
+
+class TestSyncResolve:
+    """Wave 6-C — the resolver is synchronous, and that is what unblocks shadow.
+
+    §3.2 rule 3 («`aresolve` never runs in shadow») is a rule about *network*.
+    Resolving a landmark reads `session.fitting_stations_seen`, a dict already
+    in the session, so there is nothing to await — and the shadow seam calls it
+    directly. `brand_parser` is the contrasting case: its resolver needs
+    `ctx.conn`, that is real I/O, and it stays live-only.
+    """
+
+    def test_it_is_not_a_coroutine_function(self) -> None:
+        assert not inspect.iscoroutinefunction(resolve_station_from_session)
+
+    def test_single_match_becomes_the_id(self) -> None:
+        stations = [
+            {"id": "st-1", "name": "Оболонь", "district": "Оболонський"},
+            {"id": "st-2", "name": "Позняки", "district": "Дарницький"},
+        ]
+        c = ctx("на Оболоні", stations=stations)
+        resolved = resolve_station_from_session(c, PARSER.parse(c))
+
+        assert resolved.status == "value"
+        assert resolved.value == "st-1"
+        assert resolved.confidence == _RESOLVED_CONFIDENCE
+
+    def test_two_matches_are_left_unresolved(self) -> None:
+        """Ambiguity is refused, not guessed — cross-city guard `13e9ea4`."""
+        stations = [
+            {"id": "st-zp", "name": "Перемоги 72Б", "district": "Запоріжжя"},
+            {"id": "st-dp", "name": "Перемоги 15", "district": "Дніпро"},
+        ]
+        c = ctx("на Перемоги", stations=stations)
+        parsed = PARSER.parse(c)
+        resolved = resolve_station_from_session(c, parsed)
+
+        assert resolved is parsed
+        assert resolved.status == "unresolved"
+        assert resolved.value == "Перемоги"
+
+    def test_an_empty_snapshot_resolves_nothing(self) -> None:
+        c = ctx("на Оболоні", stations=[])
+        parsed = PARSER.parse(c)
+        assert resolve_station_from_session(c, parsed) is parsed
+
+    def test_a_match_without_an_id_is_not_a_value(self, caplog) -> None:
+        """WARNING, not DEBUG: a station row with no id is a data defect."""
+        stations = [{"name": "Оболонь", "district": "Оболонський"}]
+        c = ctx("на Оболоні", stations=stations)
+        parsed = PARSER.parse(c)
+
+        with caplog.at_level(logging.WARNING, logger="src.agent.parsers.station_parser"):
+            resolved = resolve_station_from_session(c, parsed)
+
+        assert resolved is parsed
+        assert resolved.status == "unresolved"
+        assert any(
+            r.levelno >= logging.WARNING and "carries no id" in r.getMessage()
+            for r in caplog.records
+        ), "a station without an id must be loud"
+
+    def test_nothing_to_resolve_passes_through(self) -> None:
+        stations = [{"id": "st-1", "name": "Оболонь"}]
+        c = ctx("білий Nissan", stations=stations)
+        assert resolve_station_from_session(c, NOT_MENTIONED) is NOT_MENTIONED
+
+    def test_it_needs_no_connection(self) -> None:
+        """The gate that keeps the *network* resolvers out is `conn is None`."""
+        stations = [{"id": "st-1", "name": "Оболонь"}]
+        c = ctx("на Оболоні", stations=stations)
+        assert c.conn is None
+        assert resolve_station_from_session(c, PARSER.parse(c)).value == "st-1"
+
+
+class TestTheWrapperAndTheCoreAgree:
+    """One implementation, two shapes. Two copies is how they drift apart."""
+
+    #: One case per branch of the resolver: hit, ambiguous, empty snapshot,
+    #: id-less match, no landmark at all, non-string id, address-only match.
+    #: `ClassVar` because a bare mutable class attribute is RUF012 — and the
+    #: list is read by `parametrize` at class-body time, never mutated.
+    CASES: ClassVar[list[tuple[str, list[dict]]]] = [
+        ("на Оболоні", [{"id": "st-1", "name": "Оболонь"}]),
+        (
+            "на Перемоги",
+            [
+                {"id": "st-zp", "name": "Перемоги 72Б"},
+                {"id": "st-dp", "name": "Перемоги 15"},
+            ],
+        ),
+        ("на Оболоні", []),
+        ("на Оболоні", [{"name": "Оболонь"}]),
+        ("білий Nissan", [{"id": "st-1", "name": "Оболонь"}]),
+        ("на Оболоні", [{"id": 42, "name": "Оболонь"}]),
+        ("на Оболоні", [{"id": "st-9", "address": "ТЦ Оболонь, вул. Полярна 3"}]),
+    ]
+
+    @pytest.mark.parametrize("text,stations", CASES)
+    async def test_same_answer_on_the_same_input(self, text: str, stations: list[dict]) -> None:
+        c = ctx(text, stations=stations)
+        parsed = PARSER.parse(c)
+
+        assert await PARSER.aresolve(c, parsed) == resolve_station_from_session(c, parsed)
+
+    async def test_the_wrapper_adds_nothing_of_its_own(self) -> None:
+        """Delegation, not a second implementation."""
+        stations = [{"id": "st-1", "name": "Оболонь"}]
+        c = ctx("на Оболоні", stations=stations)
+        parsed = PARSER.parse(c)
+
+        with patch(
+            "src.agent.parsers.station_parser.resolve_station_from_session",
+            return_value="sentinel",
+        ) as core:
+            assert await PARSER.aresolve(c, parsed) == "sentinel"
+
+        core.assert_called_once_with(c, parsed)

@@ -979,18 +979,34 @@ class CallPipeline:
     def _run_fsm_deterministic_step(self, transcript: Transcript) -> None:
         """Advance the FSM from deterministic evidence only. No I/O.
 
-        Targeted pass first, broad pass second (§3.1). The state knows which
-        question it just asked, so its own parser earns the higher confidence;
-        the broad `compound_parse` sweep then fills *other* fields via
-        `setdefault` and is not allowed to overwrite anything — least of all
-        the targeted parser's deliberate refusal on its own field.
+        Three passes, in this order (§3.1):
 
-        Both passes are pure regex over the utterance and the engine only
-        touches session fields, so this is safe to run in shadow mode: zero LLM
-        requests, zero Store API calls, and the method is synchronous — no
-        await → no network. `FieldParser.aresolve` is never called and
-        `ParseContext.conn` stays `None`, which is the gate that enforces it
-        (§3.2 rule 3).
+        1. **targeted** — the state knows which question it just asked, so its
+           own parser earns the higher confidence. For STATION the parser only
+           produces a landmark, so `resolve_station_from_session` finishes the
+           job in the same step (see below).
+        2. **passive** — `name` and `diameter` belong to no MAIN_FLOW state
+           (`PASSIVE_PARSERS`). They run while their field is empty, write
+           through `setdefault` and **never** call `apply_field`: that would
+           advance the machine along the *passive* parser's step instead of the
+           caller's, which is the `c8c6601` defect class.
+        3. **broad** — the `compound_parse` sweep fills *other* fields via
+           `setdefault` and is not allowed to overwrite anything — least of all
+           the targeted parser's deliberate refusal on its own field.
+
+        Every pass is pure regex over the utterance plus lookups in fields the
+        session already holds, and the engine only touches session fields, so
+        this is safe to run in shadow mode: zero LLM requests, zero Store API
+        calls, and the method is synchronous — no await → no network.
+
+        `FieldParser.aresolve` is never awaited and `ParseContext.conn` stays
+        `None`, which is the gate that enforces it (§3.2 rule 3). Wave 6-C
+        sharpens what that rule protects: it forbids **network**, not the word
+        `aresolve`. The station resolver reads
+        `session.fitting_stations_seen` — the snapshot `get_fitting_stations`
+        already wrote — so it is called synchronously and runs in shadow too.
+        `brand_parser`'s resolver needs `ctx.conn` for the alias table, is real
+        I/O, and therefore stays live-only and uncalled from here.
 
         Exceptions are caught so a broken FSM never drops a live call, but they
         are logged at ERROR with a traceback. ``contextlib.suppress`` is
@@ -1002,7 +1018,8 @@ class CallPipeline:
             from src.agent.fitting_fsm import STATES, FsmEngine
             from src.agent.interrupts import classify_interrupt_text
             from src.agent.parsers.base import ParseContext
-            from src.agent.parsers.registry import get_parser
+            from src.agent.parsers.registry import PASSIVE_PARSERS, get_parser
+            from src.agent.parsers.station_parser import resolve_station_from_session
 
             engine = FsmEngine(self._session)
             engine.start()
@@ -1063,6 +1080,32 @@ class CallPipeline:
                 )
             else:
                 targeted = parser.parse(ctx)
+                # `station_parser.parse` cannot reach `status="value"` by
+                # construction — it hands back the landmark («Оболонь»), and a
+                # landmark is not a `station_id`. Only the resolver closes that
+                # gap, and until Wave 6-C it had no call site anywhere in
+                # `src/`: STATION was a dead end that 12 of 16 replayed calls
+                # died in.
+                #
+                # Dispatched on `field_name`, not on `isinstance` and not on
+                # the `cfg.parser` string: `field_name` is what the write two
+                # lines below already keys on, so there is one identity for the
+                # field in this block instead of two that can drift.
+                #
+                # No `await` and no `ctx.conn`: the resolver reads
+                # `session.fitting_stations_seen`, the snapshot
+                # `get_fitting_stations` wrote on entry. Network resolvers
+                # (brand) stay shut behind `conn is None`.
+                if (
+                    parser.field_name == "station_id"
+                    and targeted.status == "unresolved"
+                    and targeted.value
+                ):
+                    targeted = resolve_station_from_session(ctx, targeted)
+                # Same assignment as before, on purpose: this is the targeted
+                # parser finishing its own field, not a find from the side, so
+                # `claimed` still points at `station_id` and the broad pass is
+                # still locked out of it.
                 if targeted.status == "value" and parser.field_name:
                     self._session.fsm_filled_fields[parser.field_name] = targeted.value
 
@@ -1078,6 +1121,60 @@ class CallPipeline:
                 if parser is not None and parser.field_name and parser.field_name == own_field
                 else None
             )
+
+            # --- passive pass ---
+            # `name` and `diameter` belong to no MAIN_FLOW state, so nothing in
+            # the seam ever filled them: `PASSIVE_PARSERS` had zero call sites
+            # in `src/`, `fsm_filled_fields["name"]` stayed empty for the whole
+            # call, and CONFIRM lists `name` in `required_context`. Measured
+            # cost of that gap: the bot asks «Як до вас звертатися?» while the
+            # FSM sits in CITY, and the correct answer is written off as a
+            # failed city answer — 8 such charges in one day.
+            #
+            # These parsers write and never advance. `apply_field` moves the
+            # machine to the CURRENT state's `next_state` regardless of which
+            # step the field belongs to, so a passive parser calling it would
+            # walk the FSM down a step the caller never answered — `c8c6601`
+            # arriving through the back door (`registry.py:22-25`).
+            passive_filled: dict[str, str] = {}
+            for passive_name in PASSIVE_PARSERS:
+                passive = get_parser(passive_name)
+                if passive is None or not passive.field_name:
+                    continue
+                passive_field = passive.field_name
+                # PRICE_INTERRUPT owns `diameter`: the targeted pass has
+                # already run `diameter_parser` this turn and `claimed` now
+                # protects the field whatever it answered. A second run would
+                # reach around that guard — and `claimed` is only ever
+                # `own_field`, so this one skip covers both.
+                if passive_field == own_field:
+                    continue
+                # «Run on every turn *while the field is empty*»
+                # (`registry.py:83`). Checked before `parse()`, not after, so a
+                # filled field costs nothing per turn.
+                if self._session.fsm_filled_fields.get(passive_field) not in (None, ""):
+                    continue
+                passive_outcome = passive.parse(ctx)
+                if passive_outcome.status != "value":
+                    continue
+                # `setdefault`, never assignment: two passive parsers naming the
+                # same field must not overwrite each other, and the first write
+                # of a turn is the one that wins everywhere else in this seam.
+                self._session.fsm_filled_fields.setdefault(passive_field, passive_outcome.value)
+                passive_filled[passive_name] = passive_field
+                # The value is PII (`name`). The neighbouring seam log prints
+                # `mapped`, which can never carry a name — `name` is absent
+                # from COMPOUND_TO_FSM_FIELD on purpose — so this line must not
+                # be the one that starts printing it. Parser, field and state
+                # only.
+                logger.info(
+                    "fsm_passive_fill call=%s parser=%s field=%s state=%s",
+                    self._session.channel_uuid,
+                    passive_name,
+                    passive_field,
+                    state_before.value,
+                    extra={"call_id": str(self._session.channel_uuid)},
+                )
 
             # --- broad pass ---
             parsed = compound_parse(transcript.text)
@@ -1139,6 +1236,28 @@ class CallPipeline:
                             interrupt_kind,
                             transcript.text,
                             advance=advance,
+                        )
+                    elif passive_filled:
+                        # Same shape as the interrupt exemption above, same
+                        # reason. The bot asked «Як до вас звертатися?» while
+                        # the FSM sat in CITY; the caller answered it
+                        # correctly. That turn is not a failed city answer, and
+                        # charging it to CITY's `max_parser_null` is what put 8
+                        # calls a day one step closer to an operator.
+                        #
+                        # This exemption cannot loop: a passive parser runs
+                        # only while its field is empty, so each of the two
+                        # passive fields can excuse at most one turn per call.
+                        # That bound is structural, not a cap someone has to
+                        # remember to lower (`feedback_guard_needs_loop_breaker`).
+                        logger.info(
+                            "fsm_parser_null_excused call=%s state=%s field=%s "
+                            "passive=%s",
+                            self._session.channel_uuid,
+                            state_before.value,
+                            own_field,
+                            sorted(passive_filled),
+                            extra={"call_id": str(self._session.channel_uuid)},
                         )
                     else:
                         state_after = engine.on_parser_null(

@@ -1372,3 +1372,578 @@ class TestFreezeDoesNotDoubleTheResumePhrase:
         assert reply, "the price answer itself must still be spoken"
         for state in FROZEN_STATES:
             assert STATES[state].resume_phrase not in reply, reply
+
+
+# ---------------------------------------------------------------------------
+# Wave 6-C — the passive pass
+# ---------------------------------------------------------------------------
+
+
+NAME_QUESTION = "Як до вас звертатися?"
+DIAMETER_QUESTION = "Який діаметр коліс, підкажіть будь ласка?"
+
+
+def with_registry(passive: tuple[str, ...], extra: dict[str, Any] | None = None):
+    """Patch `PASSIVE_PARSERS` (and optionally `PARSERS`) for one test.
+
+    The seam imports both names from `src.agent.parsers.registry` *inside* the
+    method, so patching the module attributes is what the production code
+    actually reads — not a copy that only the test sees.
+    """
+    from src.agent.parsers import registry
+
+    parsers = dict(registry.PARSERS)
+    parsers.update(extra or {})
+    return (
+        patch.object(registry, "PASSIVE_PARSERS", passive),
+        patch.object(registry, "PARSERS", parsers),
+    )
+
+
+class TestPassivePass:
+    """`PASSIVE_PARSERS` had zero call sites in `src/` — this is the one.
+
+    `name` and `diameter` belong to no MAIN_FLOW state, so before Wave 6-C
+    nothing ever wrote them into `fsm_filled_fields`, while CONFIRM lists
+    `name` in `required_context`. The measured cost: the bot asks «Як до вас
+    звертатися?» with the FSM parked in CITY, and the correct answer is charged
+    to CITY's `max_parser_null` — 8 times in one day.
+    """
+
+    async def test_the_name_answer_lands_while_the_fsm_waits_for_a_city(self) -> None:
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+        h.session.add_assistant_turn(NAME_QUESTION)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("Юра")
+
+        assert h.session.fsm_filled_fields.get("name") == "Юра"
+
+    async def test_the_machine_does_not_move_on_a_passive_fill(self) -> None:
+        """A passive parser must never reach `apply_field`.
+
+        `apply_field` advances to the *current* state's `next_state` whatever
+        field it is handed, so `apply_field("name", …)` in CITY would hop the
+        FSM to STATION on a turn that said nothing about a station — `c8c6601`
+        through the back door (`registry.py:22-25`).
+        """
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+        h.session.add_assistant_turn(NAME_QUESTION)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("Юра")
+
+        assert h.session.fsm_state == FsmState.CITY.value
+        assert ("CITY", "STATION") not in fsm_hops(h.session)
+
+    async def test_answering_the_name_question_is_not_charged_to_the_city(self) -> None:
+        """The 8 write-offs. Same exemption shape as an interrupt turn.
+
+        The caller answered the question the bot actually asked. Charging that
+        to CITY's `max_parser_null` is what walked calls towards an operator
+        three turns early.
+        """
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+        h.session.add_assistant_turn(NAME_QUESTION)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("Юра")
+
+        assert h.session.fsm_parser_null_counts.get("CITY", 0) == 0
+
+    async def test_the_exemption_cannot_be_spent_twice(self) -> None:
+        """The loop-breaker is structural, not a cap to remember.
+
+        A passive parser runs only while its field is empty, so `name` can
+        excuse exactly one turn. The next unparsable turn is charged normally.
+        """
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+        h.session.add_assistant_turn(NAME_QUESTION)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("Юра", "ага")
+
+        assert h.session.fsm_filled_fields.get("name") == "Юра"
+        assert h.session.fsm_parser_null_counts.get("CITY", 0) == 1
+
+    async def test_a_turn_with_no_passive_fill_is_still_charged(self) -> None:
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+        h.session.add_assistant_turn(NAME_QUESTION)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("ага")
+
+        assert h.session.fsm_parser_null_counts.get("CITY", 0) == 1
+
+    async def test_the_diameter_is_captured_from_the_main_flow(self) -> None:
+        """`diameter_parser` is state-bound *and* passive.
+
+        No MAIN_FLOW state owns `diameter` — only the PRICE_INTERRUPT side
+        door does — so without the passive pass a diameter named in CITY is
+        lost to the FSM entirely.
+        """
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+        h.session.add_assistant_turn(DIAMETER_QUESTION)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("R16")
+
+        assert h.session.fsm_filled_fields.get("diameter") == 16
+        assert h.session.fsm_state == FsmState.CITY.value
+
+    async def test_the_state_that_owns_the_field_runs_its_parser_once(self) -> None:
+        """PRICE_INTERRUPT owns `diameter`; the passive pass must skip it.
+
+        `field_name == own_field` is the skip, and `claimed` is only ever
+        `own_field`, so this one condition is also what keeps the passive pass
+        from reaching around the targeted parser's refusal.
+        """
+        from src.agent.parsers import diameter_parser
+
+        calls: list[Any] = []
+        real_parse = diameter_parser.PARSER.parse
+
+        def _spy(ctx: Any) -> Any:
+            calls.append(ctx)
+            return real_parse(ctx)
+
+        h = Harness(booking_in_progress(FsmState.PRICE_INTERRUPT))
+        h.session.add_assistant_turn(DIAMETER_QUESTION)
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=True),
+            patch.object(diameter_parser.PARSER, "parse", _spy),
+        ):
+            # A turn with no diameter in it on purpose: the targeted pass then
+            # leaves `diameter` empty, so the «field already filled» skip can
+            # not be what stops the second run. Only the `own_field` skip can.
+            await h.run("ага")
+
+        assert len(calls) == 1, "the passive pass ran the state's own parser again"
+
+    async def test_the_passive_pass_does_not_reach_around_a_refusal(self) -> None:
+        """The semantic half of the same skip.
+
+        The targeted parser refuses `diameter` in PRICE_INTERRUPT. If the
+        passive pass re-ran it, a second answer would land on a field the state
+        deliberately declined to pin — exactly what `claimed` exists to stop.
+        The spy answers `unresolved` first and a value second, so the two
+        behaviours are distinguishable by the field alone.
+        """
+        from src.agent.parsers import diameter_parser
+        from src.agent.parsers.base import graded, unresolved
+
+        answers = [unresolved(0.6, value=16), graded(16, 1.0)]
+
+        def _spy(ctx: Any) -> Any:
+            return answers.pop(0) if answers else graded(16, 1.0)
+
+        h = Harness(booking_in_progress(FsmState.PRICE_INTERRUPT))
+        h.session.add_assistant_turn(DIAMETER_QUESTION)
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=True),
+            patch.object(diameter_parser.PARSER, "parse", _spy),
+        ):
+            await h.run("на 16")
+
+        assert "diameter" not in h.session.fsm_filled_fields
+
+    async def test_a_filled_field_is_not_reparsed(self) -> None:
+        """«Run on every turn *while the field is empty*» (`registry.py:83`)."""
+        from src.agent.parsers import name_parser
+
+        calls: list[Any] = []
+
+        def _spy(ctx: Any) -> Any:
+            calls.append(ctx)
+            raise AssertionError("the passive pass reparsed a filled field")
+
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+        h.session.fsm_filled_fields["name"] = "Олена"
+        h.session.add_assistant_turn(NAME_QUESTION)
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=True),
+            patch.object(name_parser.PARSER, "parse", _spy),
+        ):
+            await h.run("Юра")
+
+        assert not calls
+        assert h.session.fsm_filled_fields["name"] == "Олена"
+
+    async def test_two_passive_parsers_on_one_field_do_not_overwrite(self) -> None:
+        """The first write of the turn wins, whoever the second writer is.
+
+        Honest about what stops it: the «field already filled» guard, re-checked
+        on every iteration, is what makes the second parser a no-op here —
+        `setdefault` is the second layer and does not change the outcome. The
+        one input where the two layers disagree is pinned separately, in
+        `test_an_empty_string_already_in_the_map_is_left_alone`.
+        """
+        from src.agent.parsers.base import graded
+
+        class _SecondNameParser:
+            name = "second_name_parser"
+            field_name = "name"
+            aresolve = None
+
+            def parse(self, ctx: Any) -> Any:
+                return graded("Другий", 1.0)
+
+        passive_patch, parsers_patch = with_registry(
+            ("name_parser", "second_name_parser"),
+            {"second_name_parser": _SecondNameParser()},
+        )
+
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+        h.session.add_assistant_turn(NAME_QUESTION)
+
+        with fsm_flags(enabled=True, shadow_mode=True), passive_patch, parsers_patch:
+            await h.run("Юра")
+
+        assert h.session.fsm_filled_fields["name"] == "Юра"
+
+    async def test_an_empty_string_already_in_the_map_is_left_alone(self) -> None:
+        """The one input that tells `setdefault` from a plain assignment.
+
+        The «already filled» guard reads the *value* (`not in (None, "")`), so
+        a key sitting there with an empty string passes it. `setdefault` reads
+        the *key*, so the passive pass still does not write. That is the
+        intended order of precedence: whoever put the key in `fsm_filled_fields`
+        did so deliberately, and the passive pass is the lowest-priority writer
+        in this seam — it must not be the one that decides another writer was
+        wrong. Without this test the two guards fully overlap and
+        `setdefault → =` is an undetectable mutation.
+        """
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+        h.session.fsm_filled_fields["name"] = ""
+        h.session.add_assistant_turn(NAME_QUESTION)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("Юра")
+
+        assert h.session.fsm_filled_fields["name"] == ""
+
+    @pytest.mark.parametrize("text", ["Ммм", "Що?", "Завтра", "Оболонь"])
+    async def test_without_the_question_a_filler_is_not_a_name(self, text: str) -> None:
+        """The `is_name_question` gate is not optional.
+
+        Ungated, `detect_name` accepts every one of these, and a wrong name is
+        how «Марина» — the bot's own name — reached `book_fitting` on call
+        fcfb26a9.
+        """
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+        h.session.add_assistant_turn("У якому місті вам зручніше?")
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run(text)
+
+        assert "name" not in h.session.fsm_filled_fields
+
+    async def test_an_explicit_self_introduction_still_counts(self) -> None:
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+        h.session.add_assistant_turn("У якому місті вам зручніше?")
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("мене звати Олена")
+
+        assert h.session.fsm_filled_fields.get("name") == "Олена"
+
+    async def test_the_name_never_reaches_the_seams_log_lines(self, caplog) -> None:
+        """`name` is PII: the seam's own lines print fields, not values.
+
+        Scoped to the lines this seam emits. The legacy blocks further down
+        `_transcript_processor_loop` («got transcript», «Name auto-detected»)
+        already print the raw utterance and are not this wave's to change — but
+        the FSM seam must not become a second place that does.
+        """
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+        h.session.add_assistant_turn(NAME_QUESTION)
+
+        with (
+            caplog.at_level(logging.INFO, logger="src.core.pipeline"),
+            fsm_flags(enabled=True, shadow_mode=True),
+        ):
+            await h.run("Юра")
+
+        seam = [
+            r.getMessage()
+            for r in caplog.records
+            if r.getMessage().startswith(
+                ("fsm_passive_fill", "fsm_parser_null_excused", "fsm_shadow")
+            )
+        ]
+        assert any(m.startswith("fsm_passive_fill") for m in seam), (
+            "a passive fill must be visible in the log"
+        )
+        for message in seam:
+            assert "Юра" not in message, message
+
+    async def test_the_passive_pass_carries_no_connection(self) -> None:
+        """Same `ctx` as the targeted pass — no second `ParseContext`, no `conn`."""
+        seen: list[Any] = []
+
+        from src.agent.parsers import name_parser
+
+        real_parse = name_parser.PARSER.parse
+
+        def _spy(ctx: Any) -> Any:
+            seen.append(ctx)
+            return real_parse(ctx)
+
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+        h.session.add_assistant_turn(NAME_QUESTION)
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=True),
+            patch.object(name_parser.PARSER, "parse", _spy),
+        ):
+            await h.run("Юра")
+
+        assert seen and seen[0].conn is None
+        assert seen[0].last_bot_utterance == NAME_QUESTION
+
+
+class TestPassivePassStructure:
+    """The one rule that has to hold whatever the loop is rewritten into."""
+
+    def test_no_apply_field_between_the_claim_and_the_broad_pass(self) -> None:
+        """`apply_field` is called at most once, and never by the passive pass.
+
+        Asserted on the source because the behavioural test above can only
+        catch the states where a stray hop is observable; this catches it
+        everywhere.
+        """
+        import ast
+        import pathlib
+
+        import src.core.pipeline as pipeline_module
+
+        source = pathlib.Path(pipeline_module.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        step = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.name == "_run_fsm_deterministic_step"
+        )
+        passive_loops = [
+            node
+            for node in ast.walk(step)
+            if isinstance(node, ast.For)
+            and isinstance(node.iter, ast.Name)
+            and node.iter.id == "PASSIVE_PARSERS"
+        ]
+        assert len(passive_loops) == 1, "the passive pass is not a single loop"
+        called = {
+            n.func.attr
+            for n in ast.walk(passive_loops[0])
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        }
+        assert "apply_field" not in called
+        assert "on_parser_null" not in called
+        assert "transition" not in called
+
+    def test_the_registry_still_lists_exactly_two_passive_parsers(self) -> None:
+        """A third one would need its own `own_field`/PII review first."""
+        from src.agent.parsers.registry import PASSIVE_PARSERS
+
+        assert PASSIVE_PARSERS == ("name_parser", "diameter_parser")
+
+
+# ---------------------------------------------------------------------------
+# Wave 6-C — STATION stops being a dead end
+# ---------------------------------------------------------------------------
+
+
+def station_in_progress() -> CallSession:
+    """Parked in STATION with the snapshot `get_fitting_stations` would leave."""
+    session = CallSession(uuid.uuid4())
+    session.caller_phone = "+380671234567"
+    session.fsm_state = FsmState.STATION.value
+    session.fsm_filled_fields["intent"] = "fitting"
+    session.fsm_filled_fields["city"] = "Київ"
+    session.fitting_stations_seen = [
+        {"id": "st-1", "name": "Оболонь", "district": "Оболонський"},
+        {"id": "st-2", "name": "Позняки", "district": "Дарницький"},
+    ]
+    return session
+
+
+class TestStationResolvedInTheSeam:
+    """12 of 16 replayed calls died here: `parse()` cannot return an id.
+
+    `station_parser.parse` hands back the landmark by construction, and until
+    Wave 6-C the only code that could turn one into a `station_id` —
+    `_aresolve_station` — had zero call sites in `src/`.
+    """
+
+    async def test_the_landmark_becomes_a_station_id(self) -> None:
+        h = Harness(station_in_progress())
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("на Оболоні")
+
+        assert h.session.fsm_filled_fields.get("station_id") == "st-1"
+
+    async def test_the_fsm_leaves_station(self) -> None:
+        """The dead end, gone.
+
+        Shadow advances on a *filled field* — `advance` gates the parser_null
+        and interrupt paths only (see `TestShadowMode.test_fsm_actually_advances`).
+        """
+        h = Harness(station_in_progress())
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("на Оболоні")
+
+        assert h.session.fsm_state != FsmState.STATION.value
+        assert ("STATION", "STORAGE") in fsm_hops(h.session)
+
+    async def test_live_mode_resolves_it_too(self) -> None:
+        h = Harness(station_in_progress())
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                AsyncMock(return_value=intent("BOOKING", confidence=0.1)),
+            ),
+        ):
+            await h.run("на Оболоні")
+
+        assert h.session.fsm_filled_fields.get("station_id") == "st-1"
+        assert h.session.fsm_state != FsmState.STATION.value
+
+    async def test_an_ambiguous_landmark_is_not_guessed(self) -> None:
+        """«Перемоги» exists in two cities — cross-city guard `13e9ea4`."""
+        h = Harness(station_in_progress())
+        h.session.fitting_stations_seen = [
+            {"id": "st-zp", "name": "Перемоги 72Б", "district": "Запоріжжя"},
+            {"id": "st-dp", "name": "Перемоги 15", "district": "Дніпро"},
+        ]
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("на Перемоги")
+
+        assert "station_id" not in h.session.fsm_filled_fields
+        assert h.session.fsm_state == FsmState.STATION.value
+
+    async def test_no_snapshot_means_no_id(self) -> None:
+        h = Harness(station_in_progress())
+        h.session.fitting_stations_seen = []
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("на Оболоні")
+
+        assert "station_id" not in h.session.fsm_filled_fields
+        assert h.session.fsm_state == FsmState.STATION.value
+
+    async def test_a_turn_without_a_landmark_is_still_charged(self) -> None:
+        """STATION keeps its budget — the wave lifts the dead end, not the guard."""
+        h = Harness(station_in_progress())
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("ага")
+
+        assert h.session.fsm_parser_null_counts.get("STATION", 0) == 1
+        assert "station_id" not in h.session.fsm_filled_fields
+
+    async def test_the_broad_pass_is_still_locked_out_of_the_field(self) -> None:
+        """The resolve finishes the targeted parser's own work.
+
+        So `claimed` must still point at `station_id`: an unresolved landmark
+        is a refusal, and `setdefault` from the broad sweep must not fill it.
+        """
+        from src.agent.parsers import station_parser
+
+        h = Harness(station_in_progress())
+        h.session.fitting_stations_seen = []
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=True),
+            patch.dict(
+                "src.core.pipeline.COMPOUND_TO_FSM_FIELD",
+                {"station_hint": "station_id"},
+            ),
+        ):
+            await h.run("на Оболоні")
+
+        assert "station_id" not in h.session.fsm_filled_fields, (
+            "the broad pass wrote a landmark over the targeted refusal"
+        )
+        assert station_parser.PARSER.field_name == "station_id"
+
+    async def test_only_the_station_field_is_resolved_this_way(self) -> None:
+        """The resolver is dispatched on `field_name`, and that guard is load-bearing.
+
+        `unresolved(value=…)` is a documented pattern, not station-only: any
+        parser may hand back a hint it could not pin (`base.py:133-149`). Run
+        the station resolver over one of *those* and the seam writes a
+        `station_id` into a field that is not `station_id` — a value from a
+        different domain entirely, pinned hard enough to skip the state.
+        `c8c6601`, with an extra step.
+        """
+        from src.agent.parsers import city_parser
+        from src.agent.parsers.base import unresolved
+
+        h = Harness(station_in_progress())
+        h.session.fsm_state = FsmState.CITY.value
+        h.session.fsm_filled_fields.pop("city", None)
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=True),
+            patch.object(
+                city_parser.PARSER,
+                "parse",
+                lambda ctx: unresolved(0.5, value="Оболонь"),
+            ),
+        ):
+            await h.run("десь на Оболоні")
+
+        assert h.session.fsm_filled_fields.get("city") != "st-1", (
+            "a station id was pinned as the city"
+        )
+        assert h.session.fsm_state == FsmState.CITY.value
+
+    async def test_the_seam_still_awaits_nothing(self) -> None:
+        """The resolver is sync; `ParseContext.conn` stays the gate for the rest."""
+        seen: list[Any] = []
+
+        from src.agent.parsers import station_parser
+
+        real_parse = station_parser.PARSER.parse
+
+        def _spy(ctx: Any) -> Any:
+            seen.append(ctx)
+            return real_parse(ctx)
+
+        h = Harness(station_in_progress())
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=True),
+            patch.object(station_parser.PARSER, "parse", _spy),
+            patch.object(
+                station_parser,
+                "_aresolve_station",
+                AsyncMock(side_effect=AssertionError("the seam awaited a resolver")),
+            ),
+        ):
+            await h.run("на Оболоні")
+
+        assert seen and seen[0].conn is None
+        assert h.session.fsm_filled_fields.get("station_id") == "st-1"
