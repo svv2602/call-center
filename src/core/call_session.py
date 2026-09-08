@@ -177,6 +177,24 @@ class CallSession:
         # Ring buffer of the last FSM_HISTORY_LIMIT transitions:
         # {"t": float, "from": str|None, "to": str, "event": str, "payload": dict|None}
         self.fsm_history: list[dict[str, Any]] = []
+        # --- Side-door interrupt state (Wave 3-B, 2026-09-08) ---
+        # Read/written by `src/agent/interrupts.py`. These MUST survive the
+        # Redis round-trip: the Call Processor is stateless and reloads the
+        # session on every turn, so a field kept only on the in-memory object
+        # is reset before the next turn ever sees it. That is precisely what
+        # broke the first attempt (`c8c6601`): the loop-breaker counter below
+        # was lost each turn, the cap never tripped, and the PRICE handler
+        # repeated the same reply five times in a row.
+        # Handler name → how many times it fired during this call. The cap on
+        # this counter is the structural loop-breaker for the interrupt
+        # handlers (a prompt rule cannot do this job).
+        self.interrupt_counts: dict[str, int] = {}
+        # Multi-turn cancel sub-flow: None | "awaiting_selection" |
+        # "awaiting_confirmation:<booking_id>".
+        self.pending_cancel_action: str | None = None
+        # True while the price handler is waiting for the caller to name a
+        # wheel diameter it asked for on a previous turn.
+        self.pending_price_interrupt_needs_diameter: bool = False
 
     # --- State transitions ---
 
@@ -301,6 +319,11 @@ class CallSession:
             "fsm_filled_fields": dict(self.fsm_filled_fields),
             "fsm_prev_state": self.fsm_prev_state,
             "fsm_history": list(self.fsm_history[-FSM_HISTORY_LIMIT:]),
+            "interrupt_counts": dict(self.interrupt_counts),
+            "pending_cancel_action": self.pending_cancel_action,
+            "pending_price_interrupt_needs_diameter": (
+                self.pending_price_interrupt_needs_diameter
+            ),
             "dialog_history": [
                 {
                     "speaker": t.speaker,
@@ -385,6 +408,48 @@ class CallSession:
                 "Call %s: fsm_history has unexpected type %s — ignoring",
                 data.get("channel_uuid"),
                 type(history).__name__,
+            )
+        # --- Side-door interrupt state (Wave 3-B) ---
+        # A malformed value here must never silently become an empty default:
+        # that would reset the loop-breaker and let a handler fire forever.
+        counts = data.get("interrupt_counts") or {}
+        if isinstance(counts, dict):
+            clean: dict[str, int] = {}
+            for key, value in counts.items():
+                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                    logger.warning(
+                        "Call %s: interrupt_counts[%r] has unexpected value %r — ignoring",
+                        data.get("channel_uuid"),
+                        key,
+                        value,
+                    )
+                    continue
+                clean[str(key)] = value
+            session.interrupt_counts = clean
+        else:
+            logger.warning(
+                "Call %s: interrupt_counts has unexpected type %s — ignoring",
+                data.get("channel_uuid"),
+                type(counts).__name__,
+            )
+        pending_cancel = data.get("pending_cancel_action")
+        if pending_cancel is None or isinstance(pending_cancel, str):
+            session.pending_cancel_action = pending_cancel
+        else:
+            logger.warning(
+                "Call %s: pending_cancel_action has unexpected type %s — ignoring",
+                data.get("channel_uuid"),
+                type(pending_cancel).__name__,
+            )
+        needs_diameter = data.get("pending_price_interrupt_needs_diameter", False)
+        if isinstance(needs_diameter, bool):
+            session.pending_price_interrupt_needs_diameter = needs_diameter
+        else:
+            logger.warning(
+                "Call %s: pending_price_interrupt_needs_diameter has unexpected type %s "
+                "— ignoring",
+                data.get("channel_uuid"),
+                type(needs_diameter).__name__,
             )
         session.dialog_history = [
             DialogTurn(
