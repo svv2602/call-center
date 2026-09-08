@@ -58,12 +58,14 @@ logger = logging.getLogger(__name__)
 # not landed yet — a missing counter must never break the call flow.
 try:  # pragma: no cover - import-time branch
     from src.monitoring.metrics import (
+        fsm_parser_null_total,
         fsm_state_entered_total,
         fsm_transition_total,
     )
 
     _METRICS_AVAILABLE = True
 except ImportError:  # pragma: no cover - Wave 1-C not merged yet
+    fsm_parser_null_total = None  # type: ignore[assignment]
     fsm_state_entered_total = None  # type: ignore[assignment]
     fsm_transition_total = None  # type: ignore[assignment]
     _METRICS_AVAILABLE = False
@@ -203,6 +205,59 @@ def _filled(session: CallSession, name: str) -> bool:
     return value is not None and value != ""
 
 
+#: Value COLOR stores when the colour could not be heard after
+#: `max_parser_null` attempts. Copied verbatim from the Wave 5 prompt rule
+#: (`src/agent/prompts.py`, Krok 5: «передавай "колір не розчула" у
+#: book_fitting і рухайся далі»), so downstream guards keep recognising it and
+#: the FSM introduces no new phrase of its own.
+COLOR_NOT_HEARD = "колір не розчула"
+
+
+# --- `on_null_exhausted` branches (spec §3.7 table, Wave 6-B) ------------------
+#
+# Three of the fifteen states have a documented answer to "the parser failed
+# `max_parser_null` times in a row" that is *not* «hand the caller to an
+# operator». The other twelve keep `None` and fall through to
+# `escalate_target`, which is row 47 of §2.2.
+#
+# Two of the three write a value into the session. That side effect is what
+# makes a 16th state `BRAND_TYPE_FALLBACK` pointless: `on_null_exhausted` is
+# side-effecting by construction here, so BRAND setting a flag is not a new
+# kind of thing (README §6 of the Wave 6-B checklist).
+
+
+def _storage_null_exhausted(session: CallSession) -> FsmState:
+    """STORAGE (row 12): default to «own» rather than ask a third time.
+
+    The overwhelming majority of callers bring their own tires; a caller with a
+    storage contract is asked about it again downstream (`find_storage` runs as
+    STORAGE's `exit_tool`), so the cheap default is the safe one.
+    """
+    session.fsm_filled_fields["storage_choice"] = "own"
+    return FsmState.DATE
+
+
+def _color_null_exhausted(session: CallSession) -> FsmState:
+    """COLOR (row 20): record «колір не розчула» and move on.
+
+    Wording taken verbatim from the Wave 5 escape hatch already in the prompt —
+    this is not a new phrase invented by the FSM.
+    """
+    session.fsm_filled_fields["color"] = COLOR_NOT_HEARD
+    return FsmState.BRAND
+
+
+def _brand_null_exhausted(session: CallSession) -> FsmState:
+    """BRAND (row 23): stay in BRAND, but switch to the car-type question.
+
+    Unlike the other two this writes no value: an unheard brand must not be
+    guessed. It flips a session flag that `next_question()` reads, so the state
+    asks `StateConfig.fallback_question` from here on.
+    """
+    session.fsm_brand_type_fallback = True
+    return FsmState.BRAND
+
+
 @dataclass(frozen=True)
 class StateConfig:
     """Everything the engine needs to run one state (§2.3).
@@ -243,8 +298,22 @@ class StateConfig:
     exit_tool: str | None = None
 
     # --- Anti-regression ---
+    #: How many turns in a row this state's parser may come back without a
+    #: usable value before `on_null_exhausted` / `escalate_target` takes over.
+    #: Read by `FsmEngine.on_parser_null()` (Wave 6-B).
     max_parser_null: int = 3
+    #: Last resort when the attempts are used up and there is no branch. Row 47
+    #: of §2.2 — an operator, never «hand it back to the LLM».
     escalate_target: FsmState = FsmState.TRANSFER
+    #: What to do instead of escalating. `None` for the twelve states whose
+    #: answer really is «transfer» (§3.7 table). The three that have one are
+    #: STORAGE, COLOR and BRAND.
+    on_null_exhausted: Callable[[CallSession], FsmState] | None = None
+    #: Asked instead of `question_template` once `on_null_exhausted` flipped
+    #: this state's fallback flag. Only BRAND has one (row 23). Every string
+    #: the bot may speak lives in `STATES`, including this one — a handler that
+    #: hardcodes a phrase is the `c8c6601` failure mode.
+    fallback_question: str | None = None
     terminal: bool = False
 
 
@@ -305,6 +374,7 @@ STATES: dict[FsmState, StateConfig] = {
         required_context=("station_id",),
         exit_tool="find_storage",  # only when choice == "contract"
         max_parser_null=2,  # anti-loop: after 2 nulls default to "own"
+        on_null_exhausted=_storage_null_exhausted,
         auto_skip_if=lambda s: _filled(s, "storage_choice"),
     ),
     FsmState.DATE: StateConfig(
@@ -341,6 +411,7 @@ STATES: dict[FsmState, StateConfig] = {
         next_state=FsmState.BRAND,
         required_context=("time",),
         max_parser_null=3,  # after 3 nulls → «колір не розчула»
+        on_null_exhausted=_color_null_exhausted,
         auto_skip_if=lambda s: _filled(s, "color"),
     ),
     FsmState.BRAND: StateConfig(
@@ -353,6 +424,14 @@ STATES: dict[FsmState, StateConfig] = {
         next_state=FsmState.CONFIRM,
         required_context=("color",),
         max_parser_null=2,  # then the type-fallback branch (row 23)
+        on_null_exhausted=_brand_null_exhausted,
+        # Verbatim from the Wave 6 rule already in `src/agent/prompts.py`
+        # (Krok 6, «ПІСЛЯ 2 НЕВДАЛИХ ПЕРЕПИТУВАНЬ МАРКИ → ПЕРЕЙДИ ДО ТИПУ
+        # АВТО»). The FSM must not invent a phrase the prompt never had.
+        fallback_question=(
+            "Уточніть, будь ласка, тип автомобіля: легкове, позашляховик (SUV), "
+            "мікроавтобус чи вантажне?"
+        ),
         auto_skip_if=lambda s: _filled(s, "brand"),
     ),
     FsmState.CONFIRM: StateConfig(
@@ -925,15 +1004,30 @@ class FsmEngine:
         payload: dict[str, Any] | None,
     ) -> None:
         self.session.fsm_state = state.value
+        if from_state is not None and from_state is not state:
+            # Leaving a state clears its parser_null budget. Without this the
+            # counter is effectively global: three nulls spread over CITY,
+            # DATE and BRAND would escalate a call in which every state was
+            # answered on the second try.
+            self._null_counts().pop(from_state.value, None)
+            self._clear_fallback(from_state)
         self._record_history(from_state, state, event, payload)
         self._emit_metrics(from_state, state)
+        # Fields go into the message, not into `extra`: `JSONFormatter` only
+        # forwards a fixed whitelist of record attributes (`call_id`,
+        # `request_id`, `duration_ms`, `tool`, `success`) and drops everything
+        # else, so an `extra={"from_state": …}` would look done and log
+        # nothing. `call_id` is the one key the whitelist does pass, so it is
+        # given both ways — queryable as a field, readable in the line.
         logger.info(
-            "fsm_transition call=%s from=%s to=%s event=%s payload=%s",
+            "fsm_transition call=%s from=%s to=%s event=%s fields=%d payload=%s",
             self.session.channel_uuid,
             from_state.value if from_state else None,
             state.value,
             event.value,
+            len(self.session.fsm_filled_fields),
             payload,
+            extra={"call_id": str(self.session.channel_uuid)},
         )
 
     def _record_history(
@@ -985,6 +1079,14 @@ class FsmEngine:
 
         self.session.fsm_filled_fields[field_name] = value
         cfg = self.config()
+        # FIELD_FILLED clears this state's parser_null budget (§3.7). Doing it
+        # here rather than only on state exit matters for the self-looping
+        # states (PRICE_INTERRUPT, CANCEL_INTERRUPT): a caller who finally
+        # names a diameter on the third try must not be one null away from an
+        # escalation for the rest of the call.
+        if cfg.field_name == field_name:
+            self._null_counts().pop(cfg.state.value, None)
+            self._clear_fallback(cfg.state)
         target = cfg.next_state or cfg.state
         self.transition(
             target,
@@ -1034,11 +1136,188 @@ class FsmEngine:
             self.session.channel_uuid,
         )
 
+    # --- parser_null (Wave 6-B, §3.7) ---
+
+    def _null_counts(self) -> dict[str, int]:
+        """The live `fsm_parser_null_counts` dict, tolerating an old session.
+
+        Shaped after `_counts()` in `src/agent/interrupts.py`: a session
+        restored from a Redis payload written before this field existed has no
+        attribute at all, and the loop-breaker must degrade to «start counting»
+        rather than to `AttributeError` inside a live call.
+        """
+        counts = getattr(self.session, "fsm_parser_null_counts", None)
+        if not isinstance(counts, dict):
+            counts = {}
+            self.session.fsm_parser_null_counts = counts
+        return counts
+
+    def parser_null_count(self, state: FsmState | None = None) -> int:
+        """How many consecutive nulls `state` has already collected."""
+        return self._null_counts().get((state or self.current_state()).value, 0)
+
+    def on_parser_null(
+        self,
+        field_name: str | None = None,
+        customer_text: str = "",
+        *,
+        advance: bool = True,
+    ) -> FsmState:
+        """The state's parser produced nothing usable this turn (§3.7).
+
+        Both `unresolved` («they said something we could not pin down») and
+        `not_mentioned` («they said nothing about it») land here — the spec
+        gives them the same PARSER_NULL row, and the difference is in how the
+        re-ask is *phrased*, which is the LLM's job, not the router's.
+
+        ::
+
+            count = ++fsm_parser_null_counts[state]
+            count <  max_parser_null → re-ask, stay put
+            count >= max_parser_null → on_null_exhausted(), or
+                                       ESCALATE → escalate_target
+
+        Returns the state the caller ends up in. Staying put is a real answer
+        and is returned as the current state, not as `None`.
+
+        `advance=False` — observe only
+        ------------------------------
+        The counter, the metric and the log line still happen; the machine does
+        not move. This is the shadow-mode call: shadow's whole contract is that
+        it observes without reaching the customer, and an observer that walks
+        itself into `escalate_target` lands in TERMINAL, where every later turn
+        of that call is skipped and the observation stops. Since one WELCOME
+        without a detected `intent` would spend the default budget of 3 in the
+        first three turns, an advancing shadow would go blind on exactly the
+        calls it exists to measure. The counter is deliberately still bumped:
+        «how often would we have escalated» is the number the shadow period is
+        being run to collect.
+        """
+        state = self.current_state()
+        cfg = STATES[state]
+        counts = self._null_counts()
+        count = counts.get(state.value, 0) + 1
+        counts[state.value] = count
+
+        field = field_name or cfg.field_name or ""
+        self._emit_parser_null_metric(field, state)
+        # The customer's own words go into the *message*, never into `extra`:
+        # `JSONFormatter` runs `sanitize_pii` on `record.getMessage()` only, so
+        # an `extra={"text": ...}` would ship a raw phone number to the log
+        # store untouched. Truncated to 100 chars — enough to see what the
+        # parser choked on, short enough not to turn the log into a transcript.
+        logger.info(
+            "fsm_parser_null call=%s state=%s field=%s attempt=%d/%d text=%r",
+            self.session.channel_uuid,
+            state.value,
+            field or "none",
+            count,
+            cfg.max_parser_null,
+            (customer_text or "")[:100],
+            extra={"call_id": str(self.session.channel_uuid)},
+        )
+
+        if not advance:
+            logger.debug(
+                "fitting_fsm: observe-only parser_null in %s (call %s) — the "
+                "machine stays put",
+                state,
+                self.session.channel_uuid,
+            )
+            return state
+
+        if count < cfg.max_parser_null:
+            # Re-ask. The text is `question_template` / `silence_reprompt` of
+            # this same state — the FSM never invents a new line for a retry.
+            self.transition(
+                state,
+                event=FsmEvent.PARSER_NULL,
+                payload={"field": field, "attempt": count, "action": "reask"},
+            )
+            return state
+
+        if cfg.on_null_exhausted is not None:
+            try:
+                target = cfg.on_null_exhausted(self.session)
+            except Exception:
+                # A broken branch must not strand the caller in the state that
+                # already failed them `max_parser_null` times. Escalate, and
+                # make the defect visible with its traceback — `contextlib
+                # .suppress` on this path is what `37fb2d0` cost us.
+                logger.exception(
+                    "fitting_fsm: on_null_exhausted raised for state %s (call %s) "
+                    "— escalating to %s instead",
+                    state,
+                    self.session.channel_uuid,
+                    cfg.escalate_target,
+                )
+                target = cfg.escalate_target
+                return self.transition(
+                    target,
+                    event=FsmEvent.ESCALATE,
+                    payload={"field": field, "attempt": count, "reason": "branch_failed"},
+                )
+            counts.pop(state.value, None)  # the branch answered it — budget spent
+            return self.transition(
+                target,
+                event=FsmEvent.FIELD_FILLED,
+                payload={"field": field, "attempt": count, "action": "null_exhausted"},
+            )
+
+        counts.pop(state.value, None)
+        return self.transition(
+            cfg.escalate_target,
+            event=FsmEvent.ESCALATE,
+            payload={"field": field, "attempt": count, "reason": "parser_null"},
+        )
+
+    def _emit_parser_null_metric(self, field: str, state: FsmState) -> None:
+        if not _METRICS_AVAILABLE:
+            return
+        try:
+            fsm_parser_null_total.labels(field=field or "none", state=state.value).inc()
+        except Exception:
+            logger.exception(
+                "fitting_fsm: failed to emit fsm_parser_null_total for %s/%s", state, field
+            )
+
     # --- Rendering ---
 
     def next_question(self, state: FsmState | None = None) -> str:
-        """Question for `state` with placeholders filled from the session."""
-        return self.render(self.config(state).question_template)
+        """Question for `state` with placeholders filled from the session.
+
+        When the state has a `fallback_question` and its session flag is set,
+        that is what gets asked. Today that is BRAND only: after
+        `max_parser_null` unheard brands the bot switches to the car *type*
+        instead of asking «Яка марка вашого авто?» a third time (§3.7 row 23).
+        """
+        target = state or self.current_state()
+        cfg = self.config(target)
+        if cfg.fallback_question and self._fallback_active(target):
+            return self.render(cfg.fallback_question)
+        return self.render(cfg.question_template)
+
+    def _fallback_active(self, state: FsmState) -> bool:
+        """Is `state`'s `on_null_exhausted` fallback currently engaged?
+
+        One state, one flag — deliberately not a generic dict. A second
+        fallback would add a second named flag here, which keeps every one of
+        them greppable instead of hiding behind a computed key.
+        """
+        if state is FsmState.BRAND:
+            return bool(getattr(self.session, "fsm_brand_type_fallback", False))
+        return False
+
+    def _clear_fallback(self, state: FsmState) -> None:
+        """Retire the fallback together with the counter that armed it.
+
+        Same two moments as `fsm_parser_null_counts`: FIELD_FILLED for this
+        state's own field, and leaving the state. A flag that outlives its
+        counter would have BRAND asking for the car type on a later pass through
+        the state, for a caller whose brand was heard the first time.
+        """
+        if state is FsmState.BRAND:
+            self.session.fsm_brand_type_fallback = False
 
     def silence_reprompt(self, state: FsmState | None = None) -> str | None:
         """Per-state TIMEOUT text (Wave 5 targeted reprompts), if any."""

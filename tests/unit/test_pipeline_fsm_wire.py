@@ -18,6 +18,8 @@ against a production method that did not exist.
 from __future__ import annotations
 
 import contextlib
+import datetime
+import inspect
 import logging
 import uuid
 from types import SimpleNamespace
@@ -46,6 +48,12 @@ from src.llm.models import Usage
 from src.stt.base import Transcript
 
 LLM_REPLY = "Відповідь від LLM."
+
+#: Pinned «today» for the mapping seam. Wave 6-B routes `date` through
+#: `date_parser`, which refuses to read the process clock: a test that cannot
+#: pin today cannot assert what «завтра» resolves to. A Monday, so a weekday
+#: hint has an unambiguous next occurrence.
+_NOW = datetime.datetime(2026, 8, 3, 10, 0, tzinfo=datetime.UTC)
 
 
 # ---------------------------------------------------------------------------
@@ -725,9 +733,13 @@ class TestLowConfidenceFallback:
         mapped = map_compound_fields_to_fsm(
             {"city": "Дніпро", "date_hint": "5 серпня"},
             {"city": 0.4, "date_hint": 0.9},
+            customer_text="Дніпро, 5 серпня",
+            now=_NOW,
         )
         assert "city" not in mapped
-        assert mapped["date"] == "5 серпня"
+        # Wave 6-B: `date` no longer echoes the label — it is an ISO date or it
+        # is absent. `date_hint` is not in COMPOUND_TO_FSM_FIELD at all.
+        assert mapped["date"] == "2026-08-05"
 
 
 # ---------------------------------------------------------------------------
@@ -738,9 +750,60 @@ class TestLowConfidenceFallback:
 class TestCompoundToFsmMapping:
     def test_hint_keys_are_translated_to_state_field_names(self) -> None:
         mapped = map_compound_fields_to_fsm(
-            {"date_hint": "5 серпня", "time_hint": "10:00", "city": "Дніпро"}
+            {"date_hint": "5 серпня", "time_hint": "10:00", "city": "Дніпро"},
+            customer_text="Дніпро, 5 серпня о 10:00",
+            now=_NOW,
         )
-        assert mapped == {"date": "5 серпня", "time": "10:00", "city": "Дніпро"}
+        assert mapped == {"date": "2026-08-05", "time": "10:00", "city": "Дніпро"}
+
+    def test_date_hint_is_not_in_the_table_at_all(self) -> None:
+        """The raw label must be unreachable, not merely filtered.
+
+        `_detect_date_hint` returns «завтра» at confidence 1.0. While the key
+        sat in the table, that label went straight into
+        `fsm_filled_fields["date"]`, DATE's `auto_skip_if` read it as a pinned
+        date, and the state was skipped on a value nothing can book — the
+        `c8c6601` defect class. Removing the key makes it structurally
+        impossible for a later edit to reintroduce.
+        """
+        from src.core.pipeline import COMPOUND_TO_FSM_FIELD
+
+        assert "date_hint" not in COMPOUND_TO_FSM_FIELD
+        assert "date" not in COMPOUND_TO_FSM_FIELD.values()
+
+    def test_no_reference_date_means_no_date(self) -> None:
+        """Default-deny: without `now` the seam produces no `date` key."""
+        mapped = map_compound_fields_to_fsm(
+            {"date_hint": "завтра"}, customer_text="давайте завтра"
+        )
+        assert "date" not in mapped
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("давайте сьогодні", "2026-08-03"),
+            ("можна завтра", "2026-08-04"),
+            ("післязавтра зручно", "2026-08-05"),
+            ("хочу 15 березня", "2027-03-15"),
+            ("запишіть на 05.08", "2026-08-05"),
+            ("у п'ятницю", "2026-08-07"),
+        ],
+    )
+    def test_every_above_threshold_hint_becomes_a_parsable_iso_date(
+        self, text: str, expected: str
+    ) -> None:
+        mapped = map_compound_fields_to_fsm({}, {}, customer_text=text, now=_NOW)
+        assert mapped["date"] == expected
+        # The point of the wave in one line: whatever lands in the field, the
+        # tool layer can parse it as a calendar date.
+        datetime.date.fromisoformat(mapped["date"])
+
+    def test_a_hint_below_the_threshold_yields_no_date(self) -> None:
+        """«найближча» — the caller handed the choice back and named no day."""
+        mapped = map_compound_fields_to_fsm(
+            {}, {}, customer_text="давайте найближчу дату", now=_NOW
+        )
+        assert "date" not in mapped
 
     def test_station_hint_is_dropped_without_resolution(self) -> None:
         mapped = map_compound_fields_to_fsm({"station_hint": "біля цирку"})
@@ -774,6 +837,183 @@ class TestCompoundToFsmMapping:
         map_compound_fields_to_fsm(fields, confidence, customer_text="шини з собою")
         assert fields == {"city": "Дніпро", "date_hint": "5 серпня"}
         assert confidence == {"city": 1.0, "date_hint": 0.9}
+
+
+# ---------------------------------------------------------------------------
+# Targeted pass (Wave 6-B)
+# ---------------------------------------------------------------------------
+
+
+class TestTargetedBeforeBroad:
+    """Why the wave exists, in one class.
+
+    The broad sweep sees a bare «16» as a diameter, an hour and a day of the
+    month at once and grades it 0.6 — below the floor, correctly refused. The
+    state that just asked «який діаметр?» has no such ambiguity, so the *same*
+    detector on the *same* text is worth 1.0. One detector, two call sites,
+    two confidences (§3.1/§3.3).
+    """
+
+    TEXT = "на 16"
+    QUESTION = "Який діаметр коліс, підкажіть будь ласка?"
+
+    def test_broad_pass_refuses_a_bare_number(self) -> None:
+        from src.agent.compound_parse import compound_parse
+
+        result = compound_parse(self.TEXT)
+        assert result.fields.get("diameter") == 16
+        assert result.fields_confidence["diameter"] < 0.7, (
+            "the broad pass must not be sure about a homonym"
+        )
+
+    def test_targeted_pass_is_certain_once_the_bot_has_asked(self) -> None:
+        from src.agent.parsers import diameter_parser
+        from src.agent.parsers.base import ParseContext
+
+        asked = diameter_parser.PARSER.parse(
+            ParseContext(customer_text=self.TEXT, last_bot_utterance=self.QUESTION)
+        )
+        assert asked.status == "value"
+        assert asked.value == 16
+
+        unasked = diameter_parser.PARSER.parse(
+            ParseContext(customer_text=self.TEXT, last_bot_utterance="У якому місті?")
+        )
+        assert unasked.status == "unresolved", (
+            "without the question the same utterance must stay unresolved"
+        )
+
+    async def test_the_seam_hands_the_parser_the_real_last_bot_turn(self) -> None:
+        """The context gates are the whole mechanism — an empty string kills them.
+
+        `is_diameter_question`, `is_name_question` and `_bot_is_asking_storage`
+        all read `ctx.last_bot_utterance`. A seam that forgets to fill it makes
+        the targeted pass a slower copy of the broad one, and every test above
+        would still be green.
+        """
+        seen: list[Any] = []
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.add_assistant_turn(self.QUESTION)
+
+        from src.agent.parsers import city_parser
+
+        real_parse = city_parser.PARSER.parse
+
+        def _spy(ctx: Any) -> Any:
+            seen.append(ctx)
+            return real_parse(ctx)
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=True),
+            patch.object(city_parser.PARSER, "parse", _spy),
+        ):
+            await h.run(self.TEXT)
+
+        assert seen, "the targeted parser was never called"
+        assert seen[0].last_bot_utterance == self.QUESTION
+        assert seen[0].state is FsmState.CITY
+        assert seen[0].session is h.session
+        assert seen[0].now is not None, "date_parser cannot resolve without it"
+
+    async def test_the_broad_pass_never_overrides_the_targeted_refusal(self) -> None:
+        """A deliberate «we could not pin this» is not a hole for `setdefault`.
+
+        CITY is open, the caller names a city the resolver does not recognise.
+        The targeted parser claims `city` for the turn; if the broad sweep were
+        then allowed to `setdefault` its own guess, the FSM would pin exactly
+        the value the targeted parser declined to pin and skip the state — the
+        `c8c6601` defect class through the back door.
+        """
+        from src.agent.parsers import city_parser
+        from src.agent.parsers.base import unresolved
+
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=True),
+            patch.object(city_parser.PARSER, "parse", lambda ctx: unresolved(0.5)),
+        ):
+            await h.run("у Дніпрі")
+
+        assert "city" not in h.session.fsm_filled_fields, (
+            "the broad pass wrote over the targeted parser's refusal"
+        )
+
+
+class TestShadowStaysOffline:
+    """«no await → no network» — the invariant the shadow rollout rests on."""
+
+    def test_the_deterministic_step_is_not_a_coroutine(self) -> None:
+        assert not inspect.iscoroutinefunction(CallPipeline._run_fsm_deterministic_step)
+
+    def test_no_parser_can_be_awaited_from_the_deterministic_step(self) -> None:
+        """`aresolve` is the only I/O door in the package; it stays shut.
+
+        Checked structurally rather than by mocking: `parse()` is the sole
+        entry point the seam names, and `ParseContext.conn` — the gate a
+        parser would need before touching the DB — defaults to `None`.
+        """
+        import ast
+        import pathlib
+
+        import src.core.pipeline as pipeline_module
+
+        source = pathlib.Path(pipeline_module.__file__).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        step = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.name == "_run_fsm_deterministic_step"
+        )
+        assert not isinstance(step, ast.AsyncFunctionDef)
+        assert not any(isinstance(n, ast.Await) for n in ast.walk(step))
+        called = {
+            n.func.attr for n in ast.walk(step) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        }
+        assert "aresolve" not in called
+
+    async def test_the_context_carries_no_connection(self) -> None:
+        seen: list[Any] = []
+        h = Harness(booking_in_progress(FsmState.CITY))
+
+        from src.agent.parsers import city_parser
+
+        real_parse = city_parser.PARSER.parse
+
+        def _spy(ctx: Any) -> Any:
+            seen.append(ctx)
+            return real_parse(ctx)
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=True),
+            patch.object(city_parser.PARSER, "parse", _spy),
+        ):
+            await h.run("у Дніпрі")
+
+        assert seen and seen[0].conn is None
+
+    async def test_shadow_never_advances_the_machine_on_a_null(self) -> None:
+        """Shadow counts the null but does not walk into `escalate_target`.
+
+        An observer that escalates itself lands in TERMINAL, where every later
+        turn of the call is skipped — so it would go blind on exactly the calls
+        it is there to measure. WELCOME's default budget of 3 would be spent in
+        the first three turns of any call whose intent is not auto-detected.
+        """
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("ага", "угу", "ну", "добре")
+
+        assert h.session.fsm_state == FsmState.CITY.value, (
+            "shadow escalated a live call's FSM off the main flow"
+        )
+        assert h.session.fsm_parser_null_counts["CITY"] == 4, (
+            "shadow must still count what it would have done"
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -861,6 +1101,21 @@ def fsm_hops(session: CallSession) -> list[tuple[str | None, str]]:
     return [(h["from"], h["to"]) for h in session.fsm_history]
 
 
+def freeze_hops(session: CallSession) -> list[tuple[str | None, str]]:
+    """Hops in and out of a side-state, i.e. the freeze/resume pair only.
+
+    Wave 6-B: `fsm_history` is no longer empty on a turn the FSM did not own.
+    A PARSER_NULL re-ask is recorded as a self-transition (`CITY → CITY`), so
+    `fsm_hops(...) == []` stopped meaning «the FSM stayed out of it» and
+    started meaning «the FSM never even looked at the turn». The freeze
+    lifecycle is what this class is about, so it asserts on the freeze hops.
+    """
+    return [(a, b) for a, b in fsm_hops(session) if a != b and (a in FROZEN or b in FROZEN)]
+
+
+FROZEN = {s.value for s in FROZEN_STATES}
+
+
 class TestPipelineFreezeLifecycle:
     """The FSM enters the side-state for the handler — and always leaves it."""
 
@@ -925,16 +1180,45 @@ class TestPipelineFreezeLifecycle:
         session.interrupt_counts[_PIPELINE_DISPATCH_TOTAL_KEY] = MAX_PIPELINE_INTERRUPT_TURNS
         h = await self._run(interrupt(), session=session)
 
-        assert fsm_hops(h.session) == [], "a capped turn moved the FSM anyway"
+        assert freeze_hops(h.session) == [], "a capped turn froze the FSM anyway"
         assert h.session.fsm_state == FsmState.CITY.value
         assert h.llm_turns == [PRICE_TEXT]
 
     async def test_low_confidence_never_freezes(self) -> None:
         h = await self._run(interrupt(), confidence=0.2)
 
-        assert fsm_hops(h.session) == [], "a turn below the confidence floor moved the FSM"
+        assert freeze_hops(h.session) == [], "a turn below the confidence floor froze the FSM"
         assert h.session.fsm_state == FsmState.CITY.value
         assert h.llm_turns == [PRICE_TEXT]
+
+    async def test_a_dispatched_interrupt_does_not_cost_the_state_a_parser_null(
+        self,
+    ) -> None:
+        """The freeze/resume pair pays back the null the seam charged.
+
+        `_run_fsm_deterministic_step` runs *before* `_maybe_handle_intent`, so
+        a PRICE question does spend one of CITY's three `max_parser_null`
+        attempts on the way in. Leaving CITY for PRICE_INTERRUPT clears the
+        state's budget, and coming back leaves it at zero — so a caller who
+        asks about price three times does **not** get escalated for it.
+        """
+        h = await self._run(interrupt(reply="Монтаж R17 коштує 500 гривень."))
+
+        assert h.session.fsm_parser_null_counts.get(FsmState.CITY.value) in (None, 0)
+
+    async def test_an_undispatched_interrupt_still_costs_a_parser_null(self) -> None:
+        """KNOWN, reported, NOT fixed in Wave 6-B — see PROGRESS «Finding 3».
+
+        When the pipeline *declines* to dispatch (cap spent, or the classifier
+        is below the confidence floor) there is no freeze to pay the null back,
+        so the turn lands on the LLM **and** costs CITY an attempt. Shadow is
+        unaffected (`advance=False`) and `live` is not enabled anywhere yet, so
+        this is pinned rather than fixed: the fix reorders the seam against the
+        interrupt dispatch, which is a live-path change.
+        """
+        h = await self._run(interrupt(), confidence=0.2)
+
+        assert h.session.fsm_parser_null_counts.get(FsmState.CITY.value) == 1
 
     async def test_freeze_and_resume_survive_the_redis_roundtrip(self) -> None:
         # Mid-interrupt snapshot: exactly what a session looks like between the

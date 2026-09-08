@@ -27,6 +27,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import dataclasses
+import datetime
 import inspect
 import itertools
 import json
@@ -34,6 +35,7 @@ import logging
 import textwrap
 import uuid
 from typing import TYPE_CHECKING, Any
+from unittest import mock
 
 import pytest
 from prometheus_client import REGISTRY
@@ -60,6 +62,12 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 FSM_LOGGER = "src.agent.fitting_fsm"
+
+#: Pinned «today» for the compound-parse prefill. `date_parser` refuses to read
+#: the process clock, so a test that wants «5 серпня» to become a date has to
+#: say when «now» is. A Monday in early August, so «5 серпня» is a few days out
+#: rather than a year away.
+_NOW = datetime.datetime(2026, 8, 3, 10, 0, tzinfo=datetime.UTC)
 
 #: Fields the engine knows how to auto-skip on, in main-flow order.
 FLOW_FIELDS: tuple[tuple[FsmState, str], ...] = (
@@ -606,6 +614,11 @@ class TestCompoundParseIntegration:
         name filter, so this test exercises the real translation of
         ``date_hint``/``time_hint`` → ``date``/``time`` rather than a
         test-only copy of it.
+
+        Wave 6-B: ``now`` is passed explicitly. ``date`` comes from
+        ``date_parser`` now, and without a reference «today» the seam
+        (correctly) produces no date at all — which would leave every
+        date-carrying case here silently asserting nothing.
         """
         from src.core.pipeline import map_compound_fields_to_fsm
 
@@ -614,6 +627,7 @@ class TestCompoundParseIntegration:
             confidence,
             customer_text=text,
             min_confidence=min_confidence,
+            now=_NOW,
         )
         known = {name for _, name in FLOW_FIELDS}
         for name, value in mapped.items():
@@ -1341,3 +1355,322 @@ class TestAnchorCases:
         targets = {r.to_state for r in find_transitions(FsmState.BOOK, FsmEvent.TOOL_ERROR)}
         assert FsmState.CITY not in targets
         assert FsmState.STATION in targets
+
+
+# --------------------------------------------------------------------------
+# TestParserNullLoop — Wave 6-B
+# --------------------------------------------------------------------------
+
+
+class TestParserNullLoop:
+    """The loop-breaker for «the caller keeps not answering» (§3.7).
+
+    The reverted Wave 13 shipped a handler that repeated one question five
+    turns in a row. The cap is structural — a counter in the session, not a
+    line in the prompt — and it lives in the session rather than the engine
+    because the Call Processor is stateless and rebuilds from Redis every turn.
+    """
+
+    def test_a_null_below_the_cap_re_asks_and_stays_put(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.CITY)
+        assert eng.on_parser_null("city") is FsmState.CITY
+        assert eng.parser_null_count(FsmState.CITY) == 1
+        assert session.fsm_history[-1]["event"] == FsmEvent.PARSER_NULL.value
+
+    def test_the_re_ask_is_the_state_s_own_question(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        # README §4: the wave invents no new customer-facing lines.
+        eng = at_state(session, FsmState.CITY)
+        before = eng.next_question()
+        eng.on_parser_null("city")
+        assert eng.next_question() == before
+
+    def test_a_filled_field_zeroes_the_counter(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.CITY)
+        eng.on_parser_null("city")
+        eng.on_parser_null("city")
+        assert eng.parser_null_count(FsmState.CITY) == 2
+        eng.apply_field("city", "Дніпро")
+        assert eng.parser_null_count(FsmState.CITY) == 0
+
+    def test_leaving_the_state_zeroes_the_counter(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.CITY)
+        eng.on_parser_null("city")
+        eng.transition(FsmState.STATION)
+        assert eng.parser_null_count(FsmState.CITY) == 0
+
+    def test_a_self_looping_state_zeroes_its_own_counter_on_success(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        """The case the reset in `apply_field` exists for — and the only one.
+
+        On a normal state the reset is invisible: FIELD_FILLED leaves the
+        state, and `_enter` clears the state it left, so the counter is zeroed
+        twice over and a test on CITY passes either way (mutation 1 proved
+        exactly that). PRICE_INTERRUPT has `next_state=PRICE_INTERRUPT`, so it
+        never leaves and `_enter` never fires for it. Without the reset in
+        `apply_field` a caller who finally names a diameter on the third try
+        stays one null away from an escalation for the rest of the call — the
+        same «one bad turn and you're transferred» defect the whole
+        `parser_null` budget exists to prevent.
+        """
+        eng = at_state(session, FsmState.PRICE_INTERRUPT)
+        eng.on_parser_null("diameter")
+        eng.on_parser_null("diameter")
+        assert eng.parser_null_count(FsmState.PRICE_INTERRUPT) == 2
+
+        assert eng.apply_field("diameter", 16) is FsmState.PRICE_INTERRUPT
+        assert eng.parser_null_count(FsmState.PRICE_INTERRUPT) == 0
+
+    def test_exhausting_a_state_without_a_branch_escalates_to_transfer(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.CITY)
+        cfg = STATES[FsmState.CITY]
+        assert cfg.on_null_exhausted is None
+        assert cfg.escalate_target is FsmState.TRANSFER
+        final = FsmState.CITY
+        for _ in range(cfg.max_parser_null):
+            final = eng.on_parser_null("city")
+        assert final is cfg.escalate_target
+        assert session.fsm_history[-1]["event"] == FsmEvent.ESCALATE.value
+
+    def test_storage_falls_back_to_own_tires(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        # §3.7 row 12: two unheard answers about storage mean own tires, which
+        # is what the overwhelming majority of callers have.
+        eng = at_state(session, FsmState.STORAGE)
+        final = FsmState.STORAGE
+        for _ in range(STATES[FsmState.STORAGE].max_parser_null):
+            final = eng.on_parser_null("storage_choice")
+        assert final is FsmState.DATE
+        assert session.fsm_filled_fields["storage_choice"] == "own"
+
+    def test_color_falls_back_to_the_phrase_the_prompt_already_uses(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        from src.agent.fitting_fsm import COLOR_NOT_HEARD
+        from src.agent.prompts import _MOD_FITTING
+
+        # README §4 again: the fallback text must already exist in the prompt.
+        assert COLOR_NOT_HEARD in _MOD_FITTING
+        eng = at_state(session, FsmState.COLOR)
+        final = FsmState.COLOR
+        for _ in range(STATES[FsmState.COLOR].max_parser_null):
+            final = eng.on_parser_null("color")
+        assert final is FsmState.BRAND
+        assert session.fsm_filled_fields["color"] == COLOR_NOT_HEARD
+
+    def test_brand_switches_the_question_instead_of_leaving(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        from src.agent.prompts import _MOD_FITTING
+
+        eng = at_state(session, FsmState.BRAND)
+        asked = eng.next_question()
+        final = FsmState.BRAND
+        for _ in range(STATES[FsmState.BRAND].max_parser_null):
+            final = eng.on_parser_null("brand")
+        assert final is FsmState.BRAND, "the type fallback must not leave the state"
+        assert session.fsm_brand_type_fallback is True
+        fallback = eng.next_question()
+        assert fallback != asked
+        assert STATES[FsmState.BRAND].fallback_question in _MOD_FITTING
+
+    def test_the_brand_fallback_retires_with_its_counter(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        # A flag that outlives its counter would ask a later caller for the car
+        # type after their brand was heard the first time.
+        eng = at_state(session, FsmState.BRAND)
+        for _ in range(STATES[FsmState.BRAND].max_parser_null):
+            eng.on_parser_null("brand")
+        assert session.fsm_brand_type_fallback is True
+        eng.apply_field("brand", "Renault")
+        assert session.fsm_brand_type_fallback is False
+
+    def test_a_broken_branch_escalates_and_is_logged_with_its_traceback(
+        self,
+        session: CallSession,
+        at_state: Callable[..., FsmEngine],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        # `contextlib.suppress` on this path is what `37fb2d0` cost us.
+        def _boom(_: CallSession) -> FsmState:
+            raise RuntimeError("branch is broken")
+
+        eng = at_state(session, FsmState.STORAGE)
+        broken = dataclasses.replace(STATES[FsmState.STORAGE], on_null_exhausted=_boom)
+        with (
+            caplog.at_level(logging.ERROR, logger=FSM_LOGGER),
+            mock.patch.dict(STATES, {FsmState.STORAGE: broken}),
+        ):
+            final = FsmState.STORAGE
+            for _ in range(STATES[FsmState.STORAGE].max_parser_null):
+                final = eng.on_parser_null("storage_choice")
+
+        assert final is STATES[FsmState.STORAGE].escalate_target
+        assert any(r.exc_info for r in caplog.records if r.levelno >= logging.ERROR)
+
+    def test_the_counter_survives_the_redis_roundtrip(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.CITY)
+        eng.on_parser_null("city")
+        restored = CallSession.from_dict(json.loads(json.dumps(session.to_dict())))
+        assert restored.fsm_parser_null_counts == session.fsm_parser_null_counts
+        assert FsmEngine(restored).parser_null_count(FsmState.CITY) == 1
+
+    def test_the_brand_flag_survives_the_redis_roundtrip(
+        self, session: CallSession
+    ) -> None:
+        session.fsm_brand_type_fallback = True
+        restored = CallSession.from_dict(json.loads(json.dumps(session.to_dict())))
+        assert restored.fsm_brand_type_fallback is True
+
+    def test_a_garbage_counter_is_dropped_loudly_not_silently(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # Silent coercion here is the `37fb2d0` pattern: the value disappears
+        # and nothing in the logs says so.
+        payload = CallSession(uuid.uuid4()).to_dict()
+        payload["fsm_parser_null_counts"] = {"CITY": "три", "DATE": 2}
+        with caplog.at_level(logging.WARNING, logger="src.core.call_session"):
+            restored = CallSession.from_dict(payload)
+        assert restored.fsm_parser_null_counts == {"DATE": 2}
+        assert any(r.levelno >= logging.WARNING for r in caplog.records)
+
+    def test_observe_only_counts_without_moving(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        # Shadow mode. An observer that escalates itself into TERMINAL stops
+        # observing, which is the one thing it exists to do.
+        eng = at_state(session, FsmState.CITY)
+        for _ in range(STATES[FsmState.CITY].max_parser_null + 2):
+            assert eng.on_parser_null("city", advance=False) is FsmState.CITY
+        assert eng.current_state() is FsmState.CITY
+        assert eng.parser_null_count(FsmState.CITY) == STATES[FsmState.CITY].max_parser_null + 2
+
+    def test_the_null_metric_has_a_reader(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        labels = {"field": "city", "state": "CITY"}
+        before = counter_value("callcenter_fsm_parser_null_total", labels)
+        at_state(session, FsmState.CITY).on_parser_null("city")
+        assert counter_value("callcenter_fsm_parser_null_total", labels) == before + 1
+
+
+# --------------------------------------------------------------------------
+# TestStructuredLogOutput — Wave 6-B
+# --------------------------------------------------------------------------
+
+
+class TestStructuredLogOutput:
+    """The log lines are asserted through the real formatter, not by eye.
+
+    Without this, «observability» can turn out to be `{"event": "..."}` with
+    every interesting field dropped: `JSONFormatter` copies exactly five keys
+    out of `extra` (`call_id`, `request_id`, `duration_ms`, `tool`, `success`)
+    and throws the rest away.
+    """
+
+    @staticmethod
+    def _emit(fn: Callable[[], None]) -> list[dict[str, Any]]:
+        from src.logging.structured_logger import JSONFormatter
+
+        records: list[logging.LogRecord] = []
+
+        class _Capture(logging.Handler):
+            def emit(self, record: logging.LogRecord) -> None:
+                records.append(record)
+
+        logger = logging.getLogger(FSM_LOGGER)
+        handler = _Capture()
+        handler.setFormatter(JSONFormatter())
+        logger.addHandler(handler)
+        previous_propagate, logger.propagate = logger.propagate, False
+        previous_level = logger.level
+        logger.setLevel(logging.INFO)
+        try:
+            fn()
+        finally:
+            logger.removeHandler(handler)
+            logger.propagate = previous_propagate
+            logger.setLevel(previous_level)
+        return [json.loads(handler.format(r)) for r in records]
+
+    def test_the_transition_line_survives_the_json_formatter(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.CITY)
+        entries = self._emit(lambda: eng.apply_field("city", "Дніпро"))
+
+        line = next(e for e in entries if "fsm_transition" in e["event"])
+        assert "from=CITY" in line["event"]
+        assert "to=STATION" in line["event"]
+        assert "fields=" in line["event"], "how much is pinned is the shadow signal"
+        assert line["call_id"] == str(session.channel_uuid)
+
+    def test_the_parser_null_line_carries_state_field_and_attempt(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.CITY)
+        entries = self._emit(lambda: eng.on_parser_null("city", "ну я не знаю"))
+
+        line = next(e for e in entries if "fsm_parser_null" in e["event"])
+        assert "state=CITY" in line["event"]
+        assert "field=city" in line["event"]
+        assert "attempt=1/3" in line["event"]
+        assert "не знаю" in line["event"]
+        assert line["call_id"] == str(session.channel_uuid)
+
+    def test_the_customer_text_is_truncated(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.CITY)
+        entries = self._emit(lambda: eng.on_parser_null("city", "я" * 500))
+        line = next(e for e in entries if "fsm_parser_null" in e["event"])
+        assert line["event"].count("я") == 100, "the log must not become a transcript"
+
+    def test_pii_in_the_customer_text_is_sanitized(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        # This is the whole argument for variant B: `sanitize_pii` runs on
+        # `record.getMessage()` only. The same string passed as `extra=` would
+        # reach the log store raw.
+        eng = at_state(session, FsmState.CITY)
+        entries = self._emit(
+            lambda: eng.on_parser_null("city", "мій номер 0501234567")
+        )
+        line = next(e for e in entries if "fsm_parser_null" in e["event"])
+        assert "0501234567" not in line["event"]
+
+    def test_the_formatter_would_have_leaked_the_same_text_via_extra(self) -> None:
+        """Verified, not assumed (phase-02 checklist).
+
+        A record whose PII sits in `extra` keeps it verbatim — and in this case
+        the whitelist drops it entirely, so the field would simply vanish. Both
+        outcomes are worse than putting it in the message.
+        """
+        from src.logging.structured_logger import JSONFormatter
+
+        record = logging.LogRecord(
+            name=FSM_LOGGER,
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg="fsm_parser_null",
+            args=(),
+            exc_info=None,
+        )
+        record.customer_text = "0501234567"  # type: ignore[attr-defined]
+        entry = json.loads(JSONFormatter().format(record))
+        assert "customer_text" not in entry

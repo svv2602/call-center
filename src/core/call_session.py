@@ -177,6 +177,29 @@ class CallSession:
         # Ring buffer of the last FSM_HISTORY_LIMIT transitions:
         # {"t": float, "from": str|None, "to": str, "event": str, "payload": dict|None}
         self.fsm_history: list[dict[str, Any]] = []
+        # --- parser_null loop-breaker (Wave 6-B, spec §3.7) ---
+        # State name → how many turns in a row that state's parser came back
+        # without a usable value. Read by `FsmEngine.on_parser_null()`, which
+        # re-asks while the count is below `StateConfig.max_parser_null` and
+        # branches (or escalates to an operator) once it is not.
+        #
+        # It lives in the session, not in the engine, for the same reason
+        # `interrupt_counts` does: the Call Processor is stateless and rebuilds
+        # the engine from Redis on every turn, so a counter held on the engine
+        # would be zero every time and the cap would never trip. That is
+        # literally `c8c6601` — one question asked five turns in a row.
+        self.fsm_parser_null_counts: dict[str, int] = {}
+        # BRAND type-fallback (spec §3.7, row 23). Set by BRAND's
+        # `on_null_exhausted` after `max_parser_null` failed attempts at the
+        # brand; read by `FsmEngine.next_question()`, which then asks for the
+        # car *type* instead of the brand.
+        #
+        # A flag rather than a 16th state `BRAND_TYPE_FALLBACK`: the spec left
+        # the choice to this wave, and the "no side effects" argument for a
+        # separate state is already void — STORAGE's and COLOR's
+        # `on_null_exhausted` both write session values (§3.7 table). See
+        # `development-checklists/.../wave-6-B-.../README.md` §6.
+        self.fsm_brand_type_fallback: bool = False
         # --- Side-door interrupt state (Wave 3-B, 2026-09-08) ---
         # Read/written by `src/agent/interrupts.py`. These MUST survive the
         # Redis round-trip: the Call Processor is stateless and reloads the
@@ -319,6 +342,8 @@ class CallSession:
             "fsm_filled_fields": dict(self.fsm_filled_fields),
             "fsm_prev_state": self.fsm_prev_state,
             "fsm_history": list(self.fsm_history[-FSM_HISTORY_LIMIT:]),
+            "fsm_parser_null_counts": dict(self.fsm_parser_null_counts),
+            "fsm_brand_type_fallback": self.fsm_brand_type_fallback,
             "interrupt_counts": dict(self.interrupt_counts),
             "pending_cancel_action": self.pending_cancel_action,
             "pending_price_interrupt_needs_diameter": (
@@ -408,6 +433,40 @@ class CallSession:
                 "Call %s: fsm_history has unexpected type %s — ignoring",
                 data.get("channel_uuid"),
                 type(history).__name__,
+            )
+        # --- parser_null loop-breaker (Wave 6-B) ---
+        # Same reasoning as `interrupt_counts` right below: a malformed value
+        # must never silently become an empty default, because that resets the
+        # loop-breaker and lets the same question be asked forever.
+        null_counts = data.get("fsm_parser_null_counts") or {}
+        if isinstance(null_counts, dict):
+            clean_nulls: dict[str, int] = {}
+            for key, value in null_counts.items():
+                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                    logger.warning(
+                        "Call %s: fsm_parser_null_counts[%r] has unexpected value %r "
+                        "— ignoring",
+                        data.get("channel_uuid"),
+                        key,
+                        value,
+                    )
+                    continue
+                clean_nulls[str(key)] = value
+            session.fsm_parser_null_counts = clean_nulls
+        else:
+            logger.warning(
+                "Call %s: fsm_parser_null_counts has unexpected type %s — ignoring",
+                data.get("channel_uuid"),
+                type(null_counts).__name__,
+            )
+        brand_fallback = data.get("fsm_brand_type_fallback", False)
+        if isinstance(brand_fallback, bool):
+            session.fsm_brand_type_fallback = brand_fallback
+        else:
+            logger.warning(
+                "Call %s: fsm_brand_type_fallback has unexpected type %s — ignoring",
+                data.get("channel_uuid"),
+                type(brand_fallback).__name__,
             )
         # --- Side-door interrupt state (Wave 3-B) ---
         # A malformed value here must never silently become an empty default:

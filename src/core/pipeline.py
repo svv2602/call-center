@@ -46,6 +46,7 @@ from src.monitoring.metrics import (
     barge_in_total,
     bot_filler_stripped_total,
     false_booking_claim_total,
+    fsm_compound_preparse_fields_total,
     fsm_interrupt_total,
     tts_delivery_ms,
 )
@@ -532,9 +533,17 @@ FSM_SESSION_UPDATE_WHITELIST: frozenset[str] = frozenset(
 #   diameter                  : no state in MAIN_FLOW owns it (only the
 #       PRICE_INTERRUPT side door does). Dropped.
 #   name                      : no MAIN_FLOW state. Dropped.
+#   date_hint → date          : Wave 6-B. `_detect_date_hint` returns a *label*
+#       («завтра», «п'ятниця») at confidence 1.0, and this table used to copy
+#       it straight into `fsm_filled_fields["date"]`, where DATE's
+#       `auto_skip_if` reads it as a pinned date and skips the state on a value
+#       nothing can book — the `c8c6601` defect class. The key is removed
+#       rather than filtered so no future edit can reintroduce the raw label by
+#       accident; `date` now comes from `date_parser`, which resolves against
+#       an injected `now` and yields ISO or nothing. See
+#       :func:`map_compound_fields_to_fsm`.
 COMPOUND_TO_FSM_FIELD: dict[str, str] = {
     "city": "city",
-    "date_hint": "date",
     "time_hint": "time",
     "color": "color",
     "brand": "brand",
@@ -696,6 +705,7 @@ def map_compound_fields_to_fsm(
     *,
     customer_text: str = "",
     min_confidence: float = _FSM_APPLY_THRESHOLD,
+    now: datetime.datetime | None = None,
 ) -> dict[str, Any]:
     """Translate a compound_parse result into FSM field names.
 
@@ -707,6 +717,14 @@ def map_compound_fields_to_fsm(
 
     ``storage_choice`` is not produced by compound_parse at all, so it is derived
     here from the raw utterance via :func:`detect_storage_choice`.
+
+    ``date`` does not come from the table at all — see the comment above
+    :data:`COMPOUND_TO_FSM_FIELD`. It is produced by `date_parser`, which is the
+    one place allowed to turn a hint into a calendar date, and it needs a
+    reference «today». ``now`` is injected rather than read from the process
+    clock: a shadow-mode comparison that drifts with the wall clock cannot be
+    replayed, and a test that cannot pin "today" cannot pin «завтра» either.
+    Default-deny: ``now is None`` yields **no** ``date`` key, logged at DEBUG.
     """
     confidence = fields_confidence or {}
     mapped: dict[str, Any] = {}
@@ -729,6 +747,27 @@ def map_compound_fields_to_fsm(
             continue
         mapped[target] = value
 
+    if customer_text:
+        if now is None:
+            logger.debug(
+                "FSM mapping: no reference date supplied — %r yields no `date`",
+                customer_text,
+            )
+        else:
+            from src.agent.parsers import date_parser
+            from src.agent.parsers.base import ParseContext
+
+            outcome = date_parser.PARSER.parse(
+                ParseContext(customer_text=customer_text, now=now)
+            )
+            if outcome.status == "value" and outcome.value:
+                mapped["date"] = outcome.value
+            elif outcome.status == "unresolved":
+                logger.debug(
+                    "FSM mapping: date hint in %r did not resolve — no `date`",
+                    customer_text,
+                )
+
     storage = detect_storage_choice(customer_text)
     if storage is not None:
         mapped["storage_choice"] = storage
@@ -737,6 +776,7 @@ def map_compound_fields_to_fsm(
 
 if TYPE_CHECKING:
     from src.agent.agent import LLMAgent
+    from src.agent.parsers.base import ParseOutcome
     from src.agent.streaming_loop import StreamingAgentLoop
     from src.core.call_session import SessionStore
     from src.core.echo_canceller import EchoCanceller
@@ -1050,12 +1090,34 @@ class CallPipeline:
                 report[name] = "diverge"
         return report
 
+    def _last_bot_utterance(self) -> str:
+        """The bot's most recent turn, or `""`.
+
+        The targeted parsers gate on it (`is_diameter_question`,
+        `is_name_question`, `_bot_is_asking_storage`). Handing them an empty
+        string would silently disable every context gate in the package and
+        make the targeted pass indistinguishable from the broad one.
+        """
+        for turn in reversed(self._session.dialog_history):
+            if turn.speaker == "assistant" and turn.content:
+                return turn.content
+        return ""
+
     def _run_fsm_deterministic_step(self, transcript: Transcript) -> None:
         """Advance the FSM from deterministic evidence only. No I/O.
 
-        compound_parse is pure regex and the engine only touches session fields,
-        so this is safe to run in shadow mode: it issues zero LLM requests and
-        zero Store API calls, and it is synchronous (no await → no network).
+        Targeted pass first, broad pass second (§3.1). The state knows which
+        question it just asked, so its own parser earns the higher confidence;
+        the broad `compound_parse` sweep then fills *other* fields via
+        `setdefault` and is not allowed to overwrite anything — least of all
+        the targeted parser's deliberate refusal on its own field.
+
+        Both passes are pure regex over the utterance and the engine only
+        touches session fields, so this is safe to run in shadow mode: zero LLM
+        requests, zero Store API calls, and the method is synchronous — no
+        await → no network. `FieldParser.aresolve` is never called and
+        `ParseContext.conn` stays `None`, which is the gate that enforces it
+        (§3.2 rule 3).
 
         Exceptions are caught so a broken FSM never drops a live call, but they
         are logged at ERROR with a traceback. ``contextlib.suppress`` is
@@ -1065,10 +1127,24 @@ class CallPipeline:
         try:
             from src.agent.compound_parse import compound_parse
             from src.agent.fitting_fsm import STATES, FsmEngine
+            from src.agent.parsers.base import ParseContext
+            from src.agent.parsers.registry import get_parser
 
             engine = FsmEngine(self._session)
             engine.start()
             state_before = engine.current_state()
+
+            # DONE/TRANSFER absorb every event. Walking them again would keep
+            # re-logging a call that has already ended and would let the shadow
+            # reply overwrite itself with a terminal template on every
+            # subsequent turn.
+            if engine.is_terminal():
+                logger.debug(
+                    "fsm_shadow call=%s already terminal in %s — skipping",
+                    self._session.channel_uuid,
+                    state_before.value,
+                )
+                return
 
             # The FSM cannot leave WELCOME/INTENT without an `intent`, and the
             # only producer of `intent` is the LLM classifier — which shadow
@@ -1081,14 +1157,74 @@ class CallPipeline:
                 if scenario == "fitting" or self._session.scenario == "fitting":
                     self._session.fsm_filled_fields["intent"] = "fitting"
 
+            cfg = STATES[state_before]
+            own_field = cfg.field_name
+            if own_field is None and cfg.next_state is not None:
+                # WELCOME owns no field; the field that unblocks it belongs to
+                # its successor (INTENT → "intent").
+                own_field = STATES[cfg.next_state].field_name
+
+            # --- targeted pass ---
+            ctx = ParseContext(
+                customer_text=transcript.text,
+                last_bot_utterance=self._last_bot_utterance(),
+                state=state_before,
+                session=self._session,
+                now=datetime.datetime.now(tz=_KYIV_TZ),
+                conn=None,  # forbids aresolve — see the docstring.
+            )
+            parser = get_parser(cfg.parser)
+            targeted: ParseOutcome | None = None
+            if parser is None:
+                # Not an error: INTENT names `intent_classifier`, which is an
+                # async LLM call listed in NON_FIELD_PARSERS on purpose. Shadow
+                # mode must never reach it, so the state simply has no
+                # deterministic targeted pass and falls through to the broad one.
+                logger.debug(
+                    "fsm_shadow call=%s state=%s has no FieldParser (%s) — "
+                    "broad pass only",
+                    self._session.channel_uuid,
+                    state_before.value,
+                    cfg.parser,
+                )
+            else:
+                targeted = parser.parse(ctx)
+                if targeted.status == "value" and parser.field_name:
+                    self._session.fsm_filled_fields[parser.field_name] = targeted.value
+
+            # The targeted parser *claims* its state's own field for this turn,
+            # whatever it answered. A `unresolved`/`not_mentioned` on the field
+            # the state is waiting for is a deliberate refusal — «they spoke
+            # about a date but named none». Letting the broad sweep setdefault a
+            # value over that refusal would pin exactly the value the targeted
+            # parser declined to pin, which is the `c8c6601` defect class
+            # arriving through the back door.
+            claimed = (
+                parser.field_name
+                if parser is not None and parser.field_name and parser.field_name == own_field
+                else None
+            )
+
+            # --- broad pass ---
             parsed = compound_parse(transcript.text)
             mapped = map_compound_fields_to_fsm(
                 parsed.fields,
                 parsed.fields_confidence,
                 customer_text=transcript.text,
+                now=ctx.now,
             )
             for name, value in mapped.items():
+                if name == claimed:
+                    logger.debug(
+                        "fsm_shadow call=%s broad pass not overriding claimed "
+                        "field %s (targeted status=%s)",
+                        self._session.channel_uuid,
+                        name,
+                        targeted.status if targeted else None,
+                    )
+                    continue
                 self._session.fsm_filled_fields.setdefault(name, value)
+            self._emit_preparse_metric(mapped)
 
             # NEVER loop apply_field() over the mapped fields. apply_field
             # advances to the CURRENT state's next_state regardless of which
@@ -1097,28 +1233,49 @@ class CallPipeline:
             # written above; apply_field is invoked at most ONCE, for the field
             # the current state itself is waiting on, and the engine then walks
             # its own auto_skip_if chain a single time.
-            cfg = STATES[state_before]
-            own_field = cfg.field_name
-            if own_field is None and cfg.next_state is not None:
-                # WELCOME owns no field; the field that unblocks it belongs to
-                # its successor (INTENT → "intent").
-                own_field = STATES[cfg.next_state].field_name
             state_after = state_before
             if own_field:
                 value = self._session.fsm_filled_fields.get(own_field)
                 if value not in (None, ""):
                     state_after = engine.apply_field(own_field, value)
+                elif targeted is not None and targeted.status in (
+                    "unresolved",
+                    "not_mentioned",
+                ):
+                    # Branch on `status`, never on a locally recomputed
+                    # confidence — a second copy of the threshold is how a
+                    # loosened upstream value gets silently inherited.
+                    #
+                    # `advance` is the mode, not the reason: only `live` is
+                    # allowed to move the machine on a null. Shadow still
+                    # counts, logs and emits the metric — see
+                    # `FsmEngine.on_parser_null` for why an advancing observer
+                    # goes blind.
+                    state_after = engine.on_parser_null(
+                        own_field,
+                        transcript.text,
+                        advance=self._fsm_mode_cache == FSM_MODE_LIVE,
+                    )
 
+            # Deliberately the *raw* template, not `engine.next_question()`:
+            # `render()` logs a WARNING for every placeholder it cannot fill,
+            # and in shadow the session is half-empty by construction, so
+            # rendering here would fill the log with warnings about a reply
+            # nobody speaks.
             self._fsm_shadow_reply = STATES[state_after].question_template or None
 
             logger.info(
-                "fsm_shadow call=%s mode=%s state=%s→%s mapped=%s divergence=%s",
+                "fsm_shadow call=%s mode=%s state=%s→%s targeted=%s/%s mapped=%s "
+                "divergence=%s",
                 self._session.channel_uuid,
                 self._fsm_mode_cache,
                 state_before.value,
                 state_after.value,
+                cfg.parser,
+                targeted.status if targeted is not None else "skipped",
                 mapped,
                 self._fsm_shadow_divergence(mapped),
+                extra={"call_id": str(self._session.channel_uuid)},
             )
         except Exception:
             logger.error(
@@ -1127,6 +1284,24 @@ class CallPipeline:
                 self._session.channel_uuid,
                 exc_info=True,
             )
+
+    @staticmethod
+    def _emit_preparse_metric(mapped: dict[str, Any]) -> None:
+        """Count what the broad pre-parse actually managed to extract.
+
+        Declared at `metrics.py:501` since Wave 4 with no emitter — a counter
+        nobody increments reads as «this never happens» on a dashboard, which
+        is worse than no panel at all.
+        """
+        for name in mapped:
+            try:
+                fsm_compound_preparse_fields_total.labels(field=name).inc()
+            except Exception:
+                logger.warning(
+                    "failed to emit fsm_compound_preparse_fields_total for %s",
+                    name,
+                    exc_info=True,
+                )
 
     def _pipeline_interrupt_budget_left(self) -> bool:
         """True while the pipeline still allows the FSM to own a turn.
