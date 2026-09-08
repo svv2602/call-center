@@ -1034,17 +1034,409 @@ Placeholder → полная секция. См. Phase 3 ниже — Field Pars
 
 ## Phase 3: Field Parsers
 
-**TODO (Wave 5-B / T18):** вынести inline-парсеры полей (діаметр, дата, час, колір, місто,
-станція) из монолитного LLM prompt в отдельные pure-функции.
+Спецификация написана 2026-09-08 (Wave 4-C / T18) **после** того, как Waves 2-B и 4-A уже
+написали 8 из 9 детекторов. Это не green-field дизайн: `src/agent/compound_parse.py`
+существует, имеет свою модель confidence, свой контракт ключей и 52 теста, которые его
+поведение фиксируют. Задача Phase 3 — не изобрести второй слой поверх него, а описать
+**второй режим вызова тех же детекторов** и закрыть три дырки, которые Waves 2-B/4-A
+оставили сознательно: `storage_choice` живёт в `src/core/pipeline.py`, `station_hint` не
+резолвится в `station_id`, `date_hint`/`time_hint` не нормализуются.
 
-Планируется описать:
-- API парсеров: input `raw_text` + context → output `parsed_value | None`.
-- Существующие модули для миграции: `src/agent/color_detect.py`,
-  `src/agent/ua_datetime.py`, `src/agent/diameter_detect.py`, `src/agent/name_detect.py`,
-  `src/agent/vehicle_alias_lookup.py`, `src/agent/vehicle_translit.py`,
-  `src/agent/color_translit.py`, `src/agent/preparse.py`.
-- Отношения с `ExtractedFields` из Phase 1: классификатор даёт первый pass hints, FSM
-  finalize через detailed parsers.
-- Тесты для парсеров (следовать паттерну `test_color_detect.py`, 87 tests).
+Реализация — Wave 5-A (T19), интеграция с движком — Wave 6-B (T21). Здесь только контракт.
 
-Placeholder до заполнения T18.
+### 3.1. Решение: `FieldParser` — targeted-pass обёртка над теми же детекторами
+
+Есть два режима извлечения поля, и они оба нужны:
+
+- **broad pass** — «один проход по реплике, вытащи всё, что видно». Ловит «Київ, завтра на
+  десяту» одной репликой и через `auto_skip_if` проматывает три состояния. Это
+  `compound_parse()`, он написан и работает.
+- **targeted pass** — «состояние спросило одно поле, разбери ответ на него». Отвечает на
+  «шістнадцять» после «Який діаметр коліс?» и на «на другу» после списка слотов. Сегодня
+  это hand-rolled блок в `_transcript_processor_loop` (`src/core/pipeline.py`, Wave 6/12/14
+  auto-persist: `is_name_question` → `detect_name`, `is_diameter_question` →
+  `detect_diameter`, `bot_listed_slots` → `detect_time_choice`).
+
+Рассматривались три варианта:
+
+| # | Вариант | Вердикт |
+|---|---------|---------|
+| A | `FieldParser` — тонкая targeted-обёртка; `compound_parse` остаётся broad-pass; оба зовут одни и те же `detect_*` | **принят** |
+| B | `compound_parse` переписывается как оркестратор списка `FieldParser` | отклонён |
+| C | `FieldParser` не заводится, FSM зовёт `compound_parse(text, want="time")` | отклонён |
+
+**Почему не B.** Переписывание ломает `FIELD_KEYS` как выходной контракт и переносит все 52
+теста Wave 2-B на новый API — при нулевом выигрыше для клиента. Ровно этот класс изменения
+(«сначала красиво, потом польза») был откачен в `c8c6601`. Если оркестратор когда-нибудь
+понадобится, он вводится отдельной волной поверх уже работающего A.
+
+**Почему не C.** У полей физически разные входы, и в плоский вызов они не влезают:
+`detect_time_choice(customer_text, offered_times, allow_hour_only=…)` требует список
+предложенных слотов; `resolve_by_alias(conn, utterance)` — **async** и требует соединение с
+БД; `detect_diameter` / `detect_name` безопасны только под гейтом `is_diameter_question` /
+`is_name_question` от последней реплики бота; `storage_choice` меняет ширину списка
+признаков в зависимости от того, задал ли бот вопрос Krok 2. Протащить всё это через
+`compound_parse` означает сделать его async и контекстно-зависимым — а на его синхронности
+и отсутствии I/O держится shadow-режим: `CallPipeline._run_fsm_deterministic_step` в
+докстринге прямо ссылается на «zero LLM requests, zero Store API calls, no await → no
+network» как на основание запускать FSM параллельно живому звонку.
+
+**Инвариант варианта A:** на каждое поле — **один** детектор, две точки вызова.
+`compound_parse` и `FieldParser.parse()` обязаны звать одну и ту же функцию из
+`src/agent/*_detect.py`. Если targeted-парсер заводит собственную регулярку для поля,
+которое уже умеет broad-pass, — это дефект ревью, а не оптимизация. Разница между
+режимами выражается **только** в контексте на входе и, как следствие, в confidence.
+
+### 3.2. Контракт
+
+Модуль: `src/agent/parsers/` — пакет, один файл на парсер плюс `registry.py`.
+`StateConfig.parser` (уже объявлен в `src/agent/fitting_fsm.py`, но сегодня читается только
+тестом `tests/unit/test_fitting_fsm.py`) становится ключом реестра, по которому движок
+диспатчит.
+
+```python
+@dataclass(frozen=True)
+class ParseContext:
+    """Всё, что любой из парсеров может попросить. Один тип на все девять."""
+
+    customer_text: str                 # сырой STT-текст текущего turn'а
+    last_bot_utterance: str = ""       # для is_*_question / bot_listed_slots гейтов
+    state: FsmState | None = None      # состояние, которое задало вопрос (None = broad)
+    session: CallSession | None = None # fitting_slots_offered, fitting_station_ids, …
+    now: datetime | None = None        # для календарной арифметики DATE
+    conn: Any = None                   # соединение БД; None ⇒ aresolve запрещён
+
+
+@dataclass(frozen=True)
+class ParseOutcome:
+    """Итог разбора одного поля.
+
+    Три исхода, а не два. `NOT_MENTIONED` («клиент про дату не сказал») и
+    `UNRESOLVED` («сказал, но мы не разобрали») требуют разных переспросов —
+    ту же разницу `CompoundParseResult` уже сохраняет тем, что держит слабые
+    совпадения видимыми в `fields`.
+    """
+
+    value: Any = None
+    confidence: float = 0.0
+    spans: tuple[tuple[int, int], ...] = ()
+    status: Literal["value", "unresolved", "not_mentioned"] = "not_mentioned"
+
+
+class FieldParser(Protocol):
+    name: str                # совпадает со StateConfig.parser
+    field_name: str          # ключ в session.fsm_filled_fields
+
+    def parse(self, ctx: ParseContext) -> ParseOutcome:
+        """Синхронно, без I/O, детерминированно. Обязателен у всех парсеров."""
+
+    #: Опционально: доразрешение через сеть/БД. None у 7 из 9.
+    aresolve: Callable[[ParseContext, ParseOutcome], Awaitable[ParseOutcome]] | None = None
+```
+
+`ParseOutcome` намеренно повторяет форму `compound_parse._Hit` (`value` / `confidence` /
+`spans`) — targeted-парсер возвращает то же, что broad-pass кладёт в `CompoundParseResult`,
+и seam между ними остаётся конвертацией полей, а не переводом моделей.
+
+#### Асинхронность: `parse()` + опциональный `aresolve()`
+
+Async нужен ровно двум парсерам из девяти, и обоим — по одной причине: сырое слово клиента
+надо превратить в идентификатор, который знает только внешняя система.
+
+| Парсер | `parse()` (sync) | `aresolve()` (async) | Зачем |
+|---|---|---|---|
+| `brand_parser` | `preparse_fitting()` — курируемый whole-word список брендов | `vehicle_alias_lookup.resolve_by_alias(conn, …)` — 14 561 алиас в БД | «Дастер»/«Тігуан» нет в курируемом списке |
+| `station_parser` | `compound_parse._detect_station_hint()` — ландмарк-строка | `get_fitting_stations(query=…)` через tool-роутер | ландмарк ≠ `station_id` |
+
+Правила вызова `aresolve` (это и есть разрешение проблемы, а не обход):
+
+1. Движок **всегда** зовёт `parse()`. Он один определяет, есть ли что доразрешать.
+2. `aresolve()` вызывается **только** если `parse()` вернул `status != "value"` или
+   `confidence < 0.7`, **и** `ctx.conn is not None`, **и** режим FSM — `live`.
+3. В `shadow`-режиме `aresolve()` не вызывается никогда. Это сохраняет инвариант
+   «no await → no network» из `_run_fsm_deterministic_step` и объясняет, почему сегодня
+   `station_hint` намеренно выброшен из `COMPOUND_TO_FSM_FIELD`: резолв — сетевой вызов,
+   а shadow-режим сети не касается. После Wave 5-A это остаётся так же: shadow видит
+   `station_hint`, но не `station_id`.
+4. Отказ `aresolve()` (таймаут, БД недоступна) — **не** ошибка звонка: логируется на
+   WARNING с traceback, движок продолжает с результатом `parse()`. `contextlib.suppress`
+   на этом пути запрещён (`37fb2d0`).
+
+#### Контекстная зависимость: `ParseContext`, а не разные сигнатуры
+
+`time_parser` — самый контекстно-зависимый из девяти, и он же показывает, почему один тип
+контекста лучше девяти сигнатур. Его `parse()` читает из `ctx`:
+
+- `ctx.session.fitting_slots_offered` → список `HH:MM` для `detect_time_choice`;
+- `time_detect.bot_listed_slots(ctx.last_bot_utterance)` → флаг `allow_hour_only`
+  (голое «на десяту» однозначно только сразу после зачитанного списка; позже «17» — это
+  скорее диаметр);
+- `ctx.session.selected_fitting_time` → уже запиненный слот, чтобы не перезаписать его.
+
+Ровно эти три входа сегодня собирает Wave-14-блок в `src/core/pipeline.py`. Парсер их не
+получает аргументами — он их **достаёт из контекста сам**. Сигнатура у всех девяти одна;
+различие живёт внутри реализации, где ему и место. Именно этого не умеет вариант C: там
+различие пришлось бы протаскивать через публичный вызов `compound_parse`.
+
+### 3.3. Единственный порог confidence — `0.7`
+
+Порог один на весь FSM: `compound_parse.APPLY_THRESHOLD = 0.7`, продублированный как
+`_FSM_APPLY_THRESHOLD` в `src/core/pipeline.py` с явным комментарием «kept local so the
+pipeline never silently inherits a loosened upstream threshold». Wave 5-A **не вводит
+второго порога** — `FieldParser` использует тот же `APPLY_THRESHOLD`, импортируя его, а не
+переобъявляя.
+
+Все прочие числа в этой секции — уровни confidence (`1.0`, `0.9`, `0.6`, …) и счётчики
+попыток (`max_parser_null`), а не пороги. Порог сравнения ровно один.
+
+**Контекст поднимает confidence, а не опускает порог.** Это ключ к тому, чтобы targeted-pass
+жил с broad-pass на одном пороге. Голое «16»:
+
+| Режим | Контекст | Confidence | Результат |
+|---|---|---|---|
+| broad (`compound_parse`) | нет | `0.6` (`_diameter_confidence`, бита `«16»` = диаметр \| час \| число месяца) | ниже порога → не применяется, FSM спросит |
+| targeted, state=`PRICE_INTERRUPT` | `is_diameter_question(last_bot)` истинно | `1.0` — вопрос снял омонимию | применяется |
+| targeted, state=`TIME`, слот `16:00` предложен | `bot_listed_slots(last_bot)` истинно | `1.0` — `detect_time_choice` может выбрать только из уже предложенного | применяется |
+
+Тот же механизм уже реализован — это и есть смысл гейтов `is_diameter_question` /
+`is_name_question` / `bot_listed_slots` в пайплайне. Phase 3 их не изобретает, а
+формализует как вход в расчёт confidence.
+
+**Что происходит с полем ниже порога.** Оно не выбрасывается. `ParseOutcome` с
+`status="unresolved"` доходит до движка и означает: клиент про поле **сказал**, но
+однозначно не разобралось.
+
+| Исход `parse()` | FSM-событие | Что говорит бот |
+|---|---|---|
+| `status="value"`, `confidence ≥ 0.7` | `FIELD_FILLED` | переходит дальше по таблице §2.2 |
+| `status="unresolved"` (`confidence < 0.7`) | `PARSER_NULL` | **уточняющий** переспрос: «Ви сказали „на шістнадцяту“ — це час чи діаметр?» |
+| `status="not_mentioned"` | `PARSER_NULL` | обычный `question_template` / `silence_reprompt` |
+
+Оба «нулевых» исхода инкрементируют один и тот же счётчик `max_parser_null` (§3.7):
+для анти-лупа важно число попыток, а не их причина.
+
+### 3.4. Реестр парсеров
+
+`STATES` уже называет 12 парсеров по строкам. Спецификация обязана пользоваться **этими**
+именами — любое другое именование создаёт вторую схему имён поверх существующей.
+
+| `StateConfig.parser` | State | `field_name` | Тип |
+|---|---|---|---|
+| `noop_parser` | WELCOME, BOOK, DONE, TRANSFER | — | заглушка, всегда `not_mentioned` |
+| `intent_classifier` | INTENT | `intent` | Phase 1, уже написан (`src/agent/intent_classifier.py`) |
+| `city_parser` | CITY | `city` | field parser |
+| `station_parser` | STATION | `station_id` | field parser + `aresolve` |
+| `storage_choice_parser` | STORAGE | `storage_choice` | field parser |
+| `date_parser` | DATE | `date` | field parser |
+| `time_parser` | TIME | `time` | field parser |
+| `color_parser` | COLOR | `color` | field parser |
+| `brand_parser` | BRAND | `brand` | field parser + `aresolve` |
+| `yes_no_parser` | CONFIRM | `confirmed` | `src/agent/confirm_detect.py` — `is_confirmation()`, `asked_for_confirmation()` |
+| `diameter_parser` | PRICE_INTERRUPT | `diameter` | field parser + passive |
+| `booking_id_parser` | CANCEL_INTERRUPT | `booking_id` | Wave 5-A, отдельный (не входит в девятку) |
+
+**State-bound и passive парсеры.** Не у каждого парсера есть своё состояние:
+
+- `name_parser` — **тринадцатый**, его нет ни в одном `StateConfig`, потому что в §2.1
+  сознательно нет состояния NAME (имя приходит из профиля либо auto-persist'ится на первом
+  же turn). При этом `name` входит в `required_context` состояния CONFIRM. Значит
+  `name_parser` регистрируется как **passive**: движок гоняет его на каждом turn'е, пока
+  `fsm_filled_fields["name"]` пуст, под гейтом `name_detect.is_name_question()`. Это
+  дословно поведение Wave-6-блока в `src/core/pipeline.py`.
+- `diameter_parser` — и state-bound (PRICE_INTERRUPT), и passive: клиент называет диаметр в
+  ответ на ценовой вопрос из любого места main flow.
+
+Passive-парсеры пишут поле, но **никогда не двигают состояние** — `FsmEngine.apply_field()`
+переводит в `next_state` текущего состояния, поэтому вызов его для чужого поля даёт слепой
+прыжок по MAIN_FLOW. Пайплайн уже несёт этот запрет в комментарии
+«NEVER loop apply_field() over the mapped fields»; для passive-парсеров он абсолютный:
+только `fsm_filled_fields[...] = value`, без `apply_field`.
+
+### 3.5. Девять полей
+
+| Поле | Sync-источник | `aresolve` | Контекст из `ParseContext` | Что даёт targeted-режим сверх broad |
+|---|---|---|---|---|
+| `city` | `compound_parse._detect_city()` | — | — | ничего: единственное поле, где режимы совпадают полностью |
+| `station_id` | `compound_parse._detect_station_hint()` → ландмарк | `get_fitting_stations(query=…)` | `session.fitting_stations_seen`, `session.fitting_station_ids` | превращает hint в `station_id`; выбор по номеру/району из уже зачитанного списка |
+| `storage_choice` | `storage_detect.detect_storage_choice()` (Wave 5-A, §3.6) | — | `_bot_is_asking_storage(last_bot)` | широкий легаси-список признаков доступен только когда бот задал вопрос Krok 2 |
+| `date` | `compound_parse._detect_date_hint()` (гейт — `date_detect.mentions_date()`) | — | `now`, `session.fitting_storage_choice` | нормализация hint → ISO с учётом +3 роб. дней на contract и окна 21 день |
+| `time` | `time_detect.detect_time_choice()`; broad-заготовка — `compound_parse._detect_time_hint()` | — | `session.fitting_slots_offered`, `time_detect.bot_listed_slots(last_bot)` | валидация против реально предложенных слотов; `allow_hour_only` |
+| `color` | `color_detect.detect_color()` | — | — | ничего сверх broad; в targeted-режиме дополнительно принимается escape-hatch «не назвали» (row 19) |
+| `brand` | `preparse.preparse_fitting()` → ключ `brand` | `vehicle_alias_lookup.resolve_by_alias()` | `conn` | резолв редких марок и STT-омонимов через БД алиасов; rare-brand переспрос (row 22) |
+| `name` | `name_detect.detect_name()` | — | `name_detect.is_name_question(last_bot)` | broad-режим (`compound_parse._detect_name`) берёт **только** явное «мене звати X»; targeted снимает гейт, потому что вопрос уже задан |
+| `diameter` | `diameter_detect.detect_diameter()`, confidence — `compound_parse._diameter_confidence()` | — | `diameter_detect.is_diameter_question(last_bot)` | голое «16» поднимается с `0.6` до `1.0` |
+
+Модули `src/agent/vehicle_translit.py` (`normalize_alias()`, `translit_lat_to_cyr()`) и
+`src/agent/color_translit.py` (`translit_color_to_latin()`) — не парсеры, а нормализаторы на
+выходе: первый нормализует ключ поиска внутри `resolve_by_alias`, второй готовит значение
+для 1С. `src/agent/ua_datetime.py` (`date_to_words()`, `time_to_words()`) — форматтер
+**наружу**, в TTS-реплику; в цепочку разбора он не входит. `src/stt/numeral_parser.py`
+(`words_to_digits()`) работает до парсеров, на уровне STT-коррекции.
+
+#### Долг, который Phase 3 обязана закрыть в Wave 5-A: `date` и `time` пишутся сырыми
+
+Сегодняшний seam `map_compound_fields_to_fsm()` (`src/core/pipeline.py`) кладёт
+`date_hint → date` и `time_hint → time` **без нормализации и без валидации**. Значит
+`session.fsm_filled_fields["date"]` может содержать строку `"завтра"`, а не ISO-дату из
+примера §2.4, а `["time"]` — `"14:00"`, ни разу не сверенное с `fitting_slots_offered`
+(это то самое условие row 15 и Anchor 2). В shadow-режиме это безвредно: до `book_fitting`
+значения не доходят. При переключении на live — это дефект уровня P0.
+
+Требование к Wave 5-A: seam перестаёт писать сырые hint'ы в `date` / `time`. Либо hint'ы
+маппятся в одноимённые FSM-ключи `date_hint` / `time_hint` и нормализуются
+targeted-парсерами при входе в DATE / TIME, либо `date_parser.parse()` с непустым
+`ctx.now` возвращает уже ISO. Первый вариант предпочтителен: он не требует `now` в
+shadow-режиме и оставляет календарную арифметику там, где она сейчас (tool layer).
+
+### 3.6. STORAGE: два уровня признаков (долг Wave 4-A)
+
+Wave 4-A была обязана выводить `storage_choice`, иначе цепочка `auto_skip_if` залипала на
+STORAGE, а трогать `compound_parse` она не стала: полезная половина признаков зависит от
+того, задал ли бот вопрос Krok 2, а у `compound_parse` нет параметра «последняя реплика
+бота». Детектор осел в оркестраторе — `detect_storage_choice()` в `src/core/pipeline.py`.
+
+В пайплайне живут **два разных списка**, и это не дублирование, а разная цена ошибки:
+
+| Список | Ширина | Потребитель | Цена ложного срабатывания |
+|---|---|---|---|
+| `_STORAGE_OWN_HINTS` + `_STORAGE_OWN_HINTS_WHEN_ASKED` | широкий; содержит STT-огрызки «тобою», «за собою», «не маю» | легаси-подсказка LLM (флаг ✅ в `fitting_progress`) | дёшево: LLM всё равно переспросит |
+| `_STORAGE_SELF_EVIDENT_OWN` / `_STORAGE_SELF_EVIDENT_CONTRACT` | узкий; только самоочевидные фразы | основание **пропустить состояние FSM** | дорого: вопрос молча не задан |
+
+Слить их в один список нельзя — вернётся баг «пропустили STORAGE по слову „тобою“».
+Разделение выражается **через confidence, при одном пороге `0.7`**:
+
+| Признак | Условие | Confidence | Следствие |
+|---|---|---|---|
+| `_STORAGE_SELF_EVIDENT_OWN` / `_CONTRACT` | контекст не нужен | `1.0` | ≥ порога → можно пропустить состояние STORAGE |
+| широкий легаси-список | `_bot_is_asking_storage(last_bot)` истинно | `0.9` | ≥ порога, но достижимо **только внутри состояния STORAGE** — там вопрос уже задан, пропускать нечего |
+| широкий легаси-список | бот про зберігання не спрашивал | `0.5` | < порога → `status="unresolved"`, кормит легаси-подсказку LLM, состояние не пропускает |
+
+Уровень `0.9` физически недостижим в broad-режиме: у `compound_parse` нет
+`last_bot_utterance`. Одно и то же поле имеет разную confidence в двух режимах — и это
+самый наглядный аргумент за вариант A из §3.1: вариантом C такое не выражается, потому что
+режим у него один.
+
+**Неоднозначность → `None`.** Реплика с признаками обоих вариантов («свої привезу, чи те
+що у вас на зберіганні?») даёт `value=None`, `status="unresolved"`. Сегодня
+`detect_storage_choice()` уже так делает для узких списков — Wave 5-A распространяет то же
+правило на широкий. Монетка не подбрасывается: неоднозначность разрешается вопросом.
+
+**План миграции (Wave 5-A):**
+
+1. Новый модуль `src/agent/storage_detect.py`. Переносятся **дословно**, без переупорядочивания и
+   переформулировок: `_STORAGE_OWN_HINTS`, `_STORAGE_OWN_HINTS_WHEN_ASKED`,
+   `_STORAGE_ASKING_MARKERS`, `_STORAGE_SELF_EVIDENT_OWN`, `_STORAGE_SELF_EVIDENT_CONTRACT`,
+   `_bot_is_asking_storage()`, `detect_own_tires()`, `detect_storage_choice()`.
+2. `src/core/pipeline.py` импортирует `detect_own_tires` и `_bot_is_asking_storage` из нового
+   модуля. Легаси-нудж в `_transcript_processor_loop` не меняется ни на символ:
+   при `FSM_ENABLED=false` поведение обязано остаться байт-в-байт прежним, и это проверяется
+   тестом на равенство результатов до/после переноса на корпусе реплик из комментариев к
+   спискам (звонки 2026-08-03 14:55/14:56, 2026-09-03 10:37/10:38).
+3. `compound_parse.FIELD_KEYS` расширяется на `"storage_choice"`, `compound_parse()` начинает
+   класть в него **только** контекстно-свободный уровень (`1.0` / отсутствие). Тесты Wave 2-B
+   от этого не падают: единственная проверка контракта в `tests/unit/test_compound_parse.py` —
+   `set(result.fields) - set(FIELD_KEYS)`, то есть подмножество; добавление ключа разрешено.
+   Новые тесты на сам ключ добавляются в Wave 5-A.
+4. `COMPOUND_TO_FSM_FIELD` получает `"storage_choice": "storage_choice"`, а
+   `map_compound_fields_to_fsm()` теряет спец-случай: параметр `customer_text` и прямой вызов
+   `detect_storage_choice()` уходят, значение приходит по общему пути с общим порогом.
+5. `pipeline.detect_storage_choice` удаляется (переехал целиком); `pipeline.detect_own_tires`
+   удаляется как имя в `pipeline.py`, оставаясь ре-экспортом из `storage_detect`.
+
+### 3.7. Fallback rules
+
+В `StateConfig` уже объявлены три поля. Одно живое, два — нет.
+
+| Поле | Статус на 2026-09-08 | Судьба |
+|---|---|---|
+| `silence_reprompt` | **читается**: `FsmEngine.silence_reprompt()`, `src/agent/interrupts.py` (PRICE и CANCEL хендлеры) | без изменений |
+| `max_parser_null` | объявлено (дефолт 3; STORAGE=2, COLOR=3, BRAND=2), **не читается нигде в `src/`** | получает читателя в Wave 6-B, см. ниже |
+| `escalate_target` | объявлено (`FsmState.TRANSFER`), **не читается нигде в `src/`** | сохраняется, но смысл сужается, см. ниже |
+
+Это тот же паттерн, что метрика `fsm_interrupt_total` в Wave 1-C: поле завели и забыли.
+Спецификация обязана либо назвать читателя и волну, либо предложить удалить. Оба поля
+**сохраняются**, потому что у обоих есть строка в таблице переходов §2.2 (rows 12/20/23 —
+исчерпание попыток; row 47 — `any + ESCALATE → TRANSFER`); удалять пришлось бы вместе с
+этими строками.
+
+**Счётчик.** Wave 5-A добавляет в `CallSession` поле
+`fsm_parser_null_counts: dict[str, int]`, сериализуемое в `to_dict()` / `from_dict()`
+ровно как существующий `interrupt_counts`. Ключ — имя состояния. Сбрасывается при
+`FIELD_FILLED` для поля этого состояния и при выходе из состояния. Прототип помощников —
+`_counts()` / `_is_capped()` / `_bump()` / `_reset_followups()` в `src/agent/interrupts.py`:
+там же лежит и обоснование, почему счётчик должен быть в сессии (переживает Redis-recovery),
+и почему он вообще нужен (`c8c6601`: хендлер повторил один вопрос пять turn'ов подряд).
+
+**Читатель.** Wave 6-B добавляет `FsmEngine.on_parser_null(field_name) -> FsmState`:
+
+```
+count = ++fsm_parser_null_counts[state]
+if count < cfg.max_parser_null:
+    → PARSER_NULL-строка таблицы (§2.2 rows 7/9/12/14/17/20/22/23/26): переспрос
+if count >= cfg.max_parser_null:
+    if cfg.on_null_exhausted is not None:  → ветка состояния (см. таблицу ниже)
+    else:                                  → FsmEvent.ESCALATE → cfg.escalate_target
+```
+
+**`escalate_target` — не действие при исчерпании, а последний рубеж.** Дефолт
+`FsmState.TRANSFER` верен для шести состояний, но был бы ложью для трёх: их собственные
+комментарии в `STATES` описывают совсем другое поведение. Поэтому Wave 5-A добавляет в
+`StateConfig` одно опциональное поле — по образцу уже существующего `auto_skip_if`,
+единственного callable в этом dataclass:
+
+```python
+on_null_exhausted: Callable[[CallSession], FsmState] | None = None
+```
+
+| State | `max_parser_null` | `on_null_exhausted` | Row §2.2 |
+|---|---|---|---|
+| STORAGE | 2 | пишет `storage_choice="own"`, возвращает `DATE` | 12 |
+| COLOR | 3 | пишет `color="колір не розчула"`, возвращает `BRAND` | 20 |
+| BRAND | 2 | включает type-fallback (вопрос про тип авто), возвращает `BRAND` | 23 |
+| CITY, STATION, DATE, TIME, CONFIRM, PRICE_INTERRUPT, CANCEL_INTERRUPT | 3 (дефолт) | `None` | 47 → TRANSFER |
+
+BRAND — единственный, у кого ветка не сводится к «записать дефолтное значение»: она меняет
+задаваемый вопрос. В Wave 6-B это решается либо флагом в сессии, который читает
+`render()` состояния BRAND, либо отдельным состоянием `BRAND_TYPE_FALLBACK`. Второй вариант
+чище (`on_null_exhausted` остаётся без побочных эффектов, как `auto_skip_if`), но добавляет
+16-е состояние — решение принимает Wave 6-B.
+
+**Никакого «escalate на LLM-agent».** Такой ветки в коде нет: `escalate_target` — это
+`FsmState.TRANSFER`, то есть оператор. Делегирование обратно LLM описано отдельно и в другом
+месте — как Phase B migration path (§2.7, «agent freestyle mode»), и оно управляется
+feature-флагом, а не счётчиком парсера.
+
+### 3.8. `parser_input` — предложение удалить
+
+`StateConfig.parser_input` (`"last_user_turn"` / `"last_3_turns"` / `"compound_first_turn"`)
+объявлен, нигде не читается и ни одним состоянием не переопределён — все 15 используют
+дефолт. С введением `ParseContext` он избыточен: парсер, которому нужны три последних
+turn'а (единственный кандидат — escape-hatch «не назвали» у COLOR, row 19), достаёт их из
+`ctx.session.dialog_history` сам, как это делает Wave-5-guard сегодня. Wave 5-A либо удаляет
+поле, либо даёт ему читателя; третьего состояния («объявлено и забыто») быть не должно.
+
+### 3.9. Тесты Wave 5-A
+
+- Один файл на парсер, `tests/unit/test_parsers_<field>.py`. Паттерн — существующий
+  `tests/unit/test_color_detect.py`.
+- Корпус — **не выдуманные** фразы: STT-огрызки из комментариев к спискам в
+  `compound_parse.py`, `pipeline.py` и `prompts.py` с указанными там call-id.
+- На каждый парсер обязательны три кейса: значение выше порога, `unresolved` ниже порога,
+  `not_mentioned`. Без третьего невозможно отличить регрессию «перестал детектить» от
+  «стал детектить неуверенно».
+- **Мутационная проверка обязательна** для `storage_choice_parser`: тест, который зелёный
+  и при `confidence=0.9`, и при `confidence=0.5` для широкого списка, не проверяет ничего.
+  Порог проламывается вручную, тест обязан покраснеть.
+- `AsyncMock` для `conn` в `brand_parser` и для tool-роутера в `station_parser` — **только**
+  с `spec=`: мок без spec делает зелёным путь, которого в проде нет.
+- Эквивалентность легаси: тест, сравнивающий `storage_detect.detect_own_tires()` с
+  до-миграционным поведением на корпусе из §3.6 п. 2.
+
+### 3.10. Чего Phase 3 не делает
+
+- Не переписывает `compound_parse` (это был бы вариант B).
+- Не переносит календарную арифметику (окно 21 день, +3 рабочих дня на contract) из tool
+  layer в парсеры — это Phase 4+.
+- Не трогает LLM-промпт: снятие соответствующих блоков `_MOD_FITTING` возможно только после
+  Phase C миграции (§2.7), когда FSM authoritative.
+- Не удаляет backend guards Waves 4C→12 — §2.8 остаётся в силе.
