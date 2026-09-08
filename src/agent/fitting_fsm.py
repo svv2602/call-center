@@ -58,6 +58,7 @@ logger = logging.getLogger(__name__)
 # not landed yet — a missing counter must never break the call flow.
 try:  # pragma: no cover - import-time branch
     from src.monitoring.metrics import (
+        fsm_interrupt_turn_total,
         fsm_parser_null_total,
         fsm_state_entered_total,
         fsm_transition_total,
@@ -65,6 +66,7 @@ try:  # pragma: no cover - import-time branch
 
     _METRICS_AVAILABLE = True
 except ImportError:  # pragma: no cover - Wave 1-C not merged yet
+    fsm_interrupt_turn_total = None  # type: ignore[assignment]
     fsm_parser_null_total = None  # type: ignore[assignment]
     fsm_state_entered_total = None  # type: ignore[assignment]
     fsm_transition_total = None  # type: ignore[assignment]
@@ -302,6 +304,11 @@ class StateConfig:
     #: usable value before `on_null_exhausted` / `escalate_target` takes over.
     #: Read by `FsmEngine.on_parser_null()` (Wave 6-B).
     max_parser_null: int = 3
+    #: How many turns in this state may be spent on a detected interrupt
+    #: (price / cancel) before the caller gets an operator. Separate budget
+    #: from `max_parser_null`: a question is not a failed answer, but the
+    #: exemption still has to be bounded. Read by `on_interrupt_turn()`.
+    max_interrupt_turns: int = 4
     #: Last resort when the attempts are used up and there is no branch. Row 47
     #: of §2.2 — an operator, never «hand it back to the LLM».
     escalate_target: FsmState = FsmState.TRANSFER
@@ -1010,6 +1017,7 @@ class FsmEngine:
             # DATE and BRAND would escalate a call in which every state was
             # answered on the second try.
             self._null_counts().pop(from_state.value, None)
+            self._interrupt_turn_counts().pop(from_state.value, None)
             self._clear_fallback(from_state)
         self._record_history(from_state, state, event, payload)
         self._emit_metrics(from_state, state)
@@ -1086,6 +1094,7 @@ class FsmEngine:
         # escalation for the rest of the call.
         if cfg.field_name == field_name:
             self._null_counts().pop(cfg.state.value, None)
+            self._interrupt_turn_counts().pop(cfg.state.value, None)
             self._clear_fallback(cfg.state)
         target = cfg.next_state or cfg.state
         self.transition(
@@ -1155,6 +1164,83 @@ class FsmEngine:
     def parser_null_count(self, state: FsmState | None = None) -> int:
         """How many consecutive nulls `state` has already collected."""
         return self._null_counts().get((state or self.current_state()).value, 0)
+
+    def _interrupt_turn_counts(self) -> dict[str, int]:
+        """The live `fsm_interrupt_turn_counts` dict, tolerating an old session."""
+        counts = getattr(self.session, "fsm_interrupt_turn_counts", None)
+        if not isinstance(counts, dict):
+            counts = {}
+            self.session.fsm_interrupt_turn_counts = counts
+        return counts
+
+    def interrupt_turn_count(self, state: FsmState | None = None) -> int:
+        """How many interrupt turns `state` has already absorbed."""
+        return self._interrupt_turn_counts().get(
+            (state or self.current_state()).value, 0
+        )
+
+    def on_interrupt_turn(
+        self,
+        kind: str,
+        customer_text: str = "",
+        *,
+        advance: bool = True,
+    ) -> FsmState:
+        """The caller used this turn to open an interrupt, not to answer.
+
+        Charged to its own budget instead of `max_parser_null`. Asking what it
+        costs is not a failure to name a colour, and three such turns used to
+        spend the null budget and hand the caller to an operator for questions
+        the bot was about to answer.
+
+        The exemption is itself capped. `max_interrupt_turns` in the same state
+        → `escalate_target`, deliberately *not* `on_null_exhausted`: a caller
+        circling one state with price questions needs a human, not a silent
+        default of «own tires». An uncapped escape from a loop-breaker is not a
+        fix, it is the same unbounded loop one level up.
+
+        `advance=False` is the shadow call and has the same contract as in
+        `on_parser_null`: count, log, emit, do not move.
+        """
+        state = self.current_state()
+        cfg = STATES[state]
+        counts = self._interrupt_turn_counts()
+        count = counts.get(state.value, 0) + 1
+        counts[state.value] = count
+
+        self._emit_interrupt_turn_metric(kind, state)
+        logger.info(
+            "fsm_interrupt_turn call=%s state=%s kind=%s attempt=%d/%d text=%r",
+            self.session.channel_uuid,
+            state.value,
+            kind,
+            count,
+            cfg.max_interrupt_turns,
+            (customer_text or "")[:100],
+            extra={"call_id": str(self.session.channel_uuid)},
+        )
+
+        if not advance or count < cfg.max_interrupt_turns:
+            return state
+
+        counts.pop(state.value, None)
+        return self.transition(
+            cfg.escalate_target,
+            event=FsmEvent.ESCALATE,
+            payload={"kind": kind, "attempt": count, "reason": "interrupt_turns"},
+        )
+
+    def _emit_interrupt_turn_metric(self, kind: str, state: FsmState) -> None:
+        if not _METRICS_AVAILABLE:
+            return
+        try:
+            fsm_interrupt_turn_total.labels(state=state.value, kind=kind).inc()
+        except Exception:
+            logger.exception(
+                "fitting_fsm: failed to emit fsm_interrupt_turn_total for %s/%s",
+                state,
+                kind,
+            )
 
     def on_parser_null(
         self,

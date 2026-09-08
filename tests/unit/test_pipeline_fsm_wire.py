@@ -1206,19 +1206,77 @@ class TestPipelineFreezeLifecycle:
 
         assert h.session.fsm_parser_null_counts.get(FsmState.CITY.value) in (None, 0)
 
-    async def test_an_undispatched_interrupt_still_costs_a_parser_null(self) -> None:
-        """KNOWN, reported, NOT fixed in Wave 6-B — see PROGRESS «Finding 3».
+    async def test_an_undispatched_interrupt_costs_an_interrupt_turn_not_a_null(
+        self,
+    ) -> None:
+        """Wave 6-B «Finding 3», now fixed.
 
         When the pipeline *declines* to dispatch (cap spent, or the classifier
-        is below the confidence floor) there is no freeze to pay the null back,
-        so the turn lands on the LLM **and** costs CITY an attempt. Shadow is
-        unaffected (`advance=False`) and `live` is not enabled anywhere yet, so
-        this is pinned rather than fixed: the fix reorders the seam against the
-        interrupt dispatch, which is a live-path change.
+        below the confidence floor) there is no freeze to pay the null back, so
+        the turn used to land on the LLM **and** cost CITY one of its three
+        `max_parser_null` attempts — three price questions and the caller met
+        an operator. The seam now recognises the question by markers, which it
+        can do in shadow too, and charges the separate interrupt budget.
         """
         h = await self._run(interrupt(), confidence=0.2)
 
+        assert h.session.fsm_parser_null_counts.get(FsmState.CITY.value) in (None, 0)
+        assert h.session.fsm_interrupt_turn_counts.get(FsmState.CITY.value) == 1
+        assert h.llm_turns == [PRICE_TEXT], "the fallthrough to the LLM must still happen"
+
+    async def test_repeated_undispatched_questions_do_not_reach_an_operator(
+        self,
+    ) -> None:
+        """The whole point of the change, end to end at the seam."""
+        session = booking_in_progress(FsmState.CITY)
+        h = Harness(session)
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                AsyncMock(return_value=intent("PRICE", 0.2)),
+            ),
+        ):
+            await h.run(PRICE_TEXT, "а скільки це коштує?", "що по ціні")
+
+        assert h.session.fsm_state == FsmState.CITY.value
+        assert h.session.fsm_interrupt_turn_counts[FsmState.CITY.value] == 3
+
+    async def test_the_interrupt_budget_is_itself_bounded(self) -> None:
+        """An uncharged escape from a loop-breaker is the same loop one level
+        up — the shape of `c8c6601`. A caller circling CITY with questions the
+        pipeline will not dispatch still ends up with a human."""
+        session = booking_in_progress(FsmState.CITY)
+        h = Harness(session)
+        cap = STATES[FsmState.CITY].max_interrupt_turns
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                AsyncMock(return_value=intent("PRICE", 0.2)),
+            ),
+        ):
+            await h.run(*[PRICE_TEXT] * cap)
+
+        assert h.session.fsm_state == STATES[FsmState.CITY].escalate_target.value
+
+    async def test_a_genuine_non_answer_still_costs_a_parser_null(self) -> None:
+        """The mirror defect: if the detector fired on ordinary speech, every
+        misheard answer would be exempt and the state would re-ask forever."""
+        session = booking_in_progress(FsmState.CITY)
+        session.fsm_filled_fields.pop("city", None)
+        h = Harness(session)
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                AsyncMock(return_value=intent("OTHER", 0.9)),
+            ),
+        ):
+            await h.run("ну")
+
         assert h.session.fsm_parser_null_counts.get(FsmState.CITY.value) == 1
+        assert h.session.fsm_interrupt_turn_counts.get(FsmState.CITY.value) in (None, 0)
 
     async def test_freeze_and_resume_survive_the_redis_roundtrip(self) -> None:
         # Mid-interrupt snapshot: exactly what a session looks like between the

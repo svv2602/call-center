@@ -35,6 +35,40 @@ MAX_EMPTY_RESPONSES_BEFORE_ESCALATE = 3
 FSM_HISTORY_LIMIT = 20
 
 
+def _clean_count_map(
+    raw: object, *, field: str, channel_uuid: object
+) -> dict[str, int]:
+    """Restore a `{state: count}` loop-breaker map, dropping bad entries loudly.
+
+    Shared by the two FSM counters. A malformed value is skipped with a
+    WARNING rather than defaulted to zero: zero silently rearms a cap that was
+    supposed to have tripped.
+    """
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        logger.warning(
+            "Call %s: %s has unexpected type %s — ignoring",
+            channel_uuid,
+            field,
+            type(raw).__name__,
+        )
+        return {}
+    clean: dict[str, int] = {}
+    for key, value in raw.items():
+        if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+            logger.warning(
+                "Call %s: %s[%r] has unexpected value %r — ignoring",
+                channel_uuid,
+                field,
+                key,
+                value,
+            )
+            continue
+        clean[str(key)] = value
+    return clean
+
+
 class CallState(enum.StrEnum):
     """States of a call session."""
 
@@ -189,6 +223,17 @@ class CallSession:
         # would be zero every time and the cap would never trip. That is
         # literally `c8c6601` — one question asked five turns in a row.
         self.fsm_parser_null_counts: dict[str, int] = {}
+        # Turns spent in a state on a *detected interrupt* (price / cancel),
+        # keyed the same way. These do NOT feed `max_parser_null`: a caller who
+        # asks what it costs has not failed to answer the question, and three
+        # such turns used to walk them into TRANSFER for questions the bot was
+        # about to answer.
+        #
+        # Counted rather than ignored, and capped by `max_interrupt_turns`,
+        # because an uncharged escape from the null budget is an unbounded
+        # loop — the exact shape of `c8c6601`. Exempting a turn from one
+        # counter means putting it under another, never under none.
+        self.fsm_interrupt_turn_counts: dict[str, int] = {}
         # BRAND type-fallback (spec §3.7, row 23). Set by BRAND's
         # `on_null_exhausted` after `max_parser_null` failed attempts at the
         # brand; read by `FsmEngine.next_question()`, which then asks for the
@@ -343,6 +388,7 @@ class CallSession:
             "fsm_prev_state": self.fsm_prev_state,
             "fsm_history": list(self.fsm_history[-FSM_HISTORY_LIMIT:]),
             "fsm_parser_null_counts": dict(self.fsm_parser_null_counts),
+            "fsm_interrupt_turn_counts": dict(self.fsm_interrupt_turn_counts),
             "fsm_brand_type_fallback": self.fsm_brand_type_fallback,
             "interrupt_counts": dict(self.interrupt_counts),
             "pending_cancel_action": self.pending_cancel_action,
@@ -434,31 +480,20 @@ class CallSession:
                 data.get("channel_uuid"),
                 type(history).__name__,
             )
-        # --- parser_null loop-breaker (Wave 6-B) ---
+        # --- FSM loop-breakers (Wave 6-B) ---
         # Same reasoning as `interrupt_counts` right below: a malformed value
         # must never silently become an empty default, because that resets the
         # loop-breaker and lets the same question be asked forever.
-        null_counts = data.get("fsm_parser_null_counts") or {}
-        if isinstance(null_counts, dict):
-            clean_nulls: dict[str, int] = {}
-            for key, value in null_counts.items():
-                if isinstance(value, bool) or not isinstance(value, int) or value < 0:
-                    logger.warning(
-                        "Call %s: fsm_parser_null_counts[%r] has unexpected value %r "
-                        "— ignoring",
-                        data.get("channel_uuid"),
-                        key,
-                        value,
-                    )
-                    continue
-                clean_nulls[str(key)] = value
-            session.fsm_parser_null_counts = clean_nulls
-        else:
-            logger.warning(
-                "Call %s: fsm_parser_null_counts has unexpected type %s — ignoring",
-                data.get("channel_uuid"),
-                type(null_counts).__name__,
-            )
+        session.fsm_parser_null_counts = _clean_count_map(
+            data.get("fsm_parser_null_counts"),
+            field="fsm_parser_null_counts",
+            channel_uuid=data.get("channel_uuid"),
+        )
+        session.fsm_interrupt_turn_counts = _clean_count_map(
+            data.get("fsm_interrupt_turn_counts"),
+            field="fsm_interrupt_turn_counts",
+            channel_uuid=data.get("channel_uuid"),
+        )
         brand_fallback = data.get("fsm_brand_type_fallback", False)
         if isinstance(brand_fallback, bool):
             session.fsm_brand_type_fallback = brand_fallback

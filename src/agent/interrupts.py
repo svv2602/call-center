@@ -317,6 +317,23 @@ def _norm(text: str | None) -> str:
     return text.lower().replace("’", "'").replace("`", "'").strip()
 
 
+#: «скільки коштує» with filler words in between. The substring markers above
+#: are contiguous, so «скільки **це** коштує» — the ordinary way to ask — slid
+#: past them and the handler declined the turn even when the classifier had
+#: called it PRICE. Up to two words of slack, no more: the two halves have to
+#: stay in the same clause.
+_PRICE_GAPPED: tuple[re.Pattern[str], ...] = (
+    re.compile(r"скільки\s+(?:\S+\s+){0,2}кошт"),
+    re.compile(r"сколько\s+(?:\S+\s+){0,2}сто"),
+    re.compile(r"скільки\s+(?:\S+\s+){0,2}пла[тч]"),
+)
+
+#: Roots matched at a word start, so every case ending is covered («ціна»,
+#: «ціни», «ціні», «цінами») without listing them. `_starts_word` is what keeps
+#: «оцініть» from reading as a price question — a bare substring would not.
+_PRICE_ROOTS: tuple[str, ...] = ("цін", "цен", "вартіс", "вартост", "стоимост")
+
+
 def _mentions_price(text: str) -> bool:
     """True when the caller's own words ask about price (default-deny)."""
     lowered = _norm(text)
@@ -324,7 +341,11 @@ def _mentions_price(text: str) -> bool:
         return False
     if any(denial in lowered for denial in _PRICE_DENIALS):
         return False
-    return any(marker in lowered for marker in _PRICE_MARKERS)
+    if any(marker in lowered for marker in _PRICE_MARKERS):
+        return True
+    if any(pattern.search(lowered) for pattern in _PRICE_GAPPED):
+        return True
+    return any(_starts_word(lowered, root) for root in _PRICE_ROOTS)
 
 
 def _mentions_cancel(text: str) -> bool:
@@ -335,6 +356,30 @@ def _mentions_cancel(text: str) -> bool:
     if any(denial in lowered for denial in _CANCEL_DENIALS):
         return False
     return any(marker in lowered for marker in _CANCEL_MARKERS)
+
+
+def classify_interrupt_text(text: str) -> str | None:
+    """Which interrupt the caller's own words open, by markers alone.
+
+    Returns `"price"`, `"cancel"` or `None`. Pure and synchronous on purpose:
+    the FSM seam runs in shadow mode, where reaching the intent classifier
+    would mean a network call. These are the same marker lists the live
+    handlers use, so the seam and `_maybe_handle_intent` agree on what counts
+    as an interrupt instead of drifting apart into two definitions.
+
+    Deliberately narrower than the classifier: it recognises only the two
+    intents that actually have a handler. A knowledge-base question
+    («чи є гарантія?») is not detected here and keeps charging the parser-null
+    budget, which is today's behaviour — widening this would need a
+    general question detector, and inventing one is out of scope.
+    """
+    if _mentions_cancel(text):
+        # Checked first: «скасуйте, скільки поверне?» is a cancellation that
+        # happens to mention money, not a price question.
+        return "cancel"
+    if _mentions_price(text):
+        return "price"
+    return None
 
 
 #: Character class used for word-boundary checks. `\b` is unreliable here: the

@@ -30,6 +30,8 @@ from src.agent.interrupts import (
     MAX_INTERRUPT_FIRES,
     PRICE_HANDLER,
     InterruptResult,
+    _mentions_price,
+    classify_interrupt_text,
     handle_cancel_interrupt,
     handle_price_interrupt,
 )
@@ -628,3 +630,87 @@ class TestReturnFormat:
         assert result.advanced is False
         assert session.pending_cancel_action is None
         assert_contract(result)
+
+
+class TestClassifyInterruptText:
+    """The pure detector the FSM seam uses instead of the LLM classifier.
+
+    The seam runs in shadow mode too, where a network call is forbidden, so it
+    cannot ask `classify_intent`. Sharing `_mentions_price` / `_mentions_cancel`
+    with the live handlers is the point: two definitions of «interrupt» would
+    drift, and the seam would exempt turns the handler then declines.
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "скільки коштує?",
+            # The phrase that exposed the gap: the substring markers are
+            # contiguous, so any filler between the two halves slipped past.
+            "а скільки це коштує?",
+            "скільки буде коштувати перекидка?",
+            "почому монтаж",
+            "яка ціна",
+            # Case endings the literal marker list did not carry.
+            "що по ціні",
+            "розкажіть про ціни",
+            "яка вартість роботи",
+            "сколько это стоит",
+        ],
+    )
+    def test_a_price_question_is_a_price_interrupt(self, text: str) -> None:
+        assert classify_interrupt_text(text) == "price"
+
+    @pytest.mark.parametrize("text", ["скасуйте запис", "хочу відмінити", "я не приїду завтра"])
+    def test_a_cancellation_is_a_cancel_interrupt(self, text: str) -> None:
+        assert classify_interrupt_text(text) == "cancel"
+
+    def test_a_cancellation_that_mentions_money_is_still_a_cancellation(self) -> None:
+        # Order matters: «скасуйте, а гроші поверне?» must reach the cancel
+        # handler, not an answer about the fitting price.
+        assert classify_interrupt_text("скасуйте запис, яка ціна повернення") == "cancel"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "",
+            "мене не цікавить ціна",
+            "не треба скасовувати",
+            # Word-start matching is what keeps this from reading as «ціна».
+            "оцініть роботу майстра",
+        ],
+    )
+    def test_a_denial_or_a_near_miss_is_not_an_interrupt(self, text: str) -> None:
+        assert classify_interrupt_text(text) is None
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Київ",
+            "Одеса",
+            "чорний",
+            "Renault Duster",
+            "завтра",
+            "о десятій ранку",
+            "так",
+            "ні",
+            "АА1234ВС",
+            "я на своїх",
+            "у вас на зберіганні",
+            "205 55 R16",
+            # The genuine non-answers the parser_null budget exists for.
+            "ну",
+            "шо?",
+            "ааа",
+        ],
+    )
+    def test_an_ordinary_fitting_answer_is_not_an_interrupt(self, text: str) -> None:
+        """A false positive here is the mirror defect: it would exempt a real
+        non-answer from the null budget and re-ask the same question forever."""
+        assert classify_interrupt_text(text) is None
+
+    def test_the_detector_agrees_with_the_live_handler_gate(self) -> None:
+        # If these ever diverge, the seam exempts a turn `handle_price_interrupt`
+        # then declines — a question charged to nobody's budget.
+        for text in ("а скільки це коштує?", "що по ціні", "Київ", "ну"):
+            assert (classify_interrupt_text(text) == "price") is _mentions_price(text)

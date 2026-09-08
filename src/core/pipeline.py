@@ -1000,6 +1000,7 @@ class CallPipeline:
         try:
             from src.agent.compound_parse import compound_parse
             from src.agent.fitting_fsm import STATES, FsmEngine
+            from src.agent.interrupts import classify_interrupt_text
             from src.agent.parsers.base import ParseContext
             from src.agent.parsers.registry import get_parser
 
@@ -1120,15 +1121,31 @@ class CallPipeline:
                     # loosened upstream value gets silently inherited.
                     #
                     # `advance` is the mode, not the reason: only `live` is
-                    # allowed to move the machine on a null. Shadow still
-                    # counts, logs and emits the metric — see
-                    # `FsmEngine.on_parser_null` for why an advancing observer
-                    # goes blind.
-                    state_after = engine.on_parser_null(
-                        own_field,
-                        transcript.text,
-                        advance=self._fsm_mode_cache == FSM_MODE_LIVE,
-                    )
+                    # allowed to move the machine. Shadow still counts, logs
+                    # and emits the metric — see `FsmEngine.on_parser_null`
+                    # for why an advancing observer goes blind.
+                    advance = self._fsm_mode_cache == FSM_MODE_LIVE
+                    # A turn the caller spent opening an interrupt is not a
+                    # failed answer. Charging it to `max_parser_null` handed
+                    # the caller to an operator after three price questions
+                    # the bot was about to answer. Detected by markers rather
+                    # than by the classifier because this runs in shadow too,
+                    # where a network call is forbidden — and because the seam
+                    # and `_maybe_handle_intent` must agree on what an
+                    # interrupt is instead of keeping two definitions.
+                    interrupt_kind = classify_interrupt_text(transcript.text)
+                    if interrupt_kind is not None:
+                        state_after = engine.on_interrupt_turn(
+                            interrupt_kind,
+                            transcript.text,
+                            advance=advance,
+                        )
+                    else:
+                        state_after = engine.on_parser_null(
+                            own_field,
+                            transcript.text,
+                            advance=advance,
+                        )
 
             # Deliberately the *raw* template, not `engine.next_question()`:
             # `render()` logs a WARNING for every placeholder it cannot fill,

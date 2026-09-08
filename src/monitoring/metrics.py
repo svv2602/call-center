@@ -498,6 +498,13 @@ fsm_parser_null_total = Counter(
     ["field", "state"],
 )
 
+fsm_interrupt_turn_total = Counter(
+    "callcenter_fsm_interrupt_turn_total",
+    "Turn spent in a state on a detected interrupt rather than an answer — "
+    "exempt from the parser_null budget, capped by max_interrupt_turns",
+    ["state", "kind"],
+)
+
 fsm_compound_preparse_fields_total = Counter(
     "callcenter_fsm_compound_preparse_fields_total",
     "Fields extracted from first customer utterance via compound pre-parse",

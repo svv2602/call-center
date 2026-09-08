@@ -1568,6 +1568,139 @@ class TestParserNullLoop:
         assert counter_value("callcenter_fsm_parser_null_total", labels) == before + 1
 
 
+class TestInterruptTurnBudget:
+    """A question is not a failed answer — but the exemption is still capped.
+
+    Three price questions in a row used to exhaust `max_parser_null` and hand
+    the caller to an operator for questions the bot was about to answer. The
+    fix is a *second* bounded counter rather than an exemption: an uncharged
+    escape from a loop-breaker is the same unbounded loop one level up, which
+    is the shape of `c8c6601`.
+    """
+
+    def test_no_state_can_quietly_disable_the_budget(self) -> None:
+        """Asserted over the whole enum, and on the number rather than on the
+        config, because every other test in this class reads the cap from
+        `STATES` — raising it to 999 would leave all of them green while the
+        exemption became the unbounded loop it was written to avoid. The band
+        leaves room to tune a state without room to switch it off.
+        """
+        for state, cfg in STATES.items():
+            assert 2 <= cfg.max_interrupt_turns <= 6, state
+            assert cfg.escalate_target is not None, state
+
+    def test_an_interrupt_turn_does_not_charge_the_null_budget(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.CITY)
+        assert eng.on_interrupt_turn("price") is FsmState.CITY
+        assert eng.parser_null_count(FsmState.CITY) == 0
+        assert eng.interrupt_turn_count(FsmState.CITY) == 1
+
+    def test_the_two_budgets_do_not_drain_each_other(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        # The point of the whole change: a caller may ask and still get their
+        # full quota of misheard answers afterwards.
+        eng = at_state(session, FsmState.CITY)
+        cfg = STATES[FsmState.CITY]
+        for _ in range(cfg.max_interrupt_turns - 1):
+            assert eng.on_interrupt_turn("price") is FsmState.CITY
+        for _ in range(cfg.max_parser_null - 1):
+            assert eng.on_parser_null("city") is FsmState.CITY
+        assert eng.current_state() is FsmState.CITY
+
+    def test_the_re_ask_is_the_state_s_own_question(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.CITY)
+        before = eng.next_question()
+        eng.on_interrupt_turn("price")
+        assert eng.next_question() == before
+
+    def test_exhausting_the_interrupt_budget_escalates(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.CITY)
+        cfg = STATES[FsmState.CITY]
+        final = FsmState.CITY
+        for _ in range(cfg.max_interrupt_turns):
+            final = eng.on_interrupt_turn("price")
+        assert final is cfg.escalate_target
+        assert session.fsm_history[-1]["event"] == FsmEvent.ESCALATE.value
+
+    def test_the_cap_escalates_even_where_a_null_would_fall_back(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        """STORAGE nulls default to «own tires»; circling it with questions
+        must not. A caller who keeps asking instead of answering wants a human,
+        not a silent guess about their tires made on their behalf."""
+        eng = at_state(session, FsmState.STORAGE)
+        assert STATES[FsmState.STORAGE].on_null_exhausted is not None
+        final = FsmState.STORAGE
+        for _ in range(STATES[FsmState.STORAGE].max_interrupt_turns):
+            final = eng.on_interrupt_turn("price")
+        assert final is STATES[FsmState.STORAGE].escalate_target
+        assert "storage_choice" not in session.fsm_filled_fields
+
+    def test_a_filled_field_zeroes_the_counter(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        # PRICE_INTERRUPT self-loops, so `_enter` never fires for it — the
+        # reset in `apply_field` is the only one that runs here.
+        eng = at_state(session, FsmState.PRICE_INTERRUPT)
+        eng.on_interrupt_turn("price")
+        eng.on_interrupt_turn("price")
+        assert eng.interrupt_turn_count(FsmState.PRICE_INTERRUPT) == 2
+        eng.apply_field("diameter", 16)
+        assert eng.interrupt_turn_count(FsmState.PRICE_INTERRUPT) == 0
+
+    def test_leaving_the_state_zeroes_the_counter(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.CITY)
+        eng.on_interrupt_turn("price")
+        eng.transition(FsmState.STATION)
+        assert eng.interrupt_turn_count(FsmState.CITY) == 0
+
+    def test_observe_only_counts_without_moving(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.CITY)
+        over = STATES[FsmState.CITY].max_interrupt_turns + 2
+        for _ in range(over):
+            assert eng.on_interrupt_turn("price", advance=False) is FsmState.CITY
+        assert eng.current_state() is FsmState.CITY
+        assert eng.interrupt_turn_count(FsmState.CITY) == over
+
+    def test_the_counter_survives_the_redis_roundtrip(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.CITY)
+        eng.on_interrupt_turn("price")
+        restored = CallSession.from_dict(json.loads(json.dumps(session.to_dict())))
+        assert restored.fsm_interrupt_turn_counts == session.fsm_interrupt_turn_counts
+        assert FsmEngine(restored).interrupt_turn_count(FsmState.CITY) == 1
+
+    def test_a_garbage_counter_is_dropped_loudly_not_silently(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        payload = CallSession(uuid.uuid4()).to_dict()
+        payload["fsm_interrupt_turn_counts"] = {"CITY": "три", "DATE": 2}
+        with caplog.at_level(logging.WARNING, logger="src.core.call_session"):
+            restored = CallSession.from_dict(payload)
+        assert restored.fsm_interrupt_turn_counts == {"DATE": 2}
+        assert any(r.levelno >= logging.WARNING for r in caplog.records)
+
+    def test_the_interrupt_metric_has_a_reader(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        labels = {"state": "CITY", "kind": "price"}
+        before = counter_value("callcenter_fsm_interrupt_turn_total", labels)
+        at_state(session, FsmState.CITY).on_interrupt_turn("price")
+        assert counter_value("callcenter_fsm_interrupt_turn_total", labels) == before + 1
+
+
 # --------------------------------------------------------------------------
 # TestStructuredLogOutput — Wave 6-B
 # --------------------------------------------------------------------------
