@@ -46,6 +46,7 @@ from src.monitoring.metrics import (
     barge_in_total,
     bot_filler_stripped_total,
     false_booking_claim_total,
+    fsm_interrupt_total,
     tts_delivery_ms,
 )
 from src.stt.base import STTConfig, STTEngine, Transcript
@@ -465,6 +466,275 @@ _FAREWELL_SYSTEM_PROMPT = (
     "підсумуй результат розмови. Подякуй за дзвінок."
 )
 
+
+# ---------------------------------------------------------------------------
+# Wave 4-A — FSM wiring (feature-flagged)
+# ---------------------------------------------------------------------------
+#
+# The previous attempt at this wire (commit 2fae3b6, reverted by c8c6601) went
+# to production without a kill switch, short-circuited the turn unconditionally
+# and copied arbitrary keys onto the session with setattr(). Everything below
+# exists to make those four failure modes structurally impossible:
+#
+#   1. FSM_ENABLED=false  → nothing here is ever reached (rollback path).
+#   2. Short-circuit requires *proven* progress, and a pipeline-side cap
+#      bounds how many turns in a row the FSM may own.
+#   3. session_updates pass through an explicit whitelist; unknown keys are
+#      logged at ERROR, never silently applied and never silently skipped.
+#   4. The FSM state fed to the classifier comes from session.fsm_state, which
+#      the engine itself writes and which survives the Redis round-trip.
+
+FSM_MODE_OFF = "off"
+FSM_MODE_SHADOW = "shadow"
+FSM_MODE_LIVE = "live"
+
+# Below this classifier confidence we refuse to act on the intent and fall
+# through to the normal streaming turn (the LLM sees the raw utterance).
+FSM_INTERRUPT_CONFIDENCE_FLOOR = 0.5
+
+# Pipeline-side interrupt caps. These *duplicate* the handler-side caps in
+# src/agent/interrupts.py on purpose: the revert cause was a handler that
+# repeated the same sentence for 5 turns, so the pipeline must be able to stop
+# it even if the handler's own bookkeeping is wrong or gets reset.
+MAX_PIPELINE_INTERRUPT_TURNS = 5  # per call, total
+MAX_CONSECUTIVE_PIPELINE_INTERRUPT_TURNS = 3  # in a row, without an LLM turn
+
+# Counter keys live inside session.interrupt_counts so they survive the Redis
+# round-trip (CallSession.from_dict sanitises values but keeps string keys) and
+# survive the handler echoing interrupt_counts back via session_updates.
+_PIPELINE_DISPATCH_TOTAL_KEY = "_pipeline_dispatch_total"
+_PIPELINE_DISPATCH_STREAK_KEY = "_pipeline_dispatch_streak"
+
+# The ONLY session attributes an interrupt handler is allowed to write.
+# Derived by reading every assignment in src/agent/interrupts.py — if a handler
+# starts writing a new field, this set must be extended deliberately.
+FSM_SESSION_UPDATE_WHITELIST: frozenset[str] = frozenset(
+    {
+        "pending_price_interrupt_needs_diameter",
+        "interrupt_counts",
+        "fitting_diameter_client",
+        "pending_cancel_action",
+        "fitting_booked",
+    }
+)
+
+# --- compound_parse → FSM mapping seam ---
+#
+# compound_parse emits *contract* keys; the FSM states own different names.
+# The `_hint` suffix is meaningful upstream (it marks an unresolved, unverified
+# extraction), so we translate here instead of renaming in compound_parse.
+#
+# Deliberately NOT mapped:
+#   station_hint → station_id : a landmark string is not an ID. Filling
+#       station_id from it would let the FSM skip the STATION state with a
+#       value book_fitting cannot use. Needs get_fitting_stations resolution,
+#       which is a network call — out of bounds for shadow mode. Dropped.
+#   diameter                  : no state in MAIN_FLOW owns it (only the
+#       PRICE_INTERRUPT side door does). Dropped.
+#   name                      : no MAIN_FLOW state. Dropped.
+COMPOUND_TO_FSM_FIELD: dict[str, str] = {
+    "city": "city",
+    "date_hint": "date",
+    "time_hint": "time",
+    "color": "color",
+    "brand": "brand",
+}
+
+# Same floor compound_parse itself uses (APPLY_THRESHOLD). Kept local so the
+# pipeline never silently inherits a loosened upstream threshold.
+_FSM_APPLY_THRESHOLD = 0.7
+
+# --- storage detection ---
+#
+# Legacy list, extracted verbatim from the inline tuple that used to live in
+# _transcript_processor_loop. Behaviour must stay bit-for-bit identical when
+# FSM_ENABLED=false, so nothing here may be reordered or reworded.
+_STORAGE_OWN_HINTS: tuple[str, ...] = (
+    "привезу з собою",
+    "привезли з собою",
+    "привозим з собою",
+    "привозимо з собою",
+    "привожу з собою",
+    "привожу с собой",
+    "привозим с собой",
+    "везу з собою",
+    "везу свої",
+    "свої привезу",
+    "свій комплект",
+    "шини в мене",
+    "шини мої",
+    "мої шини",
+    "з собою везу",
+    # Wave 4 (2026-09-03) — STT mangles «з собою» → «за собою»
+    # (calls 10:37, 10:38 with Kusaeva). Also drops the «з»
+    # entirely leaving «собою». And Russian preposition drift
+    # «с собой» → «за собой». All → own tires.
+    "за собою",
+    "за собой",
+    "с собою",
+    # Wave 4 STT: «привезу» → «приложу»/«приложишь»/«прикладу»
+    # (rare word-level mangle; call 10:38 «приложишь с собой»).
+    "приложу з собою",
+    "приложу с собой",
+    "приложишь з собою",
+    "приложишь с собой",
+    "прикладу з собою",
+    "прикладу с собой",
+    # Short affirmations to the storage question — STT often
+    # cuts «з собою» down to «тобою» / «з тобою» (call 2026-08-03
+    # 14:56). And the rus/ukr mix «Шины будут любую» is real STT
+    # output for «шини будуть з собою».
+    "тобою",
+    "з тобою",
+    "шини будуть з собою",
+    "шини будуть с собой",
+    "шины будут с собой",
+    "шины будут з собою",
+    "шины будут любую",
+    "будуть з собою",
+    "будут с собой",
+    # Explicit "no storage" phrasings — client denies having a
+    # storage contract, implicitly = own tires. Call 2026-08-03:
+    # STT «в мене нема сина зберігає» (mangled) → repeat loop.
+    "нема зберігання",
+    "немає зберігання",
+    "нема ніякого зберігання",
+    "немає ніякого зберігання",
+    "не здавав на зберігання",
+    "не здавали на зберігання",
+    "ніколи не здавав",
+    "нема сина зберіга",  # STT mangle of «немає жодного зберігання»/«немає нашого»
+    "немає сина зберіга",
+)
+
+# Context-scoped: «в мене нема»/«у мене немає» = storage denial ONLY if the bot
+# just asked the storage question (Krok 2).
+_STORAGE_OWN_HINTS_WHEN_ASKED: tuple[str, ...] = (
+    "в мене нема",
+    "у мене немає",
+    "в мене немає",
+    "у мене нема",
+    "не маю",
+    "немає у мене",
+    "нема у мене",
+)
+
+_STORAGE_ASKING_MARKERS: tuple[str, ...] = (
+    "зберіган",
+    "привозите свої",
+    "з собою чи",
+)
+
+# FSM-only, deliberately narrower than the legacy list above: phrases that are
+# self-evident *without* the bot having asked anything. The legacy list is full
+# of context-dependent STT mangles («тобою») that are safe as a nudge to the
+# LLM but not safe as an FSM state skip.
+_STORAGE_SELF_EVIDENT_OWN: tuple[str, ...] = (
+    "з собою",
+    "с собой",
+    "свої шини",
+    "свои шины",
+    "власні шини",
+    "свій комплект",
+)
+_STORAGE_SELF_EVIDENT_CONTRACT: tuple[str, ...] = (
+    "зі зберігання",
+    "з зберігання",
+    "на зберіганні",
+    "у вас на зберіганні",
+    "зберігання у вас",
+    "зі складу",
+)
+
+
+def _bot_is_asking_storage(last_bot_utterance: str) -> bool:
+    """True if the bot's last utterance was the Krok 2 storage question."""
+    lowered = (last_bot_utterance or "").lower()
+    return any(marker in lowered for marker in _STORAGE_ASKING_MARKERS)
+
+
+def detect_own_tires(text: str, *, asking_storage: bool) -> bool:
+    """Legacy 'client brought their own tires' detector.
+
+    Extracted verbatim from _transcript_processor_loop so the FSM mapping layer
+    and the legacy nudge share one list instead of drifting apart. Semantics are
+    unchanged: the context-scoped extras only apply right after the bot asked
+    the storage question.
+    """
+    lowered = (text or "").lower()
+    hints = _STORAGE_OWN_HINTS
+    if asking_storage:
+        hints = (*hints, *_STORAGE_OWN_HINTS_WHEN_ASKED)
+    return any(h in lowered for h in hints)
+
+
+def detect_storage_choice(text: str) -> str | None:
+    """Self-evident storage choice for the FSM mapping layer.
+
+    Returns "own", "contract" or None. Unlike :func:`detect_own_tires` this is
+    context-free — it must be safe to run on any utterance without knowing what
+    the bot just said, because it is allowed to *skip an FSM state*.
+
+    An utterance mentioning both is ambiguous and yields None rather than a
+    coin flip.
+    """
+    lowered = (text or "").lower()
+    own = any(h in lowered for h in _STORAGE_SELF_EVIDENT_OWN)
+    contract = any(h in lowered for h in _STORAGE_SELF_EVIDENT_CONTRACT)
+    if own and contract:
+        return None
+    if own:
+        return "own"
+    if contract:
+        return "contract"
+    return None
+
+
+def map_compound_fields_to_fsm(
+    fields: dict[str, Any],
+    fields_confidence: dict[str, float] | None = None,
+    *,
+    customer_text: str = "",
+    min_confidence: float = _FSM_APPLY_THRESHOLD,
+) -> dict[str, Any]:
+    """Translate a compound_parse result into FSM field names.
+
+    Pure function: no I/O, no session mutation, safe to call in shadow mode.
+
+    Fields below ``min_confidence`` are dropped. Fields with no MAIN_FLOW state
+    are dropped with a DEBUG log (never silently) so a future compound_parse key
+    that nobody wired up is visible in the logs rather than invisible.
+
+    ``storage_choice`` is not produced by compound_parse at all, so it is derived
+    here from the raw utterance via :func:`detect_storage_choice`.
+    """
+    confidence = fields_confidence or {}
+    mapped: dict[str, Any] = {}
+    for key, value in (fields or {}).items():
+        if value in (None, ""):
+            continue
+        if confidence.get(key, 1.0) < min_confidence:
+            logger.debug(
+                "FSM mapping: dropping %r (confidence %.2f < %.2f)",
+                key,
+                confidence.get(key, 1.0),
+                min_confidence,
+            )
+            continue
+        target = COMPOUND_TO_FSM_FIELD.get(key)
+        if target is None:
+            logger.debug(
+                "FSM mapping: dropping %r — no MAIN_FLOW state owns it", key
+            )
+            continue
+        mapped[target] = value
+
+    storage = detect_storage_choice(customer_text)
+    if storage is not None:
+        mapped["storage_choice"] = storage
+    return mapped
+
+
 if TYPE_CHECKING:
     from src.agent.agent import LLMAgent
     from src.agent.streaming_loop import StreamingAgentLoop
@@ -531,6 +801,13 @@ class CallPipeline:
         self._session_store = session_store
         self._turn_counter = 0
         self._llm_history: list[dict[str, Any]] = []  # persistent LLM context for streaming path
+        # Wave 4-A. Resolved once per call so the flag cannot flip mid-call.
+        self._fsm_mode_cache: str | None = None
+        # Shadow-mode artefact: the question the FSM *would* have asked. Written
+        # in shadow mode, read by nothing on the customer path — neither TTS nor
+        # the streaming loop ever sees it. Kept on the pipeline (not the session)
+        # so it cannot leak into the Redis snapshot the LLM prompt is built from.
+        self._fsm_shadow_reply: str | None = None
         self._speaking = False
         self._barge_in_event = barge_in_event or asyncio.Event()
         self._final_transcript_queue: asyncio.Queue[Transcript | None] = asyncio.Queue()
@@ -599,6 +876,514 @@ class CallPipeline:
             await self._session_store.save(self._session)
         except Exception:
             logger.warning("session persist failed for call %s", self._session.channel_uuid)
+
+    # ------------------------------------------------------------------
+    # Wave 4-A — FSM wiring
+    # ------------------------------------------------------------------
+
+    def _fsm_mode(self) -> str:
+        """Resolve the rollout mode for this call: ``off`` / ``shadow`` / ``live``.
+
+        Resolved once per pipeline instance and cached, so the flag cannot flip
+        halfway through a call and leave the FSM half-applied.
+
+        ``off`` is the rollback path and must stay absolutely inert: no engine,
+        no classifier, no extra allocation on the hot path.
+        """
+        if self._fsm_mode_cache is not None:
+            return self._fsm_mode_cache
+
+        mode = FSM_MODE_OFF
+        try:
+            from src.config import get_settings
+
+            fsm = get_settings().fsm
+            if fsm.enabled:
+                allowed = fsm.enabled_tenant_list
+                tenant = str(self._session.tenant_id) if self._session.tenant_id else ""
+                if allowed and tenant not in allowed:
+                    logger.info(
+                        "FSM disabled for tenant=%r (allow-list %s) call=%s",
+                        tenant,
+                        allowed,
+                        self._session.channel_uuid,
+                    )
+                else:
+                    mode = FSM_MODE_SHADOW if fsm.shadow_mode else FSM_MODE_LIVE
+        except Exception:
+            # A broken/absent config must degrade to the rollback path, never
+            # to "live by accident". Logged at ERROR because a call running
+            # with an unresolvable flag is a real defect.
+            logger.error(
+                "FSM flag resolution failed for call=%s — falling back to OFF",
+                self._session.channel_uuid,
+                exc_info=True,
+            )
+            mode = FSM_MODE_OFF
+
+        self._fsm_mode_cache = mode
+        if mode != FSM_MODE_OFF:
+            logger.info("FSM mode=%s for call=%s", mode, self._session.channel_uuid)
+        return mode
+
+    def _get_llm_router(self) -> Any:
+        """LLM router used by the intent classifier, or None if unavailable."""
+        router = getattr(self._streaming_loop, "_llm_router", None)
+        if router is None:
+            router = getattr(self._agent, "_llm_router", None)
+        return router
+
+    def _get_tool_router(self) -> Any:
+        """Tool router used by the interrupt handlers, or None if unavailable."""
+        router = getattr(self._streaming_loop, "_tool_router", None)
+        if router is None:
+            router = getattr(self._agent, "tool_router", None)
+        return router
+
+    def _resolve_selected_station(self) -> dict[str, Any] | None:
+        """The one fitting station this call is pinned to, if any.
+
+        Priority: (1) the station the LLM last acted on via
+        get_fitting_slots/book_fitting — that's the client's chosen one,
+        regardless of how many were shown. (2) fallback: single-station case.
+        (3) otherwise None so the LLM asks the client to pick.
+        """
+        selected: dict[str, Any] | None = None
+        last_used = self._session.last_fitting_station_id
+        if last_used:
+            selected = next(
+                (
+                    s
+                    for s in self._session.fitting_stations_seen
+                    if s.get("id") == last_used
+                ),
+                None,
+            )
+        if selected is None and len(self._session.fitting_stations_seen) == 1:
+            selected = self._session.fitting_stations_seen[0]
+        return selected
+
+    def _build_fitting_progress(
+        self,
+        selected_station: dict[str, Any] | None,
+        *,
+        krok8_confirmed: bool,
+    ) -> dict[str, Any]:
+        """Assemble the fitting progress block from the flat session fields.
+
+        There is no ``session.fitting_progress`` — the block is derived from a
+        dozen separate ``fitting_*`` fields. Extracted in Wave 4-A so the FSM
+        snapshot and the LLM prompt block cannot drift apart.
+
+        Pure read: the one-shot ``krok8_confabulation_pending`` flag is *read*
+        here but deliberately reset by the caller, so calling this twice in a
+        turn is safe.
+        """
+        return {
+            "customer_name": self._session.fitting_customer_name,
+            "city": (selected_station or {}).get("city"),
+            "station_address": (selected_station or {}).get("address"),
+            "storage_choice": self._session.fitting_storage_choice,
+            "storage_contract": self._session.fitting_storage_contract,
+            "date": self._session.selected_fitting_date,
+            "time": self._session.selected_fitting_time,
+            "plate": self._session.fitting_plate,
+            "brand": self._session.fitting_vehicle_brand,
+            "caller_phone": self._session.caller_phone,
+            "booked": self._session.fitting_booked,
+            "requested_weekday": self._session.fitting_requested_weekday,
+            "krok8_confirmed": krok8_confirmed,
+            "krok8_confabulation_pending": self._session.krok8_confabulation_pending,
+        }
+
+    def _fsm_filled_fields_snapshot(self) -> dict[str, Any]:
+        """Compact truthy view of what the call has already collected."""
+        progress = self._build_fitting_progress(
+            self._resolve_selected_station(), krok8_confirmed=False
+        )
+        snapshot = {k: v for k, v in progress.items() if v not in (None, "", False)}
+        snapshot.update(
+            {
+                k: v
+                for k, v in self._session.fsm_filled_fields.items()
+                if v not in (None, "")
+            }
+        )
+        return snapshot
+
+    def _dialog_history_tail(self, limit: int = 5) -> list[dict[str, str]]:
+        """Last `limit` turns in the shape the intent classifier expects."""
+        tail = []
+        for turn in self._session.dialog_history[-limit:]:
+            if not turn.content:
+                continue
+            tail.append({"role": turn.speaker, "content": turn.content})
+        return tail
+
+    def _fsm_shadow_divergence(self, mapped: dict[str, Any]) -> dict[str, str]:
+        """Compare FSM-mapped values against the legacy session fields.
+
+        This is the shadow-mode divergence signal: for every slot both sides
+        claim, do they agree? Only compared where BOTH sides have a value —
+        "the FSM extracted something the legacy path missed" is expected during
+        shadow and is reported as ``new``, not as a divergence.
+        """
+        legacy: dict[str, Any] = {
+            "city": (self._resolve_selected_station() or {}).get("city"),
+            "storage_choice": self._session.fitting_storage_choice,
+            "date": self._session.selected_fitting_date,
+            "time": self._session.selected_fitting_time,
+            "brand": self._session.fitting_vehicle_brand,
+            "color": self._session.fitting_plate,
+        }
+        report: dict[str, str] = {}
+        for name, value in mapped.items():
+            if name not in legacy:
+                report[name] = "unknown"
+                continue
+            other = legacy[name]
+            if other in (None, ""):
+                report[name] = "new"
+            elif str(other).strip().lower() == str(value).strip().lower():
+                report[name] = "match"
+            else:
+                report[name] = "diverge"
+        return report
+
+    def _run_fsm_deterministic_step(self, transcript: Transcript) -> None:
+        """Advance the FSM from deterministic evidence only. No I/O.
+
+        compound_parse is pure regex and the engine only touches session fields,
+        so this is safe to run in shadow mode: it issues zero LLM requests and
+        zero Store API calls, and it is synchronous (no await → no network).
+
+        Exceptions are caught so a broken FSM never drops a live call, but they
+        are logged at ERROR with a traceback. ``contextlib.suppress`` is
+        deliberately NOT used here — a silently swallowed write on this path is
+        exactly how 3/3 bookings were lost invisibly (`37fb2d0`).
+        """
+        try:
+            from src.agent.compound_parse import compound_parse
+            from src.agent.fitting_fsm import STATES, FsmEngine
+
+            engine = FsmEngine(self._session)
+            engine.start()
+            state_before = engine.current_state()
+
+            # The FSM cannot leave WELCOME/INTENT without an `intent`, and the
+            # only producer of `intent` is the LLM classifier — which shadow
+            # mode is forbidden to call. Seed it from the same pure keyword
+            # matcher the pipeline already runs a few lines below, so the FSM
+            # actually walks during the shadow observation period instead of
+            # sitting in WELCOME and reporting nothing.
+            if not self._session.fsm_filled_fields.get("intent"):
+                scenario = detect_scenario_from_text(transcript.text)
+                if scenario == "fitting" or self._session.scenario == "fitting":
+                    self._session.fsm_filled_fields["intent"] = "fitting"
+
+            parsed = compound_parse(transcript.text)
+            mapped = map_compound_fields_to_fsm(
+                parsed.fields,
+                parsed.fields_confidence,
+                customer_text=transcript.text,
+            )
+            for name, value in mapped.items():
+                self._session.fsm_filled_fields.setdefault(name, value)
+
+            # NEVER loop apply_field() over the mapped fields. apply_field
+            # advances to the CURRENT state's next_state regardless of which
+            # step the field actually belongs to, so N fields would mean N
+            # blind hops down MAIN_FLOW. Instead: the fields are already
+            # written above; apply_field is invoked at most ONCE, for the field
+            # the current state itself is waiting on, and the engine then walks
+            # its own auto_skip_if chain a single time.
+            cfg = STATES[state_before]
+            own_field = cfg.field_name
+            if own_field is None and cfg.next_state is not None:
+                # WELCOME owns no field; the field that unblocks it belongs to
+                # its successor (INTENT → "intent").
+                own_field = STATES[cfg.next_state].field_name
+            state_after = state_before
+            if own_field:
+                value = self._session.fsm_filled_fields.get(own_field)
+                if value not in (None, ""):
+                    state_after = engine.apply_field(own_field, value)
+
+            self._fsm_shadow_reply = STATES[state_after].question_template or None
+
+            logger.info(
+                "fsm_shadow call=%s mode=%s state=%s→%s mapped=%s divergence=%s",
+                self._session.channel_uuid,
+                self._fsm_mode_cache,
+                state_before.value,
+                state_after.value,
+                mapped,
+                self._fsm_shadow_divergence(mapped),
+            )
+        except Exception:
+            logger.error(
+                "FSM deterministic step failed for call=%s — continuing on the "
+                "legacy path",
+                self._session.channel_uuid,
+                exc_info=True,
+            )
+
+    def _pipeline_interrupt_budget_left(self) -> bool:
+        """True while the pipeline still allows the FSM to own a turn.
+
+        Duplicates the handler-side caps in src/agent/interrupts.py on purpose.
+        The reverted Wave 13 shipped a handler that answered the same PRICE
+        question five turns in a row; the pipeline must be able to stop that
+        even when the handler believes it is making progress.
+        """
+        counts = self._session.interrupt_counts
+        total = counts.get(_PIPELINE_DISPATCH_TOTAL_KEY, 0)
+        streak = counts.get(_PIPELINE_DISPATCH_STREAK_KEY, 0)
+        if total >= MAX_PIPELINE_INTERRUPT_TURNS:
+            logger.warning(
+                "FSM interrupt cap: call=%s used %d/%d dispatches — handing the "
+                "turn back to the LLM for the rest of the call",
+                self._session.channel_uuid,
+                total,
+                MAX_PIPELINE_INTERRUPT_TURNS,
+            )
+            return False
+        if streak >= MAX_CONSECUTIVE_PIPELINE_INTERRUPT_TURNS:
+            logger.warning(
+                "FSM interrupt cap: call=%s hit %d consecutive interrupt turns "
+                "— forcing an LLM turn to break the loop",
+                self._session.channel_uuid,
+                streak,
+            )
+            return False
+        return True
+
+    def _note_pipeline_interrupt_dispatch(self, *, dispatched: bool) -> None:
+        """Update the pipeline-side counters after a turn."""
+        counts = self._session.interrupt_counts
+        if dispatched:
+            counts[_PIPELINE_DISPATCH_TOTAL_KEY] = (
+                counts.get(_PIPELINE_DISPATCH_TOTAL_KEY, 0) + 1
+            )
+            counts[_PIPELINE_DISPATCH_STREAK_KEY] = (
+                counts.get(_PIPELINE_DISPATCH_STREAK_KEY, 0) + 1
+            )
+        else:
+            # Any turn that reaches the LLM breaks the streak.
+            counts[_PIPELINE_DISPATCH_STREAK_KEY] = 0
+
+    def _apply_interrupt_session_updates(self, updates: dict[str, Any] | None) -> int:
+        """Copy handler-produced session updates through an explicit whitelist.
+
+        The reverted implementation did ``setattr(session, k, v)`` over whatever
+        the handler returned. Here an unknown key is refused AND logged at
+        ERROR: a handler writing a field nobody wired up is a defect, not a
+        thing to skip quietly.
+
+        Returns the number of keys actually applied.
+        """
+        applied = 0
+        for key, value in (updates or {}).items():
+            if key not in FSM_SESSION_UPDATE_WHITELIST:
+                logger.error(
+                    "FSM session_updates: refusing unknown key %r for call=%s. "
+                    "Add it to FSM_SESSION_UPDATE_WHITELIST deliberately or fix "
+                    "the handler.",
+                    key,
+                    self._session.channel_uuid,
+                )
+                continue
+            if not hasattr(self._session, key):
+                logger.error(
+                    "FSM session_updates: whitelisted key %r does not exist on "
+                    "CallSession (call=%s) — whitelist is out of date",
+                    key,
+                    self._session.channel_uuid,
+                )
+                continue
+            setattr(self._session, key, value)
+            applied += 1
+        return applied
+
+    async def _dispatch_interrupt_reply(
+        self, result: Any, *, kind: str
+    ) -> None:
+        """Speak an interrupt handler's reply and record the turn."""
+        reply = result.reply_to_customer
+        fsm_interrupt_total.labels(interrupt_type=kind).inc()
+        self._session.reset_empty_response()
+        self._session.add_assistant_turn(reply)
+        await self._log_turn("bot", reply)
+        await self._persist_session()
+        await self._speak(reply)
+        logger.info(
+            "FSM interrupt dispatched: call=%s kind=%s advanced=%s resume=%s",
+            self._session.channel_uuid,
+            kind,
+            result.advanced,
+            result.resume_state,
+        )
+
+    async def _maybe_handle_intent(self, transcript: Transcript) -> bool:
+        """Live-mode side door: let an interrupt handler own this turn.
+
+        Returns True ONLY when the handler proved it did something:
+        ``handled`` and (``advanced`` or a non-empty ``session_updates``).
+        Anything else falls through to the normal streaming turn, so a handler
+        that produces nothing can never take the caller hostage.
+        """
+        # Cap first — checked BEFORE the classifier so a blown budget costs no
+        # latency at all, and unconditionally before any handler runs.
+        if not self._pipeline_interrupt_budget_left():
+            self._note_pipeline_interrupt_dispatch(dispatched=False)
+            return False
+
+        llm_router = self._get_llm_router()
+        if llm_router is None:
+            logger.error(
+                "FSM live mode: no LLM router available for call=%s — intent "
+                "classification skipped",
+                self._session.channel_uuid,
+            )
+            self._note_pipeline_interrupt_dispatch(dispatched=False)
+            return False
+
+        try:
+            from src.agent.intent_classifier import classify_intent
+
+            result = await classify_intent(
+                customer_text=transcript.text,
+                session_context={
+                    "fsm_state": self._session.fsm_state,
+                    "current_step": self._session.fsm_state,
+                    "filled_fields": self._fsm_filled_fields_snapshot(),
+                    "dialog_history_tail": self._dialog_history_tail(),
+                    "tenant": str(self._session.tenant_id or ""),
+                },
+                llm_router=llm_router,
+            )
+        except Exception:
+            logger.error(
+                "FSM live mode: intent classification failed for call=%s",
+                self._session.channel_uuid,
+                exc_info=True,
+            )
+            self._note_pipeline_interrupt_dispatch(dispatched=False)
+            return False
+
+        if result.confidence < FSM_INTERRUPT_CONFIDENCE_FLOOR:
+            logger.info(
+                "FSM live mode: intent=%s confidence=%.2f below floor %.2f for "
+                "call=%s — using the normal LLM turn",
+                result.primary_intent,
+                result.confidence,
+                FSM_INTERRUPT_CONFIDENCE_FLOOR,
+                self._session.channel_uuid,
+            )
+            self._note_pipeline_interrupt_dispatch(dispatched=False)
+            return False
+
+        if result.primary_intent == "TRANSFER":
+            self._session.add_user_turn(
+                content=transcript.text,
+                stt_confidence=transcript.confidence,
+                detected_language=transcript.language,
+            )
+            await self._log_turn(
+                "customer",
+                transcript.text,
+                stt_confidence=transcript.confidence,
+                language=transcript.language,
+            )
+            self._session.mark_transfer(reason="intent_classifier_transfer")
+            self._note_pipeline_interrupt_dispatch(dispatched=True)
+            return True
+
+        if result.primary_intent not in ("PRICE", "CANCEL"):
+            # BOOK / RESCHEDULE are main flow — the LLM still owns them in 4-A.
+            self._note_pipeline_interrupt_dispatch(dispatched=False)
+            return False
+
+        tool_router = self._get_tool_router()
+        if tool_router is None:
+            logger.error(
+                "FSM live mode: no tool router available for call=%s — cannot "
+                "run the %s interrupt handler",
+                self._session.channel_uuid,
+                result.primary_intent,
+            )
+            self._note_pipeline_interrupt_dispatch(dispatched=False)
+            return False
+
+        try:
+            from src.agent.interrupts import (
+                handle_cancel_interrupt,
+                handle_price_interrupt,
+            )
+
+            handler = (
+                handle_price_interrupt
+                if result.primary_intent == "PRICE"
+                else handle_cancel_interrupt
+            )
+            interrupt = await handler(
+                customer_text=transcript.text,
+                session=self._session,
+                tool_router=tool_router,
+            )
+        except Exception:
+            logger.error(
+                "FSM live mode: %s interrupt handler raised for call=%s",
+                result.primary_intent,
+                self._session.channel_uuid,
+                exc_info=True,
+            )
+            self._note_pipeline_interrupt_dispatch(dispatched=False)
+            return False
+
+        # Proof of progress. `handled` alone is not enough: the reverted build
+        # short-circuited on `handled` and repeated one sentence for 5 turns.
+        made_progress = bool(
+            interrupt.handled
+            and interrupt.reply_to_customer
+            and (interrupt.advanced or interrupt.session_updates)
+        )
+        if not made_progress:
+            logger.info(
+                "FSM live mode: %s handler made no provable progress for "
+                "call=%s (handled=%s advanced=%s updates=%s) — falling through "
+                "to the LLM",
+                result.primary_intent,
+                self._session.channel_uuid,
+                interrupt.handled,
+                interrupt.advanced,
+                bool(interrupt.session_updates),
+            )
+            self._note_pipeline_interrupt_dispatch(dispatched=False)
+            return False
+
+        self._apply_interrupt_session_updates(interrupt.session_updates)
+        if interrupt.resume_state:
+            self._session.fsm_state = interrupt.resume_state
+        # Record the customer turn here rather than upstream: the FSM path skips
+        # the streaming branch that normally does it, and a missing user turn
+        # would silently corrupt both the transcript log and the next prompt.
+        self._session.add_user_turn(
+            content=transcript.text,
+            stt_confidence=transcript.confidence,
+            detected_language=transcript.language,
+        )
+        await self._log_turn(
+            "customer",
+            transcript.text,
+            stt_confidence=transcript.confidence,
+            language=transcript.language,
+        )
+        await self._dispatch_interrupt_reply(
+            interrupt, kind=result.primary_intent.lower()
+        )
+        self._note_pipeline_interrupt_dispatch(dispatched=True)
+        return True
 
     def _resolve_empty_response_fallback(self) -> str:
         """Pick a fallback phrase for an empty LLM response.
@@ -1085,6 +1870,28 @@ class CallPipeline:
             if transcript.language:
                 self._session.detected_language = transcript.language
 
+            # --- Wave 4-A: FSM injection point -------------------------------
+            # Placed here on purpose: transcript.text has already been through
+            # _apply_stt_corrections + _apply_entity_normalization, so the FSM
+            # sees the same cleaned text the LLM will.
+            #
+            # FSM_ENABLED=false → the whole block is one boolean compare and the
+            # turn continues exactly as it does today. That is the rollback path
+            # and it must stay that cheap.
+            fsm_mode = self._fsm_mode()
+            fsm_took_turn = False
+            if fsm_mode != FSM_MODE_OFF:
+                # Deterministic, synchronous, zero I/O — legal in shadow mode.
+                self._run_fsm_deterministic_step(transcript)
+                if fsm_mode == FSM_MODE_LIVE:
+                    # Only live mode is allowed to reach the customer.
+                    fsm_took_turn = await self._maybe_handle_intent(transcript)
+            if fsm_took_turn:
+                if await self._close_turn():
+                    break
+                continue
+            # -----------------------------------------------------------------
+
             # Auto-detect scenario from customer text (every turn).
             # First detection sets session.scenario; subsequent detections
             # accumulate in active_scenarios so modules are only added, never removed.
@@ -1141,19 +1948,7 @@ class CallPipeline:
             # get_fitting_slots/book_fitting — that's the client's chosen one,
             # regardless of how many were shown. (2) fallback: single-station
             # case. (3) otherwise leave None so the LLM asks the client to pick.
-            selected_station: dict[str, Any] | None = None
-            last_used = self._session.last_fitting_station_id
-            if last_used:
-                selected_station = next(
-                    (
-                        s
-                        for s in self._session.fitting_stations_seen
-                        if s.get("id") == last_used
-                    ),
-                    None,
-                )
-            if selected_station is None and len(self._session.fitting_stations_seen) == 1:
-                selected_station = self._session.fitting_stations_seen[0]
+            selected_station = self._resolve_selected_station()
 
             # Anti-hallucination: pin the slot the LLM must use. If the client
             # already picked a specific (date, time) — inject as "selected".
@@ -1209,88 +2004,20 @@ class CallPipeline:
             # «свої з собою» (call 2026-08-03 14:55: session stuck on
             # contract → 3-day guard blocked next-day booking forever).
             if self._session.fitting_storage_choice != "own":
-                _text_lc = transcript.text.lower()
-                _own_hints = (
-                    "привезу з собою",
-                    "привезли з собою",
-                    "привозим з собою",
-                    "привозимо з собою",
-                    "привожу з собою",
-                    "привожу с собой",
-                    "привозим с собой",
-                    "везу з собою",
-                    "везу свої",
-                    "свої привезу",
-                    "свій комплект",
-                    "шини в мене",
-                    "шини мої",
-                    "мої шини",
-                    "з собою везу",
-                    # Wave 4 (2026-09-03) — STT mangles «з собою» → «за собою»
-                    # (calls 10:37, 10:38 with Kusaeva). Also drops the «з»
-                    # entirely leaving «собою». And Russian preposition drift
-                    # «с собой» → «за собой». All → own tires.
-                    "за собою",
-                    "за собой",
-                    "с собою",
-                    # Wave 4 STT: «привезу» → «приложу»/«приложишь»/«прикладу»
-                    # (rare word-level mangle; call 10:38 «приложишь с собой»).
-                    "приложу з собою",
-                    "приложу с собой",
-                    "приложишь з собою",
-                    "приложишь с собой",
-                    "прикладу з собою",
-                    "прикладу с собой",
-                    # Short affirmations to the storage question — STT often
-                    # cuts «з собою» down to «тобою» / «з тобою» (call 2026-08-03
-                    # 14:56). And the rus/ukr mix «Шины будут любую» is real STT
-                    # output for «шини будуть з собою».
-                    "тобою",
-                    "з тобою",
-                    "шини будуть з собою",
-                    "шини будуть с собой",
-                    "шины будут с собой",
-                    "шины будут з собою",
-                    "шины будут любую",
-                    "будуть з собою",
-                    "будут с собой",
-                    # Explicit "no storage" phrasings — client denies having a
-                    # storage contract, implicitly = own tires. Call 2026-08-03:
-                    # STT «в мене нема сина зберігає» (mangled) → repeat loop.
-                    "нема зберігання",
-                    "немає зберігання",
-                    "нема ніякого зберігання",
-                    "немає ніякого зберігання",
-                    "не здавав на зберігання",
-                    "не здавали на зберігання",
-                    "ніколи не здавав",
-                    "нема сина зберіга",  # STT mangle of «немає жодного зберігання»/«немає нашого»
-                    "немає сина зберіга",
-                )
-                # Context-scoped: «в мене нема»/«у мене немає» = storage denial
-                # ONLY if the bot just asked the storage question (Krok 2).
+                # Wave 4-A: the hint list moved to module scope
+                # (_STORAGE_OWN_HINTS / _STORAGE_OWN_HINTS_WHEN_ASKED,
+                # applied by detect_own_tires) so the FSM mapping layer shares
+                # one source of truth with this legacy nudge. The list itself
+                # is unchanged, verbatim, and so is the behaviour.
                 _last_bot = ""
                 for _t in reversed(self._session.dialog_history):
                     if _t.speaker == "assistant" and _t.content:
                         _last_bot = _t.content.lower()
                         break
-                _asking_storage = (
-                    "зберіган" in _last_bot
-                    or "привозите свої" in _last_bot
-                    or "з собою чи" in _last_bot
-                )
-                if _asking_storage:
-                    _own_hints = (
-                        *_own_hints,
-                        "в мене нема",
-                        "у мене немає",
-                        "в мене немає",
-                        "у мене нема",
-                        "не маю",
-                        "немає у мене",
-                        "нема у мене",
-                    )
-                if any(h in _text_lc for h in _own_hints):
+                if detect_own_tires(
+                    transcript.text,
+                    asking_storage=_bot_is_asking_storage(_last_bot),
+                ):
                     _was_contract = (
                         self._session.fitting_storage_choice == "contract"
                     )
@@ -1533,24 +2260,9 @@ class CallPipeline:
 
             # Fitting progress block: shows LLM what's already collected so it
             # doesn't loop back to Krok 2/3/4 after passing through them.
-            fitting_progress: dict[str, Any] = {
-                "customer_name": self._session.fitting_customer_name,
-                "city": (selected_station or {}).get("city"),
-                "station_address": (selected_station or {}).get("address"),
-                "storage_choice": self._session.fitting_storage_choice,
-                "storage_contract": self._session.fitting_storage_contract,
-                "date": self._session.selected_fitting_date,
-                "time": self._session.selected_fitting_time,
-                "plate": self._session.fitting_plate,
-                "brand": self._session.fitting_vehicle_brand,
-                "caller_phone": self._session.caller_phone,
-                "booked": self._session.fitting_booked,
-                "requested_weekday": self._session.fitting_requested_weekday,
-                "krok8_confirmed": _krok8_confirmed,
-                "krok8_confabulation_pending": (
-                    self._session.krok8_confabulation_pending
-                ),
-            }
+            fitting_progress = self._build_fitting_progress(
+                selected_station, krok8_confirmed=_krok8_confirmed
+            )
             # Consume the flag: reset after passing to guard (one-shot signal).
             self._session.krok8_confabulation_pending = False
 
@@ -1851,14 +2563,27 @@ class CallPipeline:
                     await self._speak(fallback)
 
             # Check if transfer was triggered
-            if self._session.transferred:
-                transfer_msg = self._templates.get("transfer", TRANSFER_TEXT)
-                await self._log_turn("bot", transfer_msg)
-                await self._speak(transfer_msg)
-                self._session.transition_to(CallState.TRANSFERRING)
+            if await self._close_turn():
                 break
 
-            self._session.transition_to(CallState.LISTENING)
+    async def _close_turn(self) -> bool:
+        """End-of-turn bookkeeping shared by the LLM path and the FSM path.
+
+        Returns True when the call must stop looping (transfer announced).
+
+        Extracted in Wave 4-A so the FSM short-circuit can reuse the exact same
+        transfer handling instead of duplicating it — a divergence here is how
+        an FSM-driven TRANSFER would end up silently never announced.
+        """
+        if self._session.transferred:
+            transfer_msg = self._templates.get("transfer", TRANSFER_TEXT)
+            await self._log_turn("bot", transfer_msg)
+            await self._speak(transfer_msg)
+            self._session.transition_to(CallState.TRANSFERRING)
+            return True
+
+        self._session.transition_to(CallState.LISTENING)
+        return False
 
     async def _generate_contextual_farewell(self) -> str | None:
         """Generate a contextual farewell based on conversation history.

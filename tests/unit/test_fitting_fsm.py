@@ -591,12 +591,27 @@ class TestCompoundParseIntegration:
         fields: dict[str, Any],
         min_confidence: float = 0.7,
         confidence: dict[str, float] | None = None,
+        text: str = "",
     ) -> None:
-        """Apply only FSM-known fields above the confidence floor (§2.6)."""
+        """Apply only FSM-known fields above the confidence floor (§2.6).
+
+        Wave 4-A: delegates to the production mapping seam
+        (``src.core.pipeline.map_compound_fields_to_fsm``) instead of a local
+        name filter, so this test exercises the real translation of
+        ``date_hint``/``time_hint`` → ``date``/``time`` rather than a
+        test-only copy of it.
+        """
+        from src.core.pipeline import map_compound_fields_to_fsm
+
+        mapped = map_compound_fields_to_fsm(
+            fields,
+            confidence,
+            customer_text=text,
+            min_confidence=min_confidence,
+        )
         known = {name for _, name in FLOW_FIELDS}
-        confidence = confidence or {}
-        for name, value in fields.items():
-            if name in known and confidence.get(name, 1.0) >= min_confidence:
+        for name, value in mapped.items():
+            if name in known:
                 session.fsm_filled_fields[name] = value
 
     def test_result_contract(self, compound: Any) -> None:
@@ -613,22 +628,14 @@ class TestCompoundParseIntegration:
         eng = at_state(session, FsmState.INTENT)
         assert eng.apply_field("intent", "fitting") is FsmState.STATION
 
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Wave 4-A owes a mapping layer. compound_parse emits contract keys "
-            "(date_hint/time_hint/station_hint) while the FSM states own "
-            "date/time/station_id, so hints are dropped by a name-filtered "
-            "prefill; and 'шини з собою' yields no storage_choice at all "
-            "because storage is absent from the Wave 2-B key list. Flips to "
-            "XPASS the moment that mapping lands."
-        ),
-    )
     def test_city_storage_date_utterance_skips_to_time(
         self, compound: Any, session: CallSession, at_state: Callable[..., FsmEngine]
     ) -> None:
-        result = compound.compound_parse("на монтаж у Дніпрі, шини з собою, на 5 серпня")
-        self._prefill(session, result.fields, confidence=result.fields_confidence)
+        text = "на монтаж у Дніпрі, шини з собою, на 5 серпня"
+        result = compound.compound_parse(text)
+        self._prefill(
+            session, result.fields, confidence=result.fields_confidence, text=text
+        )
         session.fsm_filled_fields.setdefault("station_id", "000000012")
         eng = at_state(session, FsmState.INTENT)
         assert eng.apply_field("intent", "fitting") in {FsmState.DATE, FsmState.TIME}
