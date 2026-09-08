@@ -31,6 +31,7 @@ import inspect
 import itertools
 import json
 import logging
+import textwrap
 import uuid
 from typing import TYPE_CHECKING, Any
 
@@ -116,7 +117,12 @@ def counter_value(name: str, labels: dict[str, str]) -> float:
 
 def _runtime_string_literals(module: Any) -> list[str]:
     """Every string literal in `module` except docstrings."""
-    tree = ast.parse(inspect.getsource(module))
+    return _runtime_string_literals_of(inspect.getsource(module))
+
+
+def _runtime_string_literals_of(source: str) -> list[str]:
+    """Every string literal in `source` except docstrings."""
+    tree = ast.parse(source)
     docstrings: set[int] = set()
     for node in ast.walk(tree):
         if not isinstance(node, ast.Module | ast.ClassDef | ast.FunctionDef | ast.AsyncFunctionDef):
@@ -989,16 +995,268 @@ class TestShadowSafety:
                 f"except handler at line {handler.lineno} neither logs nor re-raises"
             )
 
-    def test_interrupt_handlers_cannot_ship_before_the_machine(self, session: CallSession) -> None:
-        # This ordering is the whole point of the second attempt: Wave 4-B fills
-        # these in. If either silently starts returning a string before then,
-        # the c8c6601 «Продовжуємо запис» bug is back.
+    def test_interrupts_on_a_fresh_session_never_invent_a_booking(
+        self, session: CallSession
+    ) -> None:
+        # Wave 1-A kept these as NotImplementedError so Wave 3-B could not ship a
+        # resume phrase before the machine existed. Wave 4-B implements them, so
+        # the guard becomes behavioural: on a session that never started a
+        # booking, neither call may speak a resume phrase. That invitation to
+        # "continue" a booking that never happened is the c8c6601 bug.
         eng = FsmEngine(session)
-        with pytest.raises(NotImplementedError, match="Wave 4-B"):
-            eng.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE)
-        with pytest.raises(NotImplementedError, match="Wave 4-B"):
-            eng.resume()
+        assert eng.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE) is FsmState.WELCOME
         assert session.fsm_prev_state is None
+        assert eng.resume() == ""
+        assert session.fsm_prev_state is None
+
+
+# --------------------------------------------------------------------------
+# Wave 4-B — freeze / resume
+# --------------------------------------------------------------------------
+
+
+class TestFreezeResume:
+    """The happy path of `freeze_for_interrupt` → side-state → `resume`."""
+
+    def test_freeze_from_city_enters_price_interrupt(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.CITY)
+        entered = eng.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE)
+        assert entered is FsmState.PRICE_INTERRUPT
+        assert eng.current_state() is FsmState.PRICE_INTERRUPT
+        assert session.fsm_prev_state == "CITY"
+
+    def test_freeze_from_date_enters_price_interrupt(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.DATE)
+        assert eng.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE) is FsmState.PRICE_INTERRUPT
+        assert session.fsm_prev_state == "DATE"
+
+    def test_freeze_uses_the_interrupt_targets_table(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        # No string sentinels: the side-state is whatever INTERRUPT_TARGETS says.
+        for event, target in INTERRUPT_TARGETS.items():
+            sess = CallSession(uuid.uuid4())
+            eng = at_state(sess, FsmState.TIME)
+            assert eng.freeze_for_interrupt(event) is target
+            assert sess.fsm_state == target.value
+
+    def test_resume_returns_to_exactly_the_frozen_state(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.STORAGE)
+        eng.freeze_for_interrupt(FsmEvent.INTERRUPT_CANCEL)
+        text = eng.resume()
+        assert eng.current_state() is FsmState.STORAGE
+        assert session.fsm_prev_state is None
+        assert STATES[FsmState.STORAGE].resume_phrase in text
+
+    def test_field_filled_inside_the_side_state_survives_the_resume(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        session.fsm_filled_fields.update({"intent": "fitting", "city": "Київ"})
+        eng = at_state(session, FsmState.STATION)
+        eng.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE)
+        eng.apply_field("diameter", 17)  # PRICE_INTERRUPT loops on itself
+        assert eng.current_state() is FsmState.PRICE_INTERRUPT
+        eng.resume()
+        assert eng.current_state() is FsmState.STATION
+        assert session.fsm_filled_fields["diameter"] == 17
+        assert session.fsm_filled_fields["city"] == "Київ"
+
+    @pytest.mark.parametrize(
+        "state", [FsmState.WELCOME, FsmState.INTENT, FsmState.BOOK, FsmState.DONE]
+    )
+    def test_freeze_from_an_unresumable_state_is_refused(
+        self, state: FsmState, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        sess = CallSession(uuid.uuid4())
+        eng = at_state(sess, state)
+        assert eng.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE) is state
+        assert sess.fsm_state == state.value
+        assert sess.fsm_prev_state is None
+        assert sess.fsm_history == []  # no transition was recorded either
+
+    def test_freeze_leaves_filled_fields_byte_identical(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        session.fsm_filled_fields.update(
+            {"intent": "fitting", "city": "Дніпро", "station_id": "000000012", "date": "2026-09-10"}
+        )
+        before = json.dumps(session.fsm_filled_fields, sort_keys=True, default=str)
+        eng = at_state(session, FsmState.TIME)
+        eng.freeze_for_interrupt(FsmEvent.INTERRUPT_CANCEL)
+        assert json.dumps(session.fsm_filled_fields, sort_keys=True, default=str) == before
+
+    def test_freeze_and_resume_are_recorded_in_history(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        # Both moves go through the normal `transition`, so an audit of a live
+        # call shows the excursion instead of a state that teleported.
+        eng = at_state(session, FsmState.COLOR)
+        eng.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE)
+        eng.resume()
+        hops = [(h["from"], h["to"], h["event"]) for h in session.fsm_history]
+        assert ("COLOR", "PRICE_INTERRUPT", FsmEvent.INTERRUPT_PRICE.value) in hops
+        assert ("PRICE_INTERRUPT", "COLOR", FsmEvent.RESUME.value) in hops
+
+
+class TestResumeWithNothingToResumeOn:
+    """Direct regression on `c8c6601` — resume must not invent a booking."""
+
+    def test_no_target_and_no_snapshot_goes_to_done(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.PRICE_INTERRUPT)
+        assert session.fsm_prev_state is None
+        eng.resume()
+        assert eng.current_state() is FsmState.DONE, (
+            "staying in a side-state means every later turn is answered from it"
+        )
+
+    def test_no_target_and_no_snapshot_speaks_no_resume_phrase(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.PRICE_INTERRUPT)
+        text = eng.resume()
+        assert text == ""
+        assert "Продовжуємо" not in text
+        assert "Повертаємось" not in text
+
+    def test_prev_state_stays_none(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.PRICE_INTERRUPT)
+        eng.resume()
+        assert session.fsm_prev_state is None
+
+    @pytest.mark.parametrize(
+        "target", [FsmState.WELCOME, FsmState.DONE, FsmState.PRICE_INTERRUPT, FsmState.TRANSFER]
+    )
+    def test_explicit_target_outside_frozen_states_is_refused_at_error(
+        self,
+        target: FsmState,
+        session: CallSession,
+        at_state: Callable[..., FsmEngine],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        eng = at_state(session, FsmState.CITY)
+        eng.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE)
+        with caplog.at_level(logging.DEBUG, logger=FSM_LOGGER):
+            assert eng.resume(resume_target=target) == ""
+        assert eng.current_state() is FsmState.DONE
+        assert session.fsm_prev_state is None
+        assert [r for r in caplog.records if r.levelno >= logging.ERROR]
+
+    def test_explicit_target_inside_frozen_states_wins_over_the_snapshot(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        # §2.5 rows 40/44: the table names STORAGE/DATE explicitly.
+        eng = at_state(session, FsmState.CITY)
+        eng.freeze_for_interrupt(FsmEvent.INTERRUPT_CANCEL)
+        eng.resume(resume_target=FsmState.DATE)
+        assert eng.current_state() is FsmState.DATE
+        assert session.fsm_prev_state is None
+
+
+class TestDoubleFreeze:
+    """The first snapshot is the only correct one."""
+
+    def test_second_freeze_keeps_the_first_snapshot(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        # A session recovered from Redis can carry a snapshot while sitting on a
+        # main-flow state (the resume never completed). Re-freezing then must not
+        # relabel where the booking actually stopped.
+        eng = at_state(session, FsmState.CITY)
+        eng.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE)
+        assert session.fsm_prev_state == "CITY"
+        eng.transition(FsmState.TIME)  # back on the main flow, snapshot still set
+        eng.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE)
+        assert session.fsm_prev_state == "CITY", "the second freeze overwrote the first snapshot"
+
+    def test_resume_after_a_double_freeze_returns_to_the_first_state(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.CITY)
+        eng.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE)
+        eng.transition(FsmState.TIME)
+        eng.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE)
+        eng.resume()
+        assert eng.current_state() is FsmState.CITY
+
+    def test_price_nested_in_cancel_keeps_the_booking_state(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.BRAND)
+        eng.freeze_for_interrupt(FsmEvent.INTERRUPT_CANCEL)
+        # Already in a side-state: the nested freeze is refused outright, so the
+        # caller cannot end up "returning" to CANCEL_INTERRUPT.
+        assert eng.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE) is FsmState.CANCEL_INTERRUPT
+        assert session.fsm_prev_state == "BRAND"
+        eng.resume()
+        assert eng.current_state() is FsmState.BRAND
+
+
+class TestResumePhraseSource:
+    """The phrase belongs to the state config, never to the engine body."""
+
+    def test_phrase_matches_the_state_returned_to(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        for state in sorted(FROZEN_STATES, key=lambda s: s.value):
+            sess = CallSession(uuid.uuid4())
+            eng = at_state(sess, state)
+            eng.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE)
+            assert eng.resume().startswith(STATES[state].resume_phrase)
+
+    def test_patching_the_config_changes_the_spoken_text(
+        self,
+        session: CallSession,
+        at_state: Callable[..., FsmEngine],
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        # If the phrase were a literal in `resume()`, this patch would do nothing.
+        patched = dataclasses.replace(
+            STATES[FsmState.CITY], resume_phrase="ТЕСТОВА ФРАЗА ПОВЕРНЕННЯ."
+        )
+        monkeypatch.setitem(STATES, FsmState.CITY, patched)
+        eng = at_state(session, FsmState.CITY)
+        eng.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE)
+        assert eng.resume().startswith("ТЕСТОВА ФРАЗА ПОВЕРНЕННЯ.")
+
+    def test_resume_text_never_says_the_question_twice(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        # CITY's resume phrase already ends in CITY's question. Appending
+        # next_question() blindly would ask it twice in one breath.
+        eng = at_state(session, FsmState.CITY)
+        eng.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE)
+        text = eng.resume()
+        question = STATES[FsmState.CITY].question_template
+        assert text.count(question) == 1, text
+
+    def test_resume_text_carries_the_question_when_the_phrase_lacks_it(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.BRAND)
+        eng.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE)
+        text = eng.resume()
+        assert STATES[FsmState.BRAND].resume_phrase in text
+        assert "марка" in text
+
+    def test_engine_body_holds_no_resume_literal(self) -> None:
+        # Same guard as TestResumePhrases, narrowed to the Wave 4-B bodies: not
+        # one runtime string literal in them may look like a resume phrase.
+        # Docstrings quoting the c8c6601 bug are fine; a fallback branch is not.
+        for method in (FsmEngine.freeze_for_interrupt, FsmEngine.resume, FsmEngine._resume_text):
+            source = textwrap.dedent(inspect.getsource(method))
+            for literal in _runtime_string_literals_of(source):
+                assert "Продовжуємо" not in literal, f"{method.__name__}: {literal!r}"
+                assert "Повертаємось" not in literal, f"{method.__name__}: {literal!r}"
 
 
 # --------------------------------------------------------------------------

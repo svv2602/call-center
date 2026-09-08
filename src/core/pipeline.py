@@ -1205,6 +1205,79 @@ class CallPipeline:
             applied += 1
         return applied
 
+    def _freeze_fsm_for_interrupt(self, primary_intent: str) -> tuple[Any, Any]:
+        """Enter the interrupt side-state for `primary_intent` (Wave 4-B).
+
+        Returns ``(engine, frozen_from)``. ``frozen_from`` is None whenever
+        nothing was frozen, and the pipeline MUST then skip ``resume()``:
+        ``FsmEngine.resume()`` with an empty ``fsm_prev_state`` deliberately
+        goes to DONE, so calling it on a flow that was never frozen would end a
+        live booking.
+
+        Called only after the cap and the confidence floor have both passed —
+        a turn that never reaches a handler must not move the FSM.
+        """
+        from src.agent.fitting_fsm import FROZEN_STATES, FsmEngine, FsmEvent, FsmState
+
+        event = {
+            "PRICE": FsmEvent.INTERRUPT_PRICE,
+            "CANCEL": FsmEvent.INTERRUPT_CANCEL,
+        }.get(primary_intent)
+        if event is None:
+            return None, None
+
+        state = FsmState.coerce(self._session.fsm_state)
+        if state is None or state not in FROZEN_STATES:
+            # No booking in progress (or the flow is somewhere unresumable):
+            # the handler still runs, it just has nothing to return the caller
+            # to. This is also the FSM_ENABLED=false → live flip mid-call case.
+            return None, None
+
+        engine = FsmEngine(self._session)
+        try:
+            entered = engine.freeze_for_interrupt(event)
+        except Exception:
+            # Loud, never suppressed: an engine that cannot freeze is a defect,
+            # but it must not cost the caller the turn.
+            logger.error(
+                "FSM live mode: freeze_for_interrupt failed for call=%s intent=%s",
+                self._session.channel_uuid,
+                primary_intent,
+                exc_info=True,
+            )
+            return None, None
+        if entered is state:
+            return None, None
+        return engine, state
+
+    def _unfreeze_fsm(self, engine: Any, frozen_from: Any) -> None:
+        """Leave the interrupt side-state, back where the caller was.
+
+        Must be called on EVERY exit path once a freeze happened — dispatched
+        reply, no proven progress, or a handler exception. Skipping it on the
+        failure paths strands the FSM in PRICE_INTERRUPT for the rest of the
+        call while the caller silently falls back to the LLM.
+
+        The phrase ``resume()`` returns is discarded on purpose (seam decision A,
+        README §4): the Wave 3-B handler already appended the same
+        ``StateConfig.resume_phrase`` to ``reply_to_customer``, and it is the only
+        component that knows whether the interrupt actually closed this turn.
+        Speaking this one too would say it twice.
+        """
+        if engine is None or frozen_from is None:
+            return
+        try:
+            engine.resume()
+        except Exception:
+            logger.error(
+                "FSM live mode: resume() failed for call=%s — forcing the session back to %s",
+                self._session.channel_uuid,
+                frozen_from,
+                exc_info=True,
+            )
+            self._session.fsm_state = getattr(frozen_from, "value", frozen_from)
+            self._session.fsm_prev_state = None
+
     async def _dispatch_interrupt_reply(
         self, result: Any, *, kind: str
     ) -> None:
@@ -1315,6 +1388,12 @@ class CallPipeline:
             self._note_pipeline_interrupt_dispatch(dispatched=False)
             return False
 
+        # Wave 4-B: park the main flow in the side-state for the duration of the
+        # handler. Done here — after the cap and the confidence floor, before the
+        # handler — so the handler observes PRICE_INTERRUPT/CANCEL_INTERRUPT and
+        # resolves its resume phrase from the fsm_prev_state snapshot.
+        engine, frozen_from = self._freeze_fsm_for_interrupt(result.primary_intent)
+
         try:
             from src.agent.interrupts import (
                 handle_cancel_interrupt,
@@ -1338,6 +1417,7 @@ class CallPipeline:
                 self._session.channel_uuid,
                 exc_info=True,
             )
+            self._unfreeze_fsm(engine, frozen_from)
             self._note_pipeline_interrupt_dispatch(dispatched=False)
             return False
 
@@ -1359,9 +1439,11 @@ class CallPipeline:
                 interrupt.advanced,
                 bool(interrupt.session_updates),
             )
+            self._unfreeze_fsm(engine, frozen_from)
             self._note_pipeline_interrupt_dispatch(dispatched=False)
             return False
 
+        self._unfreeze_fsm(engine, frozen_from)
         self._apply_interrupt_session_updates(interrupt.session_updates)
         if interrupt.resume_state:
             self._session.fsm_state = interrupt.resume_state

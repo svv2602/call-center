@@ -1110,28 +1110,75 @@ class FsmEngine:
         )
         return {k: v for k, v in context.items() if v is not None}
 
-    # --- Interrupts (Wave 4-B implements these) ---
+    # --- Interrupts (Wave 4-B) ---
 
     def freeze_for_interrupt(self, event: FsmEvent) -> FsmState:
         """Snapshot the current main state before entering a side-state.
 
-        NOT IMPLEMENTED IN WAVE 1-A — Wave 4-B (`phase-01-fsm-freeze-resume.md`)
-        writes the body. Contract it must honour (§2.5):
+        Contract (§2.5, written by Wave 1-A and honoured here):
 
         * only freeze when `current_state()` is in `FROZEN_STATES`;
         * write the frozen state into `session.fsm_prev_state`;
         * transition to `INTERRUPT_TARGETS[event]`;
         * keep `fsm_filled_fields` intact — the caller must not redo the flow;
         * return the side-state that was entered.
+
+        Refusing to freeze is a normal outcome, not an error: an interrupt fired
+        from WELCOME/INTENT/BOOK/DONE has nothing to come back to, and pretending
+        otherwise is exactly how `c8c6601` invited callers to continue a booking
+        that never existed. The caller can tell the two apart by comparing the
+        returned state with the one it passed in.
         """
-        raise NotImplementedError(
-            "freeze_for_interrupt is implemented in Wave 4-B (fsm-interrupts)"
+        current = self.current_state()
+
+        target = INTERRUPT_TARGETS.get(event)
+        if target is None:
+            # A new FsmEvent that nobody mapped is a wiring defect. It must be
+            # visible, but it must not raise KeyError inside a live call.
+            logger.error(
+                "fsm_interrupt: no side-state mapped for event=%s (call %s) — not freezing",
+                event,
+                self.session.channel_uuid,
+            )
+            return current
+
+        if current not in FROZEN_STATES:
+            logger.info(
+                "fsm_interrupt: event=%s prev_state=%s target=%s — refused, %s is not resumable",
+                event.value,
+                self.session.fsm_prev_state,
+                target.value,
+                current.value,
+            )
+            return current
+
+        # First snapshot wins. An interrupt inside an interrupt must return the
+        # caller to where the *booking* stopped, not to the previous side-state.
+        if self.session.fsm_prev_state:
+            logger.info(
+                "fsm_interrupt: event=%s keeps the existing prev_state=%s (current=%s)",
+                event.value,
+                self.session.fsm_prev_state,
+                current.value,
+            )
+        else:
+            self.session.fsm_prev_state = current.value
+
+        logger.info(
+            "fsm_interrupt: event=%s prev_state=%s target=%s",
+            event.value,
+            self.session.fsm_prev_state,
+            target.value,
         )
+        # Same public transition every other move uses: history + metrics come
+        # for free, and there is no second way of writing `fsm_state`.
+        self.transition(target, event=event, payload={"frozen_from": self.session.fsm_prev_state})
+        return target
 
     def resume(self, resume_target: FsmState | None = None) -> str:
         """Return from a side-state to the frozen main state.
 
-        NOT IMPLEMENTED IN WAVE 1-A — Wave 4-B writes the body. Contract (§2.5):
+        Contract (§2.5):
 
         * use `resume_target` when the table names one (row 40 →
           `FsmState.STORAGE`, row 44 → `FsmState.DATE`), otherwise
@@ -1140,8 +1187,57 @@ class FsmEngine:
           booking that was never started (the `c8c6601` bug);
         * clear `fsm_prev_state` after resuming;
         * return `resume_phrase(target)` + the target's re-emitted question.
+
+        The returned text is built from `StateConfig` only. Callers that already
+        speak a resume phrase of their own (Wave 3-B's interrupt handlers do)
+        must discard it rather than append it a second time.
         """
-        raise NotImplementedError("resume is implemented in Wave 4-B (fsm-interrupts)")
+        prev = FsmState.coerce(self.session.fsm_prev_state)
+        target = resume_target if resume_target is not None else prev
+
+        if target is not None and target not in FROZEN_STATES:
+            logger.error(
+                "fsm_interrupt: resume target %s is not a resumable state (call %s) — "
+                "going to DONE instead of parking the call in a side-state",
+                target.value,
+                self.session.channel_uuid,
+            )
+            target = None
+
+        self.session.fsm_prev_state = None
+
+        if target is None:
+            # Nothing to come back to. Ending beats hanging: a call left in
+            # PRICE_INTERRUPT answers every later turn from the side-state.
+            logger.info(
+                "fsm_interrupt: resume with no target for call %s — closing the flow, "
+                "no resume phrase is spoken",
+                self.session.channel_uuid,
+            )
+            self.transition(
+                FsmState.DONE, event=FsmEvent.RESUME, payload={"reason": "nothing_to_resume"}
+            )
+            return ""
+
+        logger.info(
+            "fsm_interrupt: resume target=%s (call %s)", target.value, self.session.channel_uuid
+        )
+        self.transition(target, event=FsmEvent.RESUME, payload={"reason": "resume"})
+        return self._resume_text(target)
+
+    def _resume_text(self, target: FsmState) -> str:
+        """`resume_phrase` for `target`, plus its question when that adds anything.
+
+        Several `resume_phrase` values (CITY, STORAGE, DATE, COLOR, BRAND)
+        already end in the state's own question. Appending `next_question`
+        blindly would make the bot ask twice in one breath, which is the same
+        "say it again" symptom the first attempt was reverted for.
+        """
+        phrase = self.resume_phrase(target)
+        question = self.next_question(target)
+        if question and question.strip() and question.strip() not in phrase:
+            return f"{phrase} {question}".strip()
+        return phrase
 
 
 def _validate_states() -> None:

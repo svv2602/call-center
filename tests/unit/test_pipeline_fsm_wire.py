@@ -26,6 +26,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.agent.fitting_fsm import FROZEN_STATES, STATES, FsmEngine, FsmEvent, FsmState
 from src.agent.intent_classifier import IntentResult
 from src.agent.interrupts import InterruptResult
 from src.agent.streaming_loop import TurnResult
@@ -833,3 +834,199 @@ class TestModeResolution:
             assert h.pipeline._fsm_mode() == FSM_MODE_OFF
         with fsm_flags(enabled=True, shadow_mode=False):
             assert h.pipeline._fsm_mode() == FSM_MODE_OFF
+
+
+# ---------------------------------------------------------------------------
+# Wave 4-B — freeze / resume around the handler
+# ---------------------------------------------------------------------------
+
+
+PRICE_TEXT = "скільки коштує монтаж"
+
+
+def booking_in_progress(state: FsmState = FsmState.CITY) -> CallSession:
+    """A session parked mid-booking, the way a live PRICE interrupt finds it."""
+    session = CallSession(uuid.uuid4())
+    session.caller_phone = "+380671234567"
+    session.last_fitting_station_id = "ST-1"
+    session.fitting_stations_seen = [
+        {"id": "ST-1", "name": "Шиномонтаж №1", "city": "Київ", "address": "вул. Тестова, 1"}
+    ]
+    session.fsm_state = state.value
+    session.fsm_filled_fields["intent"] = "fitting"
+    return session
+
+
+def fsm_hops(session: CallSession) -> list[tuple[str | None, str]]:
+    return [(h["from"], h["to"]) for h in session.fsm_history]
+
+
+class TestPipelineFreezeLifecycle:
+    """The FSM enters the side-state for the handler — and always leaves it."""
+
+    @staticmethod
+    async def _run(
+        ir: InterruptResult | Exception,
+        *,
+        state: FsmState = FsmState.CITY,
+        confidence: float = 0.9,
+        session: CallSession | None = None,
+    ) -> Harness:
+        h = Harness(session or booking_in_progress(state))
+        handler = (
+            AsyncMock(side_effect=ir)
+            if isinstance(ir, Exception)
+            else AsyncMock(return_value=ir)
+        )
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                AsyncMock(return_value=intent("PRICE", confidence)),
+            ),
+            patch("src.agent.interrupts.handle_price_interrupt", handler),
+        ):
+            await h.run(PRICE_TEXT)
+        return h
+
+    async def test_live_interrupt_freezes_speaks_and_comes_back(self) -> None:
+        h = await self._run(interrupt(reply="Монтаж R17 коштує 500 гривень."))
+
+        assert "Монтаж R17 коштує 500 гривень." in h.spoken
+        hops = fsm_hops(h.session)
+        assert ("CITY", "PRICE_INTERRUPT") in hops, "the side-state was never entered"
+        assert ("PRICE_INTERRUPT", "CITY") in hops, "the caller was never brought back"
+        assert h.session.fsm_state == FsmState.CITY.value
+        assert h.session.fsm_prev_state is None
+
+    async def test_no_progress_unfreezes_and_hands_the_turn_to_the_llm(self) -> None:
+        h = await self._run(interrupt(reply="Те саме речення.", advanced=False, session_updates={}))
+
+        assert h.llm_turns == [PRICE_TEXT], "the fallthrough to the LLM must still happen"
+        assert h.session.fsm_state != FsmState.PRICE_INTERRUPT.value, (
+            "a handler that proved nothing left the FSM stranded in the side-state"
+        )
+        assert h.session.fsm_state == FsmState.CITY.value
+        assert h.session.fsm_prev_state is None
+
+    async def test_handler_exception_unfreezes_and_is_logged_at_error(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.ERROR, logger="src.core.pipeline"):
+            h = await self._run(RuntimeError("handler blew up"))
+
+        assert h.llm_turns == [PRICE_TEXT]
+        assert h.session.fsm_state == FsmState.CITY.value
+        assert h.session.fsm_prev_state is None
+        assert any(r.levelno >= logging.ERROR for r in caplog.records)
+
+    async def test_exhausted_cap_never_freezes(self) -> None:
+        session = booking_in_progress()
+        session.interrupt_counts[_PIPELINE_DISPATCH_TOTAL_KEY] = MAX_PIPELINE_INTERRUPT_TURNS
+        h = await self._run(interrupt(), session=session)
+
+        assert fsm_hops(h.session) == [], "a capped turn moved the FSM anyway"
+        assert h.session.fsm_state == FsmState.CITY.value
+        assert h.llm_turns == [PRICE_TEXT]
+
+    async def test_low_confidence_never_freezes(self) -> None:
+        h = await self._run(interrupt(), confidence=0.2)
+
+        assert fsm_hops(h.session) == [], "a turn below the confidence floor moved the FSM"
+        assert h.session.fsm_state == FsmState.CITY.value
+        assert h.llm_turns == [PRICE_TEXT]
+
+    async def test_freeze_and_resume_survive_the_redis_roundtrip(self) -> None:
+        # Mid-interrupt snapshot: exactly what a session looks like between the
+        # freeze and the resume, then round-tripped through Redis.
+        session = booking_in_progress()
+        engine = FsmEngine(session)
+        engine.freeze_for_interrupt(FsmEvent.INTERRUPT_PRICE)
+        assert session.fsm_prev_state == "CITY"
+
+        revived = CallSession.from_dict(session.to_dict())
+        assert revived.fsm_state == FsmState.PRICE_INTERRUPT.value
+        assert revived.fsm_prev_state == "CITY"
+
+        FsmEngine(revived).resume()
+        assert revived.fsm_state == FsmState.CITY.value
+        assert revived.fsm_prev_state is None
+
+    async def test_flow_that_cannot_be_resumed_is_never_frozen(self) -> None:
+        # WELCOME has nothing to return to. Freezing it would make the eventual
+        # resume() fall through to DONE and end a call that never started.
+        h = await self._run(interrupt(), state=FsmState.WELCOME)
+
+        assert h.session.fsm_prev_state is None
+        assert ("WELCOME", "PRICE_INTERRUPT") not in fsm_hops(h.session)
+        assert h.session.fsm_state != FsmState.DONE.value
+
+
+class TestFreezeDoesNotDoubleTheResumePhrase:
+    """The Wave 3-B ↔ 4-B seam (README §4), asserted on the real handler."""
+
+    @staticmethod
+    async def _run(session: CallSession, text: str = PRICE_TEXT) -> Harness:
+        h = Harness(session)
+        h.tool_router = MagicMock(spec=["get_fitting_price"])
+        h.tool_router.get_fitting_price = AsyncMock(
+            return_value={"prices": [{"service": "Комплекс R17", "price": "450"}]}
+        )
+        h.streaming_loop._tool_router = h.tool_router
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                AsyncMock(return_value=intent("PRICE")),
+            ),
+        ):
+            await h.run(text)
+        return h
+
+    async def test_the_caller_is_told_where_the_booking_resumes(self) -> None:
+        # The silent bug: freeze puts the session in PRICE_INTERRUPT, which is
+        # not in FROZEN_STATES, so the handler used to resolve (None, "") and
+        # quote a price with no word about the booking. handled=True, non-empty
+        # reply, made_progress satisfied — nothing else catches it.
+        session = booking_in_progress()
+        session.fitting_diameter_client = 17
+        h = await self._run(session)
+
+        assert h.spoken, "the interrupt reply never reached the caller"
+        reply = h.spoken[-1]
+        assert STATES[FsmState.CITY].resume_phrase in reply, reply
+
+    async def test_the_resume_phrase_is_said_exactly_once(self) -> None:
+        session = booking_in_progress()
+        session.fitting_diameter_client = 17
+        h = await self._run(session)
+
+        reply = h.spoken[-1]
+        phrase = STATES[FsmState.CITY].resume_phrase
+        assert reply.count(phrase) == 1, f"resume phrase repeated: {reply!r}"
+
+    async def test_the_price_is_still_quoted_alongside_it(self) -> None:
+        session = booking_in_progress()
+        session.fitting_diameter_client = 17
+        h = await self._run(session)
+
+        reply = h.spoken[-1]
+        assert "R17" in reply
+        assert "450" in reply
+
+    async def test_a_call_with_no_booking_hears_no_resume_phrase(self) -> None:
+        # FSM live but the flow never reached a resumable state: the c8c6601
+        # invitation to continue a booking that does not exist must not appear.
+        # A price question with no fitting keyword in it, on a session with no
+        # intent pinned, leaves the deterministic step parked in WELCOME.
+        session = CallSession(uuid.uuid4())
+        session.caller_phone = "+380671234567"
+        session.fitting_diameter_client = 17
+        h = await self._run(session, text="а яка ціна")
+
+        assert h.session.fsm_state == FsmState.WELCOME.value
+        assert h.session.fsm_prev_state is None
+        reply = h.spoken[-1] if h.spoken else ""
+        assert reply, "the price answer itself must still be spoken"
+        for state in FROZEN_STATES:
+            assert STATES[state].resume_phrase not in reply, reply

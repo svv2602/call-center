@@ -516,10 +516,24 @@ def _resume(session: CallSession) -> tuple[str | None, str]:
       nothing to continue and the handler must not pretend otherwise;
     * a terminal or side state → likewise nothing to resume.
 
+    Wave 4-B seam: from Wave 4-B on, the pipeline calls
+    `FsmEngine.freeze_for_interrupt()` *before* this handler runs, so by the time
+    we get here `fsm_state` is `PRICE_INTERRUPT` / `CANCEL_INTERRUPT` — never a
+    member of `FROZEN_STATES`. The frozen main state lives in `fsm_prev_state`,
+    and reading it here is what keeps the caller from hearing a price quote with
+    no word about where the booking resumes. Without this fallback the bug is
+    silent: `handled=True`, a non-empty reply, `made_progress` satisfied, and
+    every Wave 3-B / 4-A test still green.
+
     The phrase itself always comes from `StateConfig.resume_phrase`. This
     module never hardcodes one.
     """
     state = FsmState.coerce(getattr(session, "fsm_state", None))
+    if state is not None and state not in FROZEN_STATES:
+        # Parked in a side-state: the resumable state is the frozen snapshot.
+        # A terminal state (DONE/TRANSFER) has no snapshot, so this resolves to
+        # None and the handler stays silent about resuming — as before.
+        state = FsmState.coerce(getattr(session, "fsm_prev_state", None))
     if state is None or state not in FROZEN_STATES:
         return None, ""
     return state.value, STATES[state].resume_phrase
