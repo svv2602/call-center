@@ -92,6 +92,69 @@ class TestDayAndMonth:
         assert outcome.status != "value"
         assert outcome.value is None
 
+    # --- Wave 6-A additions ------------------------------------------------
+
+    @pytest.mark.parametrize("text", ["на 18.09", "18/09", "на 18-09"])
+    def test_all_three_separators_of_the_numeric_form(self, text: str) -> None:
+        """`_NUMERIC_HINT_RE` accepts `.`, `/` and `-` — all three are used."""
+        outcome = PARSER.parse(ctx(text))
+        assert outcome.status == "value"
+        assert outcome.value == "2026-09-18"
+
+    def test_a_two_digit_year_is_read_as_this_century(self) -> None:
+        """«15.03.26» is 2026, not year 26."""
+        assert PARSER.parse(ctx("15.03.26")).value == "2026-03-15"
+
+    def test_an_explicit_year_is_taken_as_written_even_if_it_is_past(self) -> None:
+        """No roll-forward once the caller named the year.
+
+        `_next_occurrence` only runs for a bare `dd.mm`; a stated year is a
+        statement, and quietly moving it to 2027 would book a different day
+        from the one that was said out loud.
+        """
+        outcome = PARSER.parse(ctx("15.03.26"))
+        assert outcome.value == "2026-03-15"
+        assert outcome.value < NOW.date().isoformat()
+
+    @pytest.mark.parametrize("text", ["на 29.02", "на 29 лютого"])
+    def test_29_february_rolls_to_the_next_leap_year(self, text: str) -> None:
+        """`_MAX_YEAR_ROLL` — 2027 does not exist, 2028 does."""
+        outcome = PARSER.parse(ctx(text))
+        assert outcome.status == "value"
+        assert outcome.value == "2028-02-29"
+
+    def test_the_roll_is_bounded(self) -> None:
+        """Four years is enough to clear a 29 February and no more."""
+        from src.agent.parsers.date_parser import _MAX_YEAR_ROLL
+
+        assert _MAX_YEAR_ROLL == 4
+
+    def test_ru_month_names_come_from_the_shared_alternation(self) -> None:
+        """`_MONTH_NUMBERS` is built from `_MONTHS_RU`, so the two cannot drift."""
+        from src.agent.compound_parse import _MONTHS_RU
+        from src.agent.parsers.date_parser import _MONTH_NUMBERS
+
+        for number, name in enumerate(_MONTHS_RU.split("|"), start=1):
+            assert _MONTH_NUMBERS[name] == number
+
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("15 марта", "2027-03-15"),
+            ("на 20 декабря", "2026-12-20"),
+            ("10 января", "2027-01-10"),
+        ],
+    )
+    def test_russian_months_resolve(self, text: str, expected: str) -> None:
+        outcome = PARSER.parse(ctx(text))
+        assert outcome.status == "value"
+        assert outcome.value == expected
+
+    def test_a_month_number_out_of_range_is_unresolved(self) -> None:
+        outcome = PARSER.parse(ctx("на 10.13"))
+        assert outcome.status != "value"
+        assert outcome.value is None
+
 
 class TestWeekdays:
     @pytest.mark.parametrize(
@@ -132,3 +195,26 @@ class TestVagueAndAbsent:
 
     def test_empty_text(self) -> None:
         assert PARSER.parse(ctx("   ")).status == "not_mentioned"
+
+    # --- Wave 6-A additions ------------------------------------------------
+
+    @pytest.mark.parametrize(
+        "text",
+        ["R16", "Оболонь, Київ", "мене звати Олена", "так, підтверджую", "о 14:00"],
+    )
+    def test_not_mentioned_is_distinct_from_unresolved(self, text: str) -> None:
+        """Silence about the date needs a different re-ask from «I could not pin it».
+
+        Without this case a regression that stops detecting dates entirely is
+        indistinguishable from one that detects them unconfidently.
+        """
+        outcome = PARSER.parse(ctx(text))
+        assert outcome.status == "not_mentioned"
+        assert outcome.value is None
+        assert outcome.confidence == 0.0
+
+    def test_all_three_statuses_are_reachable(self) -> None:
+        statuses = {
+            PARSER.parse(ctx(text)).status for text in ("завтра", "найближча", "білий Nissan")
+        }
+        assert statuses == {"value", "unresolved", "not_mentioned"}
