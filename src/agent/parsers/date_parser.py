@@ -1,0 +1,215 @@
+"""`date_parser` — DATE. Turns the hint into an ISO date, or into nothing.
+
+The latent P0 this closes
+-------------------------
+`compound_parse._detect_date_hint` returns a **raw label** on purpose —
+«завтра», «п'ятниця», «15 березня» — because calendar arithmetic needs a
+«today» the module does not have. The seam in `src/core/pipeline.py` then maps
+`date_hint → "date"` with the label's own confidence, which for «завтра» is
+`1.0`: above the apply threshold. `session.fsm_filled_fields["date"]` becomes
+the string «завтра», DATE's `auto_skip_if` sees a filled field, and the state
+is skipped on a value nothing downstream can book. In `shadow` that is
+harmless — the fields only reach a log. In `live` it is the same defect class
+as `c8c6601`: the bot believes it knows the date and never asks.
+
+This parser is the guard. **A raw label never leaves it.** Either the hint
+resolves to `YYYY-MM-DD`, or the outcome is `unresolved` with no value at all.
+
+Time comes from `ctx.now` and from nowhere else
+-----------------------------------------------
+Without `ctx.now` the answer is `unresolved`, not «probably today». A parser
+that reaches for the process clock stops being a function of its context: the
+same utterance would resolve differently depending on when the test ran, and
+the shadow-mode comparison against the live flow would drift with the date.
+
+Input vocabulary
+----------------
+Exactly what `_detect_date_hint` emits, and nothing else:
+
+===========================  ==========  ==============================
+hint                         confidence  resolved to
+===========================  ==========  ==============================
+`сьогодні`/`завтра`/         `1.0`       `ctx.now` + 0/1/2 days
+`післязавтра`
+`«15 березня»`               `0.9`       next occurrence, 12 UA + 12 RU
+                                         month names
+`dd.mm[.yyyy]` via `. / -`   `0.9`       as written; bare `dd.mm` takes
+                                         the next occurrence
+weekday, canonicalised       `0.9`       next **future** occurrence
+`найближча`                  `0.6`       nothing — below the threshold
+===========================  ==========  ==============================
+
+`найближча` stays unresolved by design. The caller handed the choice back to
+the bot, and a date still has to be said out loud before it is booked; raising
+its confidence to make it «work» would book a day nobody named.
+
+Weekday resolution: «сьогодні п'ятниця» + «п'ятниця» → **next** Friday
+--------------------------------------------------------------------
+Strictly future, never today. A caller who means today has an unambiguous word
+for it («сьогодні») and uses it; a weekday name is a recurring label. The
+asymmetry decides it: booking a caller for next week when they meant today
+costs one correction at CONFIRM, where the date is read back in words
+(`ua_datetime.date_to_words`), while booking them for today when they meant
+next week has them miss a slot they never agreed to.
+
+An explicit «15 березня» is different and *does* accept today: it names one
+specific day, not a recurring label.
+
+Relationship to `main.py:_resolve_date`
+---------------------------------------
+`src/main.py:_resolve_date` covers сьогодні/завтра/післязавтра only, has no
+weekday or day-month handling, and reads the wall clock itself, so it cannot
+be imported into a parser that must stay a function of `ctx`. This module is
+the complete implementation; `_resolve_date` becomes a removal candidate in
+Wave 6-B, which owns `main.py` and can switch its callers over. Two
+implementations must not survive past that wave.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from datetime import date as _date
+from datetime import timedelta
+from typing import TYPE_CHECKING
+
+from src.agent.compound_parse import _MONTHS_RU, _MONTHS_UA, _detect_date_hint, _normalize
+from src.agent.parsers.base import (
+    APPLY_THRESHOLD,
+    NOT_MENTIONED,
+    ParseOutcome,
+    graded,
+    unresolved,
+)
+
+if TYPE_CHECKING:
+    from src.agent.parsers.base import ParseContext
+
+logger = logging.getLogger(__name__)
+
+#: Labels `_RELATIVE_DAYS` canonicalises to, and their offset in days.
+_RELATIVE_OFFSETS: dict[str, int] = {
+    "сьогодні": 0,
+    "завтра": 1,
+    "післязавтра": 2,
+}
+
+#: The canonical forms `_WEEKDAYS` maps its stems to, in `weekday()` order.
+_WEEKDAY_INDEX: dict[str, int] = {
+    "понеділок": 0,
+    "вівторок": 1,
+    "середа": 2,
+    "четвер": 3,
+    "п'ятниця": 4,
+    "субота": 5,
+    "неділя": 6,
+}
+
+#: Built from the same alternations `_DAY_MONTH_RE` is built from, so the two
+#: can not drift apart: genitive month names, UA and RU, January first.
+_MONTH_NUMBERS: dict[str, int] = {
+    name: number for number, name in enumerate(_MONTHS_UA.split("|"), start=1)
+}
+_MONTH_NUMBERS.update(
+    {name: number for number, name in enumerate(_MONTHS_RU.split("|"), start=1)}
+)
+
+_DAY_MONTH_HINT_RE = re.compile(r"^(\d{1,2})\s+([а-яіїєґ']+)$")
+_NUMERIC_HINT_RE = re.compile(r"^(\d{1,2})[./-](\d{1,2})(?:[./-](\d{2,4}))?$")
+
+#: How far forward a bare day/month is allowed to roll while looking for a
+#: valid calendar date. Four years is enough to clear a 29 February.
+_MAX_YEAR_ROLL = 4
+
+
+def _next_occurrence(day: int, month: int, today: _date) -> _date | None:
+    """First calendar date with this day and month, today included."""
+    for offset in range(_MAX_YEAR_ROLL):
+        try:
+            candidate = _date(today.year + offset, month, day)
+        except ValueError:
+            continue  # 29 February in a non-leap year — try the next one.
+        if candidate >= today:
+            return candidate
+    return None
+
+
+def _resolve_hint(hint: str, today: _date) -> _date | None:
+    """Hint → calendar date. `None` means «we could not pin it down»."""
+    offset = _RELATIVE_OFFSETS.get(hint)
+    if offset is not None:
+        return today + timedelta(days=offset)
+
+    weekday = _WEEKDAY_INDEX.get(hint)
+    if weekday is not None:
+        ahead = (weekday - today.weekday()) % 7
+        return today + timedelta(days=ahead or 7)
+
+    match = _DAY_MONTH_HINT_RE.match(hint)
+    if match:
+        month = _MONTH_NUMBERS.get(match.group(2))
+        if month is None:
+            return None
+        return _next_occurrence(int(match.group(1)), month, today)
+
+    match = _NUMERIC_HINT_RE.match(hint)
+    if match:
+        day, month = int(match.group(1)), int(match.group(2))
+        if not 1 <= month <= 12:
+            return None
+        raw_year = match.group(3)
+        if raw_year is None:
+            return _next_occurrence(day, month, today)
+        year = int(raw_year)
+        if year < 100:
+            year += 2000
+        try:
+            return _date(year, month, day)
+        except ValueError:
+            return None
+
+    # «найближча» and anything else the detector may grow later.
+    return None
+
+
+class DateParser:
+    """DATE. ISO or nothing."""
+
+    name = "date_parser"
+    field_name = "date"
+    aresolve = None
+
+    def parse(self, ctx: ParseContext) -> ParseOutcome:
+        text = (ctx.customer_text or "").strip()
+        if not text:
+            return NOT_MENTIONED
+
+        hit = _detect_date_hint(_normalize(text))
+        if hit is None:
+            return NOT_MENTIONED
+
+        if hit.confidence < APPLY_THRESHOLD:
+            # «найближча» — the caller spoke about the date without naming one.
+            logger.debug("date_parser: hint %r is below the apply threshold", hit.value)
+            return unresolved(confidence=hit.confidence, spans=hit.spans)
+
+        if ctx.now is None:
+            logger.debug(
+                "date_parser: hint %r needs a reference date and ctx.now is None "
+                "— unresolved",
+                hit.value,
+            )
+            return unresolved(confidence=hit.confidence, spans=hit.spans)
+
+        resolved = _resolve_hint(str(hit.value), ctx.now.date())
+        if resolved is None:
+            logger.debug("date_parser: hint %r did not resolve to a calendar date", hit.value)
+            return unresolved(confidence=hit.confidence, spans=hit.spans)
+
+        # Business rules — the 21-day window, +3 working days on a storage
+        # contract — stay in the tool layer (`src/main.py`). This parser
+        # normalises the form; it does not decide whether the day is bookable.
+        return graded(resolved.isoformat(), hit.confidence, hit.spans)
+
+
+PARSER = DateParser()

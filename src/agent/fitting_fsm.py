@@ -224,9 +224,14 @@ class StateConfig:
     silence_reprompt: str | None
     resume_phrase: str
 
-    # --- Parser wiring (implemented in Wave 5-B / T18) ---
+    # --- Parser wiring (parsers live in `src/agent/parsers/`, Wave 5-A) ---
+    #: Registry key — see `src.agent.parsers.registry.PARSERS`.
     parser: str
-    parser_input: str = "last_user_turn"  # or "last_3_turns" / "compound_first_turn"
+    # `parser_input` used to sit here ("last_user_turn" / "last_3_turns" /
+    # "compound_first_turn"). It was never read, no state overrode it, and
+    # `ParseContext` made it redundant: a parser that needs the last three
+    # turns reads `ctx.session.dialog_history` itself. Removed in Wave 5-A
+    # (§3.8) rather than left as a third «declared and forgotten» field.
 
     # --- Routing ---
     next_state: FsmState | None = None
