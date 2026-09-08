@@ -15,6 +15,7 @@ import pytest
 
 from src.agent.prompts import (
     _COMPACT_MARKER,
+    _MOD_CONSULTATION,
     _MOD_FITTING,
     _MOD_ORDER_FLOW,
     _MOD_ORDER_STATUS,
@@ -36,20 +37,22 @@ from src.agent.prompts import (
 class TestAssemblePrompt:
     """Test assemble_prompt() selects correct modules per scenario."""
 
-    def test_full_prompt_contains_all_modules(self) -> None:
-        """scenario=None includes all scenario modules."""
+    def test_undetected_scenario_falls_back_to_fitting_bundle(self) -> None:
+        """scenario=None loads fitting + storage only.
+
+        Fitting-only scope (2026-08-14): the `None` key used to map to
+        _ALL_SCENARIO_MODULES (~15k tok). Everything non-fitting is now
+        transferred to an operator by _MOD_CORE's scope rule, so loading
+        those modules only dilutes attention on the booking checklist.
+        """
         prompt = assemble_prompt(scenario=None)
-        # Core always present
         assert "Ти — голосовий асистент" in prompt
-        # All scenario modules present
-        assert "підбір шин" in prompt
-        assert "оформлення замовлення" in prompt
         assert "запис на шиномонтаж" in prompt
         assert "зберігання шин" in prompt
-        assert "статусу замовлення" in prompt
-        assert "консультація та інформація" in prompt
-        assert "підбір → замовлення → монтаж" in prompt
-        assert "запереченнями" in prompt
+        assert _MOD_TIRE_SEARCH not in prompt
+        assert _MOD_ORDER_FLOW not in prompt
+        assert _MOD_ORDER_STATUS not in prompt
+        assert _MOD_CONSULTATION not in prompt
 
     def test_tire_search_includes_relevant_modules(self) -> None:
         """tire_search includes tire search, order, consultation, combined, objections."""
@@ -76,15 +79,19 @@ class TestAssemblePrompt:
         assert _MOD_ORDER_FLOW not in prompt
         assert _MOD_FITTING not in prompt
 
-    def test_fitting_includes_order_and_consultation(self) -> None:
-        """fitting includes fitting + storage + order flow + consultation + combined."""
+    def test_fitting_is_trimmed_to_fitting_and_storage(self) -> None:
+        """fitting loads 2 modules, not the original 5.
+
+        Dropped order_flow / consultation / combined_flow — ~4k tok per LLM
+        call. Fitting is the primary supported scenario, so its checklist
+        gets the attention budget rather than sharing it.
+        """
         prompt = assemble_prompt(scenario="fitting")
         assert "запис на шиномонтаж" in prompt
         assert "зберігання шин" in prompt
-        assert "оформлення замовлення" in prompt
-        assert "консультація та інформація" in prompt
-        assert "підбір → замовлення → монтаж" in prompt
         assert _MOD_TIRE_SEARCH not in prompt
+        assert _MOD_ORDER_FLOW not in prompt
+        assert _MOD_CONSULTATION not in prompt
 
     def test_consultation_includes_all_action_modules(self) -> None:
         """consultation includes all modules for seamless topic switching."""
@@ -345,16 +352,17 @@ class TestBackwardCompatibility:
     """Ensure SYSTEM_PROMPT constant is backward-compatible."""
 
     def test_system_prompt_contains_all_keywords(self) -> None:
-        """SYSTEM_PROMPT constant must contain all required keywords."""
+        """SYSTEM_PROMPT is assemble_prompt(None) — core + fitting + storage.
+
+        The order/consultation keywords this used to assert went away with
+        the fitting-only scope; see
+        TestAssemblePrompt.test_undetected_scenario_falls_back_to_fitting_bundle.
+        """
         assert "Ти — голосовий асистент" in SYSTEM_PROMPT
         assert "українською" in SYSTEM_PROMPT
         assert "ЗАВЖДИ" in SYSTEM_PROMPT
-        assert "підбір шин" in SYSTEM_PROMPT
-        assert "оформлення замовлення" in SYSTEM_PROMPT
         assert "запис на шиномонтаж" in SYSTEM_PROMPT
-        assert "статусу замовлення" in SYSTEM_PROMPT
-        assert "консультація та інформація" in SYSTEM_PROMPT
-        assert "confirm_order" in SYSTEM_PROMPT
+        assert "зберігання шин" in SYSTEM_PROMPT
         assert "НІКОЛИ" in SYSTEM_PROMPT
         assert "Правила вимови" in SYSTEM_PROMPT
         assert "Мішлен" in SYSTEM_PROMPT
@@ -487,10 +495,15 @@ class TestDetectScenarioFromText:
 class TestTopicSwitching:
     """Test that active_scenarios adds modules when customer changes topic."""
 
-    def test_fitting_plus_tire_search(self) -> None:
-        """Starting with fitting, switching to tire search adds tire module."""
+    def test_fitting_does_not_expand_on_topic_switch(self) -> None:
+        """A fitting call never grows extra modules, even if tires come up.
+
+        Fitting-only scope 2026-08-14: mentioning «шини» mid-booking used to
+        append the whole tire_search module (~4k tok) and dilute attention on
+        the checklist. Non-fitting requests are handled by _MOD_CORE's scope
+        rule — transfer to an operator — not by loading more prompt.
+        """
         base = assemble_prompt(scenario="fitting", include_pronunciation=False)
-        # Before topic switch — no tire search
         assert _MOD_TIRE_SEARCH not in base
 
         result = build_system_prompt_with_context(
@@ -499,9 +512,7 @@ class TestTopicSwitching:
             scenario="fitting",
             active_scenarios={"fitting", "tire_search"},
         )
-        # After topic switch — tire search module present
-        assert "підбір шин" in result
-        # Fitting still present
+        assert _MOD_TIRE_SEARCH not in result
         assert "запис на шиномонтаж" in result
 
     def test_tire_search_plus_fitting(self) -> None:
@@ -542,17 +553,22 @@ class TestTopicSwitching:
         assert _MOD_TIRE_SEARCH not in result
 
     def test_no_duplicate_modules(self) -> None:
-        """Modules shared between scenarios should not be duplicated."""
-        base = assemble_prompt(scenario="fitting", include_pronunciation=False)
-        # Both fitting and consultation include _MOD_CONSULTATION
+        """Modules shared between scenarios should not be duplicated.
+
+        Uses tire_search as the primary scenario — fitting skips expansion
+        entirely, so dedup can only be exercised on a non-fitting path.
+        """
+        base = assemble_prompt(scenario="tire_search", include_pronunciation=False)
+        # Both tire_search and consultation include _MOD_CONSULTATION.
         result = build_system_prompt_with_context(
             base,
             is_modular=True,
-            scenario="fitting",
-            active_scenarios={"fitting", "consultation"},
+            scenario="tire_search",
+            active_scenarios={"tire_search", "consultation"},
         )
-        # _MOD_CONSULTATION should appear only once
         assert result.count("## Сценарій: консультація та інформація") == 1
+        # consultation's only module that tire_search lacks did get added.
+        assert _MOD_FITTING in result
 
 
 # ---------------------------------------------------------------------------
