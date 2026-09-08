@@ -135,6 +135,36 @@ _ESCALATION_KEYWORDS = (
     "живого", "живую", "живий", "жива",
 )
 
+# Topics the fitting-only bot genuinely cannot serve. Deliberately excludes
+# «зберігання» — «шини на зберіганні» is a question the checklist itself asks.
+_OUT_OF_SCOPE_KEYWORDS = (
+    "кредит", "розстрочк", "рассрочк",
+    "купити", "купить", "куплю", "придбат",
+    "замовл", "заказ", "доставк",
+    "гаранті", "гаранти", "поверн", "возврат", "рекламац",
+)
+
+_GUARD_MARKER = "⛔ HALLUCINATION_GUARD"
+
+# After this many blocks in one call, let the transfer through. Blocking is a
+# nudge back into the checklist, not a cage: an LLM that keeps insisting has
+# either found a real dead end or is stuck in a loop, and both are better
+# resolved by a human than by an endless bot.
+_MAX_BLOCKS_PER_CALL = 2
+
+
+def _count_prior_blocks(history: list[dict[str, Any]]) -> int:
+    """Count guard rejections already present in this call's history."""
+    count = 0
+    for msg in history:
+        content = msg.get("content")
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict) and _GUARD_MARKER in str(block.get("content", "")):
+                count += 1
+    return count
+
 
 def _extract_user_text_turns(history: list[dict[str, Any]]) -> list[str]:
     """Return only free-text customer turns (excludes tool_result content)."""
@@ -155,17 +185,50 @@ def _should_block_false_transfer(
     a synthetic tool_result message telling the LLM to continue. Otherwise
     return None (transfer is allowed).
 
-    Blocks:
-    - reason=customer_request when NO user turn contains an operator keyword.
-    - reason=cannot_help when there are fewer than 3 user text turns
-      (LLM cannot legitimately conclude cannot_help on turn 1-2).
+    Wave 16 (2026-09-08) — inverted from deny-list to default-deny. The old
+    version named only customer_request and cannot_help, so a cornered LLM
+    walked the rest of the enum until something passed: call 347317e4 tried
+    customer_request → cannot_help → complex_question in 10 seconds and
+    escaped through the third, abandoning a fully collected booking. Two of
+    the six reasons seen in production (non_fitting_scope,
+    fitting_service_unavailable) are not even in the tool schema.
+
+    Every reason now needs positive evidence in the customer's own words:
+    - customer_request — an operator keyword anywhere in the call.
+    - cannot_help / negative_emotion — an escalation keyword in the last 3
+      customer turns.
+    - anything else (complex_question, invented reasons) — an out-of-scope
+      topic or an escalation keyword in the last 3 customer turns.
     """
     reason = str(tool_args.get("reason", "")).strip().lower()
-    if reason not in ("customer_request", "cannot_help"):
+
+    if _count_prior_blocks(history) >= _MAX_BLOCKS_PER_CALL:
+        logger.warning(
+            "Transfer guard exhausted (%d prior blocks) — letting reason=%s through",
+            _MAX_BLOCKS_PER_CALL,
+            reason,
+        )
         return None
 
     user_turns = _extract_user_text_turns(history)
     joined = " ".join(user_turns).lower()
+    recent_3 = " ".join(user_turns[-3:]).lower()
+
+    if reason not in ("customer_request", "cannot_help", "negative_emotion"):
+        if any(kw in recent_3 for kw in _OUT_OF_SCOPE_KEYWORDS):
+            return None
+        if any(kw in recent_3 for kw in _ESCALATION_KEYWORDS):
+            return None
+        last = user_turns[-1] if user_turns else ""
+        return (
+            f'{_GUARD_MARKER}: transfer_to_operator(reason="{reason}") '
+            "заблокований бекендом. У ОСТАННІХ 3 репліках клієнта немає ні "
+            "питання поза шиномонтажем, ні скарги — отже це не привід "
+            f"передавати оператору. Остання репліка клієнта: {last!r}. "
+            "Якщо book_fitting повернув помилку — прочитай, яких саме полів "
+            "бракує, і запитай їх у клієнта. Якщо щось не розчула — перепитай "
+            "коротко. Продовжуй чекліст запису."
+        )
 
     if reason == "customer_request":
         # Only allow if the customer actually asked for a human somewhere.
@@ -173,14 +236,15 @@ def _should_block_false_transfer(
             return None
         last = user_turns[-1] if user_turns else ""
         return (
-            "⛔ HALLUCINATION_GUARD: transfer_to_operator(reason=\"customer_request\") "
+            f"{_GUARD_MARKER}: transfer_to_operator(reason=\"customer_request\") "
             "заблокований бекендом. Клієнт НЕ просив оператора. "
             f"Останнє повідомлення клієнта: {last!r} (усього реплік клієнта: {len(user_turns)}). "
             "Якщо клієнт назвав ім'я — виклич update_customer_profile(name=...) і продовжи fitting-чекліст "
             "(Крок 1: запитай місто). Не виклик transfer_to_operator знову з цією ж причиною."
         )
 
-    # reason == "cannot_help"
+    # reason == "cannot_help" | "negative_emotion" — same evidence test: both
+    # claim the customer is unhappy, so the customer must sound unhappy.
     # Wave 5 (2026-09-03) — tightened: require escalation keyword in the
     # LAST 3 customer turns (not any turn in history). Call dd3dd368
     # turn 62: 16 turns in, LLM invoked cannot_help after customer said
@@ -188,16 +252,15 @@ def _should_block_false_transfer(
     # because len>=5; new logic checks that a REAL escalation happened
     # recently. Escalation from turn 3 doesn't justify a transfer 40
     # turns later — that context was resolved long ago.
-    recent = " ".join(user_turns[-3:]).lower()
-    if any(kw in recent for kw in _ESCALATION_KEYWORDS):
+    if any(kw in recent_3 for kw in _ESCALATION_KEYWORDS):
         return None
     last = user_turns[-1] if user_turns else ""
     return (
-        "⛔ HALLUCINATION_GUARD: transfer_to_operator(reason=\"cannot_help\") "
+        f'{_GUARD_MARKER}: transfer_to_operator(reason="{reason}") '
         "заблокований бекендом — немає escalation-сигналу від клієнта "
         f"в ОСТАННІХ 3 репліках. Реплік клієнта усього: {len(user_turns)}, "
         f"остання: {last!r}. "
-        "cannot_help дозволено ТІЛЬКИ якщо клієнт у останніх 3 репліках "
+        f"{reason} дозволено ТІЛЬКИ якщо клієнт у останніх 3 репліках "
         "сказав щось на кшталт «не працює», «не розумію», «переключи», "
         "«не хочу з тобою», «погано». Просте уточнення марки/номера/дати "
         "НЕ є escalation'ом. Продовжи чекліст, перепитай коротко якщо "
