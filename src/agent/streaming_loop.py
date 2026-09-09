@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import random
+import re
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -103,13 +103,31 @@ _TOOL_WAIT_POOLS: dict[str, list[str]] = {
 }
 
 
-def _pick_tool_wait_phrase(tool_names: list[str]) -> str:
-    """Choose a contextual wait phrase based on the tool(s) being called."""
+def _opening_word(text: str) -> str:
+    return re.split(r"[\s,.!?]+", text.strip().lower(), maxsplit=1)[0]
+
+
+def _pick_tool_wait_phrase(tool_names: list[str], index: int = 0, avoid: str = "") -> str:
+    """Choose a contextual wait phrase based on the tool(s) being called.
+
+    Rotates by `index` rather than picking at random: on a three-phrase pool
+    `random.choice` repeated the same filler back-to-back one time in three.
+    `avoid` is the thinking filler queued for this round — a candidate opening
+    with the same word is skipped so the caller doesn't hear «Одну мить.»
+    immediately followed by «Одну мить, дивлюся адреси.».
+    """
+    pool = WAIT_DEFAULT_POOL
     for name in tool_names:
-        pool = _TOOL_WAIT_POOLS.get(name)
-        if pool:
-            return random.choice(pool)
-    return random.choice(WAIT_DEFAULT_POOL)
+        candidate = _TOOL_WAIT_POOLS.get(name)
+        if candidate:
+            pool = candidate
+            break
+    avoid_word = _opening_word(avoid) if avoid else ""
+    for offset in range(len(pool)):
+        phrase = pool[(index + offset) % len(pool)]
+        if not avoid_word or _opening_word(phrase) != avoid_word:
+            return phrase
+    return pool[index % len(pool)]
 
 
 # Backend guard against LLM hallucinating a customer-request/cannot-help
@@ -328,6 +346,10 @@ class StreamingAgentLoop:
         self._agent_name = agent_name
         self._echo_canceller = echo_canceller
         self._thinking_counter = 0
+        # Rotates the tool wait phrase; paired with _last_thinking_filler so the
+        # two filler sources never open with the same word back-to-back.
+        self._tool_wait_counter = 0
+        self._last_thinking_filler = ""
 
     @property
     def _tts(self) -> TTSEngine:
@@ -389,6 +411,20 @@ class StreamingAgentLoop:
             logger.warning("Streaming summary fallback failed", exc_info=True)
 
         return _fallback_text
+
+    def _next_tool_wait_phrase(self, tool_names: list[str]) -> str:
+        """Pick this round's wait phrase and advance the rotation.
+
+        Selection and advance live together so a caller cannot pick without
+        advancing — that would put the caller back on repeat-the-same-filler.
+        """
+        phrase = _pick_tool_wait_phrase(
+            tool_names,
+            index=self._tool_wait_counter,
+            avoid=self._last_thinking_filler,
+        )
+        self._tool_wait_counter += 1
+        return phrase
 
     async def run_turn(
         self,
@@ -525,6 +561,7 @@ class StreamingAgentLoop:
                 if not self._conn.is_closed:
                     phrase = WAIT_THINKING_POOL[self._thinking_counter % len(WAIT_THINKING_POOL)]
                     self._thinking_counter += 1
+                    self._last_thinking_filler = phrase
                     try:
                         filler_audio = await asyncio.wait_for(
                             self._tts.synthesize(phrase),
@@ -714,7 +751,7 @@ class StreamingAgentLoop:
             need_wait_phrase = not interrupted and not disconnected
             if need_wait_phrase and not self._conn.is_closed:
                 tool_names = [tc.name for tc in unique_tool_calls]
-                wait_phrase = _pick_tool_wait_phrase(tool_names)
+                wait_phrase = self._next_tool_wait_phrase(tool_names)
                 logger.info("Speaking wait-phrase during tool exec: %r", wait_phrase)
 
                 async def _speak_wait(_phrase: str = wait_phrase) -> None:

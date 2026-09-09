@@ -2284,11 +2284,17 @@ ORDER_CANCELLED_TEXT = "Замовлення скасовано. Чим ще м�
 
 # --- Contextual wait phrase pools ---
 # Each context has multiple variants; pipeline rotates through them.
+#
+# «Секундочку» is reserved for WAIT_THINKING_POOL and appears nowhere below.
+# It used to open one variant in eleven of these pools plus two of the _TEXT
+# defaults — 12 of 36 phrases — so the two independent filler sources (thinking
+# filler and tool wait phrase) kept echoing each other. Testers on 2026-09-09
+# reported hearing it several times in a row.
 
 WAIT_SEARCH_TEXT = "Зачекайте, підбираю підходящі шини для вас."
 WAIT_SEARCH_POOL = [
     WAIT_SEARCH_TEXT,
-    "Секундочку, дивлюся варіанти.",
+    "Дивлюся варіанти.",
     "Зараз підберу, одну мить.",
     "Перевіряю, що є в наявності.",
 ]
@@ -2296,21 +2302,21 @@ WAIT_SEARCH_POOL = [
 WAIT_AVAILABILITY_TEXT = "Зачекайте, перевіряю наявність."
 WAIT_AVAILABILITY_POOL = [
     WAIT_AVAILABILITY_TEXT,
-    "Секундочку, дивлюся на складі.",
+    "Дивлюся, що є на складі.",
     "Зараз перевірю, одну мить.",
 ]
 
 WAIT_ORDER_TEXT = "Зачекайте, оформлюю замовлення."
 WAIT_ORDER_POOL = [
     WAIT_ORDER_TEXT,
-    "Секундочку, зараз оформлю.",
+    "Хвилинку, зараз оформлю.",
     "Одну мить, готую замовлення.",
 ]
 
 WAIT_FITTING_TEXT = "Зачекайте, перевіряю вільні часи для запису."
 WAIT_FITTING_POOL = [
     WAIT_FITTING_TEXT,
-    "Секундочку, дивлюся вільні часи.",
+    "Дивлюся вільні часи.",
     "Зараз перевірю розклад, одну мить.",
 ]
 
@@ -2319,10 +2325,10 @@ WAIT_FITTING_POOL = [
 # mismatch: bot called get_fitting_stations but the filler said «Зараз
 # перевірю розклад» (schedule) — client heard the wrong context and got
 # confused. These phrases are about SEARCHING for addresses / points.
-WAIT_STATIONS_TEXT = "Секундочку, шукаю точки."
+WAIT_STATIONS_TEXT = "Одну мить, шукаю точки."
 WAIT_STATIONS_POOL = [
     WAIT_STATIONS_TEXT,
-    "Одну мить, дивлюся адреси.",
+    "Дивлюся адреси.",
     "Зараз перевірю, де є.",
 ]
 
@@ -2331,7 +2337,7 @@ WAIT_STATIONS_POOL = [
 # slots: call e0556668 2026-09-09 asked to cancel and heard «Зараз перевірю
 # розклад» — the caller was told the bot was checking the schedule while it
 # was actually finding his booking. Same class as the 78f185dc stations fix.
-WAIT_BOOKING_LOOKUP_TEXT = "Секундочку, шукаю ваш запис."
+WAIT_BOOKING_LOOKUP_TEXT = "Шукаю ваш запис."
 WAIT_BOOKING_LOOKUP_POOL = [
     WAIT_BOOKING_LOOKUP_TEXT,
     "Одну мить, дивлюся ваш запис.",
@@ -2341,48 +2347,48 @@ WAIT_BOOKING_LOOKUP_POOL = [
 WAIT_BOOKING_TEXT = "Зачекайте, оформлюю ваш запис."
 WAIT_BOOKING_POOL = [
     WAIT_BOOKING_TEXT,
-    "Секундочку, записую вас.",
+    "Хвилинку, записую вас.",
     "Одну мить, оформлюю запис.",
 ]
 
 WAIT_CANCEL_TEXT = "Зачекайте, скасовую запис."
 WAIT_CANCEL_POOL = [
     WAIT_CANCEL_TEXT,
-    "Секундочку, обробляю скасування.",
+    "Хвилинку, обробляю скасування.",
     "Одну мить, скасовую ваш запис.",
 ]
 
 WAIT_FITTING_PRICE_TEXT = "Зачекайте, дивлюся вартість послуг."
 WAIT_FITTING_PRICE_POOL = [
     WAIT_FITTING_PRICE_TEXT,
-    "Секундочку, перевіряю ціни на послуги.",
+    "Перевіряю ціни на послуги.",
     "Одну мить, дивлюся прайс.",
 ]
 
 WAIT_STATUS_TEXT = "Зачекайте, перевіряю статус замовлення."
 WAIT_STATUS_POOL = [
     WAIT_STATUS_TEXT,
-    "Секундочку, дивлюся статус.",
+    "Дивлюся статус.",
     "Зараз перевірю, одну мить.",
 ]
 
 WAIT_KNOWLEDGE_TEXT = "Зачекайте, дивлюся інформацію з нашої бази знань."
 WAIT_KNOWLEDGE_POOL = [
     WAIT_KNOWLEDGE_TEXT,
-    "Секундочку, перевіряю інформацію.",
+    "Перевіряю інформацію.",
     "Одну мить, дивлюся в базі.",
 ]
 
 WAIT_STORAGE_TEXT = "Зачекайте, перевіряю інформацію по зберіганню."
 WAIT_STORAGE_POOL = [
     WAIT_STORAGE_TEXT,
-    "Секундочку, дивлюся договір зберігання.",
+    "Дивлюся договір зберігання.",
     "Одну мить, перевіряю дані по зберіганню.",
 ]
 
 WAIT_DEFAULT_POOL = [
     WAIT_TEXT,
-    "Секундочку, зараз перевірю.",
+    "Хвилинку, зараз перевірю.",
     "Одну мить, будь ласка.",
     "Дивлюся, зачекайте.",
 ]
