@@ -65,6 +65,31 @@ _DIAMETER_PREFIX_RE = re.compile(
 
 _TIME_TOKEN_RE = re.compile(r"\b([01]?\d|2[0-3]):([0-5]\d)\b")
 
+#: The bot announcing what is free. Anchors the slot scan below: hours named
+#: *after* one of these are an offer, while hours named before it are as
+#: likely a price («для сімнадцятого діаметра… коштує») or a Krok 8 summary
+#: («перевіримо: дев'ятого вересня о 11:00…»). Counting hours anywhere in the
+#: utterance turns `allow_hour_only` on for 37 of the corpus's 479 bot turns,
+#: most of them exactly those two shapes — which is what the flag exists to
+#: prevent.
+_AVAILABILITY_RE = re.compile(
+    r"вільн\w*\s+час\w*|вільні|зі списку|з переліку|доступн\w*\s+час\w*",
+    re.IGNORECASE,
+)
+
+#: «12 вересня» is a date, not a slot. Without this the rule below would fire
+#: on the day number whenever it happened to be ≤ 20 — behaviour that depends
+#: on the calendar rather than on what the bot said. Deliberately a local copy
+#: rather than an import of `compound_parse._DAY_MONTH_RE`: this module is the
+#: one detector `compound_parse` does not call (see its docstring), and the
+#: dependency runs that way round on purpose.
+_DAY_MONTH_RE = re.compile(
+    r"\b\d{1,2}\s+(?:січня|лютого|березня|квітня|травня|червня|липня|серпня|"
+    r"вересня|жовтня|листопада|грудня|января|февраля|марта|апреля|мая|июня|"
+    r"июля|августа|сентября|октября|ноября|декабря)\b",
+    re.IGNORECASE,
+)
+
 
 def _normalize(text: str) -> str:
     return text.lower().replace("ʼ", "'").replace("’", "'").replace("`", "'")
@@ -100,10 +125,33 @@ def _merge_composites(nums: list[int]) -> list[int]:
 
 
 def bot_listed_slots(bot_utterance: str) -> bool:
-    """True when the bot's last turn read out a list of times."""
+    """True when the bot's last turn read out the available times.
+
+    Two ways to qualify, the second strictly widening the first:
+
+    * two or more `HH:MM` literals — the original rule, unchanged;
+    * an availability marker followed by at least one hour. This is the TTS
+      path: the bot reads slots out in words («З переліку вільні: дев'ять,
+      десять двадцять, одинадцять сорок, тринадцять»), which contains no
+      `HH:MM` token at all, so the original rule scored zero and
+      `allow_hour_only` stayed off — leaving `detect_time_choice` unable to
+      match the caller's «давайте на 13» against a slot the bot had just
+      offered. Call `f2bec2d6` died in TIME on exactly that turn. It also
+      covers a one-slot day, which is a list of length one.
+
+    Missed 9 of the 33 slot announcements in the 2026-09-07..09 corpus before
+    this; 0 after, with no turn losing its previous verdict.
+    """
     if not bot_utterance:
         return False
-    return len(_TIME_TOKEN_RE.findall(bot_utterance)) >= 2
+    if len(_TIME_TOKEN_RE.findall(bot_utterance)) >= 2:
+        return True
+    normalized = _normalize(bot_utterance)
+    marker = _AVAILABILITY_RE.search(normalized)
+    if not marker:
+        return False
+    tail = _DAY_MONTH_RE.sub(" ", normalized[marker.end() :])
+    return any(_HOUR_MIN <= n <= _HOUR_MAX for n in _extract_numbers(tail))
 
 
 def detect_time_choice(
