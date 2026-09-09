@@ -20,6 +20,11 @@ bot lie about a booking that does not exist.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
 # Whole words that carry nothing but agreement.
 _CONFIRM_WORDS: frozenset[str] = frozenset({
     "так", "да", "ок", "окей", "окейно", "okey", "ok", "yes", "ага", "угу",
@@ -66,6 +71,30 @@ def is_confirmation(customer_text: str) -> bool:
     if not tokens or len(tokens) > _MAX_CONFIRM_TOKENS:
         return False
     return all(_is_confirm_token(t) for t in tokens)
+
+
+def booking_was_confirmed(turns: Sequence[tuple[str, str]]) -> bool:
+    """Did the exchange just before this point close a Krok 8 confirmation?
+
+    `turns` is the dialog oldest-first as (speaker, content); "user" is the
+    customer. Looks at the newest customer turn and the two bot turns before
+    it — the same window the pipeline's EMERGENCY banner uses, so a gate built
+    on this reads the state exactly as the banner does.
+    """
+    bot_before_answer: list[str] = []
+    customer_answer = ""
+    for speaker, content in reversed(turns):
+        if not content:
+            continue
+        if not customer_answer:
+            if speaker == "user":
+                customer_answer = content.strip()
+            continue
+        if speaker == "assistant":
+            bot_before_answer.append(content)
+            if len(bot_before_answer) == 2:
+                break
+    return asked_for_confirmation(bot_before_answer) and is_confirmation(customer_answer)
 
 
 def asked_for_confirmation(bot_utterances: list[str]) -> bool:

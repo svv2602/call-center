@@ -26,6 +26,7 @@ from sqlalchemy import text
 
 from src.agent.agent import LLMAgent, ToolRouter
 from src.agent.booking_result import is_booking_confirmed
+from src.agent.confirm_detect import booking_was_confirmed
 from src.agent.parsers.date_parser import resolve_tool_date
 from src.agent.prompt_manager import (
     PromptManager,
@@ -89,6 +90,7 @@ from src.logging.structured_logger import setup_logging
 from src.monitoring.cost_tracker import CostBreakdown
 from src.monitoring.metrics import (
     active_calls,
+    book_fitting_confirmation_total,
     call_duration_seconds,
     call_scenario_total,
     calls_resolved_by_bot_total,
@@ -1678,6 +1680,25 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 "message": f"Неможливо записати без: {', '.join(missing)}. "
                 "Поверніся до чеклісту і запитай у клієнта відсутні дані.",
             }
+
+        # SHADOW ONLY — measure, never reject. Confirmation (Krok 8) is the one
+        # checklist item with neither a rendered row nor a server check: the
+        # progress block emits 8 rows, so «усі поля ✅» goes true the moment the
+        # brand lands and only prose withholds book_fitting. A transcript survey
+        # of 44 confirmed bookings over 14 days found roughly half without a
+        # recap-then-«так» pair, so a gate built on that estimate would refuse
+        # real bookings. This counter re-measures with the exact predicates a
+        # gate would use; promote to default-deny only once it agrees.
+        _turns = [(t.speaker, t.content or "") for t in session.dialog_history]
+        _confirmed = booking_was_confirmed(_turns)
+        book_fitting_confirmation_total.labels(confirmed="yes" if _confirmed else "no").inc()
+        if not _confirmed:
+            logger.warning(
+                "book_fitting_without_confirmation call=%s recent_turns=%r "
+                "— booking proceeds (shadow measurement)",
+                session.channel_uuid,
+                [(s, c[:60]) for s, c in _turns[-4:]],
+            )
 
         # Wave 7 (2026-09-03) — type-as-brand guard. LLM sometimes
         # passes vehicle_info="позашляховик"/"SUV"/"легкове" as a

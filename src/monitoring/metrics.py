@@ -136,6 +136,17 @@ phone_asked_despite_caller_id_total = Counter(
     "Attention-dilution regression from prompt rule Крок 7.",
 )
 
+book_fitting_confirmation_total = Counter(
+    "callcenter_book_fitting_confirmation_total",
+    "Whether a recorded «Підтверджуєте?» → «так» preceded book_fitting. "
+    "Shadow measurement only — nothing is rejected. Confirmation is the one "
+    "checklist item with neither a rendered row nor a server check, so a "
+    "transcript survey put the compliant share at roughly half; a guard built "
+    "on that estimate would refuse real bookings. Flip to a hard default-deny "
+    "gate only once this counter says the signal is reliable.",
+    ["confirmed"],  # "yes" | "no"
+)
+
 krok1_regression_blocked_total = Counter(
     "callcenter_krok1_regression_blocked_total",
     "Bot tried to call get_fitting_stations after station was already pinned "
