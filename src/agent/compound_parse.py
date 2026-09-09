@@ -263,7 +263,18 @@ _LANDMARKS: tuple[tuple[str, str, str | None], ...] = (
     ("лукяненк", "Лукʼяненка", "Київ"),
     ("лук'яненк", "Лукʼяненка", "Київ"),
     ("тимошенк", "Тимошенка", "Київ"),
-    ("героїв дніпра", "Героїв Дніпра", "Київ"),
+    # --- City-agnostic: named a city the catalog does not back ---
+    # «Героїв Дніпра» sat here under Київ, and no station in Київ carries it:
+    # the only one that does is 000000007, «м. Черкаси, вул. Героїв Дніпра, 7».
+    # The row was broken in both directions — a Kyiv caller (the metro on
+    # Оболонь) got a station that does not exist, and a Cherkasy caller got the
+    # city overwritten with Київ. Черкаси is not the fix either: pinning a city
+    # off a landmark that is a metro station in another one is how b394f6c1
+    # happened. With no city the resolver still finds the Cherkasy point on its
+    # own whenever the snapshot holds it, and finds nothing in Київ, which is
+    # the truth. Prod agrees: every «Героїв Дніпра» in `call_turns` is the bot
+    # naming that address — no caller has ever used it as a landmark.
+    ("героїв дніпра", "Героїв Дніпра", None),
     # --- Харків ---
     ("холодногірськ", "Холодногірська", "Харків"),
     ("холодногорск", "Холодногірська", "Харків"),
@@ -309,6 +320,39 @@ _LANDMARKS: tuple[tuple[str, str, str | None], ...] = (
     ("правий берег", "Правий берег", None),
     ("автовокзал", "Автовокзал", None),
 )
+
+
+def _build_landmark_keys() -> dict[str, tuple[str, ...]]:
+    """Label → every string worth searching a station's own text for.
+
+    The detector matches a *stem* and reports a canonical *label*, and the two
+    are not interchangeable against the catalog. Matched over all 30 rows of
+    `_LANDMARKS`, searching by the label alone loses «Бориса Кротова» — every
+    field but the unsearched `name` abbreviates it to «вул. Б.Кротова», so only
+    the stem «кротов» reaches it — and loses «Лукʼяненка», whose label carries a
+    U+02BC apostrophe that appears nowhere.
+
+    **All** stems of a label, not just the one that fired. «лукяненк» is a
+    plausible STT form and matches nothing; its sibling «лукьяненк» matches
+    `000000006`. Keying the search off whichever stem the caller happened to
+    produce would leave that form unresolvable for no reason, and is the naive
+    fix this shape exists to avoid.
+
+    The label is kept even though no *current* catalog row needs it: it is the
+    only key for 9 of the 21 labels, and dropping it for the 12 that do have
+    stems would make the rule depend on hand-edited 1C text staying as it is
+    today. `district` is edited in prod — `000000003` has five revisions — so a
+    key set tuned to one snapshot of that text rots by construction.
+    """
+    keys: dict[str, list[str]] = {}
+    for stem, label, _city in _LANDMARKS:
+        bucket = keys.setdefault(label, [label.lower()])
+        if stem not in bucket:
+            bucket.append(stem)
+    return {label: tuple(bucket) for label, bucket in keys.items()}
+
+
+_LANDMARK_KEYS: dict[str, tuple[str, ...]] = _build_landmark_keys()
 
 _LANDMARK_PATTERNS: tuple[tuple[re.Pattern[str], str, str | None], ...] = tuple(
     (re.compile(r"\b" + re.escape(stem)), label, city)

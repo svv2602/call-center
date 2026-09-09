@@ -148,11 +148,25 @@ class TestPeremohyIsNeverCertain:
         and both must stay city-less. The set is spelled out so a new ambivalent
         landmark cannot appear — nor an existing one quietly regain a city —
         without this test saying so.
+
+        «Героїв Дніпра» joined the set for a different reason: its city was not
+        ambivalent, it was wrong. The row said Київ (the metro station), and the
+        only point in the catalog on that street is `000000007` in Черкаси — so
+        the pin invented a Kyiv station for one caller and overwrote Черкаси for
+        the other. Черкаси is not the fix either: pinning any city off a landmark
+        that names a place in another one is the b394f6c1 defect. With no city
+        the resolver finds the Cherkasy point whenever the snapshot holds it.
         """
         from src.agent.compound_parse import _LANDMARKS
 
         agnostic = {label for _stem, label, city in _LANDMARKS if city is None}
-        assert agnostic == {"Лівий берег", "Правий берег", "Автовокзал", "Перемоги"}
+        assert agnostic == {
+            "Лівий берег",
+            "Правий берег",
+            "Автовокзал",
+            "Перемоги",
+            "Героїв Дніпра",
+        }
 
 
 class TestNotMentioned:
@@ -168,8 +182,8 @@ class TestAresolve:
 
     async def test_single_match_becomes_the_id(self) -> None:
         stations = [
-            {"id": "st-1", "name": "Оболонь", "district": "Оболонський"},
-            {"id": "st-2", "name": "Позняки", "district": "Дарницький"},
+            {"id": "st-1", "name": "6К (Київ, Тимошенка 7)", "district": "Оболонь, Правий берег"},
+            {"id": "st-2", "name": "7К (Київ, Драгоманова 2)", "district": "Позняки, Дарницький"},
         ]
         parsed = PARSER.parse(ctx("на Оболоні", stations=stations))
         resolved = await PARSER.aresolve(ctx("на Оболоні", stations=stations), parsed)
@@ -181,8 +195,8 @@ class TestAresolve:
     async def test_two_matches_are_left_unresolved(self) -> None:
         """Silently picking one is how a caller drives to the wrong address."""
         stations = [
-            {"id": "st-zp", "name": "Перемоги 72Б", "district": "Запоріжжя"},
-            {"id": "st-dp", "name": "Перемоги 15", "district": "Дніпро"},
+            {"id": "st-zp", "name": "9З", "address": "м. Запоріжжя, вул. Перемоги, 72б"},
+            {"id": "st-dp", "name": "1Д", "district": "Перемога, Правий берег"},
         ]
         parsed = PARSER.parse(ctx("на Перемоги", stations=stations))
         resolved = await PARSER.aresolve(ctx("на Перемоги", stations=stations), parsed)
@@ -203,25 +217,46 @@ class TestAresolve:
         assert resolved is parsed
 
     async def test_a_match_without_an_id_is_not_a_value(self) -> None:
-        stations = [{"name": "Оболонь", "district": "Оболонський"}]
+        stations = [{"name": "6К (Київ, Тимошенка 7)", "district": "Оболонь, Правий берег"}]
         parsed = PARSER.parse(ctx("на Оболоні", stations=stations))
         resolved = await PARSER.aresolve(ctx("на Оболоні", stations=stations), parsed)
         assert resolved is parsed
         assert resolved.status == "unresolved"
 
     async def test_nothing_to_resolve_passes_through(self) -> None:
-        stations = [{"id": "st-1", "name": "Оболонь"}]
+        stations = [{"id": "st-1", "name": "6К", "district": "Оболонь"}]
         resolved = await PARSER.aresolve(ctx("білий Nissan", stations=stations), NOT_MENTIONED)
         assert resolved is NOT_MENTIONED
 
-    async def test_matching_looks_at_address_as_well_as_name(self) -> None:
-        stations = [{"id": "st-9", "address": "ТЦ Оболонь, вул. Полярна 3"}]
+    @pytest.mark.parametrize("field", ["address", "district", "landmarks", "description"])
+    async def test_every_field_the_prod_tool_searches_is_searched_here(self, field: str) -> None:
+        """The surface is `get_fitting_stations`' own (`main.py:2489-2499`).
+
+        This resolver exists to reproduce that tool's answer from the snapshot,
+        so a field the tool matches and this does not is a station the caller
+        was offered and cannot then name. `landmarks` and `description` were
+        exactly that until Wave 6-E.
+        """
+        stations = [{"id": "st-9", field: "ТЦ Оболонь, вул. Полярна 3"}]
         parsed = PARSER.parse(ctx("на Оболоні", stations=stations))
         resolved = await PARSER.aresolve(ctx("на Оболоні", stations=stations), parsed)
         assert resolved.value == "st-9"
 
+    async def test_name_is_not_searched(self) -> None:
+        """Prod `name` is a station code («1Д (Днепр, пер. Добровольцев, 1д)»).
+
+        It carried zero of the 30 landmarks when the whole table was matched
+        against the catalog, and the prod tool does not search it either. Dead
+        surface only widens the ways two stations can collide, so it is out.
+        """
+        stations = [{"id": "st-9", "name": "ТЦ Оболонь, вул. Полярна 3"}]
+        parsed = PARSER.parse(ctx("на Оболоні", stations=stations))
+        resolved = await PARSER.aresolve(ctx("на Оболоні", stations=stations), parsed)
+        assert resolved is parsed
+        assert resolved.status == "unresolved"
+
     async def test_the_id_is_stringified(self) -> None:
-        stations = [{"id": 42, "name": "Оболонь"}]
+        stations = [{"id": 42, "name": "6К", "district": "Оболонь"}]
         parsed = PARSER.parse(ctx("на Оболоні", stations=stations))
         resolved = await PARSER.aresolve(ctx("на Оболоні", stations=stations), parsed)
         assert resolved.value == "42"
@@ -247,7 +282,7 @@ class TestContract:
         assert "router" not in {f.name for f in fields(ParseContext)}
 
     def test_the_three_statuses_across_both_passes(self) -> None:
-        stations = [{"id": "st-1", "name": "Оболонь"}]
+        stations = [{"id": "st-1", "name": "6К", "district": "Оболонь"}]
         sync_statuses = {PARSER.parse(ctx(text)).status for text in ("на Оболоні", "білий Nissan")}
         assert sync_statuses == {"unresolved", "not_mentioned"}
         assert stations, "value is reached only through aresolve — see TestAresolve"
@@ -268,8 +303,8 @@ class TestSyncResolve:
 
     def test_single_match_becomes_the_id(self) -> None:
         stations = [
-            {"id": "st-1", "name": "Оболонь", "district": "Оболонський"},
-            {"id": "st-2", "name": "Позняки", "district": "Дарницький"},
+            {"id": "st-1", "name": "6К (Київ, Тимошенка 7)", "district": "Оболонь, Правий берег"},
+            {"id": "st-2", "name": "7К (Київ, Драгоманова 2)", "district": "Позняки, Дарницький"},
         ]
         c = ctx("на Оболоні", stations=stations)
         resolved = resolve_station_from_session(c, PARSER.parse(c))
@@ -281,8 +316,8 @@ class TestSyncResolve:
     def test_two_matches_are_left_unresolved(self) -> None:
         """Ambiguity is refused, not guessed — cross-city guard `13e9ea4`."""
         stations = [
-            {"id": "st-zp", "name": "Перемоги 72Б", "district": "Запоріжжя"},
-            {"id": "st-dp", "name": "Перемоги 15", "district": "Дніпро"},
+            {"id": "st-zp", "name": "9З", "address": "м. Запоріжжя, вул. Перемоги, 72б"},
+            {"id": "st-dp", "name": "1Д", "district": "Перемога, Правий берег"},
         ]
         c = ctx("на Перемоги", stations=stations)
         parsed = PARSER.parse(c)
@@ -299,7 +334,7 @@ class TestSyncResolve:
 
     def test_a_match_without_an_id_is_not_a_value(self, caplog) -> None:
         """WARNING, not DEBUG: a station row with no id is a data defect."""
-        stations = [{"name": "Оболонь", "district": "Оболонський"}]
+        stations = [{"name": "6К (Київ, Тимошенка 7)", "district": "Оболонь, Правий берег"}]
         c = ctx("на Оболоні", stations=stations)
         parsed = PARSER.parse(c)
 
@@ -314,13 +349,13 @@ class TestSyncResolve:
         ), "a station without an id must be loud"
 
     def test_nothing_to_resolve_passes_through(self) -> None:
-        stations = [{"id": "st-1", "name": "Оболонь"}]
+        stations = [{"id": "st-1", "name": "6К", "district": "Оболонь"}]
         c = ctx("білий Nissan", stations=stations)
         assert resolve_station_from_session(c, NOT_MENTIONED) is NOT_MENTIONED
 
     def test_it_needs_no_connection(self) -> None:
         """The gate that keeps the *network* resolvers out is `conn is None`."""
-        stations = [{"id": "st-1", "name": "Оболонь"}]
+        stations = [{"id": "st-1", "name": "6К", "district": "Оболонь"}]
         c = ctx("на Оболоні", stations=stations)
         assert c.conn is None
         assert resolve_station_from_session(c, PARSER.parse(c)).value == "st-1"
@@ -334,18 +369,18 @@ class TestTheWrapperAndTheCoreAgree:
     #: `ClassVar` because a bare mutable class attribute is RUF012 — and the
     #: list is read by `parametrize` at class-body time, never mutated.
     CASES: ClassVar[list[tuple[str, list[dict]]]] = [
-        ("на Оболоні", [{"id": "st-1", "name": "Оболонь"}]),
+        ("на Оболоні", [{"id": "st-1", "name": "6К", "district": "Оболонь"}]),
         (
             "на Перемоги",
             [
-                {"id": "st-zp", "name": "Перемоги 72Б"},
-                {"id": "st-dp", "name": "Перемоги 15"},
+                {"id": "st-zp", "address": "м. Запоріжжя, вул. Перемоги, 72б"},
+                {"id": "st-dp", "district": "Перемога, Правий берег"},
             ],
         ),
         ("на Оболоні", []),
-        ("на Оболоні", [{"name": "Оболонь"}]),
-        ("білий Nissan", [{"id": "st-1", "name": "Оболонь"}]),
-        ("на Оболоні", [{"id": 42, "name": "Оболонь"}]),
+        ("на Оболоні", [{"name": "6К", "district": "Оболонь"}]),
+        ("білий Nissan", [{"id": "st-1", "name": "6К", "district": "Оболонь"}]),
+        ("на Оболоні", [{"id": 42, "name": "6К", "district": "Оболонь"}]),
         ("на Оболоні", [{"id": "st-9", "address": "ТЦ Оболонь, вул. Полярна 3"}]),
     ]
 
@@ -358,7 +393,7 @@ class TestTheWrapperAndTheCoreAgree:
 
     async def test_the_wrapper_adds_nothing_of_its_own(self) -> None:
         """Delegation, not a second implementation."""
-        stations = [{"id": "st-1", "name": "Оболонь"}]
+        stations = [{"id": "st-1", "name": "6К", "district": "Оболонь"}]
         c = ctx("на Оболоні", stations=stations)
         parsed = PARSER.parse(c)
 
@@ -381,14 +416,14 @@ class TestTheWrapperAndTheCoreAgree:
 
 #: Same landmark, two cities. The shape of call `b394f6c1`.
 TWO_CITIES: list[dict] = [
-    {"id": "st-dp", "city": "Дніпро", "name": "Перемоги 15"},
-    {"id": "st-zp", "city": "Запоріжжя", "name": "Перемоги 72Б"},
+    {"id": "st-dp", "city": "Дніпро", "district": "Перемога, Правий берег"},
+    {"id": "st-zp", "city": "Запоріжжя", "address": "м. Запоріжжя, вул. Перемоги, 72б"},
 ]
 
 #: Same landmark twice inside one city. Genuinely ambiguous, city or no city.
 ONE_CITY_TWICE: list[dict] = [
-    {"id": "st-dp-a", "city": "Дніпро", "name": "Перемоги 15"},
-    {"id": "st-dp-b", "city": "Дніпро", "name": "Перемоги 21"},
+    {"id": "st-dp-a", "city": "Дніпро", "district": "Перемога, Правий берег"},
+    {"id": "st-dp-b", "city": "Дніпро", "district": "Перемога-6, Придніпровськ"},
 ]
 
 
@@ -437,8 +472,8 @@ class TestCityNarrowing:
     @pytest.mark.parametrize("chosen", [None, ""])
     def test_with_no_city_chosen_a_unique_station_still_resolves(self, chosen: str | None) -> None:
         stations = [
-            {"id": "st-1", "city": "Київ", "name": "Оболонь"},
-            {"id": "st-2", "city": "Київ", "name": "Позняки"},
+            {"id": "st-1", "city": "Київ", "district": "Оболонь"},
+            {"id": "st-2", "city": "Київ", "district": "Позняки"},
         ]
         c = ctx("на Оболоні", stations=stations, city=chosen)
         resolved = resolve_station_from_session(c, PARSER.parse(c))
@@ -450,7 +485,7 @@ class TestCityNarrowing:
     def test_with_no_city_chosen_nothing_is_ever_a_mismatch(
         self, chosen: str | None, caplog
     ) -> None:
-        stations = [{"id": "st-1", "city": "Київ", "name": "Оболонь"}]
+        stations = [{"id": "st-1", "city": "Київ", "district": "Оболонь"}]
         c = ctx("на Оболоні", stations=stations, city=chosen)
 
         with caplog.at_level(logging.DEBUG, logger="src.agent.parsers.station_parser"):
@@ -481,8 +516,8 @@ class TestCityNarrowing:
         refuse a station the caller can actually drive to.
         """
         stations = [
-            {"id": "st-dp", "city": station_city, "name": "Перемоги 15"},
-            {"id": "st-zp", "city": "Запоріжжя", "name": "Перемоги 72Б"},
+            {"id": "st-dp", "city": station_city, "district": "Перемога"},
+            {"id": "st-zp", "city": "Запоріжжя", "address": "м. Запоріжжя, вул. Перемоги, 72б"},
         ]
         c = ctx("на Перемоги", stations=stations, city=chosen)
         assert resolve_station_from_session(c, PARSER.parse(c)).value == "st-dp"
@@ -494,8 +529,8 @@ class TestCityNarrowing:
         every city at once, which is worse than the ambiguity being fixed here.
         """
         stations = [
-            {"id": "st-blank", "city": "", "name": "Перемоги 15"},
-            {"id": "st-dp", "city": "Дніпро", "name": "Перемоги 21"},
+            {"id": "st-blank", "city": "", "district": "Перемога"},
+            {"id": "st-dp", "city": "Дніпро", "district": "Перемога"},
         ]
         c = ctx("на Перемоги", stations=stations, city="Дніпро")
         assert resolve_station_from_session(c, PARSER.parse(c)).value == "st-dp"
@@ -521,8 +556,8 @@ class TestCityNarrowing:
         WARNING below makes it loud instead of silent.
         """
         stations = [
-            {"id": "st-1", "name": "Оболонь", "district": "Оболонський"},
-            {"id": "st-2", "name": "Позняки", "district": "Дарницький"},
+            {"id": "st-1", "name": "6К (Київ, Тимошенка 7)", "district": "Оболонь, Правий берег"},
+            {"id": "st-2", "name": "7К (Київ, Драгоманова 2)", "district": "Позняки, Дарницький"},
         ]
         c = ctx("на Оболоні", stations=stations, city="Київ")
 
@@ -540,8 +575,8 @@ class TestCityNarrowing:
         declared match is what remains.
         """
         stations = [
-            {"id": "st-silent", "name": "Перемоги 15"},
-            {"id": "st-dp", "city": "Дніпро", "name": "Перемоги 21"},
+            {"id": "st-silent", "district": "Перемога"},
+            {"id": "st-dp", "city": "Дніпро", "district": "Перемога"},
         ]
         c = ctx("на Перемоги", stations=stations, city="Дніпро")
         assert resolve_station_from_session(c, PARSER.parse(c)).value == "st-dp"
@@ -569,7 +604,7 @@ class TestAmbiguityInsideOneCityIsStillRefused:
 
     def test_a_match_without_an_id_still_warns_after_narrowing(self, caplog) -> None:
         """2.2 — the id-less station stays loud on the narrowed path too."""
-        stations = [{"city": "Київ", "name": "Оболонь", "district": "Оболонський"}]
+        stations = [{"city": "Київ", "name": "6К (Київ, Тимошенка 7)", "district": "Оболонь"}]
         c = ctx("на Оболоні", stations=stations, city="Київ")
         parsed = PARSER.parse(c)
 
@@ -589,8 +624,8 @@ class TestCrossCityMismatchIsItsOwnDiagnosis:
     """
 
     STATIONS: ClassVar[list[dict]] = [
-        {"id": "st-dp", "city": "Дніпро", "name": "Перемоги 15"},
-        {"id": "st-dp-2", "city": "Дніпро", "name": "Робоча 20"},
+        {"id": "st-dp", "city": "Дніпро", "district": "Перемога, Правий берег"},
+        {"id": "st-dp-2", "city": "Дніпро", "district": "Робоча"},
     ]
 
     def test_the_hint_is_not_pinned(self) -> None:
@@ -650,7 +685,7 @@ class TestNarrowingDoesNotTouchThePhase01Pin:
         """The mismatch branch refuses to *add* a value; it clears nothing."""
         c = ctx(
             "на Перемоги",
-            stations=[{"id": "st-dp", "city": "Дніпро", "name": "Перемоги 15"}],
+            stations=[{"id": "st-dp", "city": "Дніпро", "district": "Перемога, Правий берег"}],
             filled={"city": "Черкаси", "station_id": "st-dp"},
         )
         resolve_station_from_session(c, PARSER.parse(c))
@@ -672,8 +707,8 @@ class TestTheWrapperAndTheCoreAgreeOnCities:
         ("на Перемоги", TWO_CITIES, ""),
         ("на Перемоги", ONE_CITY_TWICE, "Дніпро"),
         ("на Перемоги", ONE_CITY_TWICE, "Черкаси"),
-        ("на Оболоні", [{"id": "st-1", "city": "Київ", "name": "Оболонь"}], "Київ"),
-        ("на Оболоні", [{"id": "st-1", "city": "Київ", "name": "Оболонь"}], "Дніпро"),
+        ("на Оболоні", [{"id": "st-1", "city": "Київ", "district": "Оболонь"}], "Київ"),
+        ("на Оболоні", [{"id": "st-1", "city": "Київ", "district": "Оболонь"}], "Дніпро"),
     ]
 
     @pytest.mark.parametrize("text,stations,city", CASES)
@@ -684,3 +719,196 @@ class TestTheWrapperAndTheCoreAgreeOnCities:
         parsed = PARSER.parse(c)
 
         assert await PARSER.aresolve(c, parsed) == resolve_station_from_session(c, parsed)
+
+
+# Wave 6-E phase 02 ───────────────────────────────────────────────────────────
+#
+# The detector matches a *stem* («перемог») and reports a canonical *label*
+# («Перемоги»); the two are not interchangeable against a station's own text.
+# Ukrainian inflection breaks the label («район Дніпрошин**и**» does not contain
+# «Дніпрошина»), and the Russian stems break on their own, because the catalog
+# is written in Ukrainian. So the resolver searches the label together with
+# *every* stem sharing it — and over the four fields the prod tool matches its
+# own `query` against, which is not the three this file used to assume.
+#
+# Stations below are copied verbatim out of prod, not invented: `_LANDMARKS`
+# is matched against real catalog text, so a fixture that reads plausibly but
+# places the landmark in a field 1C never uses proves nothing.
+
+#: Call `b394f6c1`, the snapshot taken after turn 5 — four stations, all Дніпро.
+B394F6C1_SNAPSHOT: list[dict] = [
+    {
+        "id": "000000003",
+        "city": "Дніпро",
+        "name": "1Д (Днепр, пер. Добровольцев, 1Д)",
+        "phone": "(067) 130-36-03",
+        "address": "м. Дніпро, пров. Добровольців, 1д",
+        "district": "Перемога, Правий берег, Перемога-6, Победа-6, шоста Перемога, Придніпровськ",
+        "landmarks": "їхати у бік Південного мосту, набережна Перемоги, поряд Пітлайн (Питлайн), навпроти Яхт-клуб Січ (Сич), Куряче озеро, метро Придніпровська, ЖМ Перемога-1, Перемога-2, Перемога-3, Перемога-4, Перемога-5, Перемога-6, Перемога-7",
+        "description": "Днепр и днепропетровск это одно и тоже. Провулок Добровольців 1Д — єдина точка шиномонтажу на ЖМ Перемога",
+    },
+    {
+        "id": "000000005",
+        "city": "Дніпро",
+        "name": "3Д (Днепр, Зап. шоссе, 55К)",
+        "phone": "(067) 130-36-08",
+        "address": "м. Дніпро, Запорізьке шосе, 55к",
+        "district": "Тополь, Правий берег, Епіцентр, Эпицентр",
+        "landmarks": "виїзд з міста на Запоріжжя, виїзд на Запоріжжя, Опитне, Дослідне, район Тополя, район Епіцентру, выезд из города на Запорожье, Опытное",
+        "description": "Запшоссе, Запорожское шоссе, Запорізьке шосе. Виїзд на Запоріжжя, район Тополь / Опитне поле. STT-варіанти (спотворення): паризьке шосе, парижское шоссе, запорить шосе, до сливного, до слитно, дословно, дослідного",
+    },
+    {
+        "id": "000000001",
+        "city": "Дніпро",
+        "name": "7Д (Днепр, Дон. шоссе, 69)",
+        "phone": "(067) 130-36-26",
+        "address": "м. Дніпро, Донецьке шосе, 69",
+        "district": "Донецьке шосе, Лівий берег, район Каравану, район озера Куряче, Слобожанський проспект",
+        "landmarks": "Донецьке шосе 69, поряд ТРЦ Караван, біля Каравану, Слобожанський проспект, поряд з АЗС ОККО, виїзд на Донецьк, вулиця Петрозаводська, район Петрозаводської, район Передової, район Петразаводской улицы, Передовая, озеро Куряче",
+        "description": "Також кажуть: Донецкое шоссе, левый берег, если ехать от Кайдацкого мост то не доезжая до Каравана",
+    },
+    {
+        "id": "000000019",
+        "city": "Дніпро",
+        "name": "15Д (Днепр, ул. Княгини Ольги, 24А)",
+        "phone": "(067) 130-36-82",
+        "address": "м. Дніпро, вул. Княгині Ольги,24 А",
+        "district": "Речпорт, Правий берег, Річпорт",
+        "landmarks": "вул. Княгині Ольги 24А, район Речпорту, Річпорт, район Річпорту, біля набережної",
+    },
+]
+
+#: Rows the discriminating tests below need, likewise verbatim.
+_PROD_ROWS: list[dict] = [
+    {
+        "id": "000000006",
+        "name": "4К (Киев, ул. М. Тимошенко, 7)",
+        "address": "м. Київ, вул. Маршала Тимошенка, 7",
+        "city": "Київ",
+        "district": "Оболонь, Правий берег",
+        "landmarks": "магазин Еко, метро Мінське, район Оболоні, Магазин Эко, метро Минское, Лукьяненко, Лук'яненко, Левка Лук'яненка, вул. Тимошенка, Маршала Тимошенка",
+        "description": "Левка Лукьяненко 7",
+    },
+    {
+        "id": "000000007",
+        "name": "5Ч (Черкассы, ул. Героев Днепра, 7)",
+        "address": "м. Черкаси, вул.Героїв Дніпра,7",
+        "district": "Черкассы, Центр",
+        "landmarks": "вул. Героїв Дніпра 7, район автовокзалу",
+        "city": "Черкаси",
+        "description": "Героїв , Героев",
+    },
+    {
+        "id": "000000015",
+        "name": "11К (Київ, Харьківске шосе, 165)",
+        "address": "м. Київ, Харьківске шосе, 165",
+        "district": "Харківське шосе, Лівий берег, Автосалон Тойота",
+        "landmarks": "Зупинка транспорту: вул. Грузинська\nБізнес-центр: Кристал \nКиївська міська клінічна лікарня\nМагазин Сільпо",
+        "description": "Остановка транспорта: ул. Грузинская\nКиевская городская клиническая больница\nМагазин Сильпо\nна левом берегу",
+        "city": "Київ",
+    },
+    {
+        "id": "000000022",
+        "name": "Камион Aeolus, Днепр, ул. Бориса Кротова. 21К",
+        "address": "м. Дніпро, вул. Б.Кротова, 21К",
+        "city": "Дніпро",
+        "district": "Правий берег, район Дніпрошини",
+        "landmarks": "вул. Б.Кротова 21К, район заводу Дніпрошина",
+        "description": "Каміонний шиномонтаж Aeolus",
+    },
+]
+PROD: dict[str, dict] = {s["id"]: s for s in _PROD_ROWS}
+
+
+class TestTheLabelAndTheStemAreBothSearched:
+    """The second break in the `b394f6c1` chain, on the data that broke it."""
+
+    def test_the_real_snapshot_resolves_once_the_city_is_known(self) -> None:
+        """The call this wave exists for, end to end on its own snapshot.
+
+        «перемога» died here for six turns with `city="Дніпро"` already pinned:
+        the label «Перемоги» is absent from every field of `000000003`, while
+        the stem «перемог» sits in its `district` and «набережна Перемоги» in
+        its `landmarks`. Both halves of the phase reach it independently, which
+        is why this test anchors the outcome and the three below pin the halves.
+        """
+        c = ctx("на перемозі", stations=B394F6C1_SNAPSHOT, city="Дніпро")
+        resolved = resolve_station_from_session(c, PARSER.parse(c))
+
+        assert resolved.status == "value"
+        assert resolved.value == "000000003"
+
+    def test_the_snapshot_is_the_shape_prod_writes(self) -> None:
+        """Guards the fixture, not the code (`feedback_gate_added_to_pass_tests`).
+
+        `main.py:2516` writes `city` into every entry unconditionally; a
+        snapshot without it would silently switch the city filter off and make
+        the test above pass for the wrong reason.
+        """
+        assert len(B394F6C1_SNAPSHOT) == 4
+        assert all(s["city"] == "Дніпро" for s in B394F6C1_SNAPSHOT)
+
+    def test_a_landmark_only_a_sibling_stem_can_reach(self) -> None:
+        """«Бориса Кротова» — the label is in `name`, and `name` is not searched.
+
+        `address` and `landmarks` both abbreviate it to «вул. Б.Кротова», so the
+        stem «кротов» is the only key that can match. Searching by the label
+        alone loses this station outright.
+        """
+        c = ctx("на Кротова", stations=[PROD["000000022"]], city="Дніпро")
+        assert resolve_station_from_session(c, PARSER.parse(c)).value == "000000022"
+
+    def test_a_landmark_only_the_wider_surface_can_reach(self) -> None:
+        """«ЖМ Перемога» lives in `landmarks` and `description`, nowhere else.
+
+        Those two fields were not searched before this phase although the prod
+        tool matches them, so the caller was offered a station on a landmark it
+        then could not accept.
+        """
+        c = ctx("на ЖМ Перемога", stations=B394F6C1_SNAPSHOT, city="Дніпро")
+        resolved = resolve_station_from_session(c, PARSER.parse(c))
+
+        assert resolved.status == "value"
+        assert resolved.value == "000000003"
+
+    def test_the_stt_form_of_lukyanenka_resolves_through_its_siblings(self) -> None:
+        """2.6 — «лукяненк» matches nothing; «лукьяненк» does, and they are kin.
+
+        The detector fires on whichever stem the caller happened to produce, and
+        the apostrophe-less form is a plausible STT output that appears nowhere
+        in the catalog. Because the resolver searches *every* stem of the label
+        rather than the one that fired, the station is still found — this needed
+        no row of its own, which is the property being pinned.
+        """
+        c = ctx("на Лукяненка", stations=[PROD["000000006"]], city="Київ")
+        assert resolve_station_from_session(c, PARSER.parse(c)).value == "000000006"
+
+    def test_harkivske_shose_did_not_regress(self) -> None:
+        """2.4 — the widened key set must not cost a landmark that worked.
+
+        «Харківське шосе» resolved before the phase and resolves after it; the
+        Russian stems it also carries («харьковск») match nothing in a Ukrainian
+        catalog, and adding them must stay harmless rather than ambiguating it.
+        """
+        c = ctx("на Харківському шосе", stations=[PROD["000000015"]], city="Київ")
+        assert resolve_station_from_session(c, PARSER.parse(c)).value == "000000015"
+
+    def test_heroiv_dnipra_finds_the_cherkasy_point(self) -> None:
+        """2.6 — the row named Київ; the only station on that street is Черкаси.
+
+        Dropping the city does not cost the resolution, which is the whole
+        argument for `None` over `Черкаси`: the snapshot already says where the
+        station is, so the landmark does not have to guess.
+        """
+        c = ctx("біля Героїв Дніпра", stations=[PROD["000000007"]])
+        assert resolve_station_from_session(c, PARSER.parse(c)).value == "000000007"
+
+    def test_kyiv_has_no_heroiv_dnipra_to_offer(self) -> None:
+        """The other direction of the same defect: the pin invented a station.
+
+        A Kyiv caller naming the metro gets nothing, because nothing is there —
+        an honest refusal that reaches an operator, not a Cherkasy address.
+        """
+        c = ctx("біля Героїв Дніпра", stations=[PROD["000000006"]], city="Київ")
+        parsed = PARSER.parse(c)
+        assert resolve_station_from_session(c, parsed) is parsed

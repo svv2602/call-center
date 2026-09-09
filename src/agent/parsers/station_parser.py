@@ -46,7 +46,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from src.agent.compound_parse import _detect_station_hint, _normalize
+from src.agent.compound_parse import _LANDMARK_KEYS, _detect_station_hint, _normalize
 from src.agent.parsers.base import NOT_MENTIONED, ParseOutcome, graded, unresolved
 
 if TYPE_CHECKING:
@@ -63,12 +63,31 @@ _HINT_CONFIDENCE = 0.6
 _RESOLVED_CONFIDENCE = 1.0
 
 
-def _matches(station: dict, needle: str) -> bool:
-    """True when the landmark appears in the station's district or address."""
-    for key in ("district", "address", "name"):
-        value = station.get(key)
-        if isinstance(value, str) and needle in value.lower():
-            return True
+#: The fields a landmark is searched in — the same four `get_fitting_stations`
+#: already matches its own `query` against (`src/main.py:2489-2499`). This
+#: resolver exists to reproduce that tool's answer from the snapshot, so
+#: searching a different surface than the tool is a bug by construction, and it
+#: was one in both directions: `name` was read here and nowhere else, while
+#: `landmarks` and `description` were read there and not here.
+#:
+#: `name` is dropped rather than kept for safety. It does match sometimes —
+#: `000000022` spells «Бориса Кротова» out in full there — but never *alone*:
+#: adding it back changes the answer for 0 of the 21 labels, because every
+#: station it finds is already found through another field. What it does change
+#: is that prod `name` is a station code carrying a second city in parentheses
+#: («1Д (Днепр, пер. Добровольцев, 1д)»), so keeping it only widens the ways two
+#: stations can collide.
+_SEARCH_FIELDS = ("address", "district", "landmarks", "description")
+
+
+def _matches(station: dict, keys: tuple[str, ...]) -> bool:
+    """True when any of the landmark's search keys appears in the station text."""
+    for field in _SEARCH_FIELDS:
+        value = station.get(field)
+        if isinstance(value, str):
+            lowered = value.lower()
+            if any(key in lowered for key in keys):
+                return True
     return False
 
 
@@ -186,8 +205,8 @@ def resolve_station_from_session(ctx: ParseContext, outcome: ParseOutcome) -> Pa
             return outcome
         stations = in_city
 
-    needle = outcome.value.lower()
-    hits = [s for s in stations if isinstance(s, dict) and _matches(s, needle)]
+    keys = _LANDMARK_KEYS.get(outcome.value, (outcome.value.lower(),))
+    hits = [s for s in stations if isinstance(s, dict) and _matches(s, keys)]
     if len(hits) != 1:
         logger.debug(
             "station_parser.aresolve: %r matched %d of %d offered stations "
