@@ -317,6 +317,68 @@ def resolve_proposed_station(ctx: ParseContext) -> ParseOutcome:
     return graded(str(station_id), _RESOLVED_CONFIDENCE)
 
 
+def station_city(session: object | None, station_id: str) -> str | None:
+    """The `city` the snapshot records for `station_id`, verbatim — or `None`.
+
+    Returned unnormalised because the caller writes it into
+    `fsm_filled_fields["city"]`, which holds display forms («Дніпро»), not the
+    folded ones `_normalize` produces.
+    """
+    stations = getattr(session, "fitting_stations_seen", None) or []
+    for station in stations:
+        if isinstance(station, dict) and str(station.get("id") or "") == str(station_id):
+            city = station.get("city")
+            return city if isinstance(city, str) and city.strip() else None
+    return None
+
+
+def unanimous_snapshot_city(session: object | None) -> str | None:
+    """The city when every station the bot has offered agrees on one — else `None`.
+
+    Wave 6-H, the half that reaches call `011277ef`. That call dies in CITY
+    because «на перемозі» is a landmark in two cities, so `_detect_city`
+    returns nothing and the field can never be filled from the utterance — the
+    caller is transferred while the session already holds four Дніпро stations
+    the tool returned for that very city.
+
+    This is not a guess about what the caller meant. `fitting_stations_seen` is
+    filled by `get_fitting_stations(city=...)`, so a unanimous snapshot is the
+    city the bot had already resolved and passed to the tool; the provenance
+    was checked against the prod `tool_args` before the rule was written.
+
+    Default-deny with no «nearly unanimous» branch, and the corpus shows why
+    that matters rather than being tidy: the 9-station catalog spanning five
+    cities is precisely the payload the tool returns when it did **not** know
+    the city (`action_required: ask_district`). Measured over 42 calls the rule
+    fills 25 and refuses 17 — the 8 with no snapshot at all and the 9 holding
+    that catalog.
+
+    It lives in this module, not in `city_parser`, because the evidence is the
+    station snapshot and `_station_city` already states how a station's city is
+    read. A second reading of that field elsewhere is how «Дніпро» comes to
+    match «Дніпропетровськ» in one place and not the other.
+    """
+    stations = [
+        s for s in (getattr(session, "fitting_stations_seen", None) or []) if isinstance(s, dict)
+    ]
+    if not stations:
+        return None
+
+    chosen: str | None = None
+    folded: set[str] = set()
+    for station in stations:
+        city = _station_city(station)
+        if not city:
+            return None
+        folded.add(city)
+        if len(folded) > 1:
+            return None
+        if chosen is None:
+            raw = station.get("city")
+            chosen = raw if isinstance(raw, str) else None
+    return chosen
+
+
 async def _aresolve_station(ctx: ParseContext, outcome: ParseOutcome) -> ParseOutcome:
     """`FieldParser.aresolve` shape over :func:`resolve_station_from_session`.
 

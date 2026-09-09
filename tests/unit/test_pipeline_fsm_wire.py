@@ -956,8 +956,15 @@ class TestStationAutoPinInTheSeam:
 
     @staticmethod
     def _tool_has_returned_one_station(session: CallSession) -> None:
-        """What `get_fitting_stations` leaves in the session (`src/main.py`)."""
-        session.fitting_station_ids = {"ST-1"}  # snapshot comes from the fixture
+        """What `get_fitting_stations` leaves in the session (`src/main.py`).
+
+        Both halves, because the tool writes both in one loop
+        (`src/main.py:2543-2545`): the id set `auto_skip_if` reads and the dict
+        snapshot the resolver reads. The snapshot used to arrive from
+        `booking_in_progress`, which meant every test in the file carried one.
+        """
+        session.fitting_station_ids = {"ST-1"}
+        session.fitting_stations_seen = list(ONE_CITY_SNAPSHOT)
 
     async def test_the_pin_lands_on_the_turn_after_the_tool_ran(self) -> None:
         """The main test of the phase.
@@ -1212,14 +1219,34 @@ class TestModeResolution:
 PRICE_TEXT = "скільки коштує монтаж"
 
 
-def booking_in_progress(state: FsmState = FsmState.CITY) -> CallSession:
-    """A session parked mid-booking, the way a live PRICE interrupt finds it."""
+#: What `get_fitting_stations` leaves behind once it has run for one city.
+ONE_CITY_SNAPSHOT = [
+    {"id": "ST-1", "name": "Шиномонтаж №1", "city": "Київ", "address": "вул. Тестова, 1"}
+]
+
+
+def booking_in_progress(
+    state: FsmState = FsmState.CITY,
+    *,
+    stations: list[dict[str, Any]] | None = None,
+) -> CallSession:
+    """A session parked mid-booking, the way a live PRICE interrupt finds it.
+
+    The station snapshot is opt-in. It used to be seeded for everyone, because
+    the station tests below need it — but from Wave 6-H a snapshot is *itself*
+    evidence: a set of offered points that agree on one city tells the seam
+    which city the caller is in, and the machine leaves CITY on the strength of
+    it. That is a real prod shape (call `011277ef`), not an artefact, so the
+    seam is right to act on it. It just has no business being in the background
+    of a test about the freeze lifecycle or about passive fills, where it turns
+    every turn into a city answer and hides what the test is actually asserting.
+
+    Tests that mean to exercise the snapshot pass `stations=ONE_CITY_SNAPSHOT`.
+    """
     session = CallSession(uuid.uuid4())
     session.caller_phone = "+380671234567"
     session.last_fitting_station_id = "ST-1"
-    session.fitting_stations_seen = [
-        {"id": "ST-1", "name": "Шиномонтаж №1", "city": "Київ", "address": "вул. Тестова, 1"}
-    ]
+    session.fitting_stations_seen = list(stations) if stations else []
     session.fsm_state = state.value
     session.fsm_filled_fields["intent"] = "fitting"
     return session
@@ -2350,3 +2377,277 @@ class TestStationResolvedInTheSeam:
 
         assert seen and seen[0].conn is None
         assert h.session.fsm_filled_fields.get("station_id") == "st-1"
+
+
+#: A real proposal turn and the real snapshot row it names, both verbatim from
+#: call `3412071b` and from the store payload (they are the same pair
+#: `test_parsers_station.py` resolves against). Invented ones do not work and
+#: must not be made to: the first draft of these tests used «Знайшла точку на
+#: вул. Тестовій, 1 у Києві» over the fixture's «вул. Тестова, 1», and
+#: `_detect_station_hint` returned `None`. Tuning the wording until it matched
+#: would have been fitting the test to the code — the pair below is the one
+#: production actually produces.
+PROPOSAL = "Знайшла точку біля Оболоні, на вулиці Маршала Тимошенка, 7. Записуємо туди?"
+PROPOSED_STATION = {
+    "id": "000000006",
+    "name": "4К (Киев, ул. М. Тимошенко, 7)",
+    "address": "м. Київ, вул. Маршала Тимошенка, 7",
+    "city": "Київ",
+    "district": "Оболонь, Правий берег",
+    "landmarks": (
+        "магазин Еко, метро Мінське, район Оболоні, Магазин Эко, метро Минское, "
+        "Лукьяненко, Лук'яненко, Левка Лук'яненка, вул. Тимошенка, Маршала Тимошенка"
+    ),
+    "description": "Левка Лукьяненко 7",
+}
+
+#: The hidden `action_required: ask_district` payload — the catalog the tool
+#: returns when the bot did *not* know the city. Nine points across five
+#: cities, so the unanimity rule must refuse it. Kept short here; the shape
+#: that matters is «more than one distinct city», not the count.
+FIVE_CITY_CATALOG = [
+    {"id": "c-1", "name": "1К", "city": "Київ"},
+    {"id": "c-2", "name": "1Д", "city": "Дніпро"},
+    {"id": "c-3", "name": "1Л", "city": "Львів"},
+    {"id": "c-4", "name": "1О", "city": "Одеса"},
+    {"id": "c-5", "name": "1Х", "city": "Харків"},
+]
+
+
+def proposal_pending(state: FsmState, *, stations: list[dict[str, Any]]) -> CallSession:
+    """A session whose newest bot turn is a proposal of one specific point.
+
+    `add_assistant_turn` rather than a hand-set `last_bot_utterance`, because
+    the detector reads `recent_bot_utterances(ctx, 2)` and that walks
+    `dialog_history` — a fixture that only sets the scalar can never exercise
+    the second turn of the window.
+    """
+    session = booking_in_progress(state, stations=stations)
+    session.fsm_filled_fields.pop("city", None)
+    session.add_assistant_turn(PROPOSAL)
+    return session
+
+
+class TestTheProposalIsConfirmedInTheSeam:
+    """Wave 6-H, first half: the bot offered a point and the caller said yes."""
+
+    async def test_the_city_state_gets_both_the_station_and_the_city(self) -> None:
+        """`011277ef`: the call dies in CITY, so the fix cannot live in STATION.
+
+        «на перемозі» is a landmark in two cities, `_detect_city` returns
+        `None`, and the FSM never leaves CITY. On the turn the caller agrees to
+        the offered point the targeted parser is `city_parser`, not
+        `station_parser` — a rule inside `StationParser.parse` would never run.
+
+        The snapshot deliberately spans several cities. With a single-city one
+        the unanimity rule fills `city` with the same «Київ» from the other
+        side of the seam, and deleting the proposal's own city write left this
+        test green — measured, not guessed (mutation M2 scored zero). A
+        multi-city snapshot is refused by unanimity, so the proposal is the
+        only thing that can supply the city. It is also the real shape:
+        `7462c08b` resolves a proposal out of nine points across five cities.
+        """
+        h = Harness(
+            proposal_pending(FsmState.CITY, stations=[PROPOSED_STATION, *FIVE_CITY_CATALOG])
+        )
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так")
+
+        assert h.session.fsm_filled_fields.get("station_id") == "000000006"
+        assert h.session.fsm_filled_fields.get("city") == "Київ"
+        assert h.session.fsm_state != FsmState.CITY.value
+
+    async def test_the_station_state_gets_the_same_treatment(self) -> None:
+        h = Harness(proposal_pending(FsmState.STATION, stations=[PROPOSED_STATION]))
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так")
+
+        assert h.session.fsm_filled_fields.get("station_id") == "000000006"
+        assert h.session.fsm_state != FsmState.STATION.value
+
+    async def test_an_already_chosen_point_is_not_replaced(self) -> None:
+        """`setdefault`, never assignment.
+
+        The Krok 8 summary re-states the point that was already picked. The
+        rule firing there is harmless only as long as it cannot overwrite —
+        otherwise a stale snapshot entry could displace the caller's choice.
+        """
+        session = proposal_pending(FsmState.STATION, stations=[PROPOSED_STATION])
+        session.fsm_filled_fields["station_id"] = "000000009"
+        h = Harness(session)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так")
+
+        assert h.session.fsm_filled_fields["station_id"] == "000000009"
+
+    async def test_without_a_proposal_nothing_is_pinned(self) -> None:
+        """The agreement alone is not evidence — the pending question must be.
+
+        Same snapshot, same «так», only the bot's turn differs. If this pinned
+        a station, the rule would be «one point in the snapshot wins», which is
+        `auto_skip_if`'s job and is gated on the caller having been asked.
+        """
+        session = booking_in_progress(FsmState.STATION, stations=[PROPOSED_STATION])
+        session.add_assistant_turn("Для зміни міста потрібне підтвердження. Замінюємо?")
+        h = Harness(session)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так")
+
+        assert "station_id" not in h.session.fsm_filled_fields
+
+    async def test_the_step_reaches_no_network_in_shadow(self) -> None:
+        """The seam invariant the wave inherits: sync only, `conn is None`.
+
+        `_run_fsm_deterministic_step` is synchronous by contract
+        (`pipeline.py:991`, «no await → no network»), and that is what makes
+        shadow mode safe to run on live calls. The resolver reads the snapshot
+        the tool already left in the session, so it needs neither.
+        """
+        from src.agent.parsers import station_parser
+
+        seen: list[Any] = []
+        real_parse = station_parser.PARSER.parse
+
+        def _spy(ctx: Any) -> Any:
+            seen.append(ctx)
+            return real_parse(ctx)
+
+        h = Harness(proposal_pending(FsmState.STATION, stations=[PROPOSED_STATION]))
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=True),
+            patch.object(station_parser.PARSER, "parse", _spy),
+            patch.object(
+                station_parser,
+                "_aresolve_station",
+                AsyncMock(side_effect=AssertionError("the seam awaited a resolver")),
+            ),
+        ):
+            await h.run("так")
+
+        assert seen and all(ctx.conn is None for ctx in seen)
+        assert h.session.fsm_filled_fields.get("station_id") == "000000006"
+
+
+class TestTheCityComesFromAUnanimousSnapshot:
+    """Wave 6-H, second half: every offered point agrees on one city.
+
+    The snapshot is filled by `get_fitting_stations(city=...)`, so a snapshot
+    that agrees on one city is the city the bot already knew and already passed
+    to the tool. Provenance checked against the transcript and `tool_args` on
+    `011277ef` — not an LLM guess.
+    """
+
+    async def test_one_city_fills_and_advances(self) -> None:
+        h = Harness(booking_in_progress(FsmState.CITY, stations=ONE_CITY_SNAPSHOT))
+        h.session.fsm_filled_fields.pop("city", None)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("ага")
+
+        assert h.session.fsm_filled_fields.get("city") == "Київ"
+        assert h.session.fsm_state != FsmState.CITY.value
+
+    async def test_five_cities_refuse(self) -> None:
+        """The `ask_district` catalog means the bot did NOT know the city."""
+        h = Harness(booking_in_progress(FsmState.CITY, stations=FIVE_CITY_CATALOG))
+        h.session.fsm_filled_fields.pop("city", None)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("ага")
+
+        assert "city" not in h.session.fsm_filled_fields
+
+    async def test_an_empty_snapshot_refuses(self) -> None:
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("ага")
+
+        assert "city" not in h.session.fsm_filled_fields
+
+    async def test_a_station_without_a_city_refuses_the_whole_snapshot(self) -> None:
+        """Default-deny over the set, not over the majority.
+
+        One entry missing `city` is not «four out of five agree»; it is a
+        snapshot we cannot read. A rule that shrugged the gap off would be a
+        named-subset guard with the gap as its escape hatch.
+        """
+        stations = [*ONE_CITY_SNAPSHOT, {"id": "ST-2", "name": "Шиномонтаж №2"}]
+        h = Harness(booking_in_progress(FsmState.CITY, stations=stations))
+        h.session.fsm_filled_fields.pop("city", None)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("ага")
+
+        assert "city" not in h.session.fsm_filled_fields
+
+    async def test_the_city_the_caller_just_named_beats_the_snapshot(self) -> None:
+        """`bd95036c` in miniature — and a test of placement, not of a string.
+
+        The snapshot agrees on Київ; the caller asks for Дніпро out loud. The
+        snapshot was built on earlier turns, the utterance is now, and the
+        pass that reads the utterance must get the slot first.
+
+        The state is STATION, not CITY, and that is the whole point. In CITY the
+        targeted parser *is* `city_parser`, it resolves «у Дніпрі» itself, and
+        it runs ahead of both candidate placements — so the ordering is never
+        exercised and the test passes either way. Measured: the first draft sat
+        in CITY and mutation M5 (rule moved back above the broad pass) scored
+        zero red. Outside CITY nobody but the broad pass reads the city, so the
+        placement is the only thing standing between this caller and the wrong
+        town.
+        """
+        h = Harness(booking_in_progress(FsmState.STATION, stations=ONE_CITY_SNAPSHOT))
+        h.session.fsm_filled_fields.pop("city", None)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("у Дніпрі")
+
+        assert h.session.fsm_filled_fields.get("city") == "Дніпро"
+
+    async def test_a_city_spoken_but_not_recognised_silences_the_snapshot(self) -> None:
+        """Ordering alone is not enough, and this is the hole it leaves.
+
+        When the caller names a city no resolver can pin, nobody writes the
+        field — and the stale snapshot wins by default, silently, which is the
+        same wrong-town outcome as above. `unresolved` is precisely the
+        parser contract's word for «they said something we could not pin down»
+        (`base.py:88`), as opposed to `not_mentioned`. So the state's own
+        parser refusing its own field silences the snapshot for that turn.
+        """
+        from src.agent.parsers import city_parser
+        from src.agent.parsers.base import unresolved
+
+        h = Harness(booking_in_progress(FsmState.CITY, stations=ONE_CITY_SNAPSHOT))
+        h.session.fsm_filled_fields.pop("city", None)
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=True),
+            patch.object(city_parser.PARSER, "parse", lambda ctx: unresolved(0.5)),
+        ):
+            await h.run("у Кам'янському-на-Дніпрі")
+
+        assert "city" not in h.session.fsm_filled_fields
+        assert h.session.fsm_state == FsmState.CITY.value
+
+    async def test_a_silent_turn_does_not_silence_the_snapshot(self) -> None:
+        """The other side of the interlock, so it cannot be widened by accident.
+
+        «так» is `not_mentioned`, not `unresolved` — the caller said nothing
+        about a city at all. If the interlock keyed on «the targeted parser
+        returned no value» instead of on the refusal, it would swallow this
+        turn too, and `011277ef` would stay dead.
+        """
+        h = Harness(booking_in_progress(FsmState.CITY, stations=ONE_CITY_SNAPSHOT))
+        h.session.fsm_filled_fields.pop("city", None)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так")
+
+        assert h.session.fsm_filled_fields.get("city") == "Київ"

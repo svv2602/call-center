@@ -1035,7 +1035,12 @@ class CallPipeline:
             from src.agent.interrupts import classify_interrupt_text
             from src.agent.parsers.base import ParseContext
             from src.agent.parsers.registry import PASSIVE_PARSERS, get_parser
-            from src.agent.parsers.station_parser import resolve_station_from_session
+            from src.agent.parsers.station_parser import (
+                resolve_proposed_station,
+                resolve_station_from_session,
+                station_city,
+                unanimous_snapshot_city,
+            )
 
             engine = FsmEngine(self._session)
             engine.start()
@@ -1168,6 +1173,47 @@ class CallPipeline:
                 else None
             )
 
+            # --- proposal pass (Wave 6-H) ---
+            # Reads the *station snapshot* plus the bot's pending question
+            # rather than the caller's words, which is why it is a pass of its
+            # own and not part of either neighbour.
+            #
+            # Not restricted to STATION, and that is the whole point. Call
+            # `011277ef` dies in CITY: the bot quoted a price for «у місті
+            # Дніпро, провулок Добровольців», the caller said «так», and the FSM
+            # was still in CITY because «на перемозі» is a landmark in two
+            # cities and resolves to no city at all. A rule living inside
+            # `StationParser.parse` never runs on that turn.
+            #
+            # Placed before the passive and broad passes because it is not
+            # competing with them for evidence: it fires only when the bot's
+            # pending question *is* the proposal and the caller agreed to it,
+            # so the utterance is «так» and carries nothing either of those two
+            # could read. The unanimity rule is the opposite case and sits
+            # after the broad pass; see there.
+            #
+            # `apply_field` is deliberately not called here. The single sanctioned
+            # hop happens below, once, for the current state's own field.
+            proposed = resolve_proposed_station(ctx)
+            if proposed.status == "value":
+                self._session.fsm_filled_fields.setdefault("station_id", proposed.value)
+                logger.info(
+                    "fsm_station_proposal_confirmed call=%s state=%s station_id=%s offered=%d",
+                    self._session.channel_uuid,
+                    state_before.value,
+                    proposed.value,
+                    len(self._session.fitting_stations_seen or ()),
+                    extra={"call_id": str(self._session.channel_uuid)},
+                )
+                # The city of the point the caller just agreed to. Without it
+                # `011277ef` only moves from CITY to STATION, and STATION is
+                # already the largest sink. The unanimity rule below cannot
+                # cover this: `7462c08b` resolves a proposal out of a snapshot
+                # holding nine stations across five cities.
+                picked_city = station_city(self._session, proposed.value)
+                if picked_city:
+                    self._session.fsm_filled_fields.setdefault("city", picked_city)
+
             # --- passive pass ---
             # `name` and `diameter` belong to no MAIN_FLOW state, so nothing in
             # the seam ever filled them: `PASSIVE_PARSERS` had zero call sites
@@ -1266,6 +1312,50 @@ class CallPipeline:
                     broad_filled.append(name)
                 self._session.fsm_filled_fields.setdefault(name, value)
             self._emit_preparse_metric(mapped)
+
+            # --- unanimous-snapshot city (Wave 6-H) ---
+            # When every point the bot has offered sits in one city, that city
+            # came from `get_fitting_stations(city=...)` — the bot could not
+            # have narrowed the catalog without it. `011277ef` is the case: the
+            # snapshot holds one Дніпро point, and the FSM sits in CITY anyway
+            # because «на перемозі» is a landmark in two cities.
+            #
+            # Last, on purpose. Everything above reads the *current utterance*;
+            # this reads a snapshot built on earlier turns. Running it earlier
+            # would let a stale snapshot take the slot before the broad pass
+            # could write the city the caller just named, which is the
+            # `bd95036c` hazard — a Дніпро point pinned on a caller asking for
+            # Черкаси. Placed here, any reading of the live turn wins and the
+            # snapshot only fills a hole nobody else could.
+            #
+            # The ordering is not enough on its own: a caller can speak about a
+            # city the resolvers cannot pin, and then no one writes the field
+            # and the stale snapshot wins by default. That is exactly what
+            # `unresolved` means in the parser contract («they said something we
+            # could not pin down», `base.py:88`) as opposed to `not_mentioned`.
+            # So when the state's own parser is the one that refused, the
+            # snapshot stands down for the turn — the snapshot is not going
+            # anywhere, and the bot's re-ask is the cheaper way to learn.
+            caller_spoke_of_a_city = (
+                claimed == "city" and targeted is not None and targeted.status == "unresolved"
+            )
+            snapshot_city = (
+                None if caller_spoke_of_a_city else unanimous_snapshot_city(self._session)
+            )
+            if snapshot_city and self._session.fsm_filled_fields.get("city") in (None, ""):
+                # `setdefault` for the write and the emptiness read for the log,
+                # the same split the broad pass uses: `setdefault` returns the
+                # stored value either way and so cannot tell a first write from
+                # a no-op.
+                self._session.fsm_filled_fields.setdefault("city", snapshot_city)
+                logger.info(
+                    "fsm_city_from_snapshot call=%s state=%s city=%s offered=%d",
+                    self._session.channel_uuid,
+                    state_before.value,
+                    snapshot_city,
+                    len(self._session.fitting_stations_seen or ()),
+                    extra={"call_id": str(self._session.channel_uuid)},
+                )
 
             # NEVER loop apply_field() over the mapped fields. apply_field
             # advances to the CURRENT state's next_state regardless of which
