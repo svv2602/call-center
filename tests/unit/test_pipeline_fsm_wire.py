@@ -2050,6 +2050,111 @@ class TestAnsweredElsewhereExemption:
         assert "білий" not in lines[0]
 
 
+class TestBroadPassCannotInventASlot:
+    """Wave 6-G: the broad pass may fill `time` only from the offered list.
+
+    TIME carries `auto_skip_if=_filled`, so a time written by the broad pass
+    does not merely fill a field — it skips the state that would have checked
+    it, and the value rides into CONFIRM and BOOK unvalidated. The targeted
+    `time_parser` has validated against `fitting_slots_offered` since Wave 14
+    («can pin an existing slot but never invent one»); this is the same
+    contract for the sweep beside it.
+    """
+
+    def _in_date(self, offered: list[dict[str, str]] | None) -> Harness:
+        h = Harness(booking_in_progress(FsmState.DATE))
+        h.session.fsm_filled_fields["city"] = "Дніпро"
+        h.session.fsm_filled_fields["station_id"] = "ST-1"
+        h.session.fsm_filled_fields["storage_choice"] = "own"
+        h.session.fsm_filled_fields["date"] = "2026-09-09"
+        h.session.fitting_slots_offered = offered or []
+        return h
+
+    async def test_an_offered_hour_is_stored_and_skips_the_time_state(self) -> None:
+        """`8e5fe347` turn 22, which is the whole reason for the wave.
+
+        The bot had already read the list and asked the time; the FSM was still
+        in DATE. The answer must survive the state it was not asked in.
+        """
+        h = self._in_date([{"date": "2026-09-09", "time": "17:00"}])
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("на 5 вечера")
+
+        assert h.session.fsm_filled_fields.get("time") == "17:00"
+        assert h.session.fsm_state == FsmState.COLOR.value
+
+    async def test_an_hour_that_was_never_offered_is_not_stored(self) -> None:
+        h = self._in_date([{"date": "2026-09-09", "time": "17:00"}])
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("на 6 вечера")
+
+        assert h.session.fsm_filled_fields.get("time") in (None, "")
+
+    async def test_a_refused_hour_does_not_excuse_the_null(self) -> None:
+        """Otherwise an impossible time buys free turns.
+
+        The Wave 6-F exemption fires on any field the broad pass newly filled.
+        A time that is dropped must therefore be dropped *before* the emptiness
+        read, or a caller naming hours that do not exist would never escalate.
+        """
+        h = self._in_date([{"date": "2026-09-09", "time": "17:00"}])
+        h.session.fsm_filled_fields.pop("date", None)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("на 6 вечера")
+
+        assert h.session.fsm_parser_null_counts.get("DATE", 0) == 1
+
+    async def test_nothing_offered_yet_means_nothing_is_accepted(self) -> None:
+        """Default-deny includes the empty set, and confidence does not buy in.
+
+        «на 17:00» is the highest-confidence form there is (1.0, a literal
+        HH:MM). It still cannot be stored before a slot list exists, because
+        storing it would cancel the state that fetches one.
+        """
+        h = self._in_date([])
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("на 17:00")
+
+        assert h.session.fsm_filled_fields.get("time") in (None, "")
+
+    async def test_the_guard_is_confined_to_time(self) -> None:
+        """Colour and brand have no slot list and must not inherit the check."""
+        h = self._in_date([])
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("білий Volkswagen")
+
+        assert h.session.fsm_filled_fields.get("color") == "білий"
+        assert h.session.fsm_filled_fields.get("brand") == "Volkswagen"
+
+    async def test_the_refusal_is_visible_in_prod_logs(self, caplog) -> None:
+        h = self._in_date([{"date": "2026-09-09", "time": "17:00"}])
+
+        with caplog.at_level(logging.INFO), fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("на 6 вечера")
+
+        lines = [r.getMessage() for r in caplog.records if "fsm_time_not_offered" in r.getMessage()]
+        assert lines, "a silently dropped field is how a regression stays invisible"
+        assert "DATE" in lines[0]
+        assert "18:00" in lines[0]
+        # The count, never the list: the slots are a payload, not a log line.
+        assert "17:00" not in lines[0]
+
+    async def test_the_targeted_parser_inside_time_is_untouched(self) -> None:
+        """The guard covers the sweep, not the state that owns the field."""
+        h = self._in_date([{"date": "2026-09-09", "time": "17:00"}])
+        h.session.fsm_state = FsmState.TIME.value
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("на 17:00")
+
+        assert h.session.fsm_filled_fields.get("time") == "17:00"
+
+
 # ---------------------------------------------------------------------------
 # Wave 6-C — STATION stops being a dead end
 # ---------------------------------------------------------------------------

@@ -572,6 +572,22 @@ _FSM_APPLY_THRESHOLD = 0.7
 # does the golden test that pins the FSM_ENABLED=false behaviour.
 
 
+def broad_time_is_offered(offered: list[dict[str, Any]] | None, value: Any) -> bool:
+    """Is this hour one the caller was actually offered?
+
+    The targeted `time_parser` validates against `fitting_slots_offered` and by
+    the Wave 14 contract can pin an existing slot but never invent one. The
+    broad pass has no such check, and TIME carries `auto_skip_if=_filled`
+    (`fitting_fsm.py:409`) — so a time written by the broad pass does not merely
+    fill a field, it **cancels the only validation left** and carries the value
+    into CONFIRM and BOOK. That is the `c8c6601` / Wave 15 defect class.
+
+    Hence default-deny over the whole set, including the empty one: no slots
+    offered yet means there is nothing to check against, not that anything goes.
+    """
+    return any(isinstance(slot, dict) and slot.get("time") == value for slot in (offered or ()))
+
+
 def map_compound_fields_to_fsm(
     fields: dict[str, Any],
     fields_confidence: dict[str, float] | None = None,
@@ -1228,6 +1244,22 @@ class CallPipeline:
                         self._session.channel_uuid,
                         name,
                         targeted.status if targeted else None,
+                    )
+                    continue
+                # Before the emptiness read, not after: a rejected time must
+                # neither be stored nor excuse this state's null, and putting
+                # the check here makes the second half of that structurally
+                # impossible rather than something a later edit must remember.
+                if name == "time" and not broad_time_is_offered(
+                    self._session.fitting_slots_offered, value
+                ):
+                    logger.info(
+                        "fsm_time_not_offered call=%s state=%s value=%s offered=%d",
+                        self._session.channel_uuid,
+                        state_before.value,
+                        value,
+                        len(self._session.fitting_slots_offered or ()),
+                        extra={"call_id": str(self._session.channel_uuid)},
                     )
                     continue
                 if self._session.fsm_filled_fields.get(name) in (None, ""):
