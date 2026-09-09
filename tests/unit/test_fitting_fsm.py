@@ -1747,6 +1747,110 @@ class TestParserNullLoop:
         assert eng.current_state() is FsmState.CITY
         assert eng.parser_null_count(FsmState.CITY) == STATES[FsmState.CITY].max_parser_null + 2
 
+    def test_shadow_reports_the_escalation_point_once(
+        self,
+        session: CallSession,
+        at_state: Callable[..., FsmEngine],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """The verdict the shadow period exists to collect.
+
+        Shadow never reaches `escalate_target`, so without this line a call
+        that would have gone to an operator is indistinguishable in the logs
+        from one that simply ran out of turns.
+        """
+        eng = at_state(session, FsmState.CITY)
+        budget = STATES[FsmState.CITY].max_parser_null
+        with caplog.at_level(logging.WARNING, logger="src.agent.fitting_fsm"):
+            for _ in range(budget + 3):
+                eng.on_parser_null("city", advance=False)
+        lines = [r for r in caplog.records if "fsm_shadow_would_escalate" in r.getMessage()]
+        assert len(lines) == 1, "fires on the turn the budget is spent, not on every later turn"
+        assert "state=CITY" in lines[0].getMessage()
+        assert f"target={STATES[FsmState.CITY].escalate_target.value}" in lines[0].getMessage()
+        assert eng.current_state() is FsmState.CITY, "reporting must not move the machine"
+
+    def test_live_does_not_emit_the_shadow_line(
+        self,
+        session: CallSession,
+        at_state: Callable[..., FsmEngine],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Live really escalates, so the observer's line would be noise."""
+        eng = at_state(session, FsmState.CITY)
+        with caplog.at_level(logging.WARNING, logger="src.agent.fitting_fsm"):
+            for _ in range(STATES[FsmState.CITY].max_parser_null):
+                eng.on_parser_null("city")
+        assert not [r for r in caplog.records if "fsm_shadow_would_escalate" in r.getMessage()]
+
+    def test_a_fallback_state_is_not_an_escalation(
+        self,
+        session: CallSession,
+        at_state: Callable[..., FsmEngine],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """STORAGE defaults to «own tires» instead of escalating.
+
+        Counting it would inflate the verdict with calls live would have kept —
+        and shadow has to *take* the fallback, not just decline to report it.
+        Refusing the move left three of sixteen replayed calls stalled in
+        STORAGE for 14–19 turns while live had walked on.
+        """
+        assert STATES[FsmState.STORAGE].on_null_exhausted is not None
+        eng = at_state(session, FsmState.STORAGE)
+        with caplog.at_level(logging.WARNING, logger="src.agent.fitting_fsm"):
+            for _ in range(STATES[FsmState.STORAGE].max_parser_null):
+                eng.on_parser_null("storage", advance=False)
+        assert not [r for r in caplog.records if "fsm_shadow_would_escalate" in r.getMessage()]
+        assert eng.current_state() is FsmState.DATE
+        assert session.fsm_filled_fields["storage_choice"] == "own"
+
+    def test_a_raising_fallback_is_an_escalation(
+        self,
+        session: CallSession,
+        at_state: Callable[..., FsmEngine],
+        caplog: pytest.LogCaptureFixture,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """A broken branch is the one case live escalates from such a state.
+
+        Shadow must report it and still stay put — following live into TERMINAL
+        would end the observation for the rest of the call.
+        """
+        cfg = STATES[FsmState.STORAGE]
+
+        def boom(_session: CallSession) -> FsmState:
+            raise RuntimeError("branch is broken")
+
+        monkeypatch.setitem(
+            STATES, FsmState.STORAGE, dataclasses.replace(cfg, on_null_exhausted=boom)
+        )
+        eng = at_state(session, FsmState.STORAGE)
+        with caplog.at_level(logging.WARNING, logger="src.agent.fitting_fsm"):
+            for _ in range(cfg.max_parser_null):
+                eng.on_parser_null("storage", advance=False)
+        lines = [r for r in caplog.records if "fsm_shadow_would_escalate" in r.getMessage()]
+        assert len(lines) == 1
+        assert eng.current_state() is FsmState.STORAGE
+
+    def test_a_cleared_budget_can_report_a_second_point(
+        self,
+        session: CallSession,
+        at_state: Callable[..., FsmEngine],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """`apply_field` clears the budget, so a later run-up is a new verdict."""
+        eng = at_state(session, FsmState.CITY)
+        budget = STATES[FsmState.CITY].max_parser_null
+        with caplog.at_level(logging.WARNING, logger="src.agent.fitting_fsm"):
+            for _ in range(budget):
+                eng.on_parser_null("city", advance=False)
+            eng.session.fsm_parser_null_counts.pop("CITY", None)
+            for _ in range(budget):
+                eng.on_parser_null("city", advance=False)
+        lines = [r for r in caplog.records if "fsm_shadow_would_escalate" in r.getMessage()]
+        assert len(lines) == 2
+
     def test_the_null_metric_has_a_reader(
         self, session: CallSession, at_state: Callable[..., FsmEngine]
     ) -> None:
@@ -1860,6 +1964,45 @@ class TestInterruptTurnBudget:
             assert eng.on_interrupt_turn("price", advance=False) is FsmState.CITY
         assert eng.current_state() is FsmState.CITY
         assert eng.interrupt_turn_count(FsmState.CITY) == over
+
+    def test_shadow_reports_the_escalation_point_once(
+        self,
+        session: CallSession,
+        at_state: Callable[..., FsmEngine],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """A caller circling one state with questions also needs a human.
+
+        `on_interrupt_turn` escalates unconditionally — it has no
+        `on_null_exhausted` fallback — so the observer must report it too, or
+        the verdict misses every call that died this way rather than on nulls.
+        """
+        eng = at_state(session, FsmState.CITY)
+        with caplog.at_level(logging.WARNING, logger="src.agent.fitting_fsm"):
+            for _ in range(STATES[FsmState.CITY].max_interrupt_turns + 3):
+                eng.on_interrupt_turn("price", advance=False)
+        lines = [r for r in caplog.records if "fsm_shadow_would_escalate" in r.getMessage()]
+        assert len(lines) == 1
+        assert "reason=interrupt_turns" in lines[0].getMessage()
+        assert eng.current_state() is FsmState.CITY
+
+    def test_live_does_not_emit_the_shadow_line(
+        self,
+        session: CallSession,
+        at_state: Callable[..., FsmEngine],
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """Live really escalates here, so the observer's line would be noise.
+
+        The parser_null path has the same guarantee; this one is asserted
+        separately because the two escalate blocks are separate code.
+        """
+        eng = at_state(session, FsmState.CITY)
+        with caplog.at_level(logging.WARNING, logger="src.agent.fitting_fsm"):
+            for _ in range(STATES[FsmState.CITY].max_interrupt_turns):
+                eng.on_interrupt_turn("price")
+        assert eng.current_state() is STATES[FsmState.CITY].escalate_target
+        assert not [r for r in caplog.records if "fsm_shadow_would_escalate" in r.getMessage()]
 
     def test_the_counter_survives_the_redis_roundtrip(
         self, session: CallSession, at_state: Callable[..., FsmEngine]

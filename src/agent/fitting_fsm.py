@@ -1295,7 +1295,8 @@ class FsmEngine:
         fix, it is the same unbounded loop one level up.
 
         `advance=False` is the shadow call and has the same contract as in
-        `on_parser_null`: count, log, emit, do not move.
+        `on_parser_null`: count, log, emit, report the escalation point, do not
+        move.
         """
         state = self.current_state()
         cfg = STATES[state]
@@ -1315,7 +1316,11 @@ class FsmEngine:
             extra={"call_id": str(self.session.channel_uuid)},
         )
 
-        if not advance or count < cfg.max_interrupt_turns:
+        if not advance:
+            if count == cfg.max_interrupt_turns:
+                self._note_shadow_escalation(state, cfg, "interrupt_turns", f"kind={kind}", count)
+            return state
+        if count < cfg.max_interrupt_turns:
             return state
 
         counts.pop(state.value, None)
@@ -1363,16 +1368,26 @@ class FsmEngine:
 
         `advance=False` — observe only
         ------------------------------
-        The counter, the metric and the log line still happen; the machine does
-        not move. This is the shadow-mode call: shadow's whole contract is that
-        it observes without reaching the customer, and an observer that walks
-        itself into `escalate_target` lands in TERMINAL, where every later turn
-        of that call is skipped and the observation stops. Since one WELCOME
-        without a detected `intent` would spend the default budget of 3 in the
-        first three turns, an advancing shadow would go blind on exactly the
-        calls it exists to measure. The counter is deliberately still bumped:
-        «how often would we have escalated» is the number the shadow period is
-        being run to collect.
+        The counter, the metric and the log line still happen; what shadow
+        refuses is the move to `escalate_target`, because that lands in
+        TERMINAL, where every later turn of that call is skipped and the
+        observation stops. Since one WELCOME without a detected `intent` would
+        spend the default budget of 3 in the first three turns, an escalating
+        shadow would go blind on exactly the calls it exists to measure. The
+        counter is deliberately still bumped: «how often would we have
+        escalated» is the number the shadow period is being run to collect —
+        and the turn the budget runs out is reported by
+        `_note_shadow_escalation`, so that number is per call and not just an
+        aggregate counter.
+
+        An `on_null_exhausted` state is the exception: its fallback is a
+        *non-terminal* move, so an observer that takes it keeps seeing the rest
+        of the call, and refusing it was what made the shadow verdict disagree
+        with live. Three of the sixteen replayed tester calls stalled in
+        STORAGE for 14–19 turns purely because live defaulted to «own» and
+        walked on while shadow sat still. The side effect those branches write
+        is `fsm_filled_fields`, which shadow already writes on every successful
+        `apply_field` — it is FSM-owned state, not customer-visible.
         """
         state = self.current_state()
         cfg = STATES[state]
@@ -1398,7 +1413,11 @@ class FsmEngine:
             extra={"call_id": str(self.session.channel_uuid)},
         )
 
-        if not advance:
+        if not advance and (count < cfg.max_parser_null or cfg.on_null_exhausted is None):
+            if count == cfg.max_parser_null:
+                self._note_shadow_escalation(
+                    state, cfg, "parser_null", f"field={field or 'none'}", count
+                )
             logger.debug(
                 "fitting_fsm: observe-only parser_null in %s (call %s) — the "
                 "machine stays put",
@@ -1432,6 +1451,11 @@ class FsmEngine:
                     self.session.channel_uuid,
                     cfg.escalate_target,
                 )
+                if not advance:
+                    self._note_shadow_escalation(
+                        state, cfg, "parser_null", f"field={field or 'none'}", count
+                    )
+                    return state
                 target = cfg.escalate_target
                 return self.transition(
                     target,
@@ -1450,6 +1474,41 @@ class FsmEngine:
             cfg.escalate_target,
             event=FsmEvent.ESCALATE,
             payload={"field": field, "attempt": count, "reason": "parser_null"},
+        )
+
+    def _note_shadow_escalation(
+        self, state: FsmState, cfg: StateConfig, reason: str, detail: str, count: int
+    ) -> None:
+        """Record the point at which an observing FSM would have escalated.
+
+        Shadow never takes the move to `escalate_target`, so its final state can
+        only ever be a success. The verdict the shadow period exists to collect
+        — «would this call have gone to an operator?» — was therefore the one
+        thing the logs did not carry, and the replay stand was standing in for
+        it.
+
+        Emitted on the turn the budget is exactly spent, so it fires once per
+        run-up rather than on every later turn: the count only ever climbs by
+        one, and `apply_field` clearing the budget is what allows a second,
+        genuinely new escalation point to be reported later in the same call.
+
+        An `on_null_exhausted` state reports nothing on the normal path — its
+        fallback is not an escalation, and a line there would over-count. It
+        reports only if that branch *raises*, which is the one case where live
+        escalates from such a state.
+
+        Read the FIRST line per `call_id` as the verdict: live would have gone
+        terminal there, while the observer keeps walking past it.
+        """
+        logger.warning(
+            "fsm_shadow_would_escalate call=%s state=%s target=%s reason=%s %s attempt=%d",
+            self.session.channel_uuid,
+            state.value,
+            cfg.escalate_target.value,
+            reason,
+            detail,
+            count,
+            extra={"call_id": str(self.session.channel_uuid)},
         )
 
     def _emit_parser_null_metric(self, field: str, state: FsmState) -> None:
