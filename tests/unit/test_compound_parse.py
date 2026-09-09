@@ -340,6 +340,66 @@ class TestDiameterTimeDateArbitration:
         assert result.fields_confidence["time_hint"] < APPLY_THRESHOLD
 
 
+class TestDigitHourForms:
+    """Wave 6-G — the digit forms of the hours the word forms already resolve.
+
+    `8e5fe347` starved in TIME because «на 5 вечера» yielded nothing at all,
+    while «на п'яту вечора» yields 17:00. Everything here is a form measured in
+    the 16-call corpus or its immediate neighbour.
+    """
+
+    def test_the_call_that_started_the_wave(self):
+        result = parse("на 5 вечера")
+        assert result.fields["time_hint"] == "17:00"
+        assert result.fields_confidence["time_hint"] >= APPLY_THRESHOLD
+
+    def test_the_ukrainian_spelling_gives_the_same_hour(self):
+        assert parse("на 5 вечора").fields["time_hint"] == "17:00"
+
+    def test_a_russian_hour_noun_between_digit_and_marker(self):
+        assert parse("5 часов вечера").fields["time_hint"] == "17:00"
+
+    def test_preposition_before_a_small_digit_is_an_afternoon_hour(self):
+        # Symmetry with «о шостій» → 18:00. Before Wave 6-G the digit path had
+        # no 12-hour inference at all and dropped the hour on the floor.
+        result = parse("о 5")
+        assert result.fields["time_hint"] == "17:00"
+        assert result.fields_confidence["time_hint"] >= APPLY_THRESHOLD
+
+    def test_hour_noun_after_a_small_digit(self):
+        assert parse("на 5 годину").fields["time_hint"] == "17:00"
+
+    def test_morning_marker_keeps_the_hour_as_spoken(self):
+        assert parse("на 9 ранку").fields["time_hint"] == "09:00"
+        assert parse("10 утра").fields["time_hint"] == "10:00"
+
+    def test_an_hour_before_opening_is_not_invented_into_working_hours(self):
+        # 07:00 has no slot and 19:00 is not what the caller said.
+        result = parse("на 7 ранку")
+        assert result.fields["time_hint"] == "ранок"
+        assert result.fields_confidence["time_hint"] < APPLY_THRESHOLD
+
+    def test_an_hour_already_in_24h_form_is_not_shifted(self):
+        assert parse("на 17 вечора").fields["time_hint"] == "17:00"
+
+    def test_a_bare_number_is_still_a_diameter(self):
+        result = parse("на 16")
+        assert result.fields == {"diameter": 16}
+
+    def test_the_same_number_beside_a_part_of_day_is_an_hour(self):
+        result = parse("на 16 вечора")
+        assert result.fields["time_hint"] == "16:00"
+        assert "diameter" not in result.fields
+
+    def test_a_bare_number_without_any_marker_is_still_refused(self):
+        # Deliberate: «на 5» could be a diameter, and the TIME state knows which
+        # question it just asked. The marker is what lifts the ambiguity.
+        assert parse("на 5").fields == {}
+
+    def test_zero_is_not_noon(self):
+        assert parse("на 0").fields == {}
+
+
 class TestResultHelpers:
     def test_confident_fields_filters_by_threshold(self):
         result = parse("запорище R18")

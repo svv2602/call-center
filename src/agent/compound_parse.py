@@ -552,6 +552,19 @@ _PARTS_OF_DAY: tuple[tuple[re.Pattern[str], str], ...] = (
     (re.compile(r"\b(?:ввечері|увечері|вечір|вечор|на\s*вечір|вечером)"), "вечір"),
 )
 
+# «на 5 вечора», «5 часов вечера», «на 9 ранку». A bare number is ambiguous with
+# a wheel diameter, which is why «на 5» is refused below — but a part-of-day
+# marker beside it is not ambiguous: nobody says «R16 вечора». The marker is the
+# discriminator, exactly as «годин» is for _HOUR_DIGIT_WORD_RE and the feminine
+# ending is for the ordinal forms.
+#
+# No afternoon row here, and «дня» in particular must not be added: «на 3 дня»
+# is a duration in Russian, not three o'clock, and nothing in the utterance
+# separates the two readings.
+_HOUR_UNIT = r"(?:\s*(?:годин\w*|год\b|часов|часа|час\b))?"
+_HOUR_DIGIT_EVENING_RE = re.compile(r"\b(\d{1,2})" + _HOUR_UNIT + r"\s*(?:вечор\w*|вечер\w*)")
+_HOUR_DIGIT_MORNING_RE = re.compile(r"\b(\d{1,2})" + _HOUR_UNIT + r"\s*(?:ранк\w*|ранц\w*|утр\w*)")
+
 _FITTING_HOUR_MIN = 8
 _FITTING_HOUR_MAX = 20
 
@@ -586,6 +599,11 @@ def _detect_time_hint(text: str) -> _Hit | None:
         match = pattern.search(text)
         if match:
             hour = int(match.group(1))
+            if 1 <= hour < _FITTING_HOUR_MIN:
+                # The same inference the ordinal branch above makes, for the
+                # same reason. Zero is excluded because `\d{1,2}` matches it
+                # and «0 + 12» is not noon.
+                return _Hit(f"{hour + 12:02d}:00", 0.8, (match.span(),))
             if _FITTING_HOUR_MIN <= hour <= _FITTING_HOUR_MAX:
                 return _Hit(f"{hour:02d}:00", 0.9, (match.span(),))
 
@@ -595,6 +613,22 @@ def _detect_time_hint(text: str) -> _Hit | None:
         hour, minute = divmod(raw, 100)
         if _FITTING_HOUR_MIN <= hour <= _FITTING_HOUR_MAX and minute <= 59:
             return _Hit(f"{hour:02d}:{minute:02d}", 0.8, (match.span(),))
+
+    match = _HOUR_DIGIT_EVENING_RE.search(text)
+    if match:
+        hour = int(match.group(1))
+        if 1 <= hour <= 11:
+            hour += 12
+        if _FITTING_HOUR_MIN <= hour <= _FITTING_HOUR_MAX:
+            return _Hit(f"{hour:02d}:00", 0.8, (match.span(),))
+
+    match = _HOUR_DIGIT_MORNING_RE.search(text)
+    if match:
+        hour = int(match.group(1))
+        # «на 7 ранку» is before opening, so no such slot exists. Fall through
+        # to the part-of-day label rather than round it into working hours.
+        if _FITTING_HOUR_MIN <= hour <= 11:
+            return _Hit(f"{hour:02d}:00", 0.8, (match.span(),))
 
     for pattern, label in _PARTS_OF_DAY:
         match = pattern.search(text)
