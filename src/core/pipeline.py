@@ -1048,6 +1048,36 @@ class CallPipeline:
                 if scenario == "fitting" or self._session.scenario == "fitting":
                     self._session.fsm_filled_fields["intent"] = "fitting"
 
+            # STATION is the one state whose `auto_skip_if` reads data the tool
+            # router writes (`session.fitting_station_ids`, filled by
+            # `get_fitting_stations`) rather than data `apply_field` writes.
+            # `_follow_auto_skips()` used to have a single call site, inside
+            # `apply_field`, which fires on the turn the caller names the city —
+            # strictly before the tool has run. The predicate was therefore
+            # evaluated once, at the one moment it is guaranteed false, and
+            # never re-checked: correct rule, dead in practice. Three of the
+            # sixteen replayed calls ended in TRANSFER holding exactly one
+            # station id and no `station_id`.
+            #
+            # Recomputed HERE, ahead of the targeted pass, so the pin lands
+            # before this turn can be written off as a failed STATION answer
+            # and charged to `max_parser_null`.
+            #
+            # Not gated on `advance`: `advance` gates the two things that move
+            # the machine on *evidence the observer must not manufacture*
+            # (`on_parser_null`, `on_interrupt_turn`). This reads the session
+            # and writes a session field, awaits nothing and calls nothing, so
+            # it is exactly as safe in shadow as the parsers below it — and
+            # gating it would leave shadow measuring a machine the live path
+            # does not have.
+            #
+            # `state_before` is reassigned on purpose: everything below parses
+            # the turn *against the state the FSM is in*, and after the pin that
+            # is no longer the state the turn opened in. The hop itself is not
+            # lost — `_pin_single_station` logs `fsm_station_autopin` and the
+            # skip logs its own `fsm_transition`.
+            state_before = engine.refresh_auto_skips()
+
             cfg = STATES[state_before]
             own_field = cfg.field_name
             if own_field is None and cfg.next_state is not None:

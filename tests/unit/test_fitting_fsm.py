@@ -514,6 +514,194 @@ class TestApplyFieldAutoSkip:
 
 
 # --------------------------------------------------------------------------
+# TestStationAutoPin  (Wave 6-D — the recompute point, not the rule)
+# --------------------------------------------------------------------------
+
+
+def one_station(session: CallSession, station_id: str = "000000012") -> None:
+    """What `get_fitting_stations` leaves behind for a one-station city."""
+    session.fitting_station_ids = {station_id}
+    session.fitting_stations_seen = [
+        {"id": station_id, "name": "Шиномонтаж №1", "city": "Черкаси", "district": "Центр"}
+    ]
+
+
+class TestStationAutoPin:
+    """STATION's `auto_skip_if` reads a set the *tool* fills, not `apply_field`.
+
+    The rule at `STATES[STATION].auto_skip_if` was already right. It was
+    evaluated exactly once — inside `apply_field`, on the turn the caller named
+    the city, i.e. strictly before `get_fitting_stations` had run — and never
+    re-checked. `refresh_auto_skips()` is the second evaluation point, and the
+    pin is what turns «skip the state» into «leave the state with a station».
+    """
+
+    def test_pin_fires_on_a_later_turn_than_apply_field(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        """The defect this wave exists for, in one test.
+
+        Turn N: the caller names the city, the FSM enters STATION, the session
+        holds no stations yet — the predicate is false and there is nothing to
+        pin. Turn N+1: the tool has run. The predicate is now true, and the
+        only thing that ever asked it (`apply_field`) will not be called again
+        for `station_id`, because nothing can parse a station the caller never
+        named.
+        """
+        eng = at_state(session, FsmState.CITY)
+        assert eng.apply_field("city", "Черкаси") is FsmState.STATION
+        assert "station_id" not in session.fsm_filled_fields
+
+        # `get_fitting_stations` returns, between two turns (src/main.py).
+        one_station(session)
+
+        assert eng.refresh_auto_skips() is FsmState.STORAGE
+        assert session.fsm_filled_fields["station_id"] == "000000012"
+
+    def test_pin_writes_the_field_and_does_not_merely_skip(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        """A bare skip would hand `book_fitting` a booking with no station."""
+        one_station(session)
+        eng = at_state(session, FsmState.STATION)
+        eng.refresh_auto_skips()
+        assert session.fsm_filled_fields.get("station_id") == "000000012"
+
+    def test_two_stations_are_not_pinned(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        """«Exactly one», not «at least one» — two districts is a real question."""
+        session.fitting_station_ids = {"000000012", "000000022"}
+        session.fitting_stations_seen = [
+            {"id": "000000012", "name": "Оболонь"},
+            {"id": "000000022", "name": "Позняки"},
+        ]
+        eng = at_state(session, FsmState.STATION)
+        assert eng.refresh_auto_skips() is FsmState.STATION
+        assert "station_id" not in session.fsm_filled_fields
+
+    def test_no_stations_at_all_changes_nothing(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        eng = at_state(session, FsmState.STATION)
+        assert eng.refresh_auto_skips() is FsmState.STATION
+        assert session.fsm_filled_fields == {}
+        assert session.fsm_history == []
+
+    def test_single_station_missing_from_the_snapshot_warns_and_refuses(
+        self, session: CallSession, at_state: Callable[..., FsmEngine], caplog
+    ) -> None:
+        """No dict to read the id from → no pin, and never in silence."""
+        session.fitting_station_ids = {"000000012"}
+        session.fitting_stations_seen = [{"name": "Шиномонтаж без id"}]
+        eng = at_state(session, FsmState.STATION)
+        with caplog.at_level(logging.WARNING, logger="src.agent.fitting_fsm"):
+            eng.refresh_auto_skips()
+        assert "station_id" not in session.fsm_filled_fields
+        assert any(
+            "fsm_station_autopin_refused" in r.getMessage()
+            and "no_unique_snapshot" in r.getMessage()
+            for r in caplog.records
+        ), "a refused pin must be visible in the log"
+
+    def test_empty_station_id_warns_and_refuses(
+        self, session: CallSession, at_state: Callable[..., FsmEngine], caplog
+    ) -> None:
+        """An id that is present but blank is not a station.
+
+        NB the state is *not* asserted here. `auto_skip_if` still reads
+        `len(fitting_station_ids) == 1` on its own, so a refused pin leaves the
+        pre-6-D bare skip in place. Narrowing that predicate to «skip only once
+        pinned» is a real improvement and deliberately not in this phase — see
+        `PROGRESS.md`, «Наблюдения». What phase 01 guarantees is that a blank id
+        is never *written* and never refused in silence.
+        """
+        session.fitting_station_ids = {""}
+        session.fitting_stations_seen = [{"id": "", "name": "Шиномонтаж №1"}]
+        eng = at_state(session, FsmState.STATION)
+        with caplog.at_level(logging.WARNING, logger="src.agent.fitting_fsm"):
+            eng.refresh_auto_skips()
+        assert not session.fsm_filled_fields.get("station_id")
+        assert any(
+            "fsm_station_autopin_refused" in r.getMessage() and "empty_station_id" in r.getMessage()
+            for r in caplog.records
+        ), "a blank id must be refused loudly, not written"
+
+    def test_an_already_chosen_station_is_never_overwritten(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        session.fsm_filled_fields["station_id"] = "000000099"
+        one_station(session)
+        eng = at_state(session, FsmState.STATION)
+        eng.refresh_auto_skips()
+        assert session.fsm_filled_fields["station_id"] == "000000099"
+
+    def test_refresh_outside_station_is_a_no_op(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        """Only STATION reads tool-written data; the chain is not re-run elsewhere.
+
+        CITY's predicate is *true* here — `city` is pinned — and the refresh
+        must still not walk it. For the other seven states the predicate can
+        only have changed inside `apply_field`, which follows the chain itself,
+        so re-running it from the seam would fold unmeasured skips into a wave
+        whose whole point is a separable, measured number. An ungated refresh
+        leaves this test green if it only ever looks at a state whose predicate
+        is false.
+        """
+        one_station(session)
+        session.fsm_filled_fields["city"] = "Черкаси"
+        eng = at_state(session, FsmState.CITY)
+        assert eng.refresh_auto_skips() is FsmState.CITY
+        assert session.fsm_history == []
+        assert "station_id" not in session.fsm_filled_fields
+
+    def test_the_station_is_not_pinned_before_the_flow_reaches_station(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        """The pin belongs to STATION, not to «anywhere with one station».
+
+        `fitting_station_ids` is cumulative across the call — a caller who
+        asked about Київ and then switched to Черкаси leaves ids behind. Pinning
+        from a hop that is not STATION would pin a station the FSM has not
+        established a city for yet.
+        """
+        one_station(session)
+        eng = at_state(session, FsmState.INTENT)
+        assert eng.apply_field("intent", "fitting") is FsmState.CITY
+        assert "station_id" not in session.fsm_filled_fields
+
+    def test_the_apply_field_route_pins_too(
+        self, session: CallSession, at_state: Callable[..., FsmEngine]
+    ) -> None:
+        """One pin implementation, both routes into STATION.
+
+        When the stations *are* already in the session, `apply_field("city")`
+        walks straight through STATION — and must leave the id behind it.
+        """
+        one_station(session)
+        eng = at_state(session, FsmState.CITY)
+        assert eng.apply_field("city", "Черкаси") is FsmState.STORAGE
+        assert session.fsm_filled_fields["station_id"] == "000000012"
+
+    def test_refresh_does_not_recurse_or_reach_the_hop_limit(
+        self, session: CallSession, at_state: Callable[..., FsmEngine], caplog
+    ) -> None:
+        """The pin writes the field directly; going through `apply_field` here
+        would re-enter `_follow_auto_skips` past its per-frame `visited` guard."""
+        one_station(session)
+        eng = at_state(session, FsmState.STATION)
+        with caplog.at_level(logging.WARNING, logger="src.agent.fitting_fsm"):
+            eng.refresh_auto_skips()
+        assert eng.current_state() is FsmState.STORAGE
+        assert len(session.fsm_history) == 1
+        assert not [r for r in caplog.records if "hop limit" in r.getMessage()]
+        # Idempotent: a second refresh on the same turn adds nothing.
+        eng.refresh_auto_skips()
+        assert len(session.fsm_history) == 1
+
+
+# --------------------------------------------------------------------------
 # TestResumePhrases  (regression guard on the c8c6601 revert)
 # --------------------------------------------------------------------------
 

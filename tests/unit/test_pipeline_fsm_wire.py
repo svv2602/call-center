@@ -941,6 +941,134 @@ class TestTargetedBeforeBroad:
         )
 
 
+class TestStationAutoPinInTheSeam:
+    """Wave 6-D — the rule was right, the moment it was asked was wrong.
+
+    `STATES[STATION].auto_skip_if` is the only predicate in the table whose
+    input (`session.fitting_station_ids`) is written by the tool router rather
+    than by `apply_field`. `_follow_auto_skips()` had a single call site, inside
+    `apply_field`, which fires on the turn the caller names the city — before
+    `get_fitting_stations` has run. The predicate was asked once, at the one
+    moment it is guaranteed false. Measured cost: three of the sixteen replayed
+    tester calls ended in TRANSFER holding exactly one station id and no
+    `station_id`.
+    """
+
+    @staticmethod
+    def _tool_has_returned_one_station(session: CallSession) -> None:
+        """What `get_fitting_stations` leaves in the session (`src/main.py`)."""
+        session.fitting_station_ids = {"ST-1"}  # snapshot comes from the fixture
+
+    async def test_the_pin_lands_on_the_turn_after_the_tool_ran(self) -> None:
+        """The main test of the phase.
+
+        The FSM is parked in STATION from an earlier turn. The stations arrived
+        *between* turns, so no `apply_field` will ever be called for
+        `station_id` — nothing can parse a station the caller never named. If
+        the seam does not recompute, the turn is written off as a failed
+        STATION answer and the call walks towards TRANSFER.
+        """
+        h = Harness(booking_in_progress(FsmState.STATION))
+        self._tool_has_returned_one_station(h.session)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так, добре")
+
+        assert h.session.fsm_filled_fields.get("station_id") == "ST-1", (
+            "the single station was never pinned — auto_skip_if is still being "
+            "asked only from apply_field"
+        )
+        assert h.session.fsm_state != FsmState.STATION.value, "pinned but never left the state"
+
+    async def test_the_pinned_turn_is_not_charged_to_station_parser_null(self) -> None:
+        """Ordering, not just presence: the pin runs ahead of the parsers.
+
+        A pin that landed *after* the targeted pass would still fill the field,
+        yet the same turn would already have been counted as a failed STATION
+        answer — three of those and the call is escalated.
+        """
+        h = Harness(booking_in_progress(FsmState.STATION))
+        self._tool_has_returned_one_station(h.session)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так, добре")
+
+        assert not h.session.fsm_parser_null_counts.get(FsmState.STATION.value)
+
+    async def test_two_stations_still_ask_and_still_charge_the_null(self) -> None:
+        """The negative half: the recompute is not a blanket skip of STATION."""
+        session = booking_in_progress(FsmState.STATION)
+        session.fitting_station_ids = {"ST-1", "ST-2"}
+        session.fitting_stations_seen = [
+            {"id": "ST-1", "name": "Оболонь", "city": "Київ"},
+            {"id": "ST-2", "name": "Позняки", "city": "Київ"},
+        ]
+        h = Harness(session)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так, добре")
+
+        assert "station_id" not in h.session.fsm_filled_fields
+        assert h.session.fsm_state == FsmState.STATION.value
+        assert h.session.fsm_parser_null_counts.get(FsmState.STATION.value) == 1
+
+    async def test_no_stations_yet_leaves_the_turn_exactly_as_before(self) -> None:
+        """Turn N — the caller named the city, the tool has not run yet."""
+        h = Harness(booking_in_progress(FsmState.STATION))
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так, добре")
+
+        assert "station_id" not in h.session.fsm_filled_fields
+        assert h.session.fsm_state == FsmState.STATION.value
+        assert h.session.fsm_parser_null_counts.get(FsmState.STATION.value) == 1
+
+    async def test_the_pin_is_not_gated_on_live_mode(self) -> None:
+        """Shadow must measure the machine live mode will actually have.
+
+        `advance` gates the two moves the observer must not manufacture
+        (`on_parser_null`, `on_interrupt_turn`). The pin is neither: it reads
+        the session and writes a session field. Gating it would make every
+        shadow number a number about a different state machine.
+        """
+        for shadow in (True, False):
+            h = Harness(booking_in_progress(FsmState.STATION))
+            self._tool_has_returned_one_station(h.session)
+            with fsm_flags(enabled=True, shadow_mode=shadow):
+                await h.run("так, добре")
+            assert h.session.fsm_filled_fields.get("station_id") == "ST-1", (
+                f"pin missing with shadow_mode={shadow}"
+            )
+
+    async def test_the_recompute_adds_no_await_to_the_seam(self) -> None:
+        """Invariant §1.1 re-checked at the new call site.
+
+        `TestShadowStaysOffline` asserts the same thing for the method as a
+        whole; this one names `refresh_auto_skips` so that a future version of
+        it that needs a DB connection breaks here with the reason attached.
+        """
+        import ast
+        import pathlib
+
+        import src.core.pipeline as pipeline_module
+
+        tree = ast.parse(pathlib.Path(pipeline_module.__file__).read_text(encoding="utf-8"))
+        step = next(
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef)
+            and node.name == "_run_fsm_deterministic_step"
+        )
+        calls = {
+            n.func.attr
+            for n in ast.walk(step)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+        }
+        assert "refresh_auto_skips" in calls, "the recompute lost its call site"
+        assert not any(isinstance(n, ast.Await) for n in ast.walk(step))
+        assert not inspect.iscoroutinefunction(FsmEngine.refresh_auto_skips)
+
+
 class TestShadowStaysOffline:
     """«no await → no network» — the invariant the shadow rollout rests on."""
 

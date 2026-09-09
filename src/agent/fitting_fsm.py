@@ -1105,6 +1105,95 @@ class FsmEngine:
         self._follow_auto_skips()
         return self.current_state()
 
+    def refresh_auto_skips(self) -> FsmState:
+        """Re-evaluate STATION's auto-skip outside `apply_field` (Wave 6-D).
+
+        Seven of the eight `auto_skip_if` predicates read `_filled(s, "<field>")`,
+        i.e. `fsm_filled_fields`, which only `apply_field` writes — so checking
+        them once, inside `apply_field`, is exactly right. STATION is the
+        exception: its second disjunct reads `session.fitting_station_ids`, and
+        that set is written by the **tool** (`get_fitting_stations`,
+        `src/main.py`), on a later turn than the one that walked the FSM into
+        STATION. The single call site of `_follow_auto_skips()` therefore
+        evaluated the predicate at the one moment it is guaranteed false and
+        never again: the rule was correct and dead, and three of the sixteen
+        replayed tester calls ended in TRANSFER holding exactly one station id
+        and `station_id = None`.
+
+        Gated on STATION on purpose. Re-running the whole chain every turn
+        would fold unmeasured skips into a wave whose gain is measured, and
+        there is nothing to re-run: for the other seven states the predicate
+        can only have changed inside `apply_field`, which already follows the
+        chain itself.
+
+        Pure and synchronous — reads the session, writes a session field. Safe
+        to call from the shadow seam (`no await → no network`).
+        """
+        if self.current_state() is not FsmState.STATION:
+            return self.current_state()
+        self._follow_auto_skips()
+        return self.current_state()
+
+    def _pin_single_station(self) -> None:
+        """STATION with exactly one station in the session → pin `station_id`.
+
+        `auto_skip_if` *skips* the state; it does not fill the field. Skipping
+        alone would walk past STATION with `station_id` still empty and hand
+        `book_fitting` a booking without a station — and falling back to a
+        default station is forbidden (`945bcb7`). So the field is pinned first
+        and the skip then follows from the predicate's own first disjunct.
+
+        Writes `fsm_filled_fields` directly rather than calling `apply_field`:
+        `apply_field` calls `_follow_auto_skips`, and this runs *inside*
+        `_follow_auto_skips`, so going through it would be mutual recursion
+        past the `visited` guard (which is local to one frame).
+        """
+        session = self.session
+        # Never overwrite a station the caller actually chose.
+        if _filled(session, "station_id"):
+            return
+        ids = getattr(session, "fitting_station_ids", None) or set()
+        # Exactly one, not "at least one": two stations is a real question.
+        if len(ids) != 1:
+            return
+        only_id = str(next(iter(ids)) or "").strip()
+        seen = getattr(session, "fitting_stations_seen", None) or []
+        matches = [
+            s for s in seen if isinstance(s, dict) and str(s.get("id") or "").strip() == only_id
+        ]
+        if len(matches) != 1:
+            # The id set and the snapshot list are written together by
+            # `get_fitting_stations`, so this is a defensive branch (a session
+            # restored from an older Redis payload). It is logged at WARNING
+            # rather than skipped in silence — an invisible refusal on a
+            # booking path is how 3/3 bookings were lost (`37fb2d0`).
+            logger.warning(
+                "fsm_station_autopin_refused call=%s reason=no_unique_snapshot "
+                "id=%r matches=%d seen=%d",
+                session.channel_uuid,
+                only_id,
+                len(matches),
+                len(seen),
+                extra={"call_id": str(session.channel_uuid)},
+            )
+            return
+        station_id = str(matches[0].get("id") or "").strip()
+        if not station_id:
+            logger.warning(
+                "fsm_station_autopin_refused call=%s reason=empty_station_id station=%r",
+                session.channel_uuid,
+                matches[0],
+                extra={"call_id": str(session.channel_uuid)},
+            )
+            return
+        session.fsm_filled_fields["station_id"] = station_id
+        logger.info(
+            "fsm_station_autopin call=%s station=%s reason=single_station",
+            session.channel_uuid,
+            station_id,
+            extra={"call_id": str(session.channel_uuid)},
+        )
+
     def _follow_auto_skips(self) -> None:
         """Skip forward while the current state's `auto_skip_if` holds."""
         visited: set[FsmState] = {self.current_state()}
@@ -1113,6 +1202,12 @@ class FsmEngine:
             cfg = STATES[current]
             if cfg.terminal or cfg.next_state is None or cfg.next_state is current:
                 return
+            if current is FsmState.STATION:
+                # Fill before the predicate is read, so the state is left with
+                # a station rather than merely left. One call site for the pin,
+                # shared by both routes into STATION (`apply_field` and
+                # `refresh_auto_skips`).
+                self._pin_single_station()
             try:
                 should_skip = bool(cfg.auto_skip_if(self.session))
             except Exception:
