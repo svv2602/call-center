@@ -2755,10 +2755,18 @@ class CallPipeline:
                             self._session.channel_uuid, _text_stripped,
                         )
                     else:
+                        # Wave 17 (2026-09-09) — refusing to force a doomed
+                        # book_fitting is right, but staying silent let the
+                        # bot carry on and announce a booking it never made
+                        # (calls c1988daf, 57494646). Raise the Wave 6
+                        # correction banner instead: it is rendered from this
+                        # flag a few lines below, so it lands on this turn.
+                        self._session.krok8_confabulation_pending = True
                         logger.warning(
                             "Krok 8 «так» arrived but fields still ⏳ for "
                             "call=%s (LLM hallucinated confirmation). "
-                            "Suppressing emergency banner.",
+                            "Suppressing emergency banner; raising the "
+                            "checklist-correction banner instead.",
                             self._session.channel_uuid,
                         )
 
