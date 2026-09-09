@@ -40,6 +40,7 @@ from src.agent.parsers.station_parser import (
     _HINT_CONFIDENCE,
     _RESOLVED_CONFIDENCE,
     PARSER,
+    resolve_proposed_station,
     resolve_station_from_session,
 )
 from src.core.call_session import CallSession
@@ -912,3 +913,120 @@ class TestTheLabelAndTheStemAreBothSearched:
         c = ctx("біля Героїв Дніпра", stations=[PROD["000000006"]], city="Київ")
         parsed = PARSER.parse(c)
         assert resolve_station_from_session(c, parsed) is parsed
+
+
+# --- Wave 6-H: «the bot proposed a station and the caller agreed» -----------
+
+PROPOSAL_KYIV = "Знайшла точку біля Оболоні, на вулиці Маршала Тимошенка, 7. Записуємо туди?"
+REASK_YES_NO = (
+    'Перепрошую, не розчула. Скажіть, будь ласка, "так" щоб підтвердити або "ні" щоб змінити.'
+)
+CITY_CHANGE_PROMPT = (
+    "Для зміни міста потрібне підтвердження. Підтвердіть, будь ласка, "
+    "що замінюємо місто на Черкаси."
+)
+KEEP_THIS_STATION = (
+    "Ваше місто зараз Дніпро. Перейдімо до Черкас, зараз знайду точки шиномонтажу "
+    "в Черкасах. У вас у записі обрана точка шиномонтажу в Дніпрі, провулок "
+    "Добровольців, 1де. Продовжимо запис на цю точку?"
+)
+
+
+def proposal_ctx(
+    text: str,
+    bot_turns: list[str],
+    *,
+    stations: list[dict],
+    city: str | None = None,
+) -> ParseContext:
+    """A context whose `dialog_history` the proposal resolver can read.
+
+    `ctx` above cannot serve: it leaves `dialog_history` empty, so
+    `recent_bot_utterances` falls back to `last_bot_utterance` and only ever
+    yields one turn. The two-turn cases are exactly what this rule turns on.
+
+    `bot_turns` is chronological — oldest first, the order a call happens in.
+    """
+    session = CallSession(channel_uuid=uuid.uuid4())
+    session.fitting_stations_seen = stations
+    if city is not None:
+        session.fsm_filled_fields["city"] = city
+    for turn in bot_turns:
+        session.add_assistant_turn(turn)
+    return ParseContext(customer_text=text, last_bot_utterance=bot_turns[-1], session=session)
+
+
+class TestTheProposalIsResolvedFromTheSnapshot:
+    """«так» to a proposed station becomes a `station_id`, or nothing at all."""
+
+    def test_agreement_to_a_proposal_pins_the_station(self) -> None:
+        """Call `3412071b`: the bot named the Оболонь point, the caller agreed."""
+        c = proposal_ctx("так", [PROPOSAL_KYIV], stations=[PROD["000000006"]])
+        outcome = resolve_proposed_station(c)
+
+        assert outcome.status == "value"
+        assert outcome.value == "000000006"
+        assert isinstance(outcome.value, str)
+        assert outcome.confidence == _RESOLVED_CONFIDENCE
+
+    def test_a_reask_between_the_question_and_the_answer_is_crossed(self) -> None:
+        """Call `2536a21d`: proposal, silence, re-ask, «так»."""
+        c = proposal_ctx("так", [PROPOSAL_KYIV, REASK_YES_NO], stations=[PROD["000000006"]])
+        assert resolve_proposed_station(c).value == "000000006"
+
+    def test_without_agreement_nothing_is_pinned(self) -> None:
+        c = proposal_ctx("а де це", [PROPOSAL_KYIV], stations=[PROD["000000006"]])
+        assert resolve_proposed_station(c) is NOT_MENTIONED
+
+    def test_an_empty_snapshot_is_refused(self) -> None:
+        c = proposal_ctx("так", [PROPOSAL_KYIV], stations=[])
+        assert resolve_proposed_station(c) is NOT_MENTIONED
+
+    def test_two_matching_stations_are_refused(self) -> None:
+        """Ambiguity keeps its Wave 6-D answer: an operator, not a guess."""
+        c = proposal_ctx("так", ["Знайшла точку на Перемоги. Записуємо туди?"], stations=TWO_CITIES)
+        assert resolve_proposed_station(c) is NOT_MENTIONED
+
+    def test_a_proposal_the_chosen_city_cannot_serve_is_refused(self) -> None:
+        """Cross-city narrowing applies here exactly as it does to a landmark."""
+        c = proposal_ctx("так", [PROPOSAL_KYIV], stations=[PROD["000000006"]], city="Черкаси")
+        assert resolve_proposed_station(c) is NOT_MENTIONED
+
+    def test_a_bot_turn_carrying_no_landmark_is_refused(self) -> None:
+        """The marker says a proposal happened; the address says which one.
+
+        Without the second, the rule would pick the snapshot's only entry on
+        the strength of the question alone.
+        """
+        c = proposal_ctx("так", ["Записуємо туди?"], stations=[PROD["000000006"]])
+        assert resolve_proposed_station(c) is NOT_MENTIONED
+
+
+class TestTheCityChangePromptIsRefusedWithoutHelpFromTheCity:
+    """Call `bd95036c` — the control the whole construction is built around.
+
+    The bot asks to move the booking to Черкаси and the caller says
+    «підтверджую», while four Дніпро stations sit in the snapshot and a genuine
+    proposal marker sits two turns back.
+
+    Both tests below run with **no city chosen**. That is the point: on the real
+    corpus `compound_parse` reads «Черкасах» from an earlier caller turn, the
+    city narrowing fires, and the refusal looks safe for a reason that has
+    nothing to do with this rule. Take the city away and the flat window pins
+    `000000003`.
+    """
+
+    def test_the_stale_proposal_is_not_accepted(self) -> None:
+        c = proposal_ctx(
+            "підтверджую",
+            [KEEP_THIS_STATION, CITY_CHANGE_PROMPT],
+            stations=B394F6C1_SNAPSHOT,
+        )
+        assert c.session.fsm_filled_fields.get("city") in (None, "")
+        assert resolve_proposed_station(c) is NOT_MENTIONED
+
+    def test_the_snapshot_really_does_hold_the_station_it_must_not_pin(self) -> None:
+        """Guards the fixture: a snapshot that could not resolve anyway would
+        make the test above pass without the rule doing anything."""
+        c = proposal_ctx("підтверджую", [KEEP_THIS_STATION], stations=B394F6C1_SNAPSHOT)
+        assert resolve_proposed_station(c).value == "000000003"

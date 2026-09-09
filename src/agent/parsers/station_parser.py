@@ -47,12 +47,24 @@ import logging
 from typing import TYPE_CHECKING
 
 from src.agent.compound_parse import _LANDMARK_KEYS, _detect_station_hint, _normalize
-from src.agent.parsers.base import NOT_MENTIONED, ParseOutcome, graded, unresolved
+from src.agent.confirm_detect import is_confirmation
+from src.agent.parsers.base import (
+    NOT_MENTIONED,
+    ParseOutcome,
+    graded,
+    recent_bot_utterances,
+    unresolved,
+)
+from src.agent.station_proposal_detect import proposed_station
 
 if TYPE_CHECKING:
     from src.agent.parsers.base import ParseContext
 
 logger = logging.getLogger(__name__)
+
+#: How far back a proposal is searched. Mirrors `yes_no_parser` and the Wave 15
+#: block in `pipeline.py` — a filler re-ask sits between question and answer.
+_BOT_TURN_WINDOW = 2
 
 #: Held below the apply threshold on purpose — see the module docstring. The
 #: detector's own `0.9` describes how sure we are of the *landmark*, not of a
@@ -222,6 +234,86 @@ def resolve_station_from_session(ctx: ParseContext, outcome: ParseOutcome) -> Pa
             hits[0], outcome.value,
         )
         return outcome
+    return graded(str(station_id), _RESOLVED_CONFIDENCE)
+
+
+def resolve_proposed_station(ctx: ParseContext) -> ParseOutcome:
+    """«The bot named one station and the caller agreed» → `station_id`.
+
+    The second route to `status="value"`, and deliberately built from the same
+    parts as the first: `_detect_station_hint` reads the landmark out of the
+    *bot's* turn exactly as it reads one out of the caller's, and `_matches` /
+    `_in_city` then resolve it against the snapshot. A second copy of the
+    matching rules is how «Перемоги» gets picked in one place and refused in
+    the other — the same argument that keeps `_aresolve_station` a thin wrapper.
+
+    Why this is not part of `parse()`
+    ---------------------------------
+    `parse()` answers «what did the caller name», and the caller named nothing —
+    «так» carries no landmark. The evidence here is the *bot's* turn, so this is
+    a resolver, not a detector, and it keeps the module invariant that `parse()`
+    can never reach `status="value"`.
+
+    Why it is not restricted to STATION
+    -----------------------------------
+    Call `011277ef` dies in CITY: the bot quoted a price for «у місті Дніпро,
+    провулок Добровольців», the caller said «так», and the FSM was still in CITY
+    because «на перемозі» resolves to a landmark in two cities and therefore to
+    no city at all. A rule that only fires in STATION never reaches that call.
+    The seam calls this independently of the current state.
+
+    Default-deny throughout: no confirmation, no proposal, an empty snapshot,
+    a landmark the bot's turn does not carry, or anything other than exactly one
+    match — all return `NOT_MENTIONED` rather than a guess. Driving a caller to
+    the wrong address is worse than handing them to an operator.
+    """
+    session = ctx.session
+    if not is_confirmation(ctx.customer_text or ""):
+        return NOT_MENTIONED
+
+    recent = recent_bot_utterances(ctx, _BOT_TURN_WINDOW)
+    if not proposed_station(recent):
+        return NOT_MENTIONED
+
+    stations = list(getattr(session, "fitting_stations_seen", None) or []) if session else []
+    if not stations:
+        logger.debug("station_proposal: agreement with no snapshot to resolve against")
+        return NOT_MENTIONED
+
+    city = _chosen_city(session)
+    if city:
+        in_city = [s for s in stations if isinstance(s, dict) and _in_city(s, city)]
+        if not in_city:
+            # Same shape as the hint resolver's mismatch: the caller has pinned a
+            # city the snapshot cannot serve. Refusing here is what stops call
+            # `bd95036c` — «підтверджую» to a *city change* prompt — from pinning
+            # the Дніпро station that is still sitting in the snapshot.
+            logger.warning(
+                "fsm_station_proposal_city_mismatch: chosen city %r has none of "
+                "the %d offered stations — proposal not resolved",
+                city, len(stations),
+            )
+            return NOT_MENTIONED
+        stations = in_city
+
+    hint = _detect_station_hint(_normalize(" ".join(recent)))
+    if hint is None or not isinstance(hint.value, str):
+        logger.debug("station_proposal: bot turn carries no landmark — unresolved")
+        return NOT_MENTIONED
+
+    keys = _LANDMARK_KEYS.get(hint.value, (hint.value.lower(),))
+    hits = [s for s in stations if isinstance(s, dict) and _matches(s, keys)]
+    if len(hits) != 1:
+        logger.debug(
+            "station_proposal: %r matched %d of %d offered stations — unresolved",
+            hint.value, len(hits), len(stations),
+        )
+        return NOT_MENTIONED
+
+    station_id = hits[0].get("id")
+    if not station_id:
+        logger.warning("station_proposal: station %r matched but carries no id", hits[0])
+        return NOT_MENTIONED
     return graded(str(station_id), _RESOLVED_CONFIDENCE)
 
 
