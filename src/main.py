@@ -25,6 +25,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 
 from src.agent.agent import LLMAgent, ToolRouter
+from src.agent.booking_result import is_booking_confirmed
 from src.agent.parsers.date_parser import resolve_tool_date
 from src.agent.prompt_manager import (
     PromptManager,
@@ -1150,7 +1151,11 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 _tool_turn_counter[0] += 1
                 # Track tool calls for OPT-2 (lazy tool filtering) and OPT-3 (module expansion)
                 session.tools_called.add(name)
-                if name == "book_fitting" and success:
+                # `success` only means the handler did not raise, and every
+                # book_fitting guard rejection returns a dict — so it arrives
+                # here as success=True. Requiring a positive booking marker
+                # keeps a refusal from being recorded as a booking.
+                if name == "book_fitting" and success and is_booking_confirmed(result):
                     session.fitting_booked = True
                 await _call_logger.log_tool_call(
                     call_id=conn.channel_uuid,
