@@ -1899,15 +1899,22 @@ class TestPassivePassStructure:
 
 
 def station_in_progress() -> CallSession:
-    """Parked in STATION with the snapshot `get_fitting_stations` would leave."""
+    """Parked in STATION with the snapshot `get_fitting_stations` would leave.
+
+    Every entry carries `city`, because `main.py:2516` builds it that way
+    unconditionally and 603 stored payloads have it on all 1026 stations. An
+    earlier draft of this fixture put the city in `district` and left `city`
+    absent, which is a shape prod does not produce — and a resolver written to
+    pass it grows an escape hatch for a snapshot that cannot occur.
+    """
     session = CallSession(uuid.uuid4())
     session.caller_phone = "+380671234567"
     session.fsm_state = FsmState.STATION.value
     session.fsm_filled_fields["intent"] = "fitting"
     session.fsm_filled_fields["city"] = "Київ"
     session.fitting_stations_seen = [
-        {"id": "st-1", "name": "Оболонь", "district": "Оболонський"},
-        {"id": "st-2", "name": "Позняки", "district": "Дарницький"},
+        {"id": "st-1", "name": "Оболонь", "district": "Оболонський", "city": "Київ"},
+        {"id": "st-2", "name": "Позняки", "district": "Дарницький", "city": "Київ"},
     ]
     return session
 
@@ -1958,11 +1965,17 @@ class TestStationResolvedInTheSeam:
         assert h.session.fsm_state != FsmState.STATION.value
 
     async def test_an_ambiguous_landmark_is_not_guessed(self) -> None:
-        """«Перемоги» exists in two cities — cross-city guard `13e9ea4`."""
+        """Two «Перемоги» inside the *pinned* city — city narrowing cannot help.
+
+        Deliberately same-city: a snapshot spanning two cities would be refused
+        by the city filter before the ambiguity was ever reached, and the test
+        would go green without exercising the rule it names. Cross-city refusal
+        has its own coverage in `test_parsers_station.py`.
+        """
         h = Harness(station_in_progress())
         h.session.fitting_stations_seen = [
-            {"id": "st-zp", "name": "Перемоги 72Б", "district": "Запоріжжя"},
-            {"id": "st-dp", "name": "Перемоги 15", "district": "Дніпро"},
+            {"id": "st-a", "name": "Перемоги 72Б", "city": "Київ"},
+            {"id": "st-b", "name": "Перемоги 15", "city": "Київ"},
         ]
 
         with fsm_flags(enabled=True, shadow_mode=True):

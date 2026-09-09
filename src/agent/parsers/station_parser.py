@@ -72,12 +72,79 @@ def _matches(station: dict, needle: str) -> bool:
     return False
 
 
+def _chosen_city(session: object | None) -> str:
+    """The city already pinned for this call, normalised — or `""`.
+
+    `session.fsm_filled_fields["city"]` is the only place a chosen city lives:
+    `CallSession` has no `fitting_city`, and `render_context` derives its own
+    `city` from the *picked station*, which is the value this resolver is being
+    asked to produce. Whatever sits in `fsm_filled_fields` came through
+    `APPLY_THRESHOLD` (`map_compound_fields_to_fsm` drops anything below it), so
+    a low-confidence STT guess can not narrow anything here.
+    """
+    filled = getattr(session, "fsm_filled_fields", None) or {}
+    value = filled.get("city") if isinstance(filled, dict) else None
+    if not isinstance(value, str):
+        return ""
+    return _normalize(value).strip()
+
+
+def _station_city(station: dict) -> str:
+    """The station's own city, normalised — `""` when it does not say."""
+    value = station.get("city")
+    return _normalize(value).strip() if isinstance(value, str) else ""
+
+
+def _in_city(station: dict, city: str) -> bool:
+    """True when the station sits in `city`. Default-deny on anything unclear.
+
+    Comparison mirrors `src/main.py:2483` (`_normalize_city` + containment both
+    ways), which is how `get_fitting_stations` already filters the very list
+    that ends up in `fitting_stations_seen` — «Дніпро» has to keep matching
+    «Дніпропетровськ». That helper is not imported: `src/main.py` is the FastAPI
+    application and it imports the parser package, so reaching back into it
+    would be circular.
+
+    Default-deny on **both** sides: a station that does not say which city it
+    is in belongs to none of them, and nothing belongs to a blank city.
+    Containment makes `""` a substring of everything, so without those two
+    guards the filter would match every station instead of none — a hole rather
+    than a guard (§1.6), and one that fails silently.
+    """
+    other = _station_city(station)
+    if not city or not other:
+        return False
+    return other in city or city in other
+
+
 def resolve_station_from_session(ctx: ParseContext, outcome: ParseOutcome) -> ParseOutcome:
     """Landmark → `station_id`, using the stations already offered.
 
     Ambiguity is left unresolved rather than guessed: «Перемоги» exists in two
     cities, and picking one of them silently is how a caller ends up driving to
     the wrong address.
+
+    **Narrowing by the chosen city is not guessing** (Wave 6-D, phase 02). When
+    the caller has already named a city, the stations in every *other* city were
+    never candidates — dropping them removes an ambiguity that does not exist
+    rather than resolving one that does. Call `b394f6c1`: «перемога» matched two
+    stations, the flow died on STATION, and the city had been pinned for six
+    turns. Ambiguity *inside* one city is still refused, which is the rule the
+    paragraph above states.
+
+    With no city pinned the behaviour is byte-for-byte what it was: this must
+    not turn into a new «city first» precondition.
+
+    Once a city *is* pinned the filter is default-deny over the whole snapshot:
+    a station that does not say which city it is in is dropped, exactly like one
+    that names a different city. There is no «the snapshot is too sparse to
+    narrow, so keep everything» branch — that shape is a hole, not a guard
+    (§1.6), and it is the escape hatch this project has already been bitten by
+    twice (waves 15 and 16). Prod cannot produce it either: `main.py:2516` writes
+    `city` into every entry unconditionally, and 603 stored payloads / 1026
+    stations back to 2026-07-10 have it on all of them. If 1C ever did blank the
+    field the whole snapshot would be refused and the call would reach an
+    operator — never a wrong address — and the WARNING below says so out loud.
 
     Synchronous on purpose. Every input comes from
     `ctx.session.fitting_stations_seen`, so there is nothing to await — see the
@@ -92,12 +159,40 @@ def resolve_station_from_session(ctx: ParseContext, outcome: ParseOutcome) -> Pa
         logger.debug("station_parser.aresolve: no stations in session — hint kept unresolved")
         return outcome
 
+    city = _chosen_city(session)
+    if city:
+        in_city = [s for s in stations if isinstance(s, dict) and _in_city(s, city)]
+        if not in_city:
+            # Distinct from «unresolved»: the snapshot holds no station in the
+            # city the caller picked. Call `bd95036c` asked for Черкаси three
+            # times against a Дніпро snapshot and the log read exactly like a
+            # caller mumbling nonsense. Wave 6-E needs to tell the two apart, so
+            # this gets its own marker and WARNING — a DEBUG line would be
+            # filtered out in prod, which is where the calls are.
+            logger.warning(
+                "fsm_station_city_mismatch: chosen city %r has none of the %d "
+                "offered stations (%r) — hint %r kept unresolved",
+                city,
+                len(stations),
+                sorted(
+                    {
+                        s.get("city")
+                        for s in stations
+                        if isinstance(s, dict) and isinstance(s.get("city"), str)
+                    }
+                ),
+                outcome.value,
+            )
+            return outcome
+        stations = in_city
+
     needle = outcome.value.lower()
     hits = [s for s in stations if isinstance(s, dict) and _matches(s, needle)]
     if len(hits) != 1:
         logger.debug(
-            "station_parser.aresolve: %r matched %d of %d offered stations — unresolved",
-            outcome.value, len(hits), len(stations),
+            "station_parser.aresolve: %r matched %d of %d offered stations "
+            "(narrowed by city: %s) — unresolved",
+            outcome.value, len(hits), len(stations), city or "no",
         )
         return outcome
 
