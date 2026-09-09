@@ -90,6 +90,29 @@ _KEEPALIVE_POLL_SEC = 0.02  # check idle every 20 ms (one frame)
 # Minimum dialog turns before using contextual farewell
 _FAREWELL_MIN_TURNS = 3
 
+# Grace window after the bot says goodbye. Without it the caller sits through
+# the full 3×SILENCE_TIMEOUT_SEC ladder on a line nobody is going to use
+# again — testers on 2026-09-09 had to hang up by hand every time.
+_FAREWELL_HANGUP_GRACE_SEC = 2.0
+
+# Closing markers, taken from what the LLM actually says. Over 14 days of prod
+# these appeared in 20 bot turns and were the LAST turn in 18 of them, so they
+# are a reliable end-of-call signal. Deliberately narrow: «дякую за звернення»
+# alone is NOT here, because the bot also says it mid-call.
+_FAREWELL_MARKERS: tuple[str, ...] = (
+    "до побачення",
+    "всього найкращого",
+    "гарного дня",
+    "гарного вам дня",
+    "на все добре",
+)
+
+
+def _is_farewell(text: str) -> bool:
+    """True when the bot's utterance is a closing line."""
+    lowered = text.lower()
+    return any(marker in lowered for marker in _FAREWELL_MARKERS)
+
 # Default template dict (used if no PromptManager or DB unavailable)
 _DEFAULT_TEMPLATES: dict[str, str] = {
     "greeting": GREETING_TEXT,
@@ -740,6 +763,9 @@ class CallPipeline:
         self._speaking = False
         self._barge_in_event = barge_in_event or asyncio.Event()
         self._final_transcript_queue: asyncio.Queue[Transcript | None] = asyncio.Queue()
+        # Set once the bot has said goodbye; shortens the next silence wait to
+        # _FAREWELL_HANGUP_GRACE_SEC. Cleared as soon as the caller speaks.
+        self._farewell_spoken = False
 
     @property
     def _tts(self) -> TTSEngine:
@@ -2299,6 +2325,18 @@ class CallPipeline:
             transcript = await self._wait_for_final_transcript()
 
             if transcript is None:
+                if self._farewell_spoken:
+                    # The bot has already said goodbye and the caller stayed
+                    # quiet through the grace window — end the call instead of
+                    # walking the silence ladder and saying goodbye a second
+                    # time.
+                    logger.info(
+                        "Farewell spoken and caller silent for %.1fs — "
+                        "hanging up call=%s",
+                        _FAREWELL_HANGUP_GRACE_SEC,
+                        self._session.channel_uuid,
+                    )
+                    break
                 # Silence timeout
                 should_end = self._session.record_timeout()
                 if should_end:
@@ -3094,6 +3132,19 @@ class CallPipeline:
             self._session.transition_to(CallState.TRANSFERRING)
             return True
 
+        # Read the spoken text back off the session so both the LLM path and
+        # the FSM short-circuit are covered by one check. Only the LAST turn
+        # counts: on barge-in the bot adds no turn at all, and walking back past
+        # the caller to an earlier goodbye would re-arm the hangup on someone
+        # who just interrupted to ask something.
+        history = self._session.dialog_history
+        last_turn = history[-1] if history else None
+        self._farewell_spoken = (
+            last_turn is not None
+            and last_turn.speaker == "assistant"
+            and _is_farewell(last_turn.content or "")
+        )
+
         self._session.transition_to(CallState.LISTENING)
         return False
 
@@ -3156,12 +3207,17 @@ class CallPipeline:
     async def _wait_for_final_transcript(self) -> Transcript | None:
         """Wait for a final transcript from STT, with silence timeout.
 
-        Returns None on silence timeout.
+        Returns None on silence timeout. Once the bot has said goodbye the
+        wait shrinks to `_FAREWELL_HANGUP_GRACE_SEC` — just enough for a
+        caller who still has a question to speak up.
         """
+        timeout = (
+            _FAREWELL_HANGUP_GRACE_SEC if self._farewell_spoken else SILENCE_TIMEOUT_SEC
+        )
         try:
             return await asyncio.wait_for(
                 self._get_next_final_transcript(),
-                timeout=SILENCE_TIMEOUT_SEC,
+                timeout=timeout,
             )
         except TimeoutError:
             return None

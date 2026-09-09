@@ -2326,6 +2326,18 @@ WAIT_STATIONS_POOL = [
     "Зараз перевірю, де є.",
 ]
 
+# Looking up an EXISTING booking (cancel / reschedule / «чи я записаний?»).
+# Kept separate from WAIT_FITTING_POOL, whose phrases are all about free
+# slots: call e0556668 2026-09-09 asked to cancel and heard «Зараз перевірю
+# розклад» — the caller was told the bot was checking the schedule while it
+# was actually finding his booking. Same class as the 78f185dc stations fix.
+WAIT_BOOKING_LOOKUP_TEXT = "Секундочку, шукаю ваш запис."
+WAIT_BOOKING_LOOKUP_POOL = [
+    WAIT_BOOKING_LOOKUP_TEXT,
+    "Одну мить, дивлюся ваш запис.",
+    "Зараз знайду ваш запис.",
+]
+
 WAIT_BOOKING_TEXT = "Зачекайте, оформлюю ваш запис."
 WAIT_BOOKING_POOL = [
     WAIT_BOOKING_TEXT,

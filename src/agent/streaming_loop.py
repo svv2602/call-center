@@ -20,6 +20,7 @@ from src.agent.history_compressor import summarize_old_messages
 from src.agent.prompts import (
     SYSTEM_PROMPT,
     WAIT_AVAILABILITY_POOL,
+    WAIT_BOOKING_LOOKUP_POOL,
     WAIT_BOOKING_POOL,
     WAIT_CANCEL_POOL,
     WAIT_DEFAULT_POOL,
@@ -96,7 +97,7 @@ _TOOL_WAIT_POOLS: dict[str, list[str]] = {
     "book_fitting": WAIT_BOOKING_POOL,
     "cancel_fitting": WAIT_CANCEL_POOL,
     "get_fitting_price": WAIT_FITTING_PRICE_POOL,
-    "get_customer_bookings": WAIT_FITTING_POOL,
+    "get_customer_bookings": WAIT_BOOKING_LOOKUP_POOL,  # find an existing booking
     "search_knowledge_base": WAIT_KNOWLEDGE_POOL,
     "find_storage": WAIT_STORAGE_POOL,
 }
