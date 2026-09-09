@@ -2651,3 +2651,142 @@ class TestTheCityComesFromAUnanimousSnapshot:
             await h.run("так")
 
         assert h.session.fsm_filled_fields.get("city") == "Київ"
+
+
+class TestTheInferredCityCanBeTakenBack:
+    """Wave 6-H phase 05 — `bd95036c` at full length.
+
+    The unanimity rule above is measured to fire on the *diameter* answer on
+    every one of the four corpus calls it touches: it is the first turn after
+    `get_fitting_stations` filled the catalog, and the caller has not said
+    anything about a city yet. `setdefault` then guards the slot for good.
+
+    On `bd95036c` the caller asks for Черкаси four times against a Дніпро
+    snapshot and the FSM records none of it — the slot is taken, and by then
+    the machine has left CITY, so the targeted `city_parser` never runs again
+    either. The verdict does not change (that call transfers for want of a
+    station), but a wrong city surviving into BOOK is the failure this system
+    can least afford, and the next wave is meant to make STATION resolvable.
+
+    So the inference is held revocably rather than gated harder. Gating was
+    measured and rejected: every firing is on a diameter answer, so «only fire
+    on a locative turn» would have removed all four, including the three that
+    are right.
+
+    Multi-turn tests hand every utterance to a single `run()`. The harness
+    closes the connection as it releases the LAST transcript, so a second
+    `run()` finds it closed and the seam never executes — a first draft did
+    that and read as «revocation does not fire».
+    """
+
+    async def test_the_caller_takes_the_slot_back(self) -> None:
+        h = Harness(booking_in_progress(FsmState.CITY, stations=ONE_CITY_SNAPSHOT))
+        h.session.fsm_filled_fields.pop("city", None)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("17", "тільки мені в Черкасах треба")
+
+        assert h.session.fsm_filled_fields.get("city") == "Черкаси"
+        assert h.session.fsm_inferred_fields == []
+
+    async def test_the_diameter_answer_is_what_takes_the_slot(self) -> None:
+        """The premise of the class, asserted rather than assumed.
+
+        If the snapshot rule stopped firing on «17» this whole class would go
+        green for the wrong reason — nothing would ever be marked, so nothing
+        could be wrongly kept.
+        """
+        h = Harness(booking_in_progress(FsmState.CITY, stations=ONE_CITY_SNAPSHOT))
+        h.session.fsm_filled_fields.pop("city", None)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("17")
+
+        assert h.session.fsm_filled_fields.get("city") == "Київ"
+        assert h.session.fsm_inferred_fields == ["city"]
+
+    async def test_a_heard_city_is_then_kept(self) -> None:
+        """Revocation is once, not a standing licence.
+
+        Without clearing the mark the broad pass would own the slot for the
+        rest of the call and every later mention would move the booking again —
+        trading a stale inference for a value that changes under the caller's
+        feet, which is worse.
+        """
+        h = Harness(booking_in_progress(FsmState.STATION, stations=ONE_CITY_SNAPSHOT))
+        h.session.fsm_filled_fields["city"] = "Київ"
+        h.session.fsm_inferred_fields = ["city"]
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("тільки мені в Черкасах треба", "а може у Дніпрі")
+
+        assert h.session.fsm_filled_fields.get("city") == "Черкаси"
+
+    async def test_the_targeted_parser_also_clears_the_mark(self) -> None:
+        """The other way the slot stops being an inference.
+
+        The targeted pass assigns rather than `setdefault`s, so it overwrites an
+        inferred value already. What it must also do is drop the mark — else the
+        broad pass keeps its licence to overwrite the state's own parser on some
+        later turn, which is `c8c6601` arriving through the door this wave just
+        opened.
+
+        The marked session is built directly instead of being walked into: the
+        snapshot rule leaves the machine past CITY, and CITY is the only state
+        where `city_parser` is the targeted one.
+        """
+        h = Harness(booking_in_progress(FsmState.CITY, stations=ONE_CITY_SNAPSHOT))
+        h.session.fsm_filled_fields["city"] = "Київ"
+        h.session.fsm_inferred_fields = ["city"]
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("у Черкасах")
+
+        assert h.session.fsm_filled_fields.get("city") == "Черкаси"
+        assert h.session.fsm_inferred_fields == []
+
+    async def test_a_city_the_caller_named_is_never_marked(self) -> None:
+        """Default-deny: only the snapshot rule may mark, so only its guess is
+        revocable. A heard city that got marked would stay overwritable by the
+        broad pass for the rest of the call."""
+        h = Harness(booking_in_progress(FsmState.STATION, stations=ONE_CITY_SNAPSHOT))
+        h.session.fsm_filled_fields.pop("city", None)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("у Дніпрі")
+
+        assert h.session.fsm_filled_fields.get("city") == "Дніпро"
+        assert h.session.fsm_inferred_fields == []
+
+    async def test_an_unmarked_city_is_still_never_overwritten(self) -> None:
+        """The guard the mark must not dissolve.
+
+        Same two utterances as the revocation test, but nothing marked the
+        slot. The broad pass must leave it alone — otherwise the mark is
+        decorative and the pass has simply been given a general licence to
+        overwrite, which is the `c8c6601` defect class.
+        """
+        h = Harness(booking_in_progress(FsmState.STATION, stations=ONE_CITY_SNAPSHOT))
+        h.session.fsm_filled_fields["city"] = "Київ"
+        h.session.fsm_inferred_fields = []
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("тільки мені в Черкасах треба")
+
+        assert h.session.fsm_filled_fields.get("city") == "Київ"
+
+    async def test_the_mark_survives_the_redis_round_trip(self) -> None:
+        """The write and the revocation happen on different turns, and the Call
+        Processor rebuilds the session from Redis in between. A mark kept only
+        on the in-memory object is the `c8c6601` shape: correct rule, reset
+        before the turn that would have used it.
+        """
+        h = Harness(booking_in_progress(FsmState.CITY, stations=ONE_CITY_SNAPSHOT))
+        h.session.fsm_filled_fields.pop("city", None)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("17")
+        assert h.session.fsm_inferred_fields == ["city"]
+
+        revived = CallSession.from_dict(h.session.to_dict())
+        assert revived.fsm_inferred_fields == ["city"]

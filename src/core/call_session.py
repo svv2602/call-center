@@ -245,6 +245,30 @@ class CallSession:
         # `on_null_exhausted` both write session values (§3.7 table). See
         # `development-checklists/.../wave-6-B-.../README.md` §6.
         self.fsm_brand_type_fallback: bool = False
+        # Fields in `fsm_filled_fields` written from *inference*, not from the
+        # caller's words (Wave 6-H). Today only `city`, written by the
+        # unanimous-snapshot rule when every point the bot has offered sits in
+        # one city.
+        #
+        # It exists because `setdefault` protects a slot from being overwritten
+        # but says nothing about who got there first. The snapshot rule fires on
+        # the first turn after `get_fitting_stations` filled the catalog —
+        # measured, that is the *diameter* answer on all four calls it touches —
+        # which can be several turns before the caller says anything about a
+        # city at all. On `bd95036c` the caller then asked for Черкаси four
+        # times against a Дніпро snapshot and the FSM never recorded it: the
+        # slot was taken, and the machine had already left CITY, so the targeted
+        # `city_parser` never ran again either.
+        #
+        # So an inferred value is held revocably: the broad pass may overwrite a
+        # field listed here, and doing so removes it from the list. Nothing else
+        # may — a parser's deliberate refusal is never listed, so this cannot
+        # become a back door onto `claimed` (`c8c6601`).
+        #
+        # Persisted with the rest: the write and the revocation happen on
+        # different turns, and the Call Processor rebuilds the session from
+        # Redis between them.
+        self.fsm_inferred_fields: list[str] = []
         # --- Side-door interrupt state (Wave 3-B, 2026-09-08) ---
         # Read/written by `src/agent/interrupts.py`. These MUST survive the
         # Redis round-trip: the Call Processor is stateless and reloads the
@@ -390,6 +414,7 @@ class CallSession:
             "fsm_parser_null_counts": dict(self.fsm_parser_null_counts),
             "fsm_interrupt_turn_counts": dict(self.fsm_interrupt_turn_counts),
             "fsm_brand_type_fallback": self.fsm_brand_type_fallback,
+            "fsm_inferred_fields": list(self.fsm_inferred_fields),
             "interrupt_counts": dict(self.interrupt_counts),
             "pending_cancel_action": self.pending_cancel_action,
             "pending_price_interrupt_needs_diameter": (
@@ -502,6 +527,19 @@ class CallSession:
                 "Call %s: fsm_brand_type_fallback has unexpected type %s — ignoring",
                 data.get("channel_uuid"),
                 type(brand_fallback).__name__,
+            )
+        inferred = data.get("fsm_inferred_fields") or []
+        if isinstance(inferred, list):
+            session.fsm_inferred_fields = [f for f in inferred if isinstance(f, str)]
+        else:
+            # Losing this list is not neutral in either direction, so it is
+            # logged like the counters above rather than defaulted quietly: the
+            # field it names stays filled either way, and dropping the mark just
+            # makes an inferred value permanent again — the `bd95036c` shape.
+            logger.warning(
+                "Call %s: fsm_inferred_fields has unexpected type %s — ignoring",
+                data.get("channel_uuid"),
+                type(inferred).__name__,
             )
         # --- Side-door interrupt state (Wave 3-B) ---
         # A malformed value here must never silently become an empty default:

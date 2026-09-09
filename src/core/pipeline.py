@@ -1159,6 +1159,13 @@ class CallPipeline:
                 # still locked out of it.
                 if targeted.status == "value" and parser.field_name:
                     self._session.fsm_filled_fields[parser.field_name] = targeted.value
+                    # This pass already assigns rather than `setdefault`s, so it
+                    # overwrites an inferred value on its own. Dropping the mark
+                    # is what stops the broad pass from overwriting it *again*
+                    # on some later turn — which would be the back door onto
+                    # `claimed` the mark must not become.
+                    if parser.field_name in self._session.fsm_inferred_fields:
+                        self._session.fsm_inferred_fields.remove(parser.field_name)
 
             # The targeted parser *claims* its state's own field for this turn,
             # whatever it answered. A `unresolved`/`not_mentioned` on the field
@@ -1310,6 +1317,32 @@ class CallPipeline:
                     continue
                 if self._session.fsm_filled_fields.get(name) in (None, ""):
                     broad_filled.append(name)
+                elif name in self._session.fsm_inferred_fields:
+                    # The only place in this seam where the broad pass overwrites
+                    # a filled slot, and it is not an exception to the rule above
+                    # — it is the rule applied to a value the caller never said.
+                    # `fsm_inferred_fields` is written by exactly one rule (the
+                    # unanimous-snapshot city) and never by a parser, so a
+                    # targeted refusal can never appear here and `claimed` stays
+                    # the only thing standing between this pass and `c8c6601`.
+                    #
+                    # Without this, the snapshot's guess is permanent: it lands
+                    # on the diameter answer, the machine leaves CITY, and the
+                    # caller asking for Черкаси four times is never recorded
+                    # because `setdefault` finds the slot taken and the targeted
+                    # `city_parser` never runs again.
+                    self._session.fsm_inferred_fields.remove(name)
+                    if self._session.fsm_filled_fields.get(name) != value:
+                        logger.info(
+                            "fsm_inferred_field_revoked call=%s state=%s field=%s inferred=%s",
+                            self._session.channel_uuid,
+                            state_before.value,
+                            name,
+                            self._session.fsm_filled_fields.get(name),
+                            extra={"call_id": str(self._session.channel_uuid)},
+                        )
+                    self._session.fsm_filled_fields[name] = value
+                    continue
                 self._session.fsm_filled_fields.setdefault(name, value)
             self._emit_preparse_metric(mapped)
 
@@ -1348,6 +1381,14 @@ class CallPipeline:
                 # stored value either way and so cannot tell a first write from
                 # a no-op.
                 self._session.fsm_filled_fields.setdefault("city", snapshot_city)
+                # Held revocably. Measured over the 42-call corpus this rule
+                # fires on the *diameter* answer every single time — the first
+                # turn after `get_fitting_stations` filled the catalog — so it
+                # routinely takes the slot turns before the caller says anything
+                # about a city. Marking it lets the broad pass hand the slot
+                # back when they finally do.
+                if "city" not in self._session.fsm_inferred_fields:
+                    self._session.fsm_inferred_fields.append("city")
                 logger.info(
                     "fsm_city_from_snapshot call=%s state=%s city=%s offered=%d",
                     self._session.channel_uuid,
