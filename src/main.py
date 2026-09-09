@@ -1871,6 +1871,12 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 }
 
         booking_date_str = resolve_tool_date(kwargs.get("date", ""))
+        # Everything below validates `booking_date_str`, but 1С is called with
+        # `kwargs["date"]`. Without this write-back a value the parser had to
+        # normalise («завтра», «10.09») would be validated in one form and sent
+        # in another.
+        if booking_date_str:
+            kwargs["date"] = booking_date_str
 
         # Anti-hallucination guard #1 (highest priority): date/time must come
         # from the last get_fitting_slots response. Runs BEFORE the today/max
@@ -1881,6 +1887,18 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         # the one the client already chose (call ca317ad1, 2026-07-23).
         if session.fitting_slots_offered:
             offered_dates = {s["date"] for s in session.fitting_slots_offered}
+            from src.agent.regression_guards import effective_booking_date
+
+            adopted_date = effective_booking_date(booking_date_str, offered_dates)
+            if adopted_date != booking_date_str:
+                logger.warning(
+                    "book_fitting: empty date for call %s — adopting the only "
+                    "offered date %s",
+                    session.channel_uuid,
+                    adopted_date,
+                )
+                booking_date_str = adopted_date
+                kwargs["date"] = adopted_date
             offered_times_for_date = {
                 s["time"]
                 for s in session.fitting_slots_offered

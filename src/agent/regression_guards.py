@@ -8,11 +8,42 @@ Pattern history:
 - Wave 7: Krok 3/4 book_fitting date/time confabulation guard (inline in main)
 - Wave 9: Krok 1 regression guard when LLM calls get_fitting_stations after
   station is already pinned + Krok 2+ signals present (this module)
+- Wave 17: an empty book_fitting `date` slipped past every date check (this
+  module)
 """
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Collection
+
+
+def effective_booking_date(resolved_date: str, offered_dates: Collection[str]) -> str:
+    """Pick the date ``book_fitting`` should actually use.
+
+    ``resolve_tool_date("")`` returns ``""`` and every date check in
+    ``main.py`` is written ``if booking_date_str and …`` — so an empty ``date``
+    skipped the offered-slots check, the offered-time check, the
+    ``selected_fitting_*`` pin and the today/+21 bound, and reached 1С
+    unvalidated. Call ``97ddfd87`` (2026-09-08) sent exactly that.
+
+    ``get_fitting_slots`` rebuilds ``fitting_slots_offered`` from a single
+    ``date_from``, so while slots exist there is exactly one date the client
+    can mean: adopt it. Adopting rather than bouncing an error back to the LLM
+    is deliberate — a corrective message here would be a short-circuiting
+    guard with no loop-breaker, the Wave 13 PRICE-handler shape.
+
+    Returns ``""`` when there is nothing unambiguous to adopt, which leaves the
+    caller's existing guards to refuse the booking.
+    """
+    if resolved_date:
+        return resolved_date
+    unique = set(offered_dates)
+    if len(unique) == 1:
+        return next(iter(unique))
+    return ""
 
 
 def check_krok1_regression(
