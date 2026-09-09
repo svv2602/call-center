@@ -1214,6 +1214,12 @@ class CallPipeline:
                 customer_text=transcript.text,
                 now=ctx.now,
             )
+            # Which fields this turn moved from empty to filled. Emptiness is
+            # read *before* the write, exactly as the passive pass does
+            # (`registry.py:83`): `setdefault` returns the stored value either
+            # way, so it cannot tell a first write from a no-op, and that
+            # distinction is the whole loop-breaker below.
+            broad_filled: list[str] = []
             for name, value in mapped.items():
                 if name == claimed:
                     logger.debug(
@@ -1224,6 +1230,8 @@ class CallPipeline:
                         targeted.status if targeted else None,
                     )
                     continue
+                if self._session.fsm_filled_fields.get(name) in (None, ""):
+                    broad_filled.append(name)
                 self._session.fsm_filled_fields.setdefault(name, value)
             self._emit_preparse_metric(mapped)
 
@@ -1287,6 +1295,43 @@ class CallPipeline:
                             state_before.value,
                             own_field,
                             sorted(passive_filled),
+                            extra={"call_id": str(self._session.channel_uuid)},
+                        )
+                    elif broad_filled:
+                        # The caller answered a question — just not this state's
+                        # one. Measured across all four class-D calls of the
+                        # 16-call corpus, every such answer named a field
+                        # *below* the current state in MAIN_FLOW: the bot had
+                        # run ahead (on `b394f6c1` it merged the storage and
+                        # colour questions into one utterance), the caller
+                        # followed the bot, and the FSM charged the answer to
+                        # the question it was still asking. Four calls reached
+                        # an operator that way.
+                        #
+                        # The value itself was never lost — the broad pass above
+                        # stored it and `auto_skip_if=_filled` skips that state
+                        # later. Only the charge was wrong, which is why this is
+                        # one branch and not a new state.
+                        #
+                        # Bounded structurally, like the passive exemption: only
+                        # a field going empty → filled counts, and a field can
+                        # do that once per call. So a caller repeating an answer
+                        # the FSM already holds is charged from the second turn
+                        # on — «белый», «oler белый», «колер белый» on
+                        # `b394f6c1` excuses the first and charges the other
+                        # two. A cap someone has to remember to lower would not
+                        # survive (`feedback_guard_needs_loop_breaker`).
+                        #
+                        # Its own log line, not the passive one: the two
+                        # exemptions answer different questions in prod, and
+                        # merging them would hide whichever is regressing.
+                        logger.info(
+                            "fsm_parser_null_answered_elsewhere call=%s state=%s "
+                            "field=%s answered=%s",
+                            self._session.channel_uuid,
+                            state_before.value,
+                            own_field,
+                            sorted(broad_filled),
                             extra={"call_id": str(self._session.channel_uuid)},
                         )
                     else:

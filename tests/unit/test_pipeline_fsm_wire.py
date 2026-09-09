@@ -1911,6 +1911,146 @@ class TestPassivePassStructure:
 
 
 # ---------------------------------------------------------------------------
+# Wave 6-F — an answer to another question is not a failed answer
+# ---------------------------------------------------------------------------
+
+
+class TestAnsweredElsewhereExemption:
+    """Class D: the bot ran ahead, and the FSM charged the caller for it.
+
+    On all four class-D calls of the 16-call corpus the caller named a field
+    *below* the current state in MAIN_FLOW — `b394f6c1` answered the colour
+    while the FSM waited on a date, because one bot utterance had merged the
+    storage and colour questions. Four calls reached an operator that way.
+
+    The value was never lost: the broad pass stores it and `auto_skip_if`
+    skips that state later. Only the charge was wrong.
+    """
+
+    def _in_date(self) -> Harness:
+        h = Harness(booking_in_progress(FsmState.DATE))
+        h.session.fsm_filled_fields["city"] = "Дніпро"
+        h.session.fsm_filled_fields["station_id"] = "ST-1"
+        h.session.fsm_filled_fields["storage_choice"] = "own"
+        return h
+
+    async def test_the_colour_answer_is_not_charged_to_the_date(self) -> None:
+        h = self._in_date()
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("белый")
+
+        assert h.session.fsm_filled_fields.get("color") == "білий"
+        assert h.session.fsm_parser_null_counts.get("DATE", 0) == 0
+
+    async def test_repeating_an_answer_the_fsm_already_holds_is_charged(self) -> None:
+        """The loop-breaker, and the exact turn sequence of `b394f6c1`.
+
+        Only a field going empty → filled excuses a turn, and a field can do
+        that once per call. So the first «белый» is free and the two restatements
+        the caller made when the bot kept re-asking are charged normally — the
+        bound is `setdefault`, not a constant someone must remember to lower.
+        """
+        h = self._in_date()
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("белый", "oler белый", "колер белый")
+
+        assert h.session.fsm_parser_null_counts.get("DATE", 0) == 2
+
+    async def test_a_turn_that_answers_nothing_is_still_charged(self) -> None:
+        h = self._in_date()
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("Алло")
+
+        assert h.session.fsm_parser_null_counts.get("DATE", 0) == 1
+
+    async def test_the_states_own_field_cannot_excuse_itself(self) -> None:
+        """`claimed` already locks the broad pass out of `own_field`.
+
+        Were it not locked, a targeted parser's deliberate refusal («they spoke
+        about a date and named none») could be laundered into an exemption by
+        the very sweep that is forbidden to overwrite it — `c8c6601` arriving
+        through the back door, this time as a free turn instead of a value.
+        """
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("не знаю навіть")
+
+        assert h.session.fsm_filled_fields.get("city") in (None, "")
+        assert h.session.fsm_parser_null_counts.get("CITY", 0) == 1
+
+    async def test_the_exemption_does_not_move_the_machine(self) -> None:
+        """Excusing changes the counter and nothing else.
+
+        `apply_field` is still called at most once, for the current state's own
+        field. A colour answered in DATE must not hop the FSM to TIME.
+        """
+        h = self._in_date()
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("белый")
+
+        assert h.session.fsm_state == FsmState.DATE.value
+        assert ("DATE", "TIME") not in fsm_hops(h.session)
+
+    async def test_live_mode_excuses_it_too(self) -> None:
+        """The exemption is about what the turn *was*, not about the mode.
+
+        Shadow is the observer, live is the one that escalates — a rule that
+        held in only one of them would mean the shadow numbers do not describe
+        the thing that would ship.
+        """
+        h = self._in_date()
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("белый")
+
+        assert h.session.fsm_parser_null_counts.get("DATE", 0) == 0
+        assert h.session.fsm_state == FsmState.DATE.value
+
+    async def test_an_interrupt_still_wins_over_this_branch(self) -> None:
+        """Order in the ladder: interrupt first, then passive, then this.
+
+        The text has to be *both* to test anything. A bare «скільки коштує
+        монтаж» maps no field at all, so it takes the interrupt branch whatever
+        order the ladder is in — an earlier version of this test asserted
+        nothing and passed under the mutation it was written to catch.
+
+        Interrupts have their own capped budget, which escalates to a human
+        rather than defaulting a field. A turn booked as an answer instead
+        would stop spending it, and a caller circling one state with price
+        questions would never reach anyone.
+        """
+        h = self._in_date()
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("скільки коштує монтаж на білому")
+
+        assert h.session.fsm_interrupt_turn_counts.get("DATE", 0) == 1
+        assert h.session.fsm_parser_null_counts.get("DATE", 0) == 0
+
+    async def test_the_log_line_names_the_field_and_not_its_value(self, caplog) -> None:
+        """`name` cannot reach `mapped`, but the logger must not rely on that.
+
+        `COMPOUND_TO_FSM_FIELD` omits `name` on purpose; that is a property of
+        a table one edit away from changing, not a property of this log line.
+        """
+        h = self._in_date()
+
+        with caplog.at_level(logging.INFO), fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("белый")
+
+        lines = [r.getMessage() for r in caplog.records if "answered_elsewhere" in r.getMessage()]
+        assert lines, "the exemption must be visible in prod logs"
+        assert "color" in lines[0]
+        assert "білий" not in lines[0]
+
+
+# ---------------------------------------------------------------------------
 # Wave 6-C — STATION stops being a dead end
 # ---------------------------------------------------------------------------
 
