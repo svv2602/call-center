@@ -135,10 +135,24 @@ class TestPeremohyIsNeverCertain:
         assert PARSER.parse(ctx("вулиця Перемоги")).value == "Перемоги"
 
     def test_city_agnostic_landmarks_carry_no_city(self) -> None:
+        """«Перемоги» belongs in this set, and used not to be in it.
+
+        This class already knew the landmark was ambivalent — it just enforced
+        it one layer too high, on the confidence of the *station*, while
+        `_LANDMARKS` went on pinning `city="Запоріжжя"` at 0.9 against a
+        threshold of 0.7. On b394f6c1 that pin outlived the caller's explicit
+        «Днепро» four turns later, because filled fields are written with
+        `setdefault` (`pipeline.py:1227`).
+
+        Labels, not stems: «Перемоги» has two stem rows («перемог», «перемоз»)
+        and both must stay city-less. The set is spelled out so a new ambivalent
+        landmark cannot appear — nor an existing one quietly regain a city —
+        without this test saying so.
+        """
         from src.agent.compound_parse import _LANDMARKS
 
         agnostic = {label for _stem, label, city in _LANDMARKS if city is None}
-        assert agnostic == {"Лівий берег", "Правий берег", "Автовокзал"}
+        assert agnostic == {"Лівий берег", "Правий берег", "Автовокзал", "Перемоги"}
 
 
 class TestNotMentioned:

@@ -175,6 +175,66 @@ class TestSTTGarbage:
         assert result.fields["station_hint"] == "Лукʼяненка"
         assert result.fields["city"] == "Київ"
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "на перемозі",
+            "на перемогу",
+            "перемога",
+            "запишіть мене на монтаж на перемозі",
+        ],
+    )
+    def test_bare_peremohy_names_a_landmark_but_no_city(self, text):
+        # «Перемоги» is a street in Запоріжжя and a residential district in
+        # Дніпро; the bare word decides neither, and `prompts.py:460` orders the
+        # bot to ask. It used to pin Запоріжжя at 0.9 — above APPLY_THRESHOLD —
+        # so on b394f6c1 the caller's later explicit «Днепро» lost to a guess
+        # made three turns earlier, because filled fields are written with
+        # `setdefault` (pipeline.py:1227) and the first pin is permanent.
+        result = parse(text)
+        assert "city" not in result.fields
+        assert result.fields["station_hint"] == "Перемоги"
+
+    @pytest.mark.parametrize(
+        "text",
+        ["шосе перемозі", "на набережній Перемоги", "вулиця Перемоги", "шоста Перемога"],
+    )
+    def test_a_qualified_form_is_left_unresolved_for_now(self, text):
+        # Known gap, deliberately not closed here. `prompts.py:491-492` reads
+        # «Перемоги» three ways, not two: the bare word is ambivalent, but
+        # «шосе/вулиця/проспект/набережна Перемоги» means Запоріжжя (regression
+        # 2026-08-05) and «Победа-N»/«шоста Перемога» means Дніпро. The table
+        # never encoded the distinction — every form matched the one stem — so
+        # before this change all three resolved to Запоріжжя and two of them
+        # were simply wrong. Dropping the city makes the bot ask, which is
+        # right for the first case and no worse than a confident wrong answer
+        # for the other two; encoding the qualifiers needs the landmark table
+        # matched against the real station catalog, which is phase 02's task
+        # 2.1. This test exists so that work cannot silently skip them.
+        result = parse(text)
+        assert "city" not in result.fields
+        assert result.fields["station_hint"] == "Перемоги"
+
+    def test_a_qualifier_removes_the_ambivalence(self):
+        # Negative test against over-widening the fix: «ЖМ Перемога» is its own
+        # entry and names Дніпро unambiguously. Patterns are ordered
+        # longest-stem-first, so «жм перемог» is consulted before «перемог» —
+        # dropping the city from the bare stem must not reach this one.
+        result = parse("жм перемога")
+        assert result.fields["city"] == "Дніпро"
+        assert result.fields["station_hint"] == "ЖМ Перемога"
+
+    @pytest.mark.parametrize(
+        "text, expected_city",
+        [("в Дніпрі на перемозі", "Дніпро"), ("в Запоріжжі на перемозі", "Запоріжжя")],
+    )
+    def test_an_explicitly_named_city_still_wins_over_the_landmark(self, text, expected_city):
+        # The landmark no longer supplies a city, but it must not *block* one
+        # either: the caller who says both is answered, in whichever direction.
+        result = parse(text)
+        assert result.fields["city"] == expected_city
+        assert result.fields["station_hint"] == "Перемоги"
+
     def test_mangled_city_stays_below_apply_threshold(self):
         # «запорище» / «затурища» / «за Париже» — the distortions of Запоріжжя
         # that had the bot insisting on Дніпро four turns running (2026-07-31).

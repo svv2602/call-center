@@ -282,11 +282,28 @@ _LANDMARKS: tuple[tuple[str, str, str | None], ...] = (
     ("тополь", "Тополь", "Дніпро"),
     ("караван", "Караван", "Дніпро"),
     ("дніпрошин", "Дніпрошина", "Дніпро"),
-    # --- Запоріжжя ---
-    # «шосе/вулиця/проспект/набережна Перемоги» → Запоріжжя, вул. Перемоги 72Б
-    # (prompts.py; regression 2026-08-05). Checked after «жм перемог».
-    ("перемог", "Перемоги", "Запоріжжя"),
-    ("перемоз", "Перемоги", "Запоріжжя"),
+    # --- Ambivalent: a landmark that exists in more than one city ---
+    # «Перемоги» is a street in Запоріжжя AND a whole residential district in
+    # Дніпро, and the bare word decides neither. `prompts.py:460` already says
+    # so and orders the bot to ASK — three prod regressions (32c14b01,
+    # 9c82ce3d, c3c54280) paid for that rule. Pinning Запоріжжя here at 0.9,
+    # over a threshold of 0.7, contradicted it: on b394f6c1 the caller went on
+    # to say «Днепро» explicitly and lost, because the FSM writes filled fields
+    # with `setdefault` (pipeline.py:1227) and the first pin is permanent.
+    # The label is kept — it is still the search key for
+    # `get_fitting_stations(query=…)`; only the unfounded city is dropped.
+    # «жм перемог» above keeps Дніпро and still wins, because patterns are
+    # ordered longest-stem-first: a qualifier removes the ambivalence.
+    #
+    # The prompt reads this landmark three ways, and only the third is settled
+    # here: «шосе/вулиця/проспект/набережна Перемоги» is Запоріжжя
+    # (`prompts.py:491`, regression 2026-08-05), «Победа-N»/«шоста Перемога» is
+    # Дніпро (`:492`), and the bare word is ambivalent (`:493`). No stem row
+    # ever encoded the qualifiers, so all three used to collapse onto Запоріжжя
+    # and two of them were wrong. They now ask instead. Encoding them needs the
+    # whole table matched against the station catalog — see phase 02.
+    ("перемог", "Перемоги", None),
+    ("перемоз", "Перемоги", None),
     # --- City-agnostic districts (present in more than one city) ---
     ("лівий берег", "Лівий берег", None),
     ("правий берег", "Правий берег", None),

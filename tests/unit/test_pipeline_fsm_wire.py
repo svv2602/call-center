@@ -1608,6 +1608,23 @@ class TestPassivePass:
 
         assert h.session.fsm_parser_null_counts.get("CITY", 0) == 1
 
+    async def test_a_bare_ambivalent_landmark_does_not_pin_a_city(self) -> None:
+        """b394f6c1, turn 1 — the first half of the chain that killed the call.
+
+        The caller named «перемозі» and nothing else. That landmark exists in
+        two cities, so the seam must leave `city` empty and let the bot ask.
+        It used to write Запоріжжя at 0.9 (over the 0.7 threshold), and because
+        filled fields are written with `setdefault` the caller's explicit
+        «Днепро» four turns later could never overwrite it.
+        """
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("запишіть мене на монтаж на перемозі")
+
+        assert "city" not in h.session.fsm_filled_fields
+
     async def test_the_diameter_is_captured_from_the_main_flow(self) -> None:
         """`diameter_parser` is state-bound *and* passive.
 
