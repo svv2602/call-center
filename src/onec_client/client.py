@@ -589,6 +589,30 @@ def _to_1c_time(value: str) -> str:
     return f"0001-01-01T{value}"
 
 
+def from_1c_date(value: str) -> str:
+    """Inverse of `_to_datetime`: ``2026-09-14T00:00:00`` → ``2026-09-14``.
+
+    1C answers with the dateTime form even for a plain date, and until this
+    existed the value went to the agent untouched — which is how the bot came
+    to read it out loud: on 2026-09-10 both cancellation calls said «У вас
+    запис на 2026-09-14T00:00:00».
+    """
+    return value.split("T", 1)[0] if value else value
+
+
+def from_1c_time(value: str) -> str:
+    """Inverse of `_to_1c_time`: ``0001-01-01T09:00:00`` → ``09:00``.
+
+    The year is 1C's placeholder for a time-only field, so it must not survive
+    into anything the caller can hear.
+    """
+    if not value:
+        return value
+    clock = value.split("T", 1)[1] if "T" in value else value
+    parts = clock.split(":")
+    return ":".join(parts[:2]) if len(parts) >= 2 else clock
+
+
 def _normalize_phone_plus(phone: str) -> str:
     """Normalize phone to +380XXXXXXXXX format for 1C REST API.
 

@@ -101,7 +101,7 @@ from src.monitoring.metrics import (
     orders_created_total,
     tenant_resolution_fallback_total,
 )
-from src.onec_client.client import OneCClient
+from src.onec_client.client import OneCClient, from_1c_date, from_1c_time
 from src.store_client.client import StoreClient
 from src.stt.base import STTConfig
 from src.stt.google_stt import GoogleSTTEngine
@@ -3325,8 +3325,8 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     entry: dict[str, Any] = {
                         "booking_id": b.get("GUID", ""),
                         "station_id": sid,
-                        "date": b.get("Data", ""),
-                        "time": b.get("Time", ""),
+                        "date": from_1c_date(b.get("Data", "")),
+                        "time": from_1c_time(b.get("Time", "")),
                         "period": b.get("Period", ""),
                         "person": b.get("Customer", ""),
                         "auto_number": b.get("AutoNumber", ""),

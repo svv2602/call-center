@@ -519,6 +519,47 @@ class TestOneCClientHelpers:
 
         assert _to_1c_time("0001-01-01T09:00:00") == "0001-01-01T09:00:00"
 
+    def test_from_1c_date_strips_the_zero_clock(self) -> None:
+        from src.onec_client.client import from_1c_date
+
+        assert from_1c_date("2026-09-14T00:00:00") == "2026-09-14"
+
+    def test_from_1c_time_strips_the_year_one_placeholder(self) -> None:
+        from src.onec_client.client import from_1c_time
+
+        assert from_1c_time("0001-01-01T09:00:00") == "09:00"
+
+    @pytest.mark.parametrize("raw", ["2026-09-14", "09:00", ""])
+    def test_the_inverses_leave_an_already_clean_value_alone(self, raw: str) -> None:
+        """`get_customer_bookings` runs these over whatever 1C returned.
+
+        1C is not consistent about which form it answers with, so a value that
+        already looks human must come back byte-identical rather than lose a
+        field to a second pass.
+        """
+        from src.onec_client.client import from_1c_date, from_1c_time
+
+        assert from_1c_date(raw) == raw
+        assert from_1c_time(raw) == raw
+
+    def test_the_pair_round_trips_with_the_writers(self) -> None:
+        """These exist only to undo `_to_datetime`/`_to_1c_time`.
+
+        Pinning the round-trip means a change to either side that is not matched
+        on the other fails here instead of in the caller's ear — the bot read
+        «У вас запис на 2026-09-14T00:00:00» out loud on 2026-09-10 because the
+        inverse did not exist at all.
+        """
+        from src.onec_client.client import (
+            _to_1c_time,
+            _to_datetime,
+            from_1c_date,
+            from_1c_time,
+        )
+
+        assert from_1c_date(_to_datetime("2026-09-14")) == "2026-09-14"
+        assert from_1c_time(_to_1c_time("09:00")) == "09:00"
+
     def test_build_comment_all_fields(self) -> None:
         from src.onec_client.client import _build_comment
 
