@@ -1155,7 +1155,7 @@ class CallPipeline:
         """
         try:
             from src.agent.compound_parse import compound_parse
-            from src.agent.fitting_fsm import STATES, FsmEngine
+            from src.agent.fitting_fsm import STATES, FsmEngine, bot_is_asking
             from src.agent.interrupts import classify_interrupt_text
             from src.agent.parsers.base import ParseContext
             from src.agent.parsers.registry import PASSIVE_PARSERS, get_parser
@@ -1657,6 +1657,46 @@ class CallPipeline:
                             self._session.channel_uuid,
                             state_before.value,
                             own_field,
+                            extra={"call_id": str(self._session.channel_uuid)},
+                        )
+                    elif not bot_is_asking(state_before, ctx.last_bot_utterance):
+                        # The broadest of the four exemptions, and last on
+                        # purpose: the three above name a specific thing the
+                        # caller did instead (opened an interrupt, filled a
+                        # passive field, confirmed something), and each has a
+                        # log line prod is read by. Putting this one first
+                        # would swallow all three and hide which is regressing.
+                        #
+                        # `max_parser_null` counts «asked and not answered».
+                        # Whenever the bot's last turn was not this state's
+                        # question, the turn carries no evidence about the
+                        # caller at all, so there is nothing to charge. Of the
+                        # five transfers on 2026-09-10 after `fc05992`, four
+                        # are exactly this: `bba035ff` rescheduling while the
+                        # FSM held CITY, `39469f9f` and `380a280d` on price
+                        # questions while it held STATION, `30dd42fa`
+                        # dictating a phone for `find_storage` while it held
+                        # DATE. Every one of those callers answered the
+                        # question they were actually asked.
+                        #
+                        # Unbounded, unlike the three above, and that is the
+                        # deliberate part. A bound exists to keep a *stuck
+                        # caller* from circling forever, and this exemption
+                        # cannot hide one: the moment the bot does ask this
+                        # state's question, `bot_is_asking` is true and the
+                        # budget runs exactly as before. What goes unbounded
+                        # is the case where the LLM never comes back to the
+                        # question — a stuck *bot*, which the FSM cannot
+                        # diagnose and whose transfer would be no better
+                        # informed than the LLM's own `transfer_to_operator`.
+                        # That path, the silence timeout and the call duration
+                        # cap all remain.
+                        logger.info(
+                            "fsm_parser_null_off_question call=%s state=%s field=%s bot=%r",
+                            self._session.channel_uuid,
+                            state_before.value,
+                            own_field,
+                            (ctx.last_bot_utterance or "")[:100],
                             extra={"call_id": str(self._session.channel_uuid)},
                         )
                     else:

@@ -1436,6 +1436,10 @@ class TestShadowStaysOffline:
         """
         h = Harness(booking_in_progress(FsmState.CITY))
         h.session.fsm_filled_fields.pop("city", None)
+        # Four charges need four city questions. A bot that asks once and then
+        # talks about something else is a bot that is no longer asking, and
+        # from the off-question exemption the budget correctly stops at one.
+        bot_keeps_asking(h, "То в якому місті вам зручніше?")
 
         with fsm_flags(enabled=True, shadow_mode=True):
             await h.run("ага", "угу", "ну", "добре")
@@ -1539,6 +1543,15 @@ def booking_in_progress(
     every turn into a city answer and hides what the test is actually asserting.
 
     Tests that mean to exercise the snapshot pass `stations=ONE_CITY_SNAPSHOT`.
+
+    The state's own question is seeded as the last thing the bot said, because
+    that is the only way a live call is ever parked in a state: the machine is
+    in CITY *because* it asked for a city. An empty dialog history here was an
+    artefact, and from the off-question exemption it became a load-bearing one
+    — `bot_is_asking` reads the last assistant turn, and with none to read
+    every «this turn is still charged» test below was asserting the exemption
+    rather than the charge. Tests that need a different question on screen
+    call `add_assistant_turn` themselves, which lands after this one.
     """
     session = CallSession(uuid.uuid4())
     session.caller_phone = "+380671234567"
@@ -1546,7 +1559,78 @@ def booking_in_progress(
     session.fitting_stations_seen = list(stations) if stations else []
     session.fsm_state = state.value
     session.fsm_filled_fields["intent"] = "fitting"
+    question = STATES[state].question_template
+    if question:
+        session.add_assistant_turn(question)
     return session
+
+
+def bot_keeps_asking(h: Harness, question: str) -> None:
+    """Make every LLM reply be the same question again.
+
+    The default harness reply is neutral prose, so from turn two on
+    `last_bot_utterance` is no longer the state's question and every exemption
+    that reads it — the confirmation one, the off-question one — fires for a
+    reason the test did not intend. That would make a budget test pass, or
+    fail, for the wrong reason.
+
+    It is also the real shape. A charge makes the FSM re-ask, and
+    `_maybe_speak_fsm_question` refuses to say the same sentence twice in a
+    row (`outcome="repeat"`, the `c8c6601` symptom), so the LLM rephrases the
+    same question instead — which is precisely what `question_markers` are
+    built to recognise. `fe1857ba` asked «Записуємо туди?» three times.
+    """
+
+    async def _run_turn(**kwargs: Any) -> TurnResult:
+        h.llm_turns.append(kwargs.get("user_text", ""))
+        h.llm_kwargs.append(kwargs)
+        return TurnResult(
+            spoken_text=question,
+            tool_calls_made=0,
+            stop_reason="end_turn",
+            total_usage=Usage(10, 5),
+        )
+
+    h.streaming_loop.run_turn = _run_turn
+
+
+def bot_says(h: Harness, *replies: str) -> None:
+    """Script the bot's side of the dialogue, one reply per turn.
+
+    `bot_keeps_asking` covers the case where the bot repeats itself; a replay of
+    a real call needs the bot to say a *different* thing each turn, because what
+    the caller is answering changes underneath a motionless FSM. That is the
+    whole shape of the four transfers below.
+
+    Replies run out silently and the last one repeats, so a caller turn with no
+    bot line after it does not need a filler.
+    """
+
+    async def _run_turn(**kwargs: Any) -> TurnResult:
+        h.llm_turns.append(kwargs.get("user_text", ""))
+        h.llm_kwargs.append(kwargs)
+        index = min(len(h.llm_turns) - 1, len(replies) - 1)
+        return TurnResult(
+            spoken_text=replies[index] if replies else LLM_REPLY,
+            tool_calls_made=0,
+            stop_reason="end_turn",
+            total_usage=Usage(10, 5),
+        )
+
+    h.streaming_loop.run_turn = _run_turn
+
+
+def replay(state: FsmState, turns: list[tuple[str, str]]) -> Harness:
+    """Build a harness that replays `(bot said, caller said)` pairs in `state`.
+
+    The bot line of pair N is what is on screen when caller line N arrives, so
+    the first one is seeded into the history and the rest are handed to the LLM
+    mock as the reply it produces *after* the preceding caller turn.
+    """
+    h = Harness(booking_in_progress(state))
+    h.session.add_assistant_turn(turns[0][0])
+    bot_says(h, *[bot for bot, _ in turns[1:]])
+    return h
 
 
 def fsm_hops(session: CallSession) -> list[tuple[str | None, str]]:
@@ -1906,31 +1990,57 @@ class TestPassivePass:
 
         assert h.session.fsm_parser_null_counts.get("CITY", 0) == 0
 
-    async def test_the_exemption_cannot_be_spent_twice(self) -> None:
+    async def test_the_passive_fill_happens_once_and_does_not_overwrite(self) -> None:
         """The loop-breaker is structural, not a cap to remember.
 
-        A passive parser runs only while its field is empty, so `name` can
-        excuse exactly one turn. The next unparsable turn is charged normally.
+        A passive parser runs only while its field is empty, so `name` can be
+        written once and a later turn cannot move it.
+
+        This used to assert the *charge* bound — «the second turn costs one» —
+        and that reading is no longer reachable. `name_parser` is gated on the
+        bot having asked for a name (`is_name_question`), and a turn where the
+        bot asked for a name is off-question for CITY, so the off-question
+        branch takes it before the passive bound can matter. The passive
+        exemption's own cap is therefore dead code for `name` today; what is
+        still live, and still worth holding, is that the fill is one-shot.
         """
         h = Harness(booking_in_progress(FsmState.CITY))
         h.session.fsm_filled_fields.pop("city", None)
+        bot_keeps_asking(h, NAME_QUESTION)
         h.session.add_assistant_turn(NAME_QUESTION)
 
         with fsm_flags(enabled=True, shadow_mode=True):
-            await h.run("Юра", "ага")
+            await h.run("Юра", "Оксана")
 
         assert h.session.fsm_filled_fields.get("name") == "Юра"
-        assert h.session.fsm_parser_null_counts.get("CITY", 0) == 1
 
     async def test_a_turn_with_no_passive_fill_is_still_charged(self) -> None:
         h = Harness(booking_in_progress(FsmState.CITY))
         h.session.fsm_filled_fields.pop("city", None)
-        h.session.add_assistant_turn(NAME_QUESTION)
 
         with fsm_flags(enabled=True, shadow_mode=True):
             await h.run("ага")
 
         assert h.session.fsm_parser_null_counts.get("CITY", 0) == 1
+
+    async def test_the_name_question_is_excused_by_the_off_question_branch(self) -> None:
+        """What the passive exemption used to be the only cover for.
+
+        The 8 write-offs this class was written for came from the bot asking
+        «Як до вас звертатися?» with the FSM parked in CITY. The passive pass
+        excused the turn where the caller gave a name; it could do nothing
+        about the turn where they said «ага». Both are off-question now, and
+        neither costs CITY anything — the caller was never asked for a city.
+        """
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.fsm_filled_fields.pop("city", None)
+        bot_keeps_asking(h, NAME_QUESTION)
+        h.session.add_assistant_turn(NAME_QUESTION)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("Юра", "ага")
+
+        assert h.session.fsm_parser_null_counts.get("CITY", 0) == 0
 
     async def test_a_bare_ambivalent_landmark_does_not_pin_a_city(self) -> None:
         """b394f6c1, turn 1 — the first half of the chain that killed the call.
@@ -2276,6 +2386,7 @@ class TestAnsweredElsewhereExemption:
         bound is `setdefault`, not a constant someone must remember to lower.
         """
         h = self._in_date()
+        bot_keeps_asking(h, "На яку дату записуємо?")
 
         with fsm_flags(enabled=True, shadow_mode=True):
             await h.run("белый", "oler белый", "колер белый")
@@ -2404,27 +2515,7 @@ class TestConfirmedElsewhereExemption:
         h.session.add_assistant_turn(question)
         return h
 
-    @staticmethod
-    def _bot_keeps_asking(h: Harness, question: str) -> None:
-        """Make every LLM reply be the same question again.
-
-        The default harness reply is neutral prose, so on turn two
-        `last_bot_utterance` would no longer be a yes/no question and the turn
-        would be charged whatever the loop-breaker does. That would make the
-        cap test below pass for the wrong reason. A bot that keeps re-asking is
-        also the real shape: `fe1857ba` asked «Записуємо туди?» three times.
-        """
-
-        async def _run_turn(**kwargs: Any) -> TurnResult:
-            h.llm_turns.append(kwargs.get("user_text", ""))
-            return TurnResult(
-                spoken_text=question,
-                tool_calls_made=0,
-                stop_reason="end_turn",
-                total_usage=Usage(10, 5),
-            )
-
-        h.streaming_loop.run_turn = _run_turn
+    _bot_keeps_asking = staticmethod(bot_keeps_asking)
 
     async def test_agreeing_to_another_steps_question_is_not_charged(self) -> None:
         h = self._in_station()
@@ -2450,26 +2541,36 @@ class TestConfirmedElsewhereExemption:
         assert h.session.fsm_parser_null_counts.get("STATION", 0) == 1
         assert h.session.fsm_confirmation_excused_states == []
 
-    async def test_a_yes_to_a_two_option_question_keeps_costing(self) -> None:
-        """`fe1857ba` said «так» twice and only the first deserves forgiving.
+    async def test_a_yes_to_a_two_option_question_is_off_question_not_confirmed(self) -> None:
+        """`fe1857ba` said «так» to a question STATION never asked.
 
-        The second answered «Шини привозите свої з собою чи ті, що у нас на
-        зберіганні?», where «так» picks neither option and really is a failed
-        answer.
-
-        What refuses it is the allow-list being an allow-list, not the « чи »
-        veto: measured, not assumed — removing the veto leaves this test green
-        (mutation M6) because the storage question carries no marker to begin
-        with. The veto covers the other case, where the LLM rephrases a *listed*
-        question into a choice, and `test_the_choice_veto_outranks_the_marker`
+        The bot had run ahead to «Шини привозите свої з собою чи ті, що у нас на
+        зберіганні?» while the machine still stood in STATION. «так» picks
+        neither option, so the confirmation exemption refuses it — the allow-list
+        being an allow-list, not the « чи » veto: removing the veto leaves this
+        green (mutation M6) because the storage question carries no STATION
+        marker to begin with. The veto covers the other case, where the LLM
+        rephrases a *listed* question into a choice, and
+        `test_the_choice_veto_outranks_the_marker` in `test_confirm_detect.py`
         is the test that holds it.
+
+        The turn is nonetheless free, and by the branch after it: nobody asked
+        STATION anything, so STATION's budget has nothing to charge for. That is
+        the `39469f9f` shape — three turns of price and diameter talk spent the
+        whole station budget and transferred the call.
+
+        The empty `fsm_confirmation_excused_states` is what tells the two apart.
+        Had the confirmation exemption been what forgave the turn it would have
+        spent that state's one allowance; the off-question branch spends nothing,
+        so a later genuine «так» to a real station question is still free.
         """
         h = self._in_station("Шини привозите свої з собою чи ті, що у нас на зберіганні?")
 
         with fsm_flags(enabled=True, shadow_mode=True):
             await h.run("так")
 
-        assert h.session.fsm_parser_null_counts.get("STATION", 0) == 1
+        assert h.session.fsm_parser_null_counts.get("STATION", 0) == 0
+        assert h.session.fsm_confirmation_excused_states == []
 
     async def test_only_the_first_yes_per_state_is_free(self) -> None:
         """The loop-breaker, and the reason it has to be counted rather than
@@ -2724,6 +2825,9 @@ def station_in_progress() -> CallSession:
         {"id": "st-1", "name": "Оболонь", "district": "Оболонський", "city": "Київ"},
         {"id": "st-2", "name": "Позняки", "district": "Дарницький", "city": "Київ"},
     ]
+    # Same reason as `booking_in_progress`: the machine is in STATION because
+    # it read the districts out and asked which one.
+    session.add_assistant_turn(STATES[FsmState.STATION].question_template)
     return session
 
 
@@ -3729,3 +3833,194 @@ class TestNetworkResolve:
         )
         construction = source.split("pipeline = CallPipeline(", 1)[1].split(")", 1)[0]
         assert "db_engine=_db_engine" in construction
+
+
+class TestTheFiveTransfersReplayedThroughTheSeam:
+    """The four wrongly-transferred calls of 2026-09-10, driven through the pipeline.
+
+    `test_fsm_question_markers.py` holds the same corpus, but it calls
+    `bot_is_asking` directly. That left the *wiring* covered by two tests:
+    deleting the whole exemption from the chain in `pipeline.py` and running
+    everything took only those two down, so the corpus could have gone on
+    reporting «four of five saved» with the fix no longer connected to anything.
+    These replay the turns through `_run_fsm_deterministic_step` instead, which
+    is the only place the answer reaches a budget.
+
+    Shadow mode, because the assertion is about what the budget *counts*; the
+    escalation it feeds is a plain `>=` on that count and has its own tests.
+    """
+
+    async def test_the_reschedule_spends_nothing_from_city(self) -> None:
+        """`bba035ff` — the caller was cancelling a booking to move it.
+
+        The bot ran a cancel sub-flow and then read out a slot list. It never
+        asked for a city, and the machine was parked in CITY because the call
+        began there.
+        """
+        cancel_readback = (
+            "Знайшла запис у Харкові на 11 вересня о 15:40, на вулиці "
+            "Холодногірська, 11. Скасовуємо для перенесення?"
+        )
+        h = replay(
+            FsmState.CITY,
+            [
+                (cancel_readback, "перенесли"),
+                (cancel_readback, "переносимо"),
+                (
+                    "Вільний час на вівторок 15 вересня: 9:00, 10:20, 11:40, 13:00, "
+                    "14:20, 15:40. Який час зручний?",
+                    "900",
+                ),
+            ],
+        )
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("перенесли", "переносимо", "900")
+
+        assert h.session.fsm_parser_null_counts.get("CITY", 0) == 0
+
+    async def test_the_price_question_spends_nothing_from_station(self) -> None:
+        """`39469f9f` — three turns of price talk, charged to the station budget.
+
+        The middle turn is the one that needs the seam and not just the
+        predicate: «так» to «Ви хочете дізнатися вартість…?» is a confirmation,
+        and the chain has to reach the off-question branch without the
+        confirmation exemption spending STATION's one allowance on it.
+        """
+        h = replay(
+            FsmState.STATION,
+            [
+                (
+                    "Шиномонтаж R19 у місті Дніпро: легкові — 474 грн, позашляховики "
+                    "— 528 грн. Повертаємось до вибору точки шиномонтажу.",
+                    "так в Черкасах",
+                ),
+                ("Ви хочете дізнатися вартість шиномонтажу у Черкасах?", "так"),
+                ("Який діаметр коліс у вас?", "19"),
+            ],
+        )
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так в Черкасах", "так", "19")
+
+        assert h.session.fsm_parser_null_counts.get("STATION", 0) == 0
+        assert h.session.fsm_confirmation_excused_states == []
+
+    async def test_the_diameter_question_spends_nothing_from_station(self) -> None:
+        """`380a280d` — the same shape, and the reason «вулиц» is not a marker.
+
+        Its second bot turn is a price quote that names a street. A STATION
+        marker list containing «вулиц» would read that as the station question
+        and charge «а легкова часу» to it.
+        """
+        h = replay(
+            FsmState.STATION,
+            [
+                ("Який діаметр коліс у вас?", "12"),
+                (
+                    "Комплексний шиномонтаж R21-22 у Харкові, на вулиці "
+                    "Холодногірській, 11, коштує 534 гривні за колесо. Записуємо "
+                    "на монтаж?",
+                    "а легкова часу",
+                ),
+                ("Я на зв'язку. Якщо маєте запитання — я слухаю.", "є запитання"),
+            ],
+        )
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("12", "а легкова часу", "є запитання")
+
+        assert h.session.fsm_parser_null_counts.get("STATION", 0) == 0
+
+    async def test_the_phone_sub_flow_spends_nothing_from_date(self) -> None:
+        """`30dd42fa` — `find_storage` asked for a phone number three times.
+
+        The first of those requests contains «здати», which carries the DATE
+        stem «дат». Word-anchored markers are what keep it out.
+        """
+        h = replay(
+            FsmState.DATE,
+            [
+                (
+                    "Не знайшла ваш договір за цим номером. Продиктуйте, будь ласка, "
+                    "номер телефону, за яким могли здати шини — український "
+                    "мобільний, 10 цифр.",
+                    "936 52 18",
+                ),
+                (
+                    "Не знайшла ваш договір за цим номером. Можливо, договір "
+                    "оформлено на інший номер? Назвіть, будь ласка, інший телефон "
+                    "або скажіть, що не пам'ятаєте номер.",
+                    "я номер",
+                ),
+                (
+                    "Будь ласка, продиктуйте номер телефону, за яким могли здати "
+                    "шини — український мобільний, 10 цифр.",
+                    "095 9362 18",
+                ),
+            ],
+        )
+        h.session.fsm_filled_fields["storage_choice"] = "contract"
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("936 52 18", "я номер", "095 9362 18")
+
+        assert h.session.fsm_parser_null_counts.get("DATE", 0) == 0
+        assert h.session.fsm_filled_fields.get("date") is None
+
+    async def test_the_city_the_bot_really_asked_for_is_still_charged(self) -> None:
+        """The control, from the same call as the test above.
+
+        `30dd42fa` was asked «У якому місті…?», answered «места изюм», was told
+        Ізюм has no points, was asked again and answered «арки». Both are real
+        misses and both must still cost. An exemption that took these would be
+        measuring nothing.
+        """
+        h = replay(
+            FsmState.CITY,
+            [
+                (
+                    "Перепрошую, Віталію! У якому місті вам зручніше записатися на "
+                    "шиномонтаж?",
+                    "места изюм",
+                ),
+                (
+                    "За містом Ізюм точок шиномонтажу не знайшла. Назвіть, будь "
+                    "ласка, інше місто для запису.",
+                    "арки",
+                ),
+            ],
+        )
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("места изюм", "арки")
+
+        assert h.session.fsm_parser_null_counts.get("CITY", 0) == 2
+
+    async def test_the_bare_day_answer_fills_the_date_instead_of_costing(self) -> None:
+        """`a83655c5` — the fifth transfer, and the only one Fix A alone misses.
+
+        Two of its three DATE charges are off-question: a storage clarification
+        and «Ви ще на лінії?». The middle one answered «На яку дату записуємо?»
+        with «на 11», which is a real answer the parser could not read. Both
+        fixes have to be present for this call to survive.
+        """
+        h = replay(
+            FsmState.DATE,
+            [
+                (
+                    "Правильно розумію: потрібно, щоб ми доставили ваші шини зі "
+                    "зберігання?",
+                    "и я привезу с собою",
+                ),
+                ("На яку дату записуємо?", "на 11"),
+                ("Ви ще на лінії?", "Я хочу выйти из надписью запись успешный"),
+            ],
+        )
+        h.session.fsm_filled_fields["storage_choice"] = "own"
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("и я привезу с собою", "на 11", "Я хочу выйти из надписью запись успешный")
+
+        assert h.session.fsm_parser_null_counts.get("DATE", 0) == 0
+        assert h.session.fsm_filled_fields.get("date", "").endswith("-11")

@@ -290,6 +290,19 @@ class StateConfig:
     # turns reads `ctx.session.dialog_history` itself. Removed in Wave 5-A
     # (§3.8) rather than left as a third «declared and forgotten» field.
 
+    # --- Question recognition ---
+    # Belongs with the LLM-facing text above and sits here only because it is
+    # defaulted and those three fields are not.
+    #
+    #: Word-start stems that identify *this state's own question* in whatever
+    #: words the LLM chose to ask it. Read by `bot_is_asking`, which decides
+    #: whether a turn may be charged to `max_parser_null`. Stems, not whole
+    #: words, because the bot inflects («місті» / «місто» / «містом»), and
+    #: matched at a word boundary because a bare substring is not safe here:
+    #: «здати» contains «дат», which made the phone sub-flow of `30dd42fa`
+    #: read as a date question.
+    question_markers: tuple[str, ...] = ()
+
     # --- Routing ---
     next_state: FsmState | None = None
     required_context: tuple[str, ...] = ()
@@ -350,6 +363,10 @@ STATES: dict[FsmState, StateConfig] = {
         question_template="У якому місті вам зручніше?",
         silence_reprompt="Оберіть: Київ, Дніпро, Запоріжжя, Харків, Черкаси.",
         resume_phrase="Повертаємось до запису. У якому місті вам зручніше?",
+        # Deliberately *not* the five city names: the bot names a city in price
+        # answers and in booking read-backs too («Знайшла запис у Харкові…»),
+        # and charging those to CITY is what escalated `bba035ff`.
+        question_markers=("місто", "місті", "міста", "місту", "містом", "город"),
         parser="city_parser",
         next_state=FsmState.STATION,
         required_context=("intent",),
@@ -361,6 +378,15 @@ STATES: dict[FsmState, StateConfig] = {
         question_template="У [city] є [stations_count] точок у районах: [districts]. У якому вам зручніше?",
         silence_reprompt="Оберіть район, або скажіть «будь-яка».",
         resume_phrase="Повертаємось до вибору точки шиномонтажу.",
+        # No «вулиц»: the bot prints a street in every price quote, and both
+        # `39469f9f` and `380a280d` were escalated on price turns that named one.
+        # «записуємо туди» is here because leaving it out missed 12 of the 69
+        # real station questions in the last 10 prod days — the single-point
+        # form «Знайшла на вул. Холодногірська, 11 у Харкові. Записуємо туди?»
+        # names a street and nothing else, so the exclusion above ate it. The
+        # whole phrase and not «записуємо»: «Записуємо на монтаж?» closes a
+        # price quote and «Записуємо на 12 вересня…» is the CONFIRM read-back.
+        question_markers=("район", "точк", "адрес", "станці", "записуємо туди"),
         parser="station_parser",
         next_state=FsmState.STORAGE,
         required_context=("city",),
@@ -376,6 +402,7 @@ STATES: dict[FsmState, StateConfig] = {
         question_template="Шини привозите свої з собою чи ті, що у нас на зберіганні?",
         silence_reprompt="Скажіть: свої з собою або зі зберігання.",
         resume_phrase="Повертаємось до запису. Шини свої з собою чи ті, що у нас на зберіганні?",
+        question_markers=("зберіган", "свої з собою"),
         parser="storage_choice_parser",
         next_state=FsmState.DATE,
         required_context=("station_id",),
@@ -390,6 +417,7 @@ STATES: dict[FsmState, StateConfig] = {
         question_template="На яку дату записуємо?",
         silence_reprompt="Назвіть, будь ласка, дату — наприклад, завтра або п'ятницю.",
         resume_phrase="Повертаємось до запису. На яку дату вас записати?",
+        question_markers=("дат", "числ", "коли"),
         parser="date_parser",
         next_state=FsmState.TIME,
         required_context=("storage_choice",),
@@ -402,6 +430,10 @@ STATES: dict[FsmState, StateConfig] = {
         question_template="На [date] вільно: [slots]. Який час зручніше?",
         silence_reprompt="Оберіть час зі списку.",
         resume_phrase="Повертаємось до вибору часу.",
+        # «котр» covers «О котрій зручніше?», which the LLM uses instead of the
+        # template often enough to be 5 of the 31 real TIME questions in the
+        # last 10 prod days and carries none of the other four stems.
+        question_markers=("час", "годин", "вільн", "слот", "котр"),
         parser="time_parser",
         next_state=FsmState.COLOR,
         required_context=("date", "station_id"),
@@ -414,6 +446,7 @@ STATES: dict[FsmState, StateConfig] = {
         question_template="Назвіть, будь ласка, колір автомобіля.",
         silence_reprompt="Скажіть колір — білий, чорний, сірий.",
         resume_phrase="Повертаємось до запису. Назвіть, будь ласка, колір автомобіля.",
+        question_markers=("колір", "кольор", "цвет"),
         parser="color_parser",
         next_state=FsmState.BRAND,
         required_context=("time",),
@@ -427,6 +460,16 @@ STATES: dict[FsmState, StateConfig] = {
         question_template="Яка марка вашого авто?",
         silence_reprompt="Скажіть марку — Toyota, VW, BMW.",
         resume_phrase="Повертаємось до запису. Яка марка вашого авто?",
+        # The last four cover `fallback_question`, which is the only question
+        # this state asks once `_brand_null_exhausted` has flipped its flag.
+        question_markers=(
+            "марк",
+            "модел",
+            "легков",
+            "позашляховик",
+            "мікроавтобус",
+            "вантажн",
+        ),
         parser="brand_parser",
         next_state=FsmState.CONFIRM,
         required_context=("color",),
@@ -449,6 +492,7 @@ STATES: dict[FsmState, StateConfig] = {
         ),
         silence_reprompt=None,  # Wave 5 Krok 8 emergency banner instead
         resume_phrase="Повертаємось до підтвердження запису.",
+        question_markers=("підтвердж", "перевірим", "вірно", "правильно"),
         parser="yes_no_parser",
         next_state=FsmState.BOOK,
         required_context=(
@@ -514,6 +558,60 @@ STATES: dict[FsmState, StateConfig] = {
         terminal=True,
     ),
 }
+
+
+#: Ways the bot puts a request to the caller. A question mark covers most of
+#: them, but not all: «Назвіть, будь ласка, інше місто для запису.» is the
+#: CITY question in imperative form, and reading it as «not a question» would
+#: have excused two charges in `30dd42fa` that were entirely correct.
+_ASK_FORMS: tuple[str, ...] = (
+    "назвіть",
+    "скажіть",
+    "оберіть",
+    "продиктуйте",
+    "уточніть",
+    "підкажіть",
+    "назовите",
+    "скажите",
+    "выберите",
+)
+
+_ASK_FORM_RE = re.compile(r"\b(?:" + "|".join(_ASK_FORMS) + ")")
+
+_QUESTION_MARKER_RE: dict[FsmState, re.Pattern[str]] = {
+    state: re.compile(r"\b(?:" + "|".join(cfg.question_markers) + ")")
+    for state, cfg in STATES.items()
+    if cfg.question_markers
+}
+
+
+def bot_is_asking(state: FsmState, last_bot_utterance: str) -> bool:
+    """Did the bot's most recent turn put *this state's* question to the caller?
+
+    `max_parser_null` measures one thing: how many times the caller was asked
+    this state's question and did not answer it. That reading only holds while
+    the bot is actually asking it. The bot is driven by the LLM, which runs
+    price, cancel and storage-contract sub-flows the FSM does not model — and
+    on every turn of those, the FSM sits in a main-flow state and reads the
+    caller's cooperation as a failed answer. Four of the five transfers in the
+    2026-09-10 post-deploy window are that, and no caller in any of them was
+    stuck: they were rescheduling, asking a price, or dictating a phone number.
+
+    Returns True for a state with no `question_markers`, which is the honest
+    answer for the side-states — the claim is «we recognise this state's
+    question», and where there is nothing to recognise with, nothing changes.
+    `test_every_main_flow_state_has_question_markers` keeps that default from
+    quietly covering a newly added main-flow state.
+    """
+    pattern = _QUESTION_MARKER_RE.get(state)
+    if pattern is None:
+        return True
+    if not last_bot_utterance:
+        return False
+    low = last_bot_utterance.lower()
+    if "?" not in last_bot_utterance and not _ASK_FORM_RE.search(low):
+        return False
+    return bool(pattern.search(low))
 
 
 @dataclass(frozen=True)

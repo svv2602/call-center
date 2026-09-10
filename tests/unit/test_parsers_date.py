@@ -19,8 +19,8 @@ from datetime import UTC, date, datetime
 
 import pytest
 
-from src.agent.parsers import ParseContext
-from src.agent.parsers.date_parser import PARSER
+from src.agent.parsers import APPLY_THRESHOLD, ParseContext
+from src.agent.parsers.date_parser import PARSER, resolve_tool_date
 
 # A Monday, so weekday arithmetic is easy to read in the assertions.
 NOW = datetime(2026, 9, 7, 11, 30, tzinfo=UTC)
@@ -218,3 +218,148 @@ class TestVagueAndAbsent:
             PARSER.parse(ctx(text)).status for text in ("завтра", "найближча", "білий Nissan")
         }
         assert statuses == {"value", "unresolved", "not_mentioned"}
+
+
+class TestBareDayOfMonth:
+    """«на 11» — a day with no month, and only while the bot asked for one.
+
+    `a83655c5` was transferred on 2026-09-10 for saying «на 11» directly after
+    «На яку дату записуємо?». It is the one call in that window where the
+    caller answered the state's real question and the parser still returned
+    nothing, so the off-question exemption in the seam could not save it.
+
+    The gate is the whole design. A bare number is whatever the last question
+    made it: across the same ten prod calls the identical shape carried a
+    wheel diameter («19»), a time («900») and three chunks of a phone number.
+    Reading any of those as a date books an appointment nobody asked for,
+    which is strictly worse than the re-ask it replaces — so the tests below
+    weigh far more heavily on what must *not* parse.
+    """
+
+    DATE_Q = "На яку дату записуємо?"
+    DIAMETER_Q = "Який діаметр коліс у вас?"
+    PHONE_Q = (
+        "Продиктуйте, будь ласка, номер телефону, за яким могли здати шини "
+        "— український мобільний, 10 цифр."
+    )
+    SLOTS_Q = "Вільний час на 15 вересня: 9:00, 10:20, 11:40. Який час зручний?"
+
+    def asked(self, text: str, bot: str = DATE_Q) -> ParseContext:
+        return ParseContext(customer_text=text, last_bot_utterance=bot, now=NOW)
+
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("на 11", "2026-09-11"),
+            ("11", "2026-09-11"),
+            ("давайте 11", "2026-09-11"),
+            ("на 11-е", "2026-09-11"),  # ordinal suffix: a letter, not a digit
+            ("на 7", "2026-09-07"),  # today — «today included», as elsewhere
+        ],
+    )
+    def test_a_day_named_in_answer_to_the_date_question(
+        self, text: str, expected: str
+    ) -> None:
+        outcome = PARSER.parse(self.asked(text))
+        assert outcome.status == "value"
+        assert outcome.value == expected
+
+    def test_the_month_rolls_not_the_year(self) -> None:
+        """`_next_occurrence` rolls the year because it already knows the month.
+
+        A bare day has no month, so it needs the other helper: said on the
+        7th, «на 5» is next month's 5th and not this year's — a year later is
+        outside the 21-day booking window by three orders of magnitude.
+        """
+        assert PARSER.parse(self.asked("на 5")).value == "2026-10-05"
+
+    def test_a_day_that_does_not_exist_in_the_next_month_keeps_rolling(self) -> None:
+        """31 asked in a 30-day month is 31 October, not «unresolved»."""
+        assert PARSER.parse(self.asked("на 31")).value == "2026-10-31"
+
+    def test_the_confidence_sits_below_an_explicitly_named_month(self) -> None:
+        """The month is inferred here and heard in «11 вересня».
+
+        Both are applicable, and a re-ask that has to choose between two
+        readings of one turn should prefer the one the caller actually said.
+        """
+        inferred = PARSER.parse(self.asked("на 11"))
+        explicit = PARSER.parse(self.asked("на 11 вересня"))
+        assert inferred.value == explicit.value == "2026-09-11"
+        assert APPLY_THRESHOLD <= inferred.confidence < explicit.confidence
+
+    # --- the gate ---------------------------------------------------------
+
+    @pytest.mark.parametrize(
+        "text,bot",
+        [
+            ("19", DIAMETER_Q),  # 39469f9f — a wheel diameter
+            ("12", DIAMETER_Q),  # 380a280d — the same
+            ("900", SLOTS_Q),  # bba035ff — 9:00 said as one number
+            ("936 52 18", PHONE_Q),  # 30dd42fa — a phone number
+            ("095 9362 18", PHONE_Q),  # 30dd42fa — and again
+            ("на 11", "Ви ще на лінії?"),
+            ("на 11", "Я на зв'язку. Якщо маєте запитання — я слухаю."),
+            ("на 11", ""),  # first turn, or an unreadable history
+        ],
+    )
+    def test_a_number_the_bot_did_not_ask_a_date_for_is_not_a_date(
+        self, text: str, bot: str
+    ) -> None:
+        outcome = PARSER.parse(self.asked(text, bot))
+        assert outcome.status == "not_mentioned"
+        assert outcome.value is None
+
+    @pytest.mark.parametrize("text", ["936 52 18", "095 9362 18", "0 95 93"])
+    def test_several_numbers_in_one_turn_are_never_a_day(self, text: str) -> None:
+        """Belt to the gate's braces, and it earns its place.
+
+        The gate reads the *bot*; STT decides what the caller said. The bot
+        can ask for a date and hear a phone number anyway — and the last run
+        of «095 9362 18» is a perfectly legal day of the month.
+        """
+        assert PARSER.parse(self.asked(text)).status == "not_mentioned"
+
+    @pytest.mark.parametrize("text", ["900", "0", "45", "99", "15:40", "на 11.09.2026"])
+    def test_shapes_that_are_not_a_bare_day(self, text: str) -> None:
+        """«900» in particular: a time said as one number, and 9 is a real day."""
+        outcome = PARSER.parse(self.asked(text))
+        assert outcome.value != "2026-09-09"
+        assert outcome.confidence != 0.8
+
+    def test_ctx_now_is_still_the_only_clock(self) -> None:
+        """Same rule as every other branch — no reaching for the process clock."""
+        outcome = PARSER.parse(
+            ParseContext(customer_text="на 11", last_bot_utterance=self.DATE_Q, now=None)
+        )
+        assert outcome.status == "unresolved"
+        assert outcome.value is None
+
+    # --- everything that came before must be untouched ---------------------
+
+    @pytest.mark.parametrize(
+        "text,expected",
+        [("завтра", "2026-09-08"), ("11 вересня", "2026-09-11"), ("11.09", "2026-09-11")],
+    )
+    def test_the_hint_path_is_unchanged_by_the_fallback(
+        self, text: str, expected: str
+    ) -> None:
+        """The fallback only runs where `_detect_date_hint` returned None, so
+        no utterance that used to parse may now take the weaker reading."""
+        with_bot = PARSER.parse(self.asked(text))
+        without_bot = PARSER.parse(ctx(text))
+        assert with_bot.value == without_bot.value == expected
+        assert with_bot.confidence == without_bot.confidence > 0.8
+
+    def test_the_tool_layer_does_not_get_the_fallback(self) -> None:
+        """`resolve_tool_date` builds a context with no bot utterance, so a
+        bare «11» from an LLM tool call still passes through untouched rather
+        than being resolved against a question nobody asked."""
+        assert resolve_tool_date("11", NOW) == "11"
+
+    def test_a_known_gap_word_ordinals(self) -> None:
+        """«одинадцяте» is left open knowingly. Digits are what STT emits for
+        every number in the prod window, and untested vocabulary in front of a
+        field that books an appointment is worse than a re-ask. Pinned so the
+        gap is a decision on record rather than a surprise."""
+        assert PARSER.parse(self.asked("на одинадцяте")).status == "not_mentioned"
