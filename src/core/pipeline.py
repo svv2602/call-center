@@ -555,6 +555,30 @@ _FSM_ARESOLVE_TIMEOUT_SEC = 2.0
 # argument, the re-ask defect, which no wire addresses.
 FSM_VOICE_STATES: frozenset[str] = frozenset()
 
+# `fsm_filled_fields` key → `fitting_progress` key, for the gap-fill in
+# `_build_fitting_progress`. The two checklists were built independently — the
+# FSM's from `STATES[...].field_name`, the prompt block's from the flat
+# `fitting_*` session fields — and nothing mapped one onto the other, so the
+# block whose documented job is «so the LLM does not re-ask completed steps»
+# could not see anything the FSM had collected.
+#
+# Derived from `MAIN_FLOW` rather than picked by hand, so a new state cannot
+# quietly go unmapped: `intent` and `confirmed` have no counterpart in the block
+# (they are control, not checklist), and `station_id` is resolved to a whole
+# station dict by `_resolve_selected_station` instead of being copied across.
+# Every other field in the flow appears below.
+#
+# `color` → `plate` is not a typo. Krok 5 collected number plates until
+# 2026-08-18, when it switched to colour and the session field kept its name.
+_FSM_FIELD_TO_PROGRESS: dict[str, str] = {
+    "city": "city",
+    "storage_choice": "storage_choice",
+    "date": "date",
+    "time": "time",
+    "color": "plate",
+    "brand": "brand",
+}
+
 # Pipeline-side interrupt caps. These *duplicate* the handler-side caps in
 # src/agent/interrupts.py on purpose: the revert cause was a handler that
 # repeated the same sentence for 5 turns, so the pipeline must be able to stop
@@ -940,8 +964,14 @@ class CallPipeline:
 
         Priority: (1) the station the LLM last acted on via
         get_fitting_slots/book_fitting — that's the client's chosen one,
-        regardless of how many were shown. (2) fallback: single-station case.
-        (3) otherwise None so the LLM asks the client to pick.
+        regardless of how many were shown. (2) the id the FSM resolved, which
+        is the only route for a station the LLM never ran a tool against.
+        (3) fallback: single-station case. (4) otherwise None so the LLM asks
+        the client to pick.
+
+        (2) ranks below (1) on purpose: a tool call is an action taken on the
+        caller's behalf, a parse is a reading of what they said, and when the
+        two disagree the action is the one already reflected in slots offered.
         """
         selected: dict[str, Any] | None = None
         last_used = self._session.last_fitting_station_id
@@ -954,6 +984,17 @@ class CallPipeline:
                 ),
                 None,
             )
+        if selected is None:
+            fsm_station_id = self._session.fsm_filled_fields.get("station_id")
+            if fsm_station_id:
+                selected = next(
+                    (
+                        s
+                        for s in self._session.fitting_stations_seen
+                        if s.get("id") == fsm_station_id
+                    ),
+                    None,
+                )
         if selected is None and len(self._session.fitting_stations_seen) == 1:
             selected = self._session.fitting_stations_seen[0]
         return selected
@@ -973,8 +1014,19 @@ class CallPipeline:
         Pure read: the one-shot ``krok8_confabulation_pending`` flag is *read*
         here but deliberately reset by the caller, so calling this twice in a
         turn is safe.
+
+        Gaps are filled from ``fsm_filled_fields`` last. The flat fields are
+        written by tool handlers and the post-turn extraction, so before this
+        the block showed only what the *LLM* had collected — and a field the FSM
+        took is a field the LLM cannot see, which it answers by asking again.
+        That is the whole of the Wave 7-0 revert: six questions the FSM spoke,
+        six re-asks (`3e8f3589`, `3639c0b4`, 2026-09-10).
+
+        Gap-fill only, never overwrite: with the FSM off the block is
+        byte-identical to what it was, so this cannot regress a call that never
+        reaches the machine.
         """
-        return {
+        progress: dict[str, Any] = {
             "customer_name": self._session.fitting_customer_name,
             "city": (selected_station or {}).get("city"),
             "station_address": (selected_station or {}).get("address"),
@@ -990,6 +1042,12 @@ class CallPipeline:
             "krok8_confirmed": krok8_confirmed,
             "krok8_confabulation_pending": self._session.krok8_confabulation_pending,
         }
+        for fsm_key, progress_key in _FSM_FIELD_TO_PROGRESS.items():
+            if progress.get(progress_key) in (None, ""):
+                value = self._session.fsm_filled_fields.get(fsm_key)
+                if value not in (None, ""):
+                    progress[progress_key] = value
+        return progress
 
     def _fsm_filled_fields_snapshot(self) -> dict[str, Any]:
         """Compact truthy view of what the call has already collected."""

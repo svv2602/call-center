@@ -94,6 +94,12 @@ class Harness:
     ) -> None:
         self.spoken: list[str] = []
         self.llm_turns: list[str] = []
+        #: Every kwarg the pipeline handed the streaming loop, per turn. The
+        #: LLM's whole picture of the call arrives through these, so a test that
+        #: asks «what does the LLM know here» has to read them rather than the
+        #: session — the two are not the same thing, and that gap is a defect
+        #: class of its own (`3e8f3589`, 2026-09-10).
+        self.llm_kwargs: list[dict[str, Any]] = []
 
         conn = MagicMock(spec=["is_closed"])
         conn.is_closed = False
@@ -107,6 +113,7 @@ class Harness:
 
         async def _run_turn(**kwargs: Any) -> TurnResult:
             self.llm_turns.append(kwargs.get("user_text", ""))
+            self.llm_kwargs.append(kwargs)
             return TurnResult(
                 spoken_text=LLM_REPLY,
                 tool_calls_made=0,
