@@ -1596,13 +1596,28 @@ class CallPipeline:
                     exc_info=True,
                 )
 
-    def _pipeline_interrupt_budget_left(self) -> bool:
+    def _pipeline_interrupt_budget_left(self, *, continuation: bool = False) -> bool:
         """True while the pipeline still allows the FSM to own a turn.
 
         Duplicates the handler-side caps in src/agent/interrupts.py on purpose.
         The reverted Wave 13 shipped a handler that answered the same PRICE
         question five turns in a row; the pipeline must be able to stop that
         even when the handler believes it is making progress.
+
+        ``continuation`` marks a turn that answers a question an interrupt
+        handler already asked (see `_open_interrupt_kind`). It is exempt from
+        the *streak* cap and only from that one. The streak cap breaks loops by
+        forcing an LLM turn, and an open sub-flow is the single case where that
+        is the bug rather than the cure: a cancel with several bookings is
+        legitimately list → pick → confirm, i.e. three consecutive dispatches,
+        so the cap fires at exactly the length of a *correct* interaction. The
+        total cap still counts continuations, because it is the only
+        unconditional ceiling and removing it would leave the Wave 13 shape
+        with no backstop at all.
+
+        This mirrors the split the handlers already make between
+        ``MAX_INTERRUPT_FIRES`` and ``MAX_INTERRUPT_FOLLOWUPS``; the pipeline
+        simply never had it.
         """
         counts = self._session.interrupt_counts
         total = counts.get(_PIPELINE_DISPATCH_TOTAL_KEY, 0)
@@ -1616,6 +1631,8 @@ class CallPipeline:
                 MAX_PIPELINE_INTERRUPT_TURNS,
             )
             return False
+        if continuation:
+            return True
         if streak >= MAX_CONSECUTIVE_PIPELINE_INTERRUPT_TURNS:
             logger.warning(
                 "FSM interrupt cap: call=%s hit %d consecutive interrupt turns "
@@ -1626,16 +1643,24 @@ class CallPipeline:
             return False
         return True
 
-    def _note_pipeline_interrupt_dispatch(self, *, dispatched: bool) -> None:
-        """Update the pipeline-side counters after a turn."""
+    def _note_pipeline_interrupt_dispatch(
+        self, *, dispatched: bool, continuation: bool = False
+    ) -> None:
+        """Update the pipeline-side counters after a turn.
+
+        A dispatched ``continuation`` leaves the streak untouched — neither
+        bumped nor reset — for the reason given in
+        `_pipeline_interrupt_budget_left`.
+        """
         counts = self._session.interrupt_counts
         if dispatched:
             counts[_PIPELINE_DISPATCH_TOTAL_KEY] = (
                 counts.get(_PIPELINE_DISPATCH_TOTAL_KEY, 0) + 1
             )
-            counts[_PIPELINE_DISPATCH_STREAK_KEY] = (
-                counts.get(_PIPELINE_DISPATCH_STREAK_KEY, 0) + 1
-            )
+            if not continuation:
+                counts[_PIPELINE_DISPATCH_STREAK_KEY] = (
+                    counts.get(_PIPELINE_DISPATCH_STREAK_KEY, 0) + 1
+                )
         else:
             # Any turn that reaches the LLM breaks the streak.
             counts[_PIPELINE_DISPATCH_STREAK_KEY] = 0
@@ -1854,6 +1879,37 @@ class CallPipeline:
         )
         return True
 
+    def _open_interrupt_kind(self) -> str | None:
+        """The interrupt handler that already asked the caller a question.
+
+        Both handlers in `src/agent/interrupts.py` are multi-turn: they park a
+        marker on the session, speak a question, and expect the next utterance
+        to answer it. Their own default-deny gates (`_mentions_cancel`,
+        `_mentions_price`) are applied only when ``entry`` is true, precisely so
+        a bare «так» or a bare «вісімнадцять» is accepted as a *continuation*.
+
+        Nothing consulted these markers on the way in, so the continuation was
+        unreachable: `_maybe_handle_intent` asked the intent classifier, and the
+        classifier cannot label «так» — it has no intent, only a referent, and
+        the referent is on the session, not in the words. Call ``7d4b1f18``
+        (2026-09-10): the handler asked «Скасувати? Скажіть "так" або "ні"», the
+        caller said «так», it classified as BOOK at 0.40, fell under the floor,
+        and reached the main flow — which was parked in CITY, logged
+        `parser_null` and asked «У якому місті вам зручніше?». The next
+        utterance, a refusal of *that* question, was then handed to the still-open
+        confirmation and read as «ні», so the bot answered «Добре, запис
+        залишаємо» to a caller who had just said yes to cancelling. It took
+        eight exchanges and an LLM rescue to cancel one booking.
+
+        Returns the intent name the dispatch below expects, so an open sub-flow
+        and a fresh classifier verdict are the same kind of value.
+        """
+        if getattr(self._session, "pending_cancel_action", None):
+            return "CANCEL"
+        if getattr(self._session, "pending_price_interrupt_needs_diameter", False):
+            return "PRICE"
+        return None
+
     async def _maybe_handle_intent(self, transcript: Transcript) -> bool:
         """Live-mode side door: let an interrupt handler own this turn.
 
@@ -1862,9 +1918,14 @@ class CallPipeline:
         Anything else falls through to the normal streaming turn, so a handler
         that produces nothing can never take the caller hostage.
         """
+        # An open sub-flow claims this turn before the classifier is consulted.
+        # Call `7d4b1f18` (2026-09-10) is what happens otherwise, see
+        # `_open_interrupt_kind`.
+        continuation = self._open_interrupt_kind()
+
         # Cap first — checked BEFORE the classifier so a blown budget costs no
         # latency at all, and unconditionally before any handler runs.
-        if not self._pipeline_interrupt_budget_left():
+        if not self._pipeline_interrupt_budget_left(continuation=continuation is not None):
             self._note_pipeline_interrupt_dispatch(dispatched=False)
             return False
 
@@ -1878,6 +1939,9 @@ class CallPipeline:
             self._note_pipeline_interrupt_dispatch(dispatched=False)
             return False
 
+        # `None` means «no verdict», which is not the same as a verdict of BOOK.
+        # A continuation does not need one; anything else falls through.
+        result = None
         try:
             from src.agent.intent_classifier import classify_intent
 
@@ -1898,22 +1962,15 @@ class CallPipeline:
                 self._session.channel_uuid,
                 exc_info=True,
             )
-            self._note_pipeline_interrupt_dispatch(dispatched=False)
-            return False
 
-        if result.confidence < FSM_INTERRUPT_CONFIDENCE_FLOOR:
-            logger.info(
-                "FSM live mode: intent=%s confidence=%.2f below floor %.2f for "
-                "call=%s — using the normal LLM turn",
-                result.primary_intent,
-                result.confidence,
-                FSM_INTERRUPT_CONFIDENCE_FLOOR,
-                self._session.channel_uuid,
-            )
-            self._note_pipeline_interrupt_dispatch(dispatched=False)
-            return False
-
-        if result.primary_intent == "TRANSFER":
+        # Checked before the continuation branch: a caller who asks for a human
+        # mid-sub-flow gets one. This is the only verdict that outranks an open
+        # sub-flow, and it ends the call rather than competing for the turn.
+        if (
+            result is not None
+            and result.primary_intent == "TRANSFER"
+            and result.confidence >= FSM_INTERRUPT_CONFIDENCE_FLOOR
+        ):
             self._session.add_user_turn(
                 content=transcript.text,
                 stt_confidence=transcript.confidence,
@@ -1929,10 +1986,43 @@ class CallPipeline:
             self._note_pipeline_interrupt_dispatch(dispatched=True)
             return True
 
-        if result.primary_intent not in ("PRICE", "CANCEL"):
-            # BOOK / RESCHEDULE are main flow — the LLM still owns them in 4-A.
+        if continuation is not None:
+            logger.info(
+                "FSM live mode: %s sub-flow is open for call=%s — it owns this "
+                "turn regardless of intent=%s confidence=%.2f",
+                continuation,
+                self._session.channel_uuid,
+                None if result is None else result.primary_intent,
+                -1.0 if result is None else result.confidence,
+            )
+            intent_to_handle = continuation
+        elif result is None:
             self._note_pipeline_interrupt_dispatch(dispatched=False)
             return False
+        elif result.confidence < FSM_INTERRUPT_CONFIDENCE_FLOOR:
+            logger.info(
+                "FSM live mode: intent=%s confidence=%.2f below floor %.2f for "
+                "call=%s — using the normal LLM turn",
+                result.primary_intent,
+                result.confidence,
+                FSM_INTERRUPT_CONFIDENCE_FLOOR,
+                self._session.channel_uuid,
+            )
+            self._note_pipeline_interrupt_dispatch(dispatched=False)
+            return False
+        elif result.primary_intent not in ("PRICE", "CANCEL"):
+            # BOOK / RESCHEDULE are main flow — the LLM still owns them in 4-A.
+            # Logged because this branch used to return silently, which left
+            # four turns of call `7d4b1f18` unattributable during the postmortem.
+            logger.info(
+                "FSM live mode: intent=%s is main flow for call=%s — using the normal LLM turn",
+                result.primary_intent,
+                self._session.channel_uuid,
+            )
+            self._note_pipeline_interrupt_dispatch(dispatched=False)
+            return False
+        else:
+            intent_to_handle = result.primary_intent
 
         tool_router = self._get_tool_router()
         if tool_router is None:
@@ -1940,7 +2030,7 @@ class CallPipeline:
                 "FSM live mode: no tool router available for call=%s — cannot "
                 "run the %s interrupt handler",
                 self._session.channel_uuid,
-                result.primary_intent,
+                intent_to_handle,
             )
             self._note_pipeline_interrupt_dispatch(dispatched=False)
             return False
@@ -1949,7 +2039,7 @@ class CallPipeline:
         # handler. Done here — after the cap and the confidence floor, before the
         # handler — so the handler observes PRICE_INTERRUPT/CANCEL_INTERRUPT and
         # resolves its resume phrase from the fsm_prev_state snapshot.
-        engine, frozen_from = self._freeze_fsm_for_interrupt(result.primary_intent)
+        engine, frozen_from = self._freeze_fsm_for_interrupt(intent_to_handle)
 
         try:
             from src.agent.interrupts import (
@@ -1958,9 +2048,7 @@ class CallPipeline:
             )
 
             handler = (
-                handle_price_interrupt
-                if result.primary_intent == "PRICE"
-                else handle_cancel_interrupt
+                handle_price_interrupt if intent_to_handle == "PRICE" else handle_cancel_interrupt
             )
             interrupt = await handler(
                 customer_text=transcript.text,
@@ -1970,7 +2058,7 @@ class CallPipeline:
         except Exception:
             logger.error(
                 "FSM live mode: %s interrupt handler raised for call=%s",
-                result.primary_intent,
+                intent_to_handle,
                 self._session.channel_uuid,
                 exc_info=True,
             )
@@ -1990,7 +2078,7 @@ class CallPipeline:
                 "FSM live mode: %s handler made no provable progress for "
                 "call=%s (handled=%s advanced=%s updates=%s) — falling through "
                 "to the LLM",
-                result.primary_intent,
+                intent_to_handle,
                 self._session.channel_uuid,
                 interrupt.handled,
                 interrupt.advanced,
@@ -2018,10 +2106,10 @@ class CallPipeline:
             stt_confidence=transcript.confidence,
             language=transcript.language,
         )
-        await self._dispatch_interrupt_reply(
-            interrupt, kind=result.primary_intent.lower()
+        await self._dispatch_interrupt_reply(interrupt, kind=intent_to_handle.lower())
+        self._note_pipeline_interrupt_dispatch(
+            dispatched=True, continuation=continuation is not None
         )
-        self._note_pipeline_interrupt_dispatch(dispatched=True)
         return True
 
     def _resolve_empty_response_fallback(self) -> str:

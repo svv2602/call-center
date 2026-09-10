@@ -743,6 +743,288 @@ class TestLowConfidenceFallback:
 
 
 # ---------------------------------------------------------------------------
+# TestOpenSubFlowOwnsTheAnswer
+# ---------------------------------------------------------------------------
+
+
+class TestOpenSubFlowOwnsTheAnswer:
+    """Call `7d4b1f18` (2026-09-10) — the answer to a bot question got lost.
+
+    Both handlers in `src/agent/interrupts.py` are multi-turn: they park a
+    marker on the session, ask a question and expect the next utterance to
+    answer it. Their own default-deny gates are applied only on ``entry``,
+    precisely so a bare «так» or a bare diameter counts as a continuation. But
+    nothing consulted those markers on the way in, so the continuation was
+    unreachable: the classifier decides the turn, and it cannot label «так» —
+    the word has no intent, only a referent, and the referent lives on the
+    session.
+
+    In prod that read as BOOK at 0.40, fell under the floor and reached a main
+    flow parked in CITY, which asked «У якому місті вам зручніше?». The refusal
+    of *that* question then reached the still-open confirmation and was read as
+    «ні», so the bot said «Добре, запис залишаємо» to a caller who had just
+    agreed to cancel.
+    """
+
+    CONFIRMING = "awaiting_confirmation:bb561d2e-acf7-11f1-a21c-000c29c2a50f"
+
+    async def test_a_bare_yes_reaches_the_cancel_handler(self) -> None:
+        """The regression itself, with the classifier verdict prod produced."""
+        h = Harness()
+        h.session.pending_cancel_action = self.CONFIRMING
+        cancel = AsyncMock(return_value=interrupt(reply="Скасувала запис."))
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                AsyncMock(return_value=intent("BOOK", confidence=0.40)),
+            ),
+            patch("src.agent.interrupts.handle_cancel_interrupt", cancel),
+        ):
+            await h.run("так")
+
+        cancel.assert_awaited_once()
+        assert cancel.await_args.kwargs["customer_text"] == "так"
+        assert "Скасувала запис." in h.spoken
+        assert h.llm_turns == [], "the answer must not reach the main flow"
+
+    async def test_a_bare_diameter_reaches_the_price_handler(self) -> None:
+        """`pending_price_interrupt_needs_diameter` is the same shape.
+
+        Fixed together with CANCEL rather than after it: a guard written for a
+        named subset leaves an escape hatch of identical shape behind.
+        """
+        h = Harness()
+        h.session.pending_price_interrupt_needs_diameter = True
+        price = AsyncMock(return_value=interrupt(reply="Монтаж R18 — 600 гривень."))
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                AsyncMock(return_value=intent("BOOK")),
+            ),
+            patch("src.agent.interrupts.handle_price_interrupt", price),
+        ):
+            await h.run("вісімнадцять")
+
+        price.assert_awaited_once()
+        assert "Монтаж R18 — 600 гривень." in h.spoken
+        assert h.llm_turns == []
+
+    async def test_no_open_sub_flow_still_falls_through(self) -> None:
+        """The same words, no marker — nothing may claim the turn.
+
+        Without this the fix reads as «low confidence now dispatches», which is
+        the opposite of what it says.
+        """
+        h = Harness()
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                AsyncMock(return_value=intent("BOOK", confidence=0.40)),
+            ),
+            patch("src.agent.interrupts.handle_cancel_interrupt") as cancel,
+            patch("src.agent.interrupts.handle_price_interrupt") as price,
+        ):
+            await h.run("так")
+
+        cancel.assert_not_called()
+        price.assert_not_called()
+        assert h.llm_turns == ["так"]
+
+    async def test_transfer_outranks_an_open_sub_flow(self) -> None:
+        """A caller who asks for a human mid-confirmation gets one."""
+        h = Harness()
+        h.session.pending_cancel_action = self.CONFIRMING
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                AsyncMock(return_value=intent("TRANSFER")),
+            ),
+            patch("src.agent.interrupts.handle_cancel_interrupt") as cancel,
+        ):
+            await h.run("дайте оператора")
+
+        cancel.assert_not_called()
+        assert h.session.transferred is True
+        assert h.session.transfer_reason == "intent_classifier_transfer"
+
+    async def test_classifier_failure_still_dispatches_an_open_sub_flow(self) -> None:
+        """No verdict is not a verdict of BOOK.
+
+        An open sub-flow does not need the classifier at all, so a router
+        outage must not strand the caller inside a confirmation.
+        """
+        h = Harness()
+        h.session.pending_cancel_action = self.CONFIRMING
+        cancel = AsyncMock(return_value=interrupt(reply="Скасувала запис."))
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                AsyncMock(side_effect=RuntimeError("router down")),
+            ),
+            patch("src.agent.interrupts.handle_cancel_interrupt", cancel),
+        ):
+            await h.run("так")
+
+        cancel.assert_awaited_once()
+        assert h.llm_turns == []
+
+    async def test_the_sub_flow_closes_when_the_handler_clears_its_marker(self) -> None:
+        """The marker is re-read every turn, never cached across turns.
+
+        `_apply` in `src/agent/interrupts.py` writes onto the session in place,
+        so a handler that declines — including via its own `_is_capped`
+        loop-breaker — clears `pending_cancel_action` even on the no-progress
+        path, where the pipeline does not replay `session_updates`. That is the
+        second ceiling on an open sub-flow, and it only works if the pipeline
+        asks the session again rather than remembering last turn's answer.
+        """
+        h = Harness()
+        h.session.pending_cancel_action = self.CONFIRMING
+
+        async def _decline(**kwargs: Any) -> InterruptResult:
+            kwargs["session"].pending_cancel_action = None
+            return interrupt(handled=False, advanced=False)
+
+        cancel = AsyncMock(side_effect=_decline)
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                AsyncMock(return_value=intent("BOOK", confidence=0.40)),
+            ),
+            patch("src.agent.interrupts.handle_cancel_interrupt", cancel),
+        ):
+            await h.run("так", "а ще питання")
+
+        assert cancel.await_count == 1, "the closed sub-flow must not claim a second turn"
+        assert h.llm_turns == ["так", "а ще питання"]
+
+
+# ---------------------------------------------------------------------------
+# TestContinuationAndTheCaps
+# ---------------------------------------------------------------------------
+
+
+class TestContinuationAndTheCaps:
+    """Which of the two pipeline caps a continuation is exempt from.
+
+    The streak cap breaks loops by forcing an LLM turn, and an open sub-flow is
+    the one case where that is the bug rather than the cure — a cancel with
+    several bookings is legitimately list → pick → confirm, three consecutive
+    dispatches, so the cap fires at exactly the length of a *correct*
+    interaction. The total cap still counts continuations: it is the only
+    unconditional ceiling, and without it the reverted Wave 13 shape would have
+    no backstop at all.
+
+    This mirrors the `MAX_INTERRUPT_FIRES` / `MAX_INTERRUPT_FOLLOWUPS` split
+    the handlers in `src/agent/interrupts.py` already make.
+    """
+
+    CONFIRMING = TestOpenSubFlowOwnsTheAnswer.CONFIRMING
+
+    @staticmethod
+    def _cancel_patches(handler: AsyncMock):
+        return (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                AsyncMock(return_value=intent("BOOK", confidence=0.40)),
+            ),
+            patch("src.agent.interrupts.handle_cancel_interrupt", handler),
+        )
+
+    async def test_a_continuation_does_not_burn_the_streak(self) -> None:
+        h = Harness()
+        h.session.pending_cancel_action = self.CONFIRMING
+        cancel = AsyncMock(return_value=interrupt(reply="Ще раз, будь ласка."))
+        flags, classify, handler = self._cancel_patches(cancel)
+        with flags, classify, handler:
+            await h.run("так", "так", "так")
+
+        # Read with a default: a continuation leaves the streak untouched —
+        # neither bumped nor reset — so on a call that only ever continued a
+        # sub-flow the key is never written at all.
+        assert h.session.interrupt_counts.get(_PIPELINE_DISPATCH_STREAK_KEY, 0) == 0
+        assert cancel.await_count == 3
+
+    async def test_the_streak_cap_does_not_stop_an_open_sub_flow(self) -> None:
+        """A sub-flow that starts on an already-exhausted streak still runs."""
+        h = Harness()
+        h.session.pending_cancel_action = self.CONFIRMING
+        h.session.interrupt_counts[_PIPELINE_DISPATCH_STREAK_KEY] = (
+            MAX_CONSECUTIVE_PIPELINE_INTERRUPT_TURNS
+        )
+        cancel = AsyncMock(return_value=interrupt(reply="Скасувала запис."))
+        flags, classify, handler = self._cancel_patches(cancel)
+        with flags, classify, handler:
+            await h.run("так")
+
+        cancel.assert_awaited_once()
+        assert h.llm_turns == []
+
+    async def test_a_continuation_still_burns_the_total_budget(self) -> None:
+        h = Harness()
+        h.session.pending_cancel_action = self.CONFIRMING
+        cancel = AsyncMock(return_value=interrupt(reply="Скасувала запис."))
+        flags, classify, handler = self._cancel_patches(cancel)
+        with flags, classify, handler:
+            await h.run("так")
+
+        assert h.session.interrupt_counts[_PIPELINE_DISPATCH_TOTAL_KEY] == 1
+
+    async def test_the_total_cap_still_stops_an_open_sub_flow(self) -> None:
+        """The unconditional ceiling. Nothing, including a sub-flow, is exempt."""
+        h = Harness()
+        h.session.pending_cancel_action = self.CONFIRMING
+        h.session.interrupt_counts[_PIPELINE_DISPATCH_TOTAL_KEY] = MAX_PIPELINE_INTERRUPT_TURNS
+        cancel = AsyncMock(return_value=interrupt(reply="Скасувала запис."))
+        flags, classify, handler = self._cancel_patches(cancel)
+        with flags, classify, handler:
+            await h.run("так")
+
+        cancel.assert_not_called()
+        assert h.llm_turns == ["так"]
+
+    async def test_an_endless_sub_flow_is_still_bounded(self) -> None:
+        """Exempting the streak must not remove the ceiling by the back door."""
+        h = Harness()
+        h.session.pending_cancel_action = self.CONFIRMING
+        cancel = AsyncMock(return_value=interrupt(reply="Ще раз, будь ласка."))
+        flags, classify, handler = self._cancel_patches(cancel)
+        with flags, classify, handler:
+            await h.run(*["так"] * 12)
+
+        assert cancel.await_count == MAX_PIPELINE_INTERRUPT_TURNS
+        assert h.llm_turns, "the caller must reach the LLM once the budget is out"
+
+    async def test_main_flow_intent_is_now_logged(self, caplog) -> None:
+        """The branch used to return silently.
+
+        Four turns of call `7d4b1f18` produced no log line at all, which is why
+        the first pass of the postmortem misattributed them.
+        """
+        h = Harness()
+        with (
+            caplog.at_level(logging.INFO, logger="src.core.pipeline"),
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                AsyncMock(return_value=intent("BOOK")),
+            ),
+        ):
+            await h.run(FITTING_TEXT)
+
+        assert any(
+            "main flow" in r.getMessage() and "BOOK" in r.getMessage() for r in caplog.records
+        ), "a fall-through must be attributable from the logs alone"
+
+
+# ---------------------------------------------------------------------------
 # Mapping seam
 # ---------------------------------------------------------------------------
 
