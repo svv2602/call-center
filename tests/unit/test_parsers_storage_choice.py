@@ -144,6 +144,7 @@ class TestTwoLevelsDoNotCollapse:
         "тобою",  # call 2026-08-03 14:56
         "з тобою",
         "с тобой",  # call 4b6c4653, 2026-09-10 — same mangle, Russian spelling
+        "собою привезли",  # call 3639c0b4, 2026-09-10 — the «з» dropped entirely
         "шины будут любую",  # STT for «шини будуть з собою»
         "мої шини",
         "везу свої",
@@ -179,6 +180,23 @@ class TestSttMangles:
         ],
     )
     def test_wide_list_mangles_are_recognised_as_own(self, text: str) -> None:
+        outcome = PARSER.parse(ctx(text, bot=STORAGE_QUESTION))
+        assert outcome.value == "own"
+
+    @pytest.mark.parametrize(
+        "text",
+        ["собою привезли", "шини будуть собою", "привозить собою", "перед собою"],
+    )
+    def test_the_preposition_can_be_dropped_entirely(self, text: str) -> None:
+        """The mangle the Wave 4 comment described but the list never carried.
+
+        On call 3639c0b4 (2026-09-10) «собою привезли» matched nothing, so the
+        bot asked the storage question again word for word and only «твої з
+        собою» on the next turn got through. Eighteen occurrences in prod over
+        six weeks, every one meaning own tires — «перед собою» included, which
+        the LLM itself read as own on call 1487876d. Pin the value: a silent
+        NOT_MENTIONED is what costs the turn.
+        """
         outcome = PARSER.parse(ctx(text, bot=STORAGE_QUESTION))
         assert outcome.value == "own"
 

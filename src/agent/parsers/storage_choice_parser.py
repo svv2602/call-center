@@ -96,6 +96,16 @@ _STORAGE_OWN_HINTS: tuple[str, ...] = (
     "за собою",
     "за собой",
     "с собою",
+    # The bare form the comment above has claimed since Wave 4 but never
+    # listed: «собою привезли» matched nothing, so the bot re-asked the storage
+    # question word for word (call 3639c0b4, 2026-09-10, turn 9). Eighteen prod
+    # occurrences over six weeks — «шини будуть собою», «привозить собою»,
+    # «перед собою» — and in every one the caller meant their own tires. Wide
+    # list only: a bare mangle is a nudge and a 0.9 inside STORAGE, never
+    # grounds to skip the state. It subsumes every «… собою» entry here as a
+    # substring; those stay for the call provenance they carry, not because
+    # they can still fire.
+    "собою",
     # Wave 4 STT: «привезу» → «приложу»/«приложишь»/«прикладу»
     # (rare word-level mangle; call 10:38 «приложишь с собой»).
     "приложу з собою",
