@@ -17,11 +17,13 @@ against a production method that did not exist.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import datetime
 import inspect
 import logging
 import uuid
+from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -84,7 +86,12 @@ def fsm_flags(
 class Harness:
     """A CallPipeline plus the recorders needed to assert on customer impact."""
 
-    def __init__(self, session: CallSession | None = None) -> None:
+    def __init__(
+        self,
+        session: CallSession | None = None,
+        *,
+        db_engine: Any = None,
+    ) -> None:
         self.spoken: list[str] = []
         self.llm_turns: list[str] = []
 
@@ -122,6 +129,7 @@ class Harness:
             agent=MagicMock(spec=[]),
             session=self.session,
             streaming_loop=streaming_loop,
+            db_engine=db_engine,
         )
 
         async def _speak(text: str) -> None:
@@ -2475,6 +2483,27 @@ class TestConfirmedElsewhereExemption:
         assert h.session.fsm_parser_null_counts.get("STATION", 0) == 2
         assert h.session.fsm_confirmation_excused_states == ["STATION"]
 
+    async def test_the_cancel_subflow_is_covered_too(self) -> None:
+        """`4a687e9a` (2026-09-10) — the first live cancellation, measured on
+        the deploy that shipped this branch.
+
+        The exemption worked and still missed: `_YES_NO_ASK_MARKERS` was a list
+        of phrasings, and the cancel sub-flow contributed none of them, so «так
+        так» to «Скасувати? Скажіть «так» або «ні».» was charged to CITY. It is
+        here rather than only in `test_confirm_detect` because the prod symptom
+        was a charged attempt, not a `False` from a predicate.
+        """
+        h = Harness(booking_in_progress(FsmState.CITY))
+        h.session.add_assistant_turn(
+            "У вас запис на 14 вересня о 14:20. Скасувати? Скажіть «так» або «ні»."
+        )
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("так так")
+
+        assert h.session.fsm_parser_null_counts.get("CITY", 0) == 0
+        assert h.session.fsm_confirmation_excused_states == ["CITY"]
+
     async def test_each_state_gets_its_own(self) -> None:
         """Per state, not per call. `b034315e` spent one in TIME after the bot
         had already asked a station confirmation earlier in the same call — a
@@ -3273,3 +3302,423 @@ class TestTheInferredCityCanBeTakenBack:
 
         revived = CallSession.from_dict(h.session.to_dict())
         assert revived.fsm_inferred_fields == ["city"]
+
+
+# ---------------------------------------------------------------------------
+# TestNetworkResolve — `FieldParser.aresolve` finally has a call site
+# ---------------------------------------------------------------------------
+
+#: Call `9ebf8351`, 2026-09-10 turn 17. The caller named their car and the FSM
+#: charged them for it: `brand_parser.parse` knows the curated brands only, so
+#: a *model* name comes back `not_mentioned` → `BRAND parser_null 1/2`. The
+#: Wave 8 alias table (`e67c6d7`) has held `tiguan → Volkswagen` since Wave 8
+#: and had no reachable call site in `src/` to be asked through.
+TIGUAN = "Tiguan"
+
+
+class _FakeConn:
+    """A SQLAlchemy `AsyncConnection` stand-in that answers nothing.
+
+    Every test here patches `resolve_by_alias`, so the connection is only ever
+    passed around, never queried. Giving it no methods is the assertion: if a
+    resolver starts issuing SQL of its own, these tests fail loudly instead of
+    silently exercising a mock.
+    """
+
+
+class FakeEngine:
+    """What `src/main.py` hands the pipeline, reduced to the one method it uses.
+
+    Deliberately not a `MagicMock`: the pipeline opens the connection with
+    `async with`, and a bare mock hands back another mock from `__aenter__` —
+    a connection that was never opened would still look open, and
+    `test_the_connection_is_always_returned` would pass against a pipeline that
+    leaks one per turn (`codetrap_asyncmock_hides_missing_api`).
+    """
+
+    def __init__(self) -> None:
+        self.opened = 0
+        self.closed = 0
+
+    def connect(self) -> Any:
+        engine = self
+
+        class _Cm:
+            async def __aenter__(self) -> _FakeConn:
+                engine.opened += 1
+                return _FakeConn()
+
+            async def __aexit__(self, *exc: Any) -> bool:
+                engine.closed += 1
+                return False
+
+        return _Cm()
+
+
+@contextlib.contextmanager
+def alias_table(
+    mapping: dict[str, Any],
+    *,
+    raises: BaseException | None = None,
+    delay: float = 0.0,
+):
+    """Replace the alias table's SQL and nothing above it.
+
+    Patched at `resolve_by_alias` — the lowest point that touches the database
+    — so `brand_parser`'s candidate generation, its ambiguity handling and the
+    engine's call rules all still run for real. Yields the list of candidates
+    the resolver actually asked about, which is how the «`parse()` first» rule
+    is asserted: an empty list means the resolver was never reached.
+    """
+    from src.agent import vehicle_alias_lookup
+
+    asked: list[str] = []
+
+    async def _resolve(conn: Any, utterance: str) -> Any:
+        asked.append(utterance)
+        if delay:
+            await asyncio.sleep(delay)
+        if raises is not None:
+            raise raises
+        return mapping.get(utterance.strip().lower(), vehicle_alias_lookup.ResolveResult())
+
+    with patch.object(vehicle_alias_lookup, "resolve_by_alias", _resolve):
+        yield asked
+
+
+def volkswagen() -> Any:
+    """The row prod actually holds: `tiguan|Volkswagen|Tiguan|auto_model_name`."""
+    from src.agent.vehicle_alias_lookup import ResolveResult
+
+    return ResolveResult(
+        brand_id=1,
+        brand_name="Volkswagen",
+        model_id=2,
+        model_name="Tiguan",
+        source="auto_model_name",
+    )
+
+
+class TestNetworkResolve:
+    """`_run_fsm_network_resolve` — the FSM's only step that may do I/O.
+
+    It exists because `_run_fsm_deterministic_step` may not: «no await → no
+    network» is what makes shadow mode safe to run against live traffic, so the
+    network half of §3.2 gets its own step in front of the seam rather than a
+    connection threaded into it. In front, because the seam decides
+    `apply_field` vs `on_parser_null` in one pass — a resolver behind it would
+    have to undo a charge instead of preventing it.
+    """
+
+    def _in_brand(self, *, engine: FakeEngine | None = None) -> Harness:
+        h = Harness(booking_in_progress(FsmState.BRAND), db_engine=engine or FakeEngine())
+        h.session.fsm_filled_fields["color"] = "чорний"
+        return h
+
+    async def test_the_alias_table_fills_the_field_the_parser_missed(self) -> None:
+        """The prod case, end to end: «Tiguan» → Volkswagen, no attempt spent."""
+        h = self._in_brand()
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            alias_table({"tiguan": volkswagen()}) as asked,
+        ):
+            await h.run(TIGUAN)
+
+        assert h.session.fsm_filled_fields.get("brand") == "Volkswagen"
+        assert h.session.fsm_parser_null_counts.get("BRAND", 0) == 0
+        assert h.session.fsm_state != FsmState.BRAND.value
+        assert asked[0] == "tiguan"
+
+    async def test_without_the_wire_the_same_turn_is_charged(self, caplog) -> None:
+        """The baseline the fix is measured against — and the rollback shape.
+
+        No engine is the state every test outside this class runs in, so if this
+        went green with the field filled, the whole class would be asserting
+        something the pipeline does unconditionally.
+
+        «No engine» has to be a *decision*, which is why the log is asserted
+        empty: reaching `None.connect()` and catching the AttributeError
+        produces the same session state as declining to run, and would turn
+        every turn of every engine-less deployment into a WARNING.
+        """
+        h = Harness(booking_in_progress(FsmState.BRAND), db_engine=None)
+
+        with (
+            caplog.at_level(logging.WARNING),
+            fsm_flags(enabled=True, shadow_mode=False),
+            alias_table({"tiguan": volkswagen()}) as asked,
+        ):
+            await h.run(TIGUAN)
+
+        assert h.session.fsm_filled_fields.get("brand") in (None, "")
+        assert h.session.fsm_parser_null_counts.get("BRAND", 0) == 1
+        assert asked == []
+        assert not [r for r in caplog.records if "FSM network resolve" in r.getMessage()]
+
+    async def test_the_step_refuses_shadow_when_called_directly(self) -> None:
+        """The mode check is inside the step as well as around its call site.
+
+        What reaches a future caller — a replay harness, a retry, the next wave
+        — is the method, not the `if` in front of it. A guard that lives only at
+        one call site is one refactor away from being no guard at all.
+        """
+        engine = FakeEngine()
+        h = self._in_brand(engine=engine)
+        transcript = Transcript(text=TIGUAN, is_final=True, confidence=0.95, language="uk-UA")
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=True),
+            alias_table({"tiguan": volkswagen()}) as asked,
+        ):
+            await h.pipeline._run_fsm_network_resolve(transcript)
+
+        assert engine.opened == 0
+        assert asked == []
+        assert h.session.fsm_filled_fields.get("brand") in (None, "")
+
+    async def test_shadow_never_opens_a_connection(self) -> None:
+        """§3.2 rule 3. Shadow runs against live traffic on the strength of
+        «no await → no network»; one connection opened here and the mode stops
+        being an observer."""
+        engine = FakeEngine()
+        h = self._in_brand(engine=engine)
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=True),
+            alias_table({"tiguan": volkswagen()}) as asked,
+        ):
+            await h.run(TIGUAN)
+
+        assert engine.opened == 0
+        assert asked == []
+        assert h.session.fsm_parser_null_counts.get("BRAND", 0) == 1
+
+    async def test_the_kill_switch_covers_it_too(self) -> None:
+        engine = FakeEngine()
+        h = self._in_brand(engine=engine)
+
+        with fsm_flags(enabled=False), alias_table({"tiguan": volkswagen()}) as asked:
+            await h.run(TIGUAN)
+
+        assert engine.opened == 0
+        assert asked == []
+
+    async def test_a_resolved_parse_is_not_second_guessed(self) -> None:
+        """Rule 1: `parse()` runs first and alone decides if anything is left.
+
+        «Фольксваген» is curated, so the deterministic answer is already there.
+        Asking the database anyway would let a table edit override a hand-picked
+        brand — and would spend a connection on every BRAND turn.
+        """
+        engine = FakeEngine()
+        h = self._in_brand(engine=engine)
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            alias_table({"фольксваген": volkswagen()}) as asked,
+        ):
+            await h.run("Фольксваген")
+
+        assert h.session.fsm_filled_fields.get("brand") == "Volkswagen"
+        assert asked == []
+        assert engine.closed == engine.opened
+
+    async def test_a_filled_field_opens_nothing(self) -> None:
+        """The field is checked before the connection, not after: BRAND is
+        reachable with `brand` already set by the broad pass on an earlier turn.
+        """
+        engine = FakeEngine()
+        h = self._in_brand(engine=engine)
+        h.session.fsm_filled_fields["brand"] = "Renault"
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            alias_table({"tiguan": volkswagen()}) as asked,
+        ):
+            await h.run(TIGUAN)
+
+        assert engine.opened == 0
+        assert asked == []
+        assert h.session.fsm_filled_fields["brand"] == "Renault"
+
+    async def test_a_state_whose_parser_has_no_resolver_opens_nothing(self) -> None:
+        """Dispatch is on `parser.aresolve is not None`. Eleven of the thirteen
+        parsers declare `None`, and those turns must cost no connection at all.
+        """
+        engine = FakeEngine()
+        h = Harness(booking_in_progress(FsmState.DATE), db_engine=engine)
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("хмм")
+
+        assert engine.opened == 0
+
+    async def test_an_ambiguous_alias_resolves_nothing(self) -> None:
+        """«500» spans Fiat and someone else's 500. `brand_parser` already
+        refuses those; the wire must not turn a refusal into a value."""
+        from src.agent.vehicle_alias_lookup import ResolveResult
+
+        h = self._in_brand()
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            alias_table({"tiguan": ResolveResult(ambiguous=True)}),
+        ):
+            await h.run(TIGUAN)
+
+        # Absent, not `None`: an unresolved field that exists as a key reads as
+        # «asked and answered nothing» to everything downstream that walks
+        # `fsm_filled_fields`, and `book_fitting` is one of those readers.
+        assert "brand" not in h.session.fsm_filled_fields
+        assert h.session.fsm_parser_null_counts.get("BRAND", 0) == 1
+
+    async def test_a_failing_database_costs_one_field_not_the_call(self) -> None:
+        """§3.2 rule 4. The caller is on the phone: the turn continues on the
+        `parse()` result and the FSM stays where it was."""
+        h = self._in_brand()
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            alias_table({}, raises=RuntimeError("pool exhausted")),
+        ):
+            await h.run(TIGUAN)
+
+        assert h.session.fsm_state == FsmState.BRAND.value
+        assert h.session.fsm_parser_null_counts.get("BRAND", 0) == 1
+        assert LLM_REPLY in h.assistant_texts
+
+    async def test_the_failure_is_logged_with_its_traceback(self, caplog) -> None:
+        """Not `contextlib.suppress`, and not a bare DEBUG line: a silently
+        swallowed failure on this path is how 3/3 bookings were lost invisibly
+        (`37fb2d0`). The traceback is what tells a pool timeout from a typo.
+        """
+        h = self._in_brand()
+
+        with (
+            caplog.at_level(logging.WARNING),
+            fsm_flags(enabled=True, shadow_mode=False),
+            alias_table({}, raises=RuntimeError("pool exhausted")),
+        ):
+            await h.run(TIGUAN)
+
+        failures = [r for r in caplog.records if "FSM network resolve failed" in r.getMessage()]
+        assert len(failures) == 1
+        assert failures[0].levelno == logging.WARNING
+        assert failures[0].exc_info is not None
+
+    async def test_a_hung_database_cannot_hold_the_turn(self) -> None:
+        """The real risk on a voice turn is not a wrong answer, it is silence.
+        A resolver that never returns must time out into the same «continue on
+        `parse()`» path as any other failure.
+        """
+        h = self._in_brand()
+
+        with (
+            patch("src.core.pipeline._FSM_ARESOLVE_TIMEOUT_SEC", 0.01),
+            fsm_flags(enabled=True, shadow_mode=False),
+            alias_table({"tiguan": volkswagen()}, delay=1.0),
+        ):
+            await h.run(TIGUAN)
+
+        assert h.session.fsm_filled_fields.get("brand") in (None, "")
+        assert h.session.fsm_state == FsmState.BRAND.value
+
+    async def test_the_connection_is_always_returned(self) -> None:
+        """Opened with `async with`, so a raising resolver still gives it back.
+        A per-turn leak exhausts a pool of fifteen inside one busy call."""
+        engine = FakeEngine()
+        h = self._in_brand(engine=engine)
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            alias_table({}, raises=RuntimeError("boom")),
+        ):
+            await h.run(TIGUAN)
+
+        assert engine.opened == 1
+        assert engine.closed == 1
+
+    async def test_the_resolved_field_drops_its_inferred_mark(self) -> None:
+        """Same bookkeeping as the seam's targeted pass. The mark exists so the
+        broad pass may hand a guessed slot back; leaving it on a value the
+        caller actually named lets a later sweep overwrite it.
+        """
+        h = self._in_brand()
+        h.session.fsm_filled_fields.pop("brand", None)
+        h.session.fsm_inferred_fields.append("brand")
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            alias_table({"tiguan": volkswagen()}),
+        ):
+            await h.run(TIGUAN)
+
+        assert h.session.fsm_filled_fields.get("brand") == "Volkswagen"
+        assert "brand" not in h.session.fsm_inferred_fields
+
+    async def test_it_is_visible_in_the_prod_logs(self, caplog) -> None:
+        """The one line that says a field came from the database rather than
+        from the utterance. Without it a regression in the alias table reads as
+        a regression in the parser."""
+        h = self._in_brand()
+
+        with (
+            caplog.at_level(logging.INFO),
+            fsm_flags(enabled=True, shadow_mode=False),
+            alias_table({"tiguan": volkswagen()}),
+        ):
+            await h.run(TIGUAN)
+
+        lines = [r.getMessage() for r in caplog.records if "fsm_aresolve" in r.getMessage()]
+        assert len(lines) == 1
+        assert "field=brand" in lines[0]
+        assert "value=Volkswagen" in lines[0]
+        assert "state=BRAND" in lines[0]
+
+    async def test_station_agrees_with_the_seam(self) -> None:
+        """`station_parser` comes through here too — dispatch is on the declared
+        resolver, not on a list of states someone has to remember to extend
+        (`feedback_guards_need_default_deny`).
+
+        Its resolver is a thin wrapper over the same
+        `resolve_station_from_session` the seam calls, so wiring it must be a
+        no-op on the answer. This pins that: the landmark resolves to the same
+        id it did before the wire, and it does so without asking the database.
+        """
+        engine = FakeEngine()
+        # Two points, not one: with a single station `refresh_auto_skips` pins
+        # it outright and the test would pass without any resolver at all.
+        stations = [
+            {"id": "ST-1", "name": "Донецьке шосе", "city": "Дніпро", "address": "Донецьке шосе"},
+            {"id": "ST-2", "name": "Запорізьке шосе", "city": "Дніпро", "address": "Запорізьке"},
+        ]
+        h = Harness(
+            booking_in_progress(FsmState.STATION, stations=stations),
+            db_engine=engine,
+        )
+        h.session.fsm_filled_fields["city"] = "Дніпро"
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            alias_table({}) as asked,
+        ):
+            await h.run("Донецьке шосе")
+
+        assert h.session.fsm_filled_fields.get("station_id") == "ST-1"
+        assert asked == []
+
+    def test_production_actually_hands_the_pipeline_an_engine(self) -> None:
+        """`src/main.py` is the only place a real engine comes from.
+
+        Every other test in this class builds the pipeline itself, so all of
+        them stay green against a production call site that leaves `db_engine`
+        at its default — which is the exact shape of the hole this wave closes:
+        a resolver that works and has no caller. Read as text rather than
+        imported: importing `src.main` starts the world.
+        """
+        source = (Path(__file__).resolve().parents[2] / "src" / "main.py").read_text(
+            encoding="utf-8"
+        )
+        construction = source.split("pipeline = CallPipeline(", 1)[1].split(")", 1)[0]
+        assert "db_engine=_db_engine" in construction

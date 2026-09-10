@@ -526,6 +526,13 @@ FSM_MODE_LIVE = "live"
 # through to the normal streaming turn (the LLM sees the raw utterance).
 FSM_INTERRUPT_CONFIDENCE_FLOOR = 0.5
 
+# Ceiling on `FieldParser.aresolve` (`_run_fsm_network_resolve`). The caller is
+# on the phone: a database that stops answering must cost one field, not the
+# turn. Generous next to the ~6 indexed lookups the alias table does, so a
+# timeout here means the pool is exhausted or the DB is down, not that the
+# query was slow.
+_FSM_ARESOLVE_TIMEOUT_SEC = 2.0
+
 # Main-flow states the FSM is allowed to ask in its own words (Wave 7-0).
 #
 # Empty, and not to be refilled without a redesign. Shipped on 2026-09-10 with
@@ -540,9 +547,12 @@ FSM_INTERRUPT_CONFIDENCE_FLOOR = 0.5
 # bookings in the fifteen comparable calls before the deploy.
 #
 # Narrowing the set does not help — the defect is one state deep, not three.
-# Re-enabling requires the FSM to own the turn's tool calls, which it cannot
-# while `station_id` is never filled (the targeted pass maps `station_parser` to
-# `city` alone, and `aresolve` has no call-sites).
+# Re-enabling requires the FSM to own the turn's tool calls. The reason given
+# here for why it cannot — «`station_id` is never filled, and `aresolve` has no
+# call-sites» — has since been fixed: Wave 6-C wired the station resolver into
+# the seam and Wave 20 gave the network resolvers their own step
+# (`_run_fsm_network_resolve`). The set stays empty on the *other* half of the
+# argument, the re-ask defect, which no wire addresses.
 FSM_VOICE_STATES: frozenset[str] = frozenset()
 
 # Pipeline-side interrupt caps. These *duplicate* the handler-side caps in
@@ -756,6 +766,7 @@ class CallPipeline:
         customer_profile: str | None = None,
         echo_canceller: EchoCanceller | None = None,
         session_store: SessionStore | None = None,
+        db_engine: Any = None,
     ) -> None:
         self._conn = conn
         self._stt = stt
@@ -775,6 +786,11 @@ class CallPipeline:
         self._customer_profile = customer_profile
         self._echo_canceller = echo_canceller
         self._session_store = session_store
+        # The FSM's only route to a database. `None` in shadow-safe contexts and
+        # in every test that does not opt in — `_run_fsm_network_resolve` is a
+        # no-op without it, which keeps «no engine ⇒ no I/O» checkable in one
+        # place instead of at each resolver.
+        self._db_engine = db_engine
         self._turn_counter = 0
         self._llm_history: list[dict[str, Any]] = []  # persistent LLM context for streaming path
         # Wave 4-A. Resolved once per call so the flag cannot flip mid-call.
@@ -1616,6 +1632,109 @@ class CallPipeline:
             logger.error(
                 "FSM deterministic step failed for call=%s — continuing on the "
                 "legacy path",
+                self._session.channel_uuid,
+                exc_info=True,
+            )
+
+    async def _run_fsm_network_resolve(self, transcript: Transcript) -> None:
+        """Run the current state's `aresolve` — the one FSM step allowed I/O.
+
+        Live only, and deliberately *outside* `_run_fsm_deterministic_step`:
+        that method is synchronous by contract («no await → no network»), and
+        that contract is the whole reason shadow mode is safe to run against
+        live traffic. Threading a live connection into it would end shadow
+        mode's guarantee for the sake of one field.
+
+        **In front of the seam, not behind it.** The seam decides `apply_field`
+        vs `on_parser_null` in a single pass, so a resolver running afterwards
+        would have to *undo* a charge instead of preventing it. Resolving first
+        means the seam finds `fsm_filled_fields[own_field]` already set and
+        takes its ordinary `apply_field` branch — this step adds no branch to
+        the seam at all.
+
+        Dispatch is on `parser.aresolve is not None`, never on a list of
+        states: an allow-list is a thing someone forgets to extend
+        (`feedback_guards_need_default_deny`). `station_parser` therefore comes
+        through here too, and that is correct — its resolver is a thin wrapper
+        over the same `resolve_station_from_session` the seam calls, so the two
+        paths cannot disagree. Only `brand_parser` actually reads `ctx.conn`,
+        and it is the reason this step exists: the Wave 8 alias table
+        (`e67c6d7`, «Тігуан» → Volkswagen) had **zero call sites in `src/`**,
+        and on 2026-09-10 that cost a live booking its BRAND field.
+
+        Bounded by the state's own `max_parser_null` — the caller cannot spend
+        more turns in BRAND than its budget, and one turn is at most
+        `brand_parser._MAX_CANDIDATES` lookups. The real risk on a voice turn is
+        a slow database, so the resolver runs under
+        `_FSM_ARESOLVE_TIMEOUT_SEC`; a timeout is a WARNING and the turn
+        continues on the `parse()` result, exactly like any other failure
+        (§3.2 rule 4). `contextlib.suppress` is forbidden here (`37fb2d0`).
+        """
+        # The single enforcement point, and the reason the call site carries no
+        # second copy: this is the boundary where «live» stops being a mode and
+        # starts being a connection to production data.
+        if self._fsm_mode() != FSM_MODE_LIVE or self._db_engine is None:
+            return
+        try:
+            from src.agent.fitting_fsm import STATES, FsmEngine
+            from src.agent.parsers.base import ParseContext
+            from src.agent.parsers.registry import get_parser
+
+            engine = FsmEngine(self._session)
+            engine.start()
+            state = engine.current_state()
+            parser = get_parser(STATES[state].parser)
+            # `aresolve is None` for eleven of the thirteen parsers, and
+            # `parser is None` for INTENT — both mean there is nothing here to
+            # resolve, so no connection is opened for those turns.
+            if parser is None or parser.aresolve is None or not parser.field_name:
+                return
+            field = parser.field_name
+            if self._session.fsm_filled_fields.get(field) not in (None, ""):
+                return
+
+            async with self._db_engine.connect() as conn:
+                ctx = ParseContext(
+                    customer_text=transcript.text,
+                    last_bot_utterance=self._last_bot_utterance(),
+                    state=state,
+                    session=self._session,
+                    now=datetime.datetime.now(tz=_KYIV_TZ),
+                    conn=conn,
+                )
+                # Rule 1: `parse()` first, and it alone decides whether anything
+                # is left to resolve. A resolved parse is never second-guessed
+                # by a database.
+                outcome = parser.parse(ctx)
+                if outcome.status == "value":
+                    return
+                resolved = await asyncio.wait_for(
+                    parser.aresolve(ctx, outcome),
+                    timeout=_FSM_ARESOLVE_TIMEOUT_SEC,
+                )
+
+            if resolved.status != "value":
+                return
+            self._session.fsm_filled_fields[field] = resolved.value
+            # Same bookkeeping as the seam's targeted pass: this *is* a targeted
+            # resolution of the state's own field, so an inferred mark on it is
+            # spent, and leaving the mark would let the broad pass overwrite a
+            # value the caller actually named.
+            if field in self._session.fsm_inferred_fields:
+                self._session.fsm_inferred_fields.remove(field)
+            logger.info(
+                "fsm_aresolve call=%s state=%s parser=%s field=%s value=%s parse=%s",
+                self._session.channel_uuid,
+                state.value,
+                parser.name,
+                field,
+                resolved.value,
+                outcome.status,
+                extra={"call_id": str(self._session.channel_uuid)},
+            )
+        except Exception:
+            logger.warning(
+                "FSM network resolve failed for call=%s — continuing on the parse() result",
                 self._session.channel_uuid,
                 exc_info=True,
             )
@@ -2662,6 +2781,13 @@ class CallPipeline:
             fsm_mode = self._fsm_mode()
             fsm_took_turn = False
             if fsm_mode != FSM_MODE_OFF:
+                # The network half of §3.2, and the only FSM step that does I/O.
+                # It self-gates on live mode rather than being wrapped in a
+                # second check here: two copies of one condition means a test
+                # can only ever pin one of them, and the copy that matters is
+                # the one at the boundary. Ahead of the seam because the seam
+                # charges `parser_null` in the same pass — see its docstring.
+                await self._run_fsm_network_resolve(transcript)
                 # Deterministic, synchronous, zero I/O — legal in shadow mode.
                 self._run_fsm_deterministic_step(transcript)
                 if fsm_mode == FSM_MODE_LIVE:

@@ -31,7 +31,11 @@ in live, and shadow does now see a `station_id`.
 
 `brand_parser` is the contrasting case and stays live-only: its resolver needs
 `ctx.conn` for the alias table, that is real I/O, and `ParseContext.conn` is
-pinned to `None` in the seam precisely to forbid it.
+pinned to `None` in the seam precisely to forbid it. Wave 20 gives it a step of
+its own in front of the seam, `CallPipeline._run_fsm_network_resolve`, which is
+async, live-only, and holds the only connection the FSM ever sees. That step
+dispatches on `aresolve is not None`, so it carries this parser too — harmless,
+because `_aresolve_station` is a wrapper over the same function the seam calls.
 
 Until Wave 6-C the id had no reachable path at all — `aresolve` had zero call
 sites, so STATION was a structural dead end (12 of 16 replayed calls died

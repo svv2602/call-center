@@ -1274,6 +1274,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             customer_profile=customer_profile_text,
             echo_canceller=echo_canceller,
             session_store=_session_store,
+            db_engine=_db_engine,
         )
         await pipeline.run()
 

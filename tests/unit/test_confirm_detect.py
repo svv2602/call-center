@@ -164,6 +164,38 @@ class TestConfirmationOutsideKrok8:
         assert not is_yes_no_question("Записуємо туди чи пошукаємо інший пункт?")
         assert not is_yes_no_question("Підтверджуєте чи хочете змінити дату?")
 
+    @pytest.mark.parametrize(
+        "quoted",
+        [
+            "Скасувати? Скажіть «так» або «ні».",
+            'Скасувати? Скажіть "так" або "ні".',
+            "Скасувати? Скажіть так або ні.",
+            "Скасувати? Скажіть ʼтакʼ або ʼніʼ.",
+        ],
+    )
+    def test_a_question_that_spells_its_own_answers_out(self, quoted):
+        """`4a687e9a` turn 6, the first live cancellation.
+
+        The cancel sub-flow had no phrasing on the allow-list, so «так так»
+        was charged to CITY. Adding «скасувати?» would have fixed this one call
+        and broken the multi-booking case below, so the marker is the part of
+        the sentence that is a rule rather than a phrasing.
+
+        Parametrized over the quote glyphs because the LLM picks a different
+        one from turn to turn, and a rule that depends on which one it picked
+        is not a rule.
+        """
+        assert is_yes_no_question(quoted)
+
+    def test_picking_which_booking_to_cancel_is_not_a_yes_no(self):
+        """Same sub-flow, and «так» answers nothing in it.
+
+        A caller with two bookings is asked which to cancel. That turn has to
+        keep costing an attempt — this is why «скасувати?» is not the marker.
+        """
+        assert not is_yes_no_question("Який запис скасувати?")
+        assert not is_yes_no_question("Скасувати запис на 14 вересня чи на 15?")
+
     def test_записуємо_alone_is_agreement(self):
         """`cf43d623` turn 12 — «записуємо» as the answer, not the question.
 

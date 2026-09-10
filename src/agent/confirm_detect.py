@@ -63,6 +63,16 @@ _ASK_MARKERS: tuple[str, ...] = (
 # «записуємо туди» is listed with its object for that reason — «На яку дату
 # записуємо?» is the second most common question in the log and is not a
 # yes/no.
+#
+# «так або ні» is the one marker here that is not a phrasing but a rule: a
+# question that spells its own two answers out *is* a yes/no question, whatever
+# sub-flow it belongs to. It was added for the cancel sub-flow, which the
+# phrasing-by-phrasing list structurally could not reach — on `4a687e9a`
+# (2026-09-10) the bot asked «…Скасувати? Скажіть «так» або «ні».», the caller
+# said «так так» and the FSM charged it to CITY. «скасувати?» itself is
+# deliberately *not* a marker: with several bookings the same sub-flow asks
+# «Який запис скасувати?», which is an open question where «так» answers
+# nothing.
 _YES_NO_ASK_MARKERS: tuple[str, ...] = (
     "записуємо туди",
     "записуємо сюди",
@@ -72,7 +82,13 @@ _YES_NO_ASK_MARKERS: tuple[str, ...] = (
     "підходить?",
     "ви ще на лінії",
     "ви маєте на увазі",
+    "так або ні",
 )
+
+# Stripped before the markers are matched. The bot quotes the two answers it
+# wants («так» / "так" / plain), and which glyph the LLM picks varies turn to
+# turn — matching on the quoted form would make the rule above depend on it.
+_QUOTE_GLYPHS = str.maketrans("", "", "«»\"'`ʼ’‘”“")
 
 # …unless the same sentence also offers a choice. `fe1857ba` (2026-09-10) is
 # why: the caller said «так» to «Шини привозите свої з собою чи ті, що у нас на
@@ -139,12 +155,16 @@ def is_yes_no_question(bot_utterance: str) -> bool:
       reached an operator.
     * `b034315e` (2026-09-10): «Пропоную понеділок, чотирнадцяте вересня.
       Підходить?» → «так», charged to TIME.
+    * `4a687e9a` (2026-09-10, the first live cancellation): «…Скасувати?
+      Скажіть «так» або «ні».» → «так так», charged to CITY. The sub-flow the
+      caller was in had no phrasing on the list at all, which is why the list
+      now also carries the self-describing «так або ні».
 
     Deliberately narrow — an allow-list of phrasings taken off the log, vetoed
     by « чи ». A wrong «yes» here does not book anything; it withholds one
     escalation tick, which is why the veto matters more than the coverage.
     """
-    low = (bot_utterance or "").lower()
+    low = (bot_utterance or "").lower().translate(_QUOTE_GLYPHS)
     if not low or _CHOICE_MARKER in low:
         return False
     return any(marker in low for marker in (*_YES_NO_ASK_MARKERS, *_ASK_MARKERS))
