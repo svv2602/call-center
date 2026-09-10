@@ -143,6 +143,7 @@ class TestTwoLevelsDoNotCollapse:
     WIDE_ONLY = (
         "тобою",  # call 2026-08-03 14:56
         "з тобою",
+        "с тобой",  # call 4b6c4653, 2026-09-10 — same mangle, Russian spelling
         "шины будут любую",  # STT for «шини будуть з собою»
         "мої шини",
         "везу свої",
@@ -192,6 +193,20 @@ class TestSttMangles:
     def test_mangles_that_also_carry_a_self_evident_substring(self, text: str) -> None:
         """«приложишь с собой» contains «с собой» — self-evident by construction."""
         outcome = PARSER.parse(ctx(text))
+        assert outcome.value == "own"
+
+    @pytest.mark.parametrize("text", ["с тобой", "тобой"])
+    def test_the_russian_spelling_of_the_same_mangle(self, text: str) -> None:
+        """Call 4b6c4653, 2026-09-10 — the inversion this list exists to prevent.
+
+        Only the Ukrainian «-ою» spellings were listed, so «с тобой» matched
+        nothing, `parse` returned NOT_MENTIONED, and the LLM asked «потрібно, щоб
+        ми доставили ваші шини зі зберігання?» — the opposite of what the caller
+        had just said. The call then died at STORAGE with no booking. A silent
+        NOT_MENTIONED is what makes this shape dangerous rather than merely
+        unhelpful, so pin the value, not just «not None».
+        """
+        outcome = PARSER.parse(ctx(text, bot=STORAGE_QUESTION))
         assert outcome.value == "own"
 
 

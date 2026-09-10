@@ -110,6 +110,13 @@ _STORAGE_OWN_HINTS: tuple[str, ...] = (
     # output for «шини будуть з собою».
     "тобою",
     "з тобою",
+    # Same mangle in Russian orthography — «з собою» → «с тобой» (call
+    # 4b6c4653, 2026-09-10). Only the «-ою» spellings were listed, so the
+    # answer parsed as nothing, the bot asked «потрібно, щоб ми доставили
+    # ваші шини зі зберігання?» — the opposite of what the caller said — and
+    # the call died at STORAGE without a booking. Bare, because the match is
+    # a substring test: listing «с тобой» beside it would never fire.
+    "тобой",
     "шини будуть з собою",
     "шини будуть с собой",
     "шины будут с собой",
