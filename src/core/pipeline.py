@@ -53,6 +53,7 @@ from src.monitoring.metrics import (
     false_booking_claim_total,
     fsm_compound_preparse_fields_total,
     fsm_interrupt_total,
+    fsm_voice_total,
     tts_delivery_ms,
 )
 from src.stt.base import STTConfig, STTEngine, Transcript
@@ -520,6 +521,17 @@ FSM_MODE_LIVE = "live"
 # Below this classifier confidence we refuse to act on the intent and fall
 # through to the normal streaming turn (the LLM sees the raw utterance).
 FSM_INTERRUPT_CONFIDENCE_FLOOR = 0.5
+
+# Main-flow states the FSM is allowed to ask in its own words (Wave 7-0). Every
+# other state still gets its question from the LLM, so this set is the migration
+# dial: a state joins it only when the prompt no longer asks the same thing, and
+# leaving it is a one-line rollback that needs no deploy of the prompt.
+#
+# These three start it because their `question_template` is byte-identical to
+# what the LLM already says in production (verified on calls 4e09dfab and
+# c71ad0e5, 2026-09-10) — so the first cut changes *who* speaks, not *what* the
+# caller hears, and any behaviour change is attributable to the seam itself.
+FSM_VOICE_STATES: frozenset[str] = frozenset({"STORAGE", "COLOR", "BRAND"})
 
 # Pipeline-side interrupt caps. These *duplicate* the handler-side caps in
 # src/agent/interrupts.py on purpose: the revert cause was a handler that
@@ -1745,6 +1757,95 @@ class CallPipeline:
             result.resume_state,
         )
 
+    async def _maybe_speak_fsm_question(self, transcript: Transcript) -> bool:
+        """Live-mode main flow: let the FSM ask the next question itself.
+
+        Runs after `_run_fsm_deterministic_step` has already consumed this
+        transcript, so `session.fsm_state` is the state whose field we still
+        need. Returns True only when the question was actually spoken, and the
+        caller then skips the LLM turn entirely — that suppression is the point.
+        Asking from both sides is what made the reverted build say «В якому
+        місті?» twice in a row (`c8c6601`).
+
+        Every refusal below falls through to the LLM, which is the behaviour
+        that shipped before this method existed.
+        """
+        try:
+            from src.agent.fitting_fsm import STATES, FsmEngine, FsmState
+
+            state = FsmState(self._session.fsm_state)
+            if state.value not in FSM_VOICE_STATES:
+                return False
+
+            cfg = STATES[state]
+            field = cfg.field_name
+            # The state's own field is already known — the FSM is about to move
+            # on, and its question would ask for something we have.
+            if not field or self._session.fsm_filled_fields.get(field):
+                fsm_voice_total.labels(state=state.value, outcome="field_filled").inc()
+                return False
+
+            engine = FsmEngine(self._session)
+            engine.start()
+            question, unresolved = engine.next_question_checked(state)
+            if unresolved:
+                # `render` leaves these literal, so speaking now would put
+                # «[districts]» in the caller's ear.
+                fsm_voice_total.labels(state=state.value, outcome="unresolved").inc()
+                return False
+            if not question.strip():
+                fsm_voice_total.labels(state=state.value, outcome="empty").inc()
+                return False
+
+            # Never say the same sentence twice in a row. On a parser_null the
+            # FSM's own answer is to re-ask, and re-asking verbatim is the
+            # symptom the first attempt was reverted for; the LLM rephrases.
+            last_bot = next(
+                (
+                    t.content
+                    for t in reversed(self._session.dialog_history)
+                    if t.speaker == "assistant" and t.content
+                ),
+                "",
+            )
+            if question.strip() == last_bot.strip():
+                fsm_voice_total.labels(state=state.value, outcome="repeat").inc()
+                return False
+        except Exception:
+            logger.error(
+                "FSM voice: refusing the turn for call=%s — falling through to "
+                "the LLM",
+                self._session.channel_uuid,
+                exc_info=True,
+            )
+            return False
+
+        self._session.add_user_turn(
+            content=transcript.text,
+            stt_confidence=transcript.confidence,
+            detected_language=transcript.language,
+        )
+        await self._log_turn(
+            "customer",
+            transcript.text,
+            stt_confidence=transcript.confidence,
+            language=transcript.language,
+        )
+        self._session.reset_empty_response()
+        self._session.add_assistant_turn(question)
+        await self._log_turn("bot", question)
+        await self._persist_session()
+        await self._speak(question)
+        fsm_voice_total.labels(state=state.value, outcome="spoken").inc()
+        logger.info(
+            "fsm_voice call=%s state=%s spoke=%r",
+            self._session.channel_uuid,
+            state.value,
+            question,
+            extra={"call_id": str(self._session.channel_uuid)},
+        )
+        return True
+
     async def _maybe_handle_intent(self, transcript: Transcript) -> bool:
         """Live-mode side door: let an interrupt handler own this turn.
 
@@ -2428,6 +2529,8 @@ class CallPipeline:
                 if fsm_mode == FSM_MODE_LIVE:
                     # Only live mode is allowed to reach the customer.
                     fsm_took_turn = await self._maybe_handle_intent(transcript)
+                    if not fsm_took_turn:
+                        fsm_took_turn = await self._maybe_speak_fsm_question(transcript)
             if fsm_took_turn:
                 if await self._close_turn():
                     break

@@ -522,6 +522,15 @@ fsm_compound_preparse_fields_total = Counter(
     ["field"],
 )
 
+fsm_voice_total = Counter(
+    "callcenter_fsm_voice_total",
+    "Main-flow turns the FSM asked in its own words instead of the LLM. "
+    "`outcome=spoken` means the LLM turn was suppressed; every other value is a "
+    "refusal that fell through to the LLM, so a state stuck on one refusal "
+    "reason is a template or an opt-in that is not ready.",
+    ["state", "outcome"],
+)
+
 
 def get_metrics() -> bytes:
     """Generate Prometheus metrics output."""

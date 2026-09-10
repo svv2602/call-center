@@ -1531,11 +1531,15 @@ class FsmEngine:
         `max_parser_null` unheard brands the bot switches to the car *type*
         instead of asking «Яка марка вашого авто?» a third time (§3.7 row 23).
         """
+        return self.next_question_checked(state)[0]
+
+    def next_question_checked(self, state: FsmState | None = None) -> tuple[str, list[str]]:
+        """`next_question`, plus its unresolved placeholders (see `render_checked`)."""
         target = state or self.current_state()
         cfg = self.config(target)
         if cfg.fallback_question and self._fallback_active(target):
-            return self.render(cfg.fallback_question)
-        return self.render(cfg.question_template)
+            return self.render_checked(cfg.fallback_question)
+        return self.render_checked(cfg.question_template)
 
     def _fallback_active(self, state: FsmState) -> bool:
         """Is `state`'s `on_null_exhausted` fallback currently engaged?
@@ -1575,8 +1579,17 @@ class FsmEngine:
 
     def render(self, template: str) -> str:
         """Substitute `{placeholder}` and `[placeholder]` from session context."""
+        return self.render_checked(template)[0]
+
+    def render_checked(self, template: str) -> tuple[str, list[str]]:
+        """`render`, plus the placeholders that stayed unresolved.
+
+        Callers that put the result in the caller's ear need the second element:
+        an unfilled `[districts]` survives substitution as a literal, and on the
+        FSM voice path that is what gets spoken out loud.
+        """
         if not template:
-            return ""
+            return "", []
         context = self.render_context()
         missing: list[str] = []
 
@@ -1599,7 +1612,7 @@ class FsmEngine:
                 self.current_state(),
                 self.session.channel_uuid,
             )
-        return rendered
+        return rendered, missing
 
     def render_context(self) -> dict[str, Any]:
         """Values available to `question_template` / `resume_phrase`.
