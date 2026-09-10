@@ -228,6 +228,62 @@ class TestSttMangles:
         assert outcome.value == "own"
 
 
+class TestTheBareStem:
+    """«свої» on its own — the answer the two-option question invites.
+
+    Live FSM, 2026-09-10. The wide list carried «свої привезу» and «везу свої»
+    but not «свої», so the shortest possible answer parsed as nothing:
+    `b034315e` said «свої» right after the Krok 2 question and it spent
+    STORAGE's second and last attempt; `8abd8557` said «шили свої» (STT for
+    «шини свої») and it spent the first. Neither call was ever asked again.
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "свої",  # b034315e, 2026-09-10 09:58:14
+            "шили свої",  # 8abd8557, 2026-09-10 09:55:18 — STT for «шини свої»
+            "шини свої",  # 7bb9e79b
+            "свои",  # fca511fe / f9523ef9 / 3b8afcc5
+            "привезу свои",  # the Russian word order «свої привезу» never had
+            "свои провожу",  # c08fc7a2 / 1b6721a4
+            "свои свои",  # cf43d623, 2026-09-10 11:15:53
+        ],
+    )
+    def test_the_stem_alone_answers_the_question(self, text: str) -> None:
+        outcome = PARSER.parse(ctx(text, bot=STORAGE_QUESTION))
+        assert outcome.status == "value"
+        assert outcome.value == "own"
+
+    @pytest.mark.parametrize("text", ["своїй з собою", "своїм", "своими шинами"])
+    def test_it_matches_the_longer_stems_too(self, text: str) -> None:
+        """Wanted, not tolerated: every prod «сво-» stem meant own tires."""
+        assert PARSER.parse(ctx(text, bot=STORAGE_QUESTION)).value == "own"
+
+    @pytest.mark.parametrize("text", ["ще не свої", "чи не свої"])
+    def test_the_negations_read_as_own_as_well(self, text: str) -> None:
+        """Both shapes are in prod (255c02b5, f7555aac) and both callers went on
+        to confirm own tires on the very next turn. Reading them as «own» agrees
+        with the outcome; refusing them costs the attempt.
+        """
+        assert PARSER.parse(ctx(text, bot=STORAGE_QUESTION)).value == "own"
+
+    def test_it_stays_wide_and_never_skips_the_state(self) -> None:
+        """Like «собою», a bare stem is a nudge — never grounds to skip STORAGE.
+
+        The broad pass runs without a bot utterance, so this is also what stops
+        «свої» said in some other state from filling the field from a distance.
+        """
+        outcome = PARSER.parse(ctx("свої"))
+        assert outcome.status == "unresolved"
+        assert outcome.confidence == _UNASKED_CONFIDENCE
+        assert outcome.confidence < APPLY_THRESHOLD
+
+    def test_the_storage_reading_still_outranks_it(self) -> None:
+        """«свої на зберіганні» carries both readings, so it yields nothing."""
+        assert PARSER.parse(ctx("свої на зберіганні", bot=STORAGE_QUESTION)).value is None
+
+
 class TestContextScopedDenials:
     """«не маю» / «в мене нема» are own **only** right after Krok 2."""
 

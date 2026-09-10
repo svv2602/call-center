@@ -10,9 +10,27 @@ whole flow back to Krok 1.
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
 
-from src.agent.regression_guards import caller_named_city, check_krok1_regression
+from src.agent.regression_guards import (
+    caller_named_city,
+    check_krok1_regression,
+    check_weekday_mismatch,
+    requested_weekday,
+)
+
+#: Every date below is anchored to this call: Thursday 2026-09-10.
+THURSDAY = date(2026, 9, 10)
+#: Call `b034315e`: the caller named Sunday, then agreed to the Monday offered.
+SUNDAY_THEN_YES = ["хочу записатися на неділю", "так"]
+#: Calls `dce9f6af` / `dac6df27` ran on Wednesday 2026-08-05.
+WEDNESDAY = date(2026, 8, 5)
+TUESDAY_ASKED = ["запишіть на вівторок"]
+#: Call `ab39e3c6` ran on Monday 2026-07-27.
+MONDAY_AB39 = date(2026, 7, 27)
+HISTORY_AB39 = ["потрібно записатись на шиномонтаж", "в неділю", "1 серпня"]
 
 
 class TestCallerNamedCity:
@@ -471,3 +489,210 @@ class TestBackwardsCompat:
         )
         assert result is not None
         assert result["reason"] == "past_krok_2"
+
+
+class TestWeekdayMismatch:
+    """The date the LLM queries must be the weekday the caller named.
+
+    Call 2026-08-03: «п'ятницю» (7 серпня), `date_from=2026-08-06` — a
+    Thursday. The bot read Thursday's slots out as Friday's.
+    """
+
+    def test_the_call_that_created_the_guard(self) -> None:
+        verdict = check_weekday_mismatch(
+            "2026-09-10", ["давайте на п'ятницю"], THURSDAY
+        )
+        assert verdict is not None
+        assert verdict["reason"] == "weekday_mismatch"
+        assert verdict["requested_weekday"] == 4
+        assert verdict["slots"] == []
+        assert "2026-09-11" in verdict["message"]
+        assert "Клієнт просив пʼятницю" in verdict["message"]
+        assert "це четвер" in verdict["message"]
+
+    def test_the_right_weekday_passes(self) -> None:
+        assert check_weekday_mismatch("2026-09-11", ["на п'ятницю"], THURSDAY) is None
+
+    def test_no_weekday_named_is_not_the_guard_s_business(self) -> None:
+        assert check_weekday_mismatch("2026-09-14", ["давайте завтра"], THURSDAY) is None
+
+    def test_an_unparseable_date_is_left_to_the_other_checks(self) -> None:
+        assert check_weekday_mismatch("", ["на п'ятницю"], THURSDAY) is None
+        assert check_weekday_mismatch("завтра", ["на п'ятницю"], THURSDAY) is None
+
+    @pytest.mark.parametrize(
+        "text,weekday",
+        [
+            ("запишіть на понеділок", 0),
+            ("давайте в среду", 2),
+            ("можна в четверг", 3),
+            ("на суботу", 5),
+            ("на неділю", 6),
+            ("в воскресенье", 6),
+        ],
+    )
+    def test_both_languages_are_heard(self, text: str, weekday: int) -> None:
+        verdict = check_weekday_mismatch("2026-09-11", [text], THURSDAY)
+        assert verdict is not None, text
+        assert verdict["requested_weekday"] == weekday
+
+    def test_the_correction_is_never_in_the_past(self) -> None:
+        """«на четвер» said on a Thursday means the next one, not today."""
+        verdict = check_weekday_mismatch("2026-09-11", ["на четвер"], THURSDAY)
+        assert verdict is not None
+        assert "2026-09-17" in verdict["message"]
+
+    def test_a_weekday_named_long_ago_is_not_still_the_request(self) -> None:
+        """Three turns of silence about dates and the keyword stops counting."""
+        assert (
+            check_weekday_mismatch(
+                "2026-09-14",
+                ["на п'ятницю", "білий Nissan", "R16", "Олена"],
+                THURSDAY,
+            )
+            is None
+        )
+
+
+class TestTheWeekdayIsUnavailable:
+    """Call `b034315e` (2026-09-10) — the guard fought the caller's own «так».
+
+    «на неділю» → `get_fitting_slots(2026-09-13)` → `available=0`. The bot
+    offered Monday, the caller agreed, the LLM queried Monday — and the guard
+    sent it back to the Sunday it had just been told was empty. Twice. The
+    caller then heard that there were no evening slots, computed from a list
+    the guard itself had emptied.
+    """
+
+
+    def test_the_bounce_without_the_fix(self) -> None:
+        verdict = check_weekday_mismatch("2026-09-14", SUNDAY_THEN_YES, THURSDAY)
+        assert verdict is not None
+        assert "2026-09-13" in verdict["message"]
+
+    def test_a_day_already_queried_to_zero_outranks_the_words(self) -> None:
+        assert (
+            check_weekday_mismatch(
+                "2026-09-14",
+                SUNDAY_THEN_YES,
+                THURSDAY,
+                dates_with_no_slots={"2026-09-13"},
+            )
+            is None
+        )
+
+    def test_a_different_empty_day_does_not_open_the_gate(self) -> None:
+        """Only the date the guard would bounce *to* counts."""
+        verdict = check_weekday_mismatch(
+            "2026-09-14",
+            SUNDAY_THEN_YES,
+            THURSDAY,
+            dates_with_no_slots={"2026-09-18"},
+        )
+        assert verdict is not None
+
+    def test_the_guard_does_not_repeat_itself(self) -> None:
+        """Call `56aea836` (2026-08-04): three identical refusals in 29s."""
+        assert (
+            check_weekday_mismatch(
+                "2026-09-14", SUNDAY_THEN_YES, THURSDAY, bounced_weekday_since_lookup=6
+            )
+            is None
+        )
+
+    def test_a_new_weekday_is_a_fresh_request_not_a_repeat(self) -> None:
+        """The cap is on the weekday, not the call — «а можна в суботу?»."""
+        verdict = check_weekday_mismatch(
+            "2026-09-14",
+            ["на неділю", "а можна в суботу"],
+            THURSDAY,
+            bounced_weekday_since_lookup=6,
+        )
+        assert verdict is not None
+        assert verdict["requested_weekday"] == 5
+
+
+class TestRequestedWeekday:
+    def test_the_latest_mention_wins(self) -> None:
+        assert requested_weekday(["на понеділок", "ні, краще в суботу"]) == 5
+
+    def test_nothing_named(self) -> None:
+        assert requested_weekday(["білий Nissan", "R16"]) is None
+
+    def test_empty_turns_do_not_count_against_the_depth(self) -> None:
+        """A silent turn is not a turn about something else."""
+        assert requested_weekday(["на суботу", "", "", "", "так"]) == 5
+
+    def test_the_depth_is_three_turns(self) -> None:
+        """Three turns counted inclusive of the one carrying the keyword."""
+        assert requested_weekday(["на суботу", "a", "b"]) == 5
+        assert requested_weekday(["на суботу", "a", "b", "c"]) is None
+
+    def test_a_substring_is_not_a_weekday(self) -> None:
+        """The keywords are prefix-anchored on a word boundary."""
+        assert requested_weekday(["посеред дороги"]) is None
+
+
+class TestARepeatIsNotADriftBack:
+    """Calls `dce9f6af` and `dac6df27` (2026-08-05) — the other half of the cap.
+
+    Both took the correction («вівторок» → 2026-08-11), got real slots four
+    seconds later, and drifted back to 2026-08-06 a turn on. The guard has to
+    fire again there, so the caller who asked for Tuesday is not read
+    Thursday's times. The caller clears `fitting_weekday_bounced_since_lookup`
+    on every completed lookup, which is what tells the two shapes apart.
+    """
+
+
+    def test_the_first_refusal(self) -> None:
+        verdict = check_weekday_mismatch("2026-08-06", TUESDAY_ASKED, WEDNESDAY)
+        assert verdict is not None
+        assert verdict["requested_weekday"] == 1
+        assert "2026-08-11" in verdict["message"]
+
+    def test_the_same_wrong_date_again_is_a_repeat(self) -> None:
+        assert (
+            check_weekday_mismatch(
+                "2026-08-06",
+                TUESDAY_ASKED,
+                WEDNESDAY,
+                bounced_weekday_since_lookup=1,
+            )
+            is None
+        )
+
+    def test_a_lookup_in_between_rearms_the_guard(self) -> None:
+        """`None` is what the caller writes back after a completed lookup."""
+        verdict = check_weekday_mismatch(
+            "2026-08-06",
+            TUESDAY_ASKED,
+            WEDNESDAY,
+            bounced_weekday_since_lookup=None,
+        )
+        assert verdict is not None
+        assert verdict["requested_weekday"] == 1
+
+
+class TestAReplacementDateIsAlsoAnOverride:
+    """Call `ab39e3c6` (2026-07-27) — the same defect, said a different way.
+
+    «в неділю» → 2026-08-02 came back empty (station shut at weekends) → the
+    caller named «1 серпня» instead. The guard has no business sending that
+    back to a Sunday it was already told was closed. That call booked 11:40.
+    """
+
+    def test_the_bounce_without_the_fix(self) -> None:
+        verdict = check_weekday_mismatch("2026-08-01", HISTORY_AB39, MONDAY_AB39)
+        assert verdict is not None
+        assert "2026-08-02" in verdict["message"]
+
+    def test_the_empty_sunday_settles_it(self) -> None:
+        assert (
+            check_weekday_mismatch(
+                "2026-08-01",
+                HISTORY_AB39,
+                MONDAY_AB39,
+                dates_with_no_slots={"2026-08-02"},
+            )
+            is None
+        )

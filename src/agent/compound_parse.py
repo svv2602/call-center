@@ -284,8 +284,16 @@ _LANDMARKS: tuple[tuple[str, str, str | None], ...] = (
     ("речпорт", "Речпорт", "Дніпро"),
     ("донецьке шосе", "Донецьке шосе", "Дніпро"),
     ("донецкое шоссе", "Донецьке шосе", "Дніпро"),
-    ("запорізьке шосе", "Запорізьке шосе", "Дніпро"),
-    ("запорожское шоссе", "Запорізьке шосе", "Дніпро"),
+    # Stems, not the whole phrase — the same shape as «харьковск» above, and for
+    # the same reason. Spelled out in full these matched the nominative only, so
+    # «на запорожском шоссе» sailed past the landmark pass and the city stem
+    # «запорож» read a Dnipro street as the city of Запоріжжя. Call `4fcb70d4`
+    # (2026-09-10): the caller said «в Днепре», then named this street, and
+    # Wave 18 duly overrode the LLM's correct `city='Дніпро'` with the phantom
+    # — every lookup for the rest of the call ran against the one Запоріжжя
+    # point, and «давайте в Днепре» three turns later could not get back.
+    ("запорізьк", "Запорізьке шосе", "Дніпро"),
+    ("запорожск", "Запорізьке шосе", "Дніпро"),
     ("добровольц", "Добровольців", "Дніпро"),
     ("княгині ольги", "Княгині Ольги", "Дніпро"),
     ("кротов", "Бориса Кротова", "Дніпро"),

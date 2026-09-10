@@ -252,3 +252,113 @@ def test_dictated_phone_number_is_not_a_slot():
     offered = ["09:00", "10:20"]
     assert detect_time_choice("нуль дев'ять нуль сім три два один", offered) is None
     assert detect_time_choice("мій номер 0970932120", offered) is None
+
+
+GRID = ["09:00", "09:40", "10:20", "11:00", "13:00", "14:00", "14:20", "15:00", "17:00"]
+
+
+class TestTwelveHourClock:
+    """Call `8abd8557` (2026-09-10) — «давайте на два» meant 14:00.
+
+    The bot had just read out the 17 September list. This detector returned
+    ``None``, the LLM answered «Час 10:20 прийнято», and the caller's correction
+    («еще раз временно зовите я хотел на два часа дня») ended the call at an
+    operator. Two of the day's calls died in TIME.
+    """
+
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("давайте на два", "14:00"),
+            ("я хотел на два часа дня", "14:00"),
+            ("на другу", "14:00"),
+            ("о другій", "14:00"),
+            ("на першу", "13:00"),
+            ("на третю", "15:00"),
+            ("на п'яту", "17:00"),
+            ("на 5 вечера", "17:00"),
+            ("на 5", "17:00"),
+        ],
+    )
+    def test_afternoon_hour_spoken_on_a_twelve_hour_clock(self, text, expected):
+        assert detect_time_choice(text, GRID, allow_hour_only=True) == expected
+
+    def test_the_afternoon_reading_still_has_to_be_on_offer(self):
+        """The mapping widens what is proposed; membership stays the authority."""
+        assert detect_time_choice("на шосту", GRID, allow_hour_only=True) is None
+        assert detect_time_choice("на сьому", GRID, allow_hour_only=True) is None
+
+    def test_minutes_survive_the_mapping(self):
+        assert detect_time_choice("на два двадцять", GRID) == "14:20"
+        assert detect_time_choice("на два тридцять", GRID) is None
+
+    def test_a_bare_afternoon_hour_still_needs_widening(self):
+        """Same gate as any other bare hour — «на два» could be two of something."""
+        assert detect_time_choice("на два", GRID) is None
+
+    def test_the_lone_slot_in_the_hour_is_taken(self):
+        """`8abd8557`'s real grid: 40-minute steps, so hour 14 holds only 14:20."""
+        forty = ["09:00", "09:40", "10:20", "11:00", "11:40", "12:20", "13:00", "13:40", "14:20"]
+        assert detect_time_choice("давайте на два", forty, allow_hour_only=True) == "14:20"
+
+    def test_a_morning_hour_is_unaffected(self):
+        for text, expected in (("на дев'яту", "09:00"), ("о 11", "11:00")):
+            assert detect_time_choice(text, GRID, allow_hour_only=True) == expected
+
+    def test_the_mapping_is_stated_in_full(self):
+        """Pinned as a table so the widening cannot quietly grow.
+
+        Only 1-7 are re-read. An hour that is already inside the working day
+        keeps its single reading: «на вісім» is 08:00 and must not also offer
+        20:00, or the detector would start guessing between two hours the
+        caller distinguished perfectly well.
+        """
+        from src.agent.time_detect import _hour_variants
+
+        afternoon = [[13], [14], [15], [16], [17], [18], [19]]
+        assert [_hour_variants(n) for n in range(1, 8)] == afternoon
+        assert all(_hour_variants(n) == [n] for n in range(8, 21)), "one reading, not two"
+        assert _hour_variants(0) == []
+        assert _hour_variants(21) == []
+
+    def test_an_hour_inside_the_working_day_is_not_re_read(self):
+        assert detect_time_choice("на вісім", ["20:00", "09:00"], allow_hour_only=True) is None
+
+
+COUNT_GRID = ["09:00", "13:00", "14:00", "16:00", "17:00"]
+
+
+class TestWheelCountIsNotAnHour:
+    """2 and 4 are the two commonest wheel counts and two afternoon hours.
+
+    The booking flow never asks how many wheels — it books a set of four
+    (`prompts.py:450`) — but the caller volunteers it, and the price flow reads
+    it as a multiplier (`prompts.py:706`). Without the guard «два колеса» pins
+    14:00.
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "два колеса",
+            "на 4 колеса",
+            "чотири колеса",
+            "тільки два колеса перевзути",
+            "це за 4 колеса чи за одне",
+            "за чотири шини",
+        ],
+    )
+    def test_a_count_never_pins_a_slot(self, text):
+        assert detect_time_choice(text, COUNT_GRID, allow_hour_only=True) is None
+
+    def test_the_guard_is_load_bearing(self):
+        """Without the strip the same phrase resolves — asserted, not assumed."""
+        from src.agent.time_detect import _QUANTITY_RE, _normalize
+
+        stripped = _QUANTITY_RE.sub(" ", _normalize("два колеса"))
+        assert "колеса" not in stripped
+        assert detect_time_choice("два колеса", COUNT_GRID, allow_hour_only=True) is None
+        assert detect_time_choice("два", COUNT_GRID, allow_hour_only=True) == "14:00"
+
+    def test_an_hour_next_to_an_unrelated_noun_still_counts(self):
+        assert detect_time_choice("давайте о другій", COUNT_GRID, allow_hour_only=True) == "14:00"

@@ -31,7 +31,7 @@ _CONFIRM_WORDS: frozenset[str] = frozenset({
     "вірно", "верно", "правильно", "точно", "звісно", "звичайно", "конечно",
     "добре", "добро", "хорошо", "гаразд", "підходить", "подходит",
     "згоден", "згодна", "згодні", "согласен", "согласна",
-    "давай", "давайте", "запишіть", "записуйте",
+    "давай", "давайте", "запишіть", "записуйте", "записуємо",
     "воно", "таки", "таково",
 })
 
@@ -52,6 +52,34 @@ _ASK_MARKERS: tuple[str, ...] = (
     "підтверджуєте", "підтверджує", "підтвердити", "підтверджен",
     "перевіримо:", "підтверджуєш",
 )
+
+# Bot phrasings that invite a bare «так» *outside* Krok 8. The FSM never asks
+# these — they belong to the LLM's own checklist — but the caller answering one
+# lands in whatever state the machine happens to be sitting in.
+#
+# An allow-list, not a heuristic on «?»: every other question the bot asks is
+# open («Яка марка авто?») or two-option («…свої з собою чи ті, що у нас на
+# зберіганні?»), and a «так» to one of those really is a non-answer.
+# «записуємо туди» is listed with its object for that reason — «На яку дату
+# записуємо?» is the second most common question in the log and is not a
+# yes/no.
+_YES_NO_ASK_MARKERS: tuple[str, ...] = (
+    "записуємо туди",
+    "записуємо сюди",
+    "вірно?",
+    "правильно?",
+    "правильно розумію",
+    "підходить?",
+    "ви ще на лінії",
+    "ви маєте на увазі",
+)
+
+# …unless the same sentence also offers a choice. `fe1857ba` (2026-09-10) is
+# why: the caller said «так» to «Шини привозите свої з собою чи ті, що у нас на
+# зберіганні?», which answers nothing, and it has to keep costing an attempt.
+# The marker list already excludes that question; this makes it hold when the
+# LLM rephrases one of the listed questions into a choice.
+_CHOICE_MARKER = " чи "
 
 _PUNCT = " \t\n.,!?;:—–-\"'«»()"
 
@@ -95,6 +123,31 @@ def booking_was_confirmed(turns: Sequence[tuple[str, str]]) -> bool:
             if len(bot_before_answer) == 2:
                 break
     return asked_for_confirmation(bot_before_answer) and is_confirmation(customer_answer)
+
+
+def is_yes_no_question(bot_utterance: str) -> bool:
+    """Did the bot's last turn ask something a bare «так» actually answers?
+
+    Krok 8 counts — `_ASK_MARKERS` is included — but so do the confirmations
+    the LLM scatters through the rest of the flow, which is the point. The FSM
+    charges a failed answer to the state it is *in*, and the bot regularly asks
+    a confirmation belonging to some other step:
+
+    * `fe1857ba`, `cf43d623` (2026-09-10): «Записуємо туди?» → «так» /
+      «записуємо». The FSM sat in STATION, where `station_id` is what it wanted,
+      so a valid answer spent an attempt. Both calls ran the budget out and
+      reached an operator.
+    * `b034315e` (2026-09-10): «Пропоную понеділок, чотирнадцяте вересня.
+      Підходить?» → «так», charged to TIME.
+
+    Deliberately narrow — an allow-list of phrasings taken off the log, vetoed
+    by « чи ». A wrong «yes» here does not book anything; it withholds one
+    escalation tick, which is why the veto matters more than the coverage.
+    """
+    low = (bot_utterance or "").lower()
+    if not low or _CHOICE_MARKER in low:
+        return False
+    return any(marker in low for marker in (*_YES_NO_ASK_MARKERS, *_ASK_MARKERS))
 
 
 def asked_for_confirmation(bot_utterances: list[str]) -> bool:

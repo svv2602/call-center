@@ -106,6 +106,25 @@ _STORAGE_OWN_HINTS: tuple[str, ...] = (
     # substring; those stay for the call provenance they carry, not because
     # they can still fire.
     "собою",
+    # The other half of the answer, and the same omission: the list carried
+    # «свої привезу» and «везу свої» but not «свої» on its own, so the one-word
+    # answer to a two-option question parsed as nothing. Live FSM, 2026-09-10:
+    # `b034315e` said «свої» and it burnt STORAGE's last attempt; `8abd8557`
+    # said «шили свої» (STT for «шини свої») and it burnt the first. Both
+    # spellings, because the caller answers in whichever language they spoke.
+    #
+    # It matches inside «своїй» / «своїм» / «своими» too, which is wanted: every
+    # prod occurrence of those stems meant the caller's own tires. It also
+    # matches the negations — «ще не свої», «чи не свої» — and in all three
+    # calls that produced one the caller went on to confirm own tires anyway,
+    # so reading them as «own» agrees with the outcome.
+    #
+    # Wide list only, like «собою» above. A bare stem is a nudge and a 0.9
+    # inside STORAGE; it is not grounds to skip the state, and the broad pass
+    # (no bot utterance) leaves it at 0.5 so it cannot fill the field from
+    # another state either.
+    "свої",
+    "свои",
     # Wave 4 STT: «привезу» → «приложу»/«приложишь»/«прикладу»
     # (rare word-level mangle; call 10:38 «приложишь с собой»).
     "приложу з собою",

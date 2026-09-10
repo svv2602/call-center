@@ -15,7 +15,11 @@ import time
 import zoneinfo
 from typing import TYPE_CHECKING, Any
 
-from src.agent.confirm_detect import asked_for_confirmation, is_confirmation
+from src.agent.confirm_detect import (
+    asked_for_confirmation,
+    is_confirmation,
+    is_yes_no_question,
+)
 from src.agent.parsers.storage_choice_parser import (
     _bot_is_asking_storage,
     detect_own_tires,
@@ -1541,6 +1545,44 @@ class CallPipeline:
                             state_before.value,
                             own_field,
                             sorted(broad_filled),
+                            extra={"call_id": str(self._session.channel_uuid)},
+                        )
+                    elif (
+                        is_yes_no_question(ctx.last_bot_utterance)
+                        and is_confirmation(transcript.text)
+                        and state_before.value
+                        not in self._session.fsm_confirmation_excused_states
+                    ):
+                        # The third shape of «the caller answered a question,
+                        # just not this state's one» — and the one the other two
+                        # branches structurally cannot see, because a bare «так»
+                        # fills no field for them to notice.
+                        #
+                        # The bot asks confirmations that belong to steps the FSM
+                        # is not on. `fe1857ba` and `cf43d623` (2026-09-10) are
+                        # the same call twice: STATION was waiting for
+                        # `station_id`, the bot asked «Записуємо туди?», the
+                        # caller said «так» / «записуємо» — and it spent an
+                        # attempt. Both ran the budget out at STATION and reached
+                        # an operator while cooperating on every turn.
+                        # `b034315e` is the same charge one state along: «Пропоную
+                        # понеділок… Підходить?» → «так», billed to TIME.
+                        #
+                        # One per state, because nothing else bounds it. The
+                        # passive exemption runs out when its field fills and the
+                        # broad one when the field goes empty→filled; a
+                        # confirmation leaves the machine exactly where it was, so
+                        # an unbounded version would answer a genuinely stuck call
+                        # by never escalating. The second «так» in `fe1857ba` is
+                        # the case to keep charging — it came after the two-option
+                        # storage question, where «так» answers nothing.
+                        self._session.fsm_confirmation_excused_states.append(state_before.value)
+                        logger.info(
+                            "fsm_parser_null_confirmed_elsewhere call=%s state=%s "
+                            "field=%s",
+                            self._session.channel_uuid,
+                            state_before.value,
+                            own_field,
                             extra={"call_id": str(self._session.channel_uuid)},
                         )
                     else:

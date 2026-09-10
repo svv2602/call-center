@@ -135,19 +135,48 @@ class TestLandmarkSpanGuard:
         """«запорізьк» is deliberately absent from `_CITY_STEMS` for this."""
         assert PARSER.parse(ctx("на Запорізьке шосе")).value == "Дніпро"
 
-    def test_an_inflected_landmark_yields_nothing_rather_than_the_wrong_city(
-        self,
-    ) -> None:
-        """Wave 6-A observation, pinned as-is.
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "на Запорізькому шосе",
+            "на запорожском шоссе",
+            "запорожская 6",
+            "на запорожском шоссе Запорожское шоссе",
+        ],
+    )
+    def test_the_inflected_landmark_resolves_like_the_nominative(self, text: str) -> None:
+        """What Wave 6-A recorded here as fail-safe turned out not to be.
 
-        `_LANDMARKS` stems that carry a second word («запорізьке шосе») only
-        match the nominative, so «на Запорізькому шосе» — the form a caller
-        actually uses — matches neither the landmark nor a city stem. The
-        outcome is `not_mentioned`, which is fail-safe (the bot asks) rather
-        than the `1b6721a4` failure mode (the bot confirms Kharkiv). Recorded
-        for Wave 6-B, not fixed here.
+        The observation was right: spelled out in full, «запорізьке шосе»
+        matched the nominative only, so the inflected form a caller actually
+        uses matched neither the landmark nor a city stem. It was filed as
+        harmless because the outcome was `not_mentioned` and the bot would ask.
+
+        It is not harmless in Russian. The stem `_CITY_STEMS` carries for
+        Запоріжжя is «запорож», and «запорожском» starts with it — so the
+        inflected street did not fall through to nothing, it resolved to the
+        wrong city at the *named* tier. Call `4fcb70d4` (2026-09-10): «в
+        Днепре», then this street, and Wave 18 replaced the LLM's correct
+        `city='Дніпро'` with Запоріжжя. Every lookup afterwards ran against the
+        single Запоріжжя point, and «давайте в Днепре» three turns later could
+        not undo it.
+
+        The fix is the shape Харківське шосе has had since `1b6721a4` — an
+        adjective stem, «запорізьк» / «запорожск», short enough to survive
+        inflection.
         """
-        assert PARSER.parse(ctx("на Запорізькому шосе")).status == "not_mentioned"
+        outcome = PARSER.parse(ctx(text))
+        assert outcome.value == "Дніпро"
+        assert outcome.confidence == 0.9, "derived from a landmark, not named"
+
+    @pytest.mark.parametrize(
+        "text", ["в Запорожье", "у Запоріжжі", "місто Запоріжжя", "запишіть на монтаж запоріжжя"]
+    )
+    def test_the_city_itself_is_untouched(self, text: str) -> None:
+        """The half that had to keep working: «запорожь» is the city, «запорожск»
+        is a Dnipro street, and only the second is now swallowed by the landmark.
+        """
+        assert PARSER.parse(ctx(text)).value == "Запоріжжя"
 
     @pytest.mark.parametrize(
         "text,expected",

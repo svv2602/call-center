@@ -2359,6 +2359,207 @@ class TestAnsweredElsewhereExemption:
         assert "білий" not in lines[0]
 
 
+#: `fe1857ba` / `cf43d623` turn 10 — a confirmation belonging to no MAIN_FLOW state.
+STATION_CONFIRM = "Записуємо туди?"
+
+
+class TestConfirmedElsewhereExemption:
+    """The third shape of «answered a question, just not this state's one».
+
+    The two exemptions above both key on a field being written, and a bare «так»
+    writes nothing, so neither branch can see this turn at all. What the caller
+    answered was a confirmation the LLM asked out of its own checklist while the
+    FSM sat somewhere else entirely:
+
+    * `fe1857ba`, `cf43d623` (2026-09-10): STATION was waiting for `station_id`,
+      the bot asked «Записуємо туди?», the caller said «так» / «записуємо». Both
+      calls ran STATION's budget out and reached an operator while cooperating on
+      every single turn.
+    * `b034315e`: «Пропоную понеділок, чотирнадцяте вересня. Підходить?» → «так»,
+      charged to TIME.
+
+    The stations snapshot is left empty throughout. With one the proposal pass
+    (Wave 6-H) resolves «так» into a `station_id` several branches earlier and
+    every test here would be green without the exemption existing.
+    """
+
+    def _in_station(self, question: str = STATION_CONFIRM) -> Harness:
+        h = Harness(booking_in_progress(FsmState.STATION))
+        h.session.fsm_filled_fields["city"] = "Дніпро"
+        h.session.add_assistant_turn(question)
+        return h
+
+    @staticmethod
+    def _bot_keeps_asking(h: Harness, question: str) -> None:
+        """Make every LLM reply be the same question again.
+
+        The default harness reply is neutral prose, so on turn two
+        `last_bot_utterance` would no longer be a yes/no question and the turn
+        would be charged whatever the loop-breaker does. That would make the
+        cap test below pass for the wrong reason. A bot that keeps re-asking is
+        also the real shape: `fe1857ba` asked «Записуємо туди?» three times.
+        """
+
+        async def _run_turn(**kwargs: Any) -> TurnResult:
+            h.llm_turns.append(kwargs.get("user_text", ""))
+            return TurnResult(
+                spoken_text=question,
+                tool_calls_made=0,
+                stop_reason="end_turn",
+                total_usage=Usage(10, 5),
+            )
+
+        h.streaming_loop.run_turn = _run_turn
+
+    async def test_agreeing_to_another_steps_question_is_not_charged(self) -> None:
+        h = self._in_station()
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так")
+
+        assert h.session.fsm_parser_null_counts.get("STATION", 0) == 0
+        assert h.session.fsm_confirmation_excused_states == ["STATION"]
+
+    async def test_the_same_yes_after_an_open_question_is_charged(self) -> None:
+        """The baseline every assertion in this class rests on.
+
+        Same state, same word, same empty snapshot — only the bot's question
+        differs. If this ever goes to zero the exemption has stopped being
+        conditional on anything and the tests above prove nothing.
+        """
+        h = self._in_station("У якому районі зручніше?")
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так")
+
+        assert h.session.fsm_parser_null_counts.get("STATION", 0) == 1
+        assert h.session.fsm_confirmation_excused_states == []
+
+    async def test_a_yes_to_a_two_option_question_keeps_costing(self) -> None:
+        """`fe1857ba` said «так» twice and only the first deserves forgiving.
+
+        The second answered «Шини привозите свої з собою чи ті, що у нас на
+        зберіганні?», where «так» picks neither option and really is a failed
+        answer.
+
+        What refuses it is the allow-list being an allow-list, not the « чи »
+        veto: measured, not assumed — removing the veto leaves this test green
+        (mutation M6) because the storage question carries no marker to begin
+        with. The veto covers the other case, where the LLM rephrases a *listed*
+        question into a choice, and `test_the_choice_veto_outranks_the_marker`
+        is the test that holds it.
+        """
+        h = self._in_station("Шини привозите свої з собою чи ті, що у нас на зберіганні?")
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так")
+
+        assert h.session.fsm_parser_null_counts.get("STATION", 0) == 1
+
+    async def test_only_the_first_yes_per_state_is_free(self) -> None:
+        """The loop-breaker, and the reason it has to be counted rather than
+        structural.
+
+        The passive exemption runs out when its field fills and the broad one
+        when a field goes empty → filled. A confirmation leaves the machine
+        exactly where it stood, so an unbounded version would answer a genuinely
+        stuck call by never escalating at all — the caller says «так», the bot
+        re-asks, forever (`feedback_guard_needs_loop_breaker`).
+        """
+        h = self._in_station()
+        self._bot_keeps_asking(h, STATION_CONFIRM)
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так", "так", "так")
+
+        assert h.session.fsm_parser_null_counts.get("STATION", 0) == 2
+        assert h.session.fsm_confirmation_excused_states == ["STATION"]
+
+    async def test_each_state_gets_its_own(self) -> None:
+        """Per state, not per call. `b034315e` spent one in TIME after the bot
+        had already asked a station confirmation earlier in the same call — a
+        call-wide budget would have charged the TIME answer that this whole
+        branch exists to excuse.
+        """
+        h = self._in_station()
+        h.session.fsm_confirmation_excused_states = ["CITY", "TIME"]
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так")
+
+        assert h.session.fsm_parser_null_counts.get("STATION", 0) == 0
+        assert h.session.fsm_confirmation_excused_states == ["CITY", "TIME", "STATION"]
+
+    async def test_an_answer_that_carries_information_is_never_excused(self) -> None:
+        """`is_confirmation` caps at four tokens for exactly this.
+
+        «так, але я ще не вирішив куди саме» is an answer with content in it, and
+        the content is a refusal to pick the very field this state wants.
+        Excusing it would be the broad pass's job if it mapped anything — it must
+        not be laundered into a free turn by the word «так» at the front.
+
+        The phrasing avoids «у центрі» on purpose: «цен» is a price-interrupt
+        marker and «центрі» starts with it, so the obvious wording takes the
+        interrupt branch and this test would assert nothing.
+        """
+        h = self._in_station()
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так, але я ще не вирішив куди саме")
+
+        assert h.session.fsm_parser_null_counts.get("STATION", 0) == 1
+        assert h.session.fsm_confirmation_excused_states == []
+
+    async def test_the_exemption_does_not_move_the_machine(self) -> None:
+        """Excusing changes the counter and nothing else — the caller has still
+        not named a station, so STATION is still the right place to be."""
+        h = self._in_station()
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так")
+
+        assert h.session.fsm_state == FsmState.STATION.value
+        assert h.session.fsm_filled_fields.get("station_id") in (None, "")
+
+    async def test_live_mode_excuses_it_too(self) -> None:
+        """Shadow observes, live escalates. A rule holding in one only would mean
+        the shadow numbers do not describe the thing that ships."""
+        h = self._in_station()
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("так")
+
+        assert h.session.fsm_parser_null_counts.get("STATION", 0) == 0
+        assert h.session.fsm_state == FsmState.STATION.value
+
+    async def test_the_mark_survives_the_redis_round_trip(self) -> None:
+        """The exemption is spent on one turn and enforced on the next, and the
+        Call Processor rebuilds the session from Redis in between. A list kept
+        only on the in-memory object re-arms the cap every turn, which silently
+        turns «one per state» into «always»."""
+        h = self._in_station()
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так")
+
+        revived = CallSession.from_dict(h.session.to_dict())
+        assert revived.fsm_confirmation_excused_states == ["STATION"]
+
+    async def test_it_is_visible_in_the_prod_logs(self, caplog) -> None:
+        """Its own line, like the other two exemptions: they answer different
+        questions in prod and a shared line would hide whichever is regressing.
+        """
+        h = self._in_station()
+
+        with caplog.at_level(logging.INFO), fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("так")
+
+        lines = [r.getMessage() for r in caplog.records if "confirmed_elsewhere" in r.getMessage()]
+        assert lines, "the exemption must be visible in prod logs"
+        assert "STATION" in lines[0]
+        assert "station_id" in lines[0]
+
+
 class TestBroadPassCannotInventASlot:
     """Wave 6-G: the broad pass may fill `time` only from the offered list.
 

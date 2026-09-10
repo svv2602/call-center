@@ -181,6 +181,13 @@ class CallSession:
         # bounce per call only: a client who answers vaguely («будь-коли»)
         # must not be trapped in a re-ask loop.
         self.fitting_date_guard_fired: bool = False
+        # Dates this call has already queried and got zero available slots for.
+        # The weekday guard reads it: a date the station has no room on is not
+        # a date to send the LLM back to (call b034315e, 2026-09-10).
+        self.fitting_dates_no_slots: set[str] = set()
+        # Weekday (0=Mon..6=Sun) the weekday guard has already bounced for.
+        # One refusal per named weekday — see `check_weekday_mismatch`.
+        self.fitting_weekday_bounced_since_lookup: int | None = None
         self.tenant_id: str | None = None
         self.tenant_slug: str | None = None
         self.tenant_name: str | None = None
@@ -269,6 +276,16 @@ class CallSession:
         # different turns, and the Call Processor rebuilds the session from
         # Redis between them.
         self.fsm_inferred_fields: list[str] = []
+        # States that have already spent their one «the caller confirmed
+        # something else» exemption. The bot asks confirmations belonging to
+        # steps the FSM is not on («Записуємо туди?» while the machine waits for
+        # `station_id`), and answering one is not a failed answer — but a bare
+        # «так» fills no field, so unlike the passive and broad exemptions
+        # nothing about it runs out on its own. One per state is the bound: a
+        # caller who keeps saying «так» to a question the bot keeps re-asking is
+        # the stuck call the budget exists to catch, and from the second turn on
+        # it is charged again (`feedback_guard_needs_loop_breaker`).
+        self.fsm_confirmation_excused_states: list[str] = []
         # --- Side-door interrupt state (Wave 3-B, 2026-09-08) ---
         # Read/written by `src/agent/interrupts.py`. These MUST survive the
         # Redis round-trip: the Call Processor is stateless and reloads the
@@ -400,6 +417,8 @@ class CallSession:
             "fitting_requested_weekday": self.fitting_requested_weekday,
             "fitting_diameter_client": self.fitting_diameter_client,
             "fitting_date_guard_fired": self.fitting_date_guard_fired,
+            "fitting_dates_no_slots": sorted(self.fitting_dates_no_slots),
+            "fitting_weekday_bounced_since_lookup": self.fitting_weekday_bounced_since_lookup,
             "tools_called": sorted(self.tools_called),
             "active_scenarios": sorted(self.active_scenarios),
             "tenant_id": self.tenant_id,
@@ -415,6 +434,7 @@ class CallSession:
             "fsm_interrupt_turn_counts": dict(self.fsm_interrupt_turn_counts),
             "fsm_brand_type_fallback": self.fsm_brand_type_fallback,
             "fsm_inferred_fields": list(self.fsm_inferred_fields),
+            "fsm_confirmation_excused_states": list(self.fsm_confirmation_excused_states),
             "interrupt_counts": dict(self.interrupt_counts),
             "pending_cancel_action": self.pending_cancel_action,
             "pending_price_interrupt_needs_diameter": (
@@ -476,6 +496,8 @@ class CallSession:
         session.fitting_date_guard_fired = bool(
             data.get("fitting_date_guard_fired", False)
         )
+        session.fitting_dates_no_slots = set(data.get("fitting_dates_no_slots", []))
+        session.fitting_weekday_bounced_since_lookup = data.get("fitting_weekday_bounced_since_lookup")
         session.tools_called = set(data.get("tools_called", []))
         session.active_scenarios = set(data.get("active_scenarios", []))
         session.tenant_id = data.get("tenant_id")
@@ -540,6 +562,18 @@ class CallSession:
                 "Call %s: fsm_inferred_fields has unexpected type %s — ignoring",
                 data.get("channel_uuid"),
                 type(inferred).__name__,
+            )
+        excused = data.get("fsm_confirmation_excused_states") or []
+        if isinstance(excused, list):
+            session.fsm_confirmation_excused_states = [s for s in excused if isinstance(s, str)]
+        else:
+            # Same reasoning as the counters: an empty default here re-arms the
+            # loop-breaker on every Redis round-trip, which is every turn, so the
+            # «one per state» bound would silently become «always».
+            logger.warning(
+                "Call %s: fsm_confirmation_excused_states has unexpected type %s — ignoring",
+                data.get("channel_uuid"),
+                type(excused).__name__,
             )
         # --- Side-door interrupt state (Wave 3-B) ---
         # A malformed value here must never silently become an empty default:

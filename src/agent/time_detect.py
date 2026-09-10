@@ -48,13 +48,48 @@ _NUM_WORDS: dict[str, int] = {
     "п'ятдесят": 50, "пятдесят": 50, "пятьдесят": 50,
 }
 
+#: The six ordinal stems `compound_parse._HOUR_ORDINALS` knows and the cardinal
+#: table above does not. `_mentions_time` has understood «на другу» since Wave
+#: 6-A while the vocabulary that actually pins a slot did not, so a caller who
+#: named the hour as an ordinal was heard talking about time and then matched
+#: against nothing. The other fourteen ordinals need no entry — «п'яту» already
+#: matches the cardinal stem «п'ят», «восьму» matches «восьм», «десяту»
+#: matches «десят».
+_ORDINAL_ONLY_STEMS: dict[str, int] = {
+    "перш": 1, "друг": 2, "трет": 3, "четверт": 4, "шост": 6, "сьом": 7,
+}
+
+#: Feminine endings only, copied from `compound_parse._HOUR_ORDINAL_ENDING`.
+#: These are the forms that agree with «годину»/«годині». The stems are *not*
+#: admitted bare, because the masculine genitive — «сьомого», «третього» — is a
+#: day of the month: «сьомого вересня» would otherwise read as 19:00. None of
+#: the generated forms is a prefix of a genitive one, which is what keeps that
+#: separation. Some combinations («трета») are not words; they simply never
+#: match.
+_NUM_WORDS.update(
+    {
+        stem + ending: hour
+        for stem, hour in _ORDINAL_ONLY_STEMS.items()
+        for ending in ("а", "у", "ої", "ьої", "ій", "ю")
+    }
+)
+
+_NUM_ALT = "|".join(re.escape(w) for w in sorted(_NUM_WORDS, key=len, reverse=True))
+
 _WORD_RE = re.compile(
-    "(?<![а-яіїєґёa-z])("
-    + "|".join(
-        re.escape(w)
-        for w in sorted(_NUM_WORDS, key=len, reverse=True)
-    )
-    + r")|(\d{1,4})",
+    "(?<![а-яіїєґёa-z])(" + _NUM_ALT + r")|(\d{1,4})",
+    re.IGNORECASE,
+)
+
+#: A count of wheels, not an hour. «два колеса» and «на 4 колеса» are the
+#: price flow's multiplier triggers (`prompts.py:706`), and 2 and 4 are also
+#: the two most-offered afternoon hours once the 12-hour clock is read. The
+#: booking flow never asks for a count — it books a set of four
+#: (`prompts.py:450`) — so any number that carries one of these nouns is
+#: dropped before the slot scan rather than disambiguated after it.
+_QUANTITY_RE = re.compile(
+    r"(?:(?<![а-яіїєґёa-z])(?:" + _NUM_ALT + r")\w*|\d{1,2})\s*"
+    r"(?:колес|коліс|шин|балон|диск|штук)\w*",
     re.IGNORECASE,
 )
 
@@ -141,6 +176,29 @@ def _merge_composites(nums: list[int]) -> list[int]:
     return merged
 
 
+def _hour_variants(n: int) -> list[int]:
+    """Every hour a spoken number could name.
+
+    Callers use the 12-hour clock — «на два», «на два часа дня», «на другу»
+    all mean 14:00 — and the 24-hour reading threw those away before any slot
+    was looked at. Call `8abd8557` (2026-09-10): the bot read out the 17
+    September list, the caller said «давайте на два», this returned ``None``,
+    the LLM answered «Час 10:20 прийнято», and the caller's correction («я
+    хотел на два часа дня») ended in a transfer.
+
+    Mapping 1-7 onto the afternoon takes no reading away: 45 days of prod
+    ``get_fitting_slots`` results contain no slot outside 08:00-17:59, so a
+    literal 02:00 could never have matched anything. The membership test in
+    ``detect_time_choice`` remains the real authority — this only widens what
+    is offered up to it.
+    """
+    if _HOUR_MIN <= n <= _HOUR_MAX:
+        return [n]
+    if 1 <= n <= 7:
+        return [n + 12]
+    return []
+
+
 def bot_listed_slots(bot_utterance: str) -> bool:
     """True when the bot's last turn read out the available times.
 
@@ -217,8 +275,9 @@ def detect_time_choice(
 
     offered = set(offered_times)
     text = _normalize(customer_text)
-    # Drop «R17»-style diameters before parsing numbers.
+    # Drop «R17»-style diameters and «два колеса»-style counts before parsing.
     text = _DIAMETER_PREFIX_RE.sub(" ", text)
+    text = _QUANTITY_RE.sub(" ", text)
     nums = _extract_numbers(text)
 
     # A dictated phone number produces a long digit run in which some
@@ -227,32 +286,27 @@ def detect_time_choice(
     if len(nums) > 5 or re.search(r"\d{6,}", text):
         return None
 
-    for i, hour in enumerate(nums):
-        if not _HOUR_MIN <= hour <= _HOUR_MAX:
-            # «1420» spoken as one token.
-            if 800 <= hour <= 2059:
-                candidate = f"{hour // 100:02d}:{hour % 100:02d}"
-                if candidate in offered:
-                    return candidate
+    for i, raw in enumerate(nums):
+        # «1420» spoken as one token.
+        if 800 <= raw <= 2059:
+            candidate = f"{raw // 100:02d}:{raw % 100:02d}"
+            if candidate in offered:
+                return candidate
+        if not (i + 1 < len(nums) and 0 <= nums[i + 1] <= 59):
             continue
-        if i + 1 < len(nums) and 0 <= nums[i + 1] <= 59:
+        for hour in _hour_variants(raw):
             candidate = f"{hour:02d}:{nums[i + 1]:02d}"
             if candidate in offered:
                 return candidate
 
     if allow_hour_only:
-        for i, hour in enumerate(nums):
-            if not _HOUR_MIN <= hour <= _HOUR_MAX:
-                continue
+        for i, raw in enumerate(nums):
             # The caller named minutes, and the loop above already found that
             # `HH:MM` is not on offer. Widening here would answer a request for
             # 11:20 with 11:00 — a time nobody asked for, silently. Measured on
             # 30 days of prod turns: without this, «11:20», «15:20», «на 12-20»
             # and «9 20» all became the top of their hour.
             if i + 1 < len(nums) and 0 <= nums[i + 1] <= 59:
-                continue
-            same_hour = [t for t in offered if t.startswith(f"{hour:02d}:")]
-            if not same_hour:
                 continue
             # A bare hour names the slot on the hour when there is one. Treating
             # «о 12» as ambiguous because 12:30 also exists reads the caller as
@@ -263,12 +317,16 @@ def detect_time_choice(
             # third charge escalated a fully collected, customer-confirmed booking
             # to an operator. The LLM had read the same turn as 12:00 («Дванадцята
             # прийнята»).
-            on_the_hour = f"{hour:02d}:00"
-            if on_the_hour in offered:
-                return on_the_hour
-            # Nothing on the hour: one slot in it is still an unambiguous pick,
-            # several remain a genuine coin flip.
-            if len(same_hour) == 1:
-                return same_hour[0]
+            for hour in _hour_variants(raw):
+                same_hour = [t for t in offered if t.startswith(f"{hour:02d}:")]
+                if not same_hour:
+                    continue
+                on_the_hour = f"{hour:02d}:00"
+                if on_the_hour in offered:
+                    return on_the_hour
+                # Nothing on the hour: one slot in it is still an unambiguous
+                # pick, several remain a genuine coin flip.
+                if len(same_hour) == 1:
+                    return same_hour[0]
 
     return None

@@ -2,7 +2,11 @@
 
 import pytest
 
-from src.agent.confirm_detect import asked_for_confirmation, is_confirmation
+from src.agent.confirm_detect import (
+    asked_for_confirmation,
+    is_confirmation,
+    is_yes_no_question,
+)
 
 
 @pytest.mark.parametrize(
@@ -95,3 +99,78 @@ def test_reask_then_question_still_counts():
 )
 def test_no_open_question(utterances):
     assert not asked_for_confirmation(utterances)
+
+
+class TestConfirmationOutsideKrok8:
+    """`is_yes_no_question` — which of the bot's questions a bare «так» answers.
+
+    Krok 8 is not the only place the bot invites a yes. It scatters
+    confirmations through the whole checklist, and the FSM charges a failed
+    answer to the state it happens to be *in*, so a cooperating caller loses an
+    attempt for answering the question that was actually asked. Every «yes» case
+    below is a phrasing taken off the 2026-09-10 prod log; every «no» case is a
+    question the bot asks just as often where «так» really is a non-answer.
+    """
+
+    @pytest.mark.parametrize(
+        "utterance",
+        [
+            # `fe1857ba` / `cf43d623` — asked while the FSM waited for station_id.
+            "Записуємо туди?",
+            "Гаразд, записуємо сюди?",
+            # `b034315e` — asked while the FSM waited for a time.
+            "Пропоную понеділок, чотирнадцяте вересня. Підходить?",
+            "Ваш номер 0671234567, вірно?",
+            "Правильно?",
+            "Правильно розумію, вам потрібен монтаж на завтра?",
+            "Ви ще на лінії?",
+            "Ви маєте на увазі Zeekr?",
+            # Krok 8 markers are included on purpose — same treatment.
+            "Наталя, перевіримо: 11 вересня о 11:00. Підтверджуєте?",
+            'Скажіть, будь ласка, "так" щоб підтвердити або "ні" щоб змінити.',
+        ],
+    )
+    def test_a_bare_yes_answers_these(self, utterance):
+        assert is_yes_no_question(utterance)
+
+    @pytest.mark.parametrize(
+        "utterance",
+        [
+            "",
+            # Open questions — «так» answers none of them.
+            "Яка марка вашого авто?",
+            "На яку дату записуємо?",
+            "У якому районі зручніше?",
+            "Який час зручний?",
+            "Назвіть, будь ласка, колір автомобіля.",
+            "Як до вас звертатися?",
+            # Two-option questions: the answer is A or B, and «так» is neither.
+            "У вас легковий чи позашляховик?",
+            "Шини привозите свої з собою чи ті, що у нас на зберіганні?",
+        ],
+    )
+    def test_a_bare_yes_answers_none_of_these(self, utterance):
+        assert not is_yes_no_question(utterance)
+
+    def test_the_choice_veto_outranks_the_marker(self):
+        """`fe1857ba` said «так» twice and only the first should be forgiven.
+
+        The second came after the two-option storage question, which answers
+        nothing and has to keep costing an attempt. The marker list already
+        excludes that exact phrasing; the veto is what makes it hold when the
+        LLM rephrases a *listed* question into a choice.
+        """
+        assert is_yes_no_question("Записуємо туди?")
+        assert not is_yes_no_question("Записуємо туди чи пошукаємо інший пункт?")
+        assert not is_yes_no_question("Підтверджуєте чи хочете змінити дату?")
+
+    def test_записуємо_alone_is_agreement(self):
+        """`cf43d623` turn 12 — «записуємо» as the answer, not the question.
+
+        It went in the word list, not the marker list: as an answer it is a
+        plain yes, and «На яку дату записуємо?» is why the marker carries its
+        object («записуємо туди») and this word does not.
+        """
+        assert is_confirmation("записуємо")
+        assert is_confirmation("так, записуємо")
+        assert not is_yes_no_question("На яку дату записуємо?")

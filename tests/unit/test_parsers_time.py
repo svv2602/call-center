@@ -156,34 +156,42 @@ class TestHourOnlyWidening:
 
 
 class TestFeminineOrdinalHours:
-    """Wave 6-A finding: the two time vocabularies do not overlap fully.
+    """The Wave 6-A gap, now closed.
 
-    `compound_parse._HOUR_ORDINALS` understands the feminine-ordinal form
-    («на другу» = 14:00, «о шостій» = 18:00) and it is what `_mentions_time`
-    consults. `time_detect._NUM_WORDS` — the vocabulary that actually pins a
-    slot — carries the *cardinal* stems, and six of the twenty ordinal stems
-    (перш, друг, трет, четверт, шост, сьом) are not among them.
+    `compound_parse._HOUR_ORDINALS` has understood the feminine-ordinal form
+    («на другу» = 14:00, «о шостій» = 18:00) since Wave 6-A, and it is what
+    `_mentions_time` consults. `time_detect._NUM_WORDS` — the vocabulary that
+    actually pins a slot — carried only the *cardinal* stems, so six of the
+    twenty ordinals (перш, друг, трет, четверт, шост, сьом) were heard as talk
+    about time and then matched against nothing.
 
-    Consequence today: «на другу» with 14:00 on offer comes back `unresolved`,
-    not `14:00`. It fails safe (the bot re-asks rather than booking the wrong
-    hour), and the same limitation is already live in the Wave 14 block in
-    `pipeline.py`, so this is a pre-existing gap and not a Wave 5-A regression.
-    Pinned here, handed to Wave 6-B — do not "fix" it by loosening a test.
+    The two tables are now checked against each other below rather than kept in
+    step by hand.
     """
 
-    @pytest.mark.parametrize("text", ["на другу", "о шостій", "о третій", "на четверту"])
-    def test_ordinal_hours_are_not_resolved_to_a_slot(self, text: str) -> None:
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            ("на другу", "14:00"),
+            ("о шостій", "18:00"),
+            ("о третій", "15:00"),
+            ("на четверту", "16:00"),
+            ("до третьої", "15:00"),
+            ("шоста година", "18:00"),
+        ],
+    )
+    def test_ordinal_hours_pin_the_offered_slot(self, text: str, expected: str) -> None:
         outcome = PARSER.parse(ctx(text, ["09:00", "14:00", "15:00", "16:00", "18:00"]))
-        assert outcome.status == "unresolved"
-        assert outcome.value is None
+        assert outcome.status == "value"
+        assert outcome.value == expected
 
     @pytest.mark.parametrize("text", ["на дев'яту", "на десяту"])
     def test_ordinals_sharing_a_cardinal_stem_do_resolve(self, text: str) -> None:
         outcome = PARSER.parse(ctx(text, ["09:00", "10:00", "14:20"]))
         assert outcome.status == "value"
 
-    def test_the_gap_is_exactly_six_stems(self) -> None:
-        """Stated numerically so a future fix has to update this line."""
+    def test_the_two_vocabularies_now_agree(self) -> None:
+        """Every ordinal `_mentions_time` recognises can also pin a slot."""
         from src.agent.compound_parse import _HOUR_ORDINALS
         from src.agent.time_detect import _NUM_WORDS
 
@@ -195,14 +203,29 @@ class TestFeminineOrdinalHours:
                 for word in _NUM_WORDS
             )
         ]
-        assert missing == ["перш", "друг", "трет", "четверт", "шост", "сьом"]
+        assert missing == []
+
+    @pytest.mark.parametrize("text", ["сьомого вересня", "третього вересня", "другого числа"])
+    def test_the_masculine_genitive_is_a_date_not_an_hour(self, text: str) -> None:
+        """The reason the endings are spelled out instead of the stems admitted.
+
+        «сьомого вересня» is the 7th of September. A bare `сьом` stem would
+        make it the number 7, and the 12-hour reading would then offer it as
+        19:00 — a slot the caller never asked for, on a turn that was about the
+        date.
+        """
+        from src.agent.time_detect import _extract_numbers
+
+        assert _extract_numbers(text) == []
+        assert PARSER.parse(ctx(text, ["09:00", "15:00", "19:00"])).value is None
 
     def test_shosta_ranku_is_a_part_of_day_not_an_hour(self) -> None:
-        """«шоста ранку» has no preposition and no «година», so it reads as «ранок».
+        """«шоста ранку» reads as «ранок», and 06:00 is not reachable from it.
 
         `_detect_time_hint` grades a part of day `0.6` — a preference, not a
-        time — and `detect_time_choice` finds no number, so the outcome is
-        `unresolved` regardless of what is on offer.
+        time. `detect_time_choice` does now read the 6, but only as the
+        afternoon hour it maps to, so an early-morning slot on offer is not
+        matched by it.
         """
         from src.agent.compound_parse import _detect_time_hint
 

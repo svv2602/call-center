@@ -2826,81 +2826,27 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         except ValueError:
             pass
 
-        # Weekday-date sanity check: if the last user turn mentioned a weekday
+        # Weekday-date sanity check: if a recent user turn mentioned a weekday
         # by name (напр. «на п'ятницю») and the LLM-passed date_from does not
         # land on that weekday, refuse and tell the LLM the correct date.
-        # Call 2026-08-03: client said «п'ятницю» (7 серпня), bot called with
-        # date_from=6 серпня (четвер) → offered slots for wrong day.
-        try:
-            d_from_check = date_type.fromisoformat(date_from)
-            # Wave 12 (2026-09-07) — extended with Russian day names to
-            # catch «на среду»/«в четверг» etc. (call ebe7dfcb turn 20).
-            _weekday_map = {
-                "понеділок": 0, "понеділка": 0, "пн": 0, "monday": 0,
-                "понедельник": 0,
-                "вівторок": 1, "вівторка": 1, "вт": 1, "tuesday": 1,
-                "вторник": 1,
-                "серед": 2, "середу": 2, "wednesday": 2,
-                "среду": 2, "среды": 2, "среда": 2,
-                "четвер": 3, "четвр": 3, "чт": 3, "thursday": 3,
-                "четверг": 3,
-                "п'ятниц": 4, "пʼятниц": 4, "пятниц": 4, "пт": 4, "friday": 4,
-                "субот": 5, "сб": 5, "saturday": 5,
-                "суббот": 5,
-                "неділ": 6, "нд": 6, "sunday": 6,
-                "воскресен": 6,
-            }
-            _requested_wd: int | None = None
-            # Scan last 3 user turns for a weekday keyword
-            _turns_scanned = 0
-            for _turn in reversed(session.dialog_history):
-                if _turn.speaker != "user" or not _turn.content:
-                    continue
-                _text = _turn.content.lower()
-                for _kw, _wd in _weekday_map.items():
-                    if re.search(r"\b" + re.escape(_kw), _text):
-                        _requested_wd = _wd
-                        break
-                if _requested_wd is not None:
-                    break
-                _turns_scanned += 1
-                if _turns_scanned >= 3:
-                    break
+        from src.agent.regression_guards import check_weekday_mismatch
 
-            if (
-                _requested_wd is not None
-                and d_from_check.weekday() != _requested_wd
-            ):
-                _wd_names = [
-                    "понеділок", "вівторок", "середу", "четвер",
-                    "пʼятницю", "суботу", "неділю",
-                ]
-                # Compute the nearest matching weekday ≥ tomorrow.
-                _min_date = today_date + timedelta(days=1)
-                _delta = (_requested_wd - _min_date.weekday()) % 7
-                _correct = _min_date + timedelta(days=_delta)
-                logger.warning(
-                    "get_fitting_slots weekday mismatch call=%s: "
-                    "requested=%s but date_from=%s (%s). Correct=%s",
-                    session.channel_uuid,
-                    _wd_names[_requested_wd],
-                    date_from,
-                    _wd_names[d_from_check.weekday()],
-                    _correct.isoformat(),
-                )
-                return {
-                    "station_id": station_id,
-                    "error": True,
-                    "message": (
-                        f"Дата {date_from} — це {_wd_names[d_from_check.weekday()]}, "
-                        f"а не {_wd_names[_requested_wd]}. Клієнт просив "
-                        f"{_wd_names[_requested_wd]} — це {_correct.isoformat()}. "
-                        f"Виклич ЩЕ РАЗ get_fitting_slots з date_from='{_correct.isoformat()}'."
-                    ),
-                    "slots": [],
-                }
-        except (ValueError, AttributeError):
-            pass
+        _weekday_verdict = check_weekday_mismatch(
+            date_from,
+            [t.content for t in session.dialog_history if t.speaker == "user"],
+            today_date,
+            dates_with_no_slots=session.fitting_dates_no_slots,
+            bounced_weekday_since_lookup=session.fitting_weekday_bounced_since_lookup,
+        )
+        if _weekday_verdict is not None:
+            session.fitting_weekday_bounced_since_lookup = _weekday_verdict.pop("requested_weekday")
+            logger.warning(
+                "get_fitting_slots weekday mismatch call=%s: date_from=%s. %s",
+                session.channel_uuid,
+                date_from,
+                _weekday_verdict["message"],
+            )
+            return {"station_id": station_id, **_weekday_verdict}
 
         # Storage 3-business-day lead-time guard: if tires come from client's
         # storage contract, they must be shipped from the central warehouse —
@@ -2977,6 +2923,11 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 # a date/time outside of what we returned from 1C.
                 session.selected_fitting_date = date_from
                 session.selected_fitting_time = None  # reset — client hasn't chosen yet
+                # A lookup got through, so the weekday guard is rearmed. Calls
+                # dce9f6af/dac6df27 (2026-08-05) took the correction, queried the
+                # right day, then drifted back to the wrong one a turn later —
+                # that second bounce is the guard working, not looping.
+                session.fitting_weekday_bounced_since_lookup = None
                 session.fitting_slots_offered = [
                     {"date": date_from, "time": t} for t in avail_times
                 ]
@@ -3003,6 +2954,9 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 # Saturday-in-Zaporizhzhia + Friday-today-in-Cherkasy). Compute
                 # a real next-business-day suggestion so bot can offer it.
                 if not avail:
+                    # Remember the empty day: the weekday guard must not send
+                    # the LLM back to a date the station has no room on.
+                    session.fitting_dates_no_slots.add(date_from)
                     weekday = d_from.weekday()  # 0=Mon..6=Sun
 
                     def _next_business_day(from_date: date_type) -> date_type:
