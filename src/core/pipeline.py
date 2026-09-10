@@ -522,16 +522,24 @@ FSM_MODE_LIVE = "live"
 # through to the normal streaming turn (the LLM sees the raw utterance).
 FSM_INTERRUPT_CONFIDENCE_FLOOR = 0.5
 
-# Main-flow states the FSM is allowed to ask in its own words (Wave 7-0). Every
-# other state still gets its question from the LLM, so this set is the migration
-# dial: a state joins it only when the prompt no longer asks the same thing, and
-# leaving it is a one-line rollback that needs no deploy of the prompt.
+# Main-flow states the FSM is allowed to ask in its own words (Wave 7-0).
 #
-# These three start it because their `question_template` is byte-identical to
-# what the LLM already says in production (verified on calls 4e09dfab and
-# c71ad0e5, 2026-09-10) — so the first cut changes *who* speaks, not *what* the
-# caller hears, and any behaviour change is attributable to the seam itself.
-FSM_VOICE_STATES: frozenset[str] = frozenset({"STORAGE", "COLOR", "BRAND"})
+# Empty, and not to be refilled without a redesign. Shipped on 2026-09-10 with
+# STORAGE/COLOR/BRAND on the argument that their templates are byte-identical to
+# what the LLM already says, so only *who* speaks would change. That argument was
+# wrong about the turn: speaking here suppresses the LLM turn, and that turn is
+# where the LLM acts on the answer to the *previous* question. On call 3639c0b4
+# STORAGE spoke over «Харківське шосе», so the mandated second
+# `get_fitting_stations(query=...)` never ran and the station was blind-picked;
+# on 3e8f3589 three spoken events cost three verbatim re-asks. Six `spoken`
+# events across two calls produced six re-asks and zero bookings, against nine
+# bookings in the fifteen comparable calls before the deploy.
+#
+# Narrowing the set does not help — the defect is one state deep, not three.
+# Re-enabling requires the FSM to own the turn's tool calls, which it cannot
+# while `station_id` is never filled (the targeted pass maps `station_parser` to
+# `city` alone, and `aresolve` has no call-sites).
+FSM_VOICE_STATES: frozenset[str] = frozenset()
 
 # Pipeline-side interrupt caps. These *duplicate* the handler-side caps in
 # src/agent/interrupts.py on purpose: the revert cause was a handler that

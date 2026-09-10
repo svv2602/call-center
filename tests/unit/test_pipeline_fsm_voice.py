@@ -10,9 +10,14 @@ The invariant these tests exist for is the *suppression*: on a turn the FSM
 speaks, the LLM turn must not also run. Both sides asking is exactly how the
 reverted build (`c8c6601`) said «В якому місті?» twice in a row.
 
-`FSM_VOICE_STATES` is patched explicitly wherever a test depends on its
-contents, so widening the production set cannot silently change what these
-tests assert.
+The production opt-in set is now **empty** — suppression turned out to eat the
+turn on which the LLM acts on the previous answer, and the three shipped states
+produced six re-asks and zero bookings on 2026-09-10 (see the comment on
+`FSM_VOICE_STATES`). The machinery is kept, and so are these tests, because the
+refusal branches are the part a redesign has to preserve. Every test that needs
+a voiced state patches `FSM_VOICE_STATES` itself via `voiced(...)`, so the tests
+say what they exercise instead of inheriting it from a constant that is now
+empty.
 """
 
 from __future__ import annotations
@@ -55,6 +60,14 @@ def live_classifier():
     )
 
 
+def voiced(*states: FsmState):
+    """Opt `states` into the voice path for the duration of the test."""
+    return patch(
+        "src.core.pipeline.FSM_VOICE_STATES",
+        frozenset(state.value for state in states),
+    )
+
+
 class TestTheFsmTakesTheTurn:
     @pytest.mark.parametrize(
         ("state", "question"),
@@ -68,7 +81,7 @@ class TestTheFsmTakesTheTurn:
         self, state: FsmState, question: str
     ) -> None:
         h = Harness(session_in(state, city="Київ", station_id="000000019"))
-        with fsm_flags(enabled=True, shadow_mode=False), live_classifier():
+        with fsm_flags(enabled=True, shadow_mode=False), live_classifier(), voiced(state):
             await h.run(UNPARSEABLE)
 
         assert question in h.spoken
@@ -82,25 +95,36 @@ class TestTheFsmTakesTheTurn:
         prompt, and would do it silently.
         """
         h = Harness(session_in(FsmState.STORAGE, city="Київ"))
-        with fsm_flags(enabled=True, shadow_mode=False), live_classifier():
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            live_classifier(),
+            voiced(FsmState.STORAGE),
+        ):
             await h.run(UNPARSEABLE)
 
         assert UNPARSEABLE in h.customer_texts
 
-    async def test_the_three_shipped_states_are_the_ones_measured_in_prod(self) -> None:
-        """These three were chosen because the LLM already says them verbatim.
+    async def test_no_state_is_voiced_in_production(self) -> None:
+        """The rollback of 2026-09-10, pinned so a refill has to be deliberate.
 
-        If someone widens the set, the safety argument («the caller hears the
-        same words, only a different component chose them») no longer holds
-        without re-measuring, so the set itself is pinned.
+        Suppressing the LLM turn also suppresses the tool calls that turn was
+        going to make about the *previous* answer — on call 3639c0b4 that lost
+        the second `get_fitting_stations(query=...)` and the station was
+        blind-picked. Six spoken events over two calls, six re-asks, zero
+        bookings. Anyone adding a state back has to change this test, and the
+        reason to change it is a design that lets the FSM own the tool calls.
         """
-        assert sorted(FSM_VOICE_STATES) == ["BRAND", "COLOR", "STORAGE"]
+        assert sorted(FSM_VOICE_STATES) == []
 
 
 class TestTheFsmDeclinesTheTurn:
     async def test_a_state_outside_the_opt_in_set_stays_with_the_llm(self) -> None:
         h = Harness(session_in(FsmState.DATE, city="Київ", station_id="000000019"))
-        with fsm_flags(enabled=True, shadow_mode=False), live_classifier():
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            live_classifier(),
+            voiced(FsmState.STORAGE),
+        ):
             await h.run(UNPARSEABLE)
 
         assert h.llm_turns == [UNPARSEABLE]
@@ -120,7 +144,11 @@ class TestTheFsmDeclinesTheTurn:
         session = session_in(FsmState.STORAGE, city="Київ", storage_choice="свої з собою")
         h = Harness(session)
         h.pipeline._run_fsm_deterministic_step = lambda transcript: None  # type: ignore[method-assign]
-        with fsm_flags(enabled=True, shadow_mode=False), live_classifier():
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            live_classifier(),
+            voiced(FsmState.STORAGE),
+        ):
             await h.run(UNPARSEABLE)
 
         assert session.fsm_state == FsmState.STORAGE.value, "the step must stay stubbed"
@@ -139,7 +167,7 @@ class TestTheFsmDeclinesTheTurn:
         with (
             fsm_flags(enabled=True, shadow_mode=False),
             live_classifier(),
-            patch("src.core.pipeline.FSM_VOICE_STATES", frozenset({"STATION"})),
+            voiced(FsmState.STATION),
         ):
             await h.run(UNPARSEABLE)
 
@@ -155,7 +183,11 @@ class TestTheFsmDeclinesTheTurn:
         session = session_in(FsmState.STORAGE, city="Київ")
         session.add_assistant_turn(STORAGE_Q)
         h = Harness(session)
-        with fsm_flags(enabled=True, shadow_mode=False), live_classifier():
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            live_classifier(),
+            voiced(FsmState.STORAGE),
+        ):
             await h.run(UNPARSEABLE)
 
         assert h.spoken.count(STORAGE_Q) == 0
@@ -163,7 +195,11 @@ class TestTheFsmDeclinesTheTurn:
 
     async def test_shadow_mode_cannot_reach_the_customer(self) -> None:
         h = Harness(session_in(FsmState.STORAGE, city="Київ"))
-        with fsm_flags(enabled=True, shadow_mode=True), live_classifier():
+        with (
+            fsm_flags(enabled=True, shadow_mode=True),
+            live_classifier(),
+            voiced(FsmState.STORAGE),
+        ):
             await h.run(UNPARSEABLE)
 
         assert STORAGE_Q not in h.spoken
@@ -179,6 +215,7 @@ class TestInterruptsOutrankTheVoice:
         h = Harness(session_in(FsmState.STORAGE, city="Київ"))
         with (
             fsm_flags(enabled=True, shadow_mode=False),
+            voiced(FsmState.STORAGE),
             patch(
                 "src.agent.intent_classifier.classify_intent",
                 AsyncMock(return_value=intent("PRICE")),
