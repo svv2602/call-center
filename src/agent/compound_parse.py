@@ -379,7 +379,7 @@ def _detect_city(text: str) -> _Hit | None:
 
     Order matters and is not arbitrary:
 
-    1. Landmarks first, recording the span they occupy.
+    1. Landmarks first, recording the spans they occupy.
     2. Explicit city stems are searched in the text with those spans blanked —
        otherwise «на харьковскому» (Харківське шосе, Kyiv) matches the Kharkiv
        stem and the bot confirms the wrong city, which is exactly what call
@@ -388,18 +388,16 @@ def _detect_city(text: str) -> _Hit | None:
        says «в Дніпрі на Оболоні» they told us the city, and the cross-city
        guard deals with the mismatch.
     4. Only then do the known STT mutations get a look, at low confidence.
-    """
-    landmark_city: str | None = None
-    landmark_spans: list[tuple[int, int]] = []
-    for pattern, _label, city in _LANDMARK_PATTERNS:
-        match = pattern.search(text)
-        if not match:
-            continue
-        landmark_spans.append(match.span())
-        if landmark_city is None and city is not None:
-            landmark_city = city
 
-    residual = _blank(text, landmark_spans)
+    Every occurrence is blanked, not just the first. Repeating a landmark is
+    normal — the caller names the street, the bot mishears, the caller repeats
+    it — and with `search` the second mention survived into `residual` and
+    matched the city stem at 1.0, inverting step 2 on exactly the input it
+    exists for. Call `63d11ab4`: «запиши на монтаж на Харьковское шоссе … на
+    Харьковском шоссе» resolved to Харків, while either half alone resolved to
+    Київ.
+    """
+    residual, landmark_city = _city_residual(text)
 
     for pattern, city in _CITY_PATTERNS:
         if pattern.search(residual):
@@ -413,6 +411,42 @@ def _detect_city(text: str) -> _Hit | None:
             return _Hit(city, 0.6)
 
     return None
+
+
+def _city_residual(text: str) -> tuple[str, str | None]:
+    """Steps 1-2 of `_detect_city`: text with landmarks blanked, and their city.
+
+    Split out so `named_cities` runs the same blanking pass rather than a
+    second copy of it — the pass is the whole of the `1b6721a4` / `63d11ab4`
+    guard, and two copies of it would drift.
+    """
+    landmark_city: str | None = None
+    landmark_spans: list[tuple[int, int]] = []
+    for pattern, _label, city in _LANDMARK_PATTERNS:
+        spans = [m.span() for m in pattern.finditer(text)]
+        if not spans:
+            continue
+        landmark_spans.extend(spans)
+        if landmark_city is None and city is not None:
+            landmark_city = city
+    return _blank(text, landmark_spans), landmark_city
+
+
+def named_cities(text: str) -> frozenset[str]:
+    """Every city the caller named *outright* in one utterance.
+
+    `_detect_city` answers «which city», returning the first stem that matches
+    and so collapsing «я з Києва, але треба в Дніпрі» to whichever entry
+    `_CITY_PATTERNS` happens to list first — an arbitrary pick, since the order
+    is by table position, not by position in the sentence. Callers that must
+    not guess need to see *both*, which is what this returns.
+
+    Only the 1.0 tier. A landmark-derived city (0.9) is an inference and a
+    fuzzy STT match (0.6) is a maybe; neither is the caller naming a city, and
+    the whole point here is to be able to say «the caller told us, in words».
+    """
+    residual, _landmark_city = _city_residual(_normalize(text))
+    return frozenset(city for pattern, city in _CITY_PATTERNS if pattern.search(residual))
 
 
 # ═══════════════════════════════════════════════════════════

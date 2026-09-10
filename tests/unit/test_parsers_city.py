@@ -76,6 +76,42 @@ class TestLandmarkSpanGuard:
     def test_every_spelling_of_the_street_resolves_to_kyiv(self, text: str) -> None:
         assert PARSER.parse(ctx(text)).value == "Київ"
 
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Запиши на монтаж на Харьковское шоссе, ниткой на Харьковском шоссе",
+            "ниткой на Харьковском шоссе, запиши на Харьковское шоссе",
+            "на харьковскому, ще раз на харьковскому",
+        ],
+    )
+    def test_repeating_the_street_does_not_turn_it_into_the_city(self, text: str) -> None:
+        """Call `63d11ab4` — the blanking pass used to hide only the first hit.
+
+        Each half alone resolved to Київ; said twice, the surviving second
+        mention matched the Kharkiv stem and outranked the landmark at 1.0. So
+        the guard inverted on the repetition, which is the *more* emphatic
+        input, and the caller was routed to another city for saying it twice.
+        """
+        outcome = PARSER.parse(ctx(text))
+        assert outcome.value == "Київ"
+        assert outcome.confidence == 0.9, "still landmark-derived, never named"
+
+    def test_blanking_every_occurrence_is_what_makes_that_work(self) -> None:
+        """Pinned against the detector's pieces, like the guard test below.
+
+        Blanking one span leaves the Kharkiv stem matchable; blanking both does
+        not. If the first assertion ever fails the repetition test above has
+        stopped testing anything.
+        """
+        from src.agent.compound_parse import _CITY_PATTERNS, _blank
+
+        raw = "на харьковскому і на харьковскому"
+        spans = [(3, 12), (21, 30)]
+        kharkiv = [pattern for pattern, city in _CITY_PATTERNS if city == "Харків"]
+
+        assert any(p.search(_blank(raw, spans[:1])) for p in kharkiv)
+        assert not any(p.search(_blank(raw, spans)) for p in kharkiv)
+
     def test_the_guard_is_load_bearing_not_decorative(self) -> None:
         """Without the blanking the Kharkiv stem *does* match «харьковскому».
 

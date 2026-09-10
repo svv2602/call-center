@@ -2246,7 +2246,34 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         # rationale + root-case call log. Two triggers:
         #  (A) cross-city — station pinned in city X, LLM asks city Y
         #  (B) past-Krok-2 signals (storage/date/slots present)
-        from src.agent.regression_guards import check_krok1_regression
+        from src.agent.regression_guards import caller_named_city, check_krok1_regression
+
+        # === Wave 18: the caller's own words outrank the profile city ===
+        # Runs *before* the Krok 1 guard on purpose. Correcting the argument
+        # here means the station gets pinned in the right city in the first
+        # place, so the cross-city branch below never has to arbitrate between
+        # a wrong pin and a right correction — which it currently resolves in
+        # favour of the pin. Call `cbb41e0d`.
+        #
+        # Overriding rather than bouncing an error back to the LLM, for the
+        # reason spelled out in `effective_booking_date`: a corrective message
+        # is a short-circuiting guard with no loop-breaker.
+        # Only ever *replaces* a city, never fills an empty one: an absent
+        # `city` is the prompt's landmark path («виклич get_fitting_stations
+        # БЕЗ параметра city з query=«орієнтир»»), and injecting there would
+        # narrow a search that is deliberately wide.
+        _said_city = caller_named_city(
+            [t.content for t in session.dialog_history if t.speaker == "user"]
+        )
+        if _said_city and city and _normalize_city(_said_city) != _normalize_city(city):
+            logger.warning(
+                "get_fitting_stations: caller-named city overrides the argument "
+                "for call %s (llm passed %r, caller said %r)",
+                session.channel_uuid,
+                city,
+                _said_city,
+            )
+            city = _said_city
 
         pinned_city: str | None = None
         if session.last_fitting_station_id:
@@ -2265,6 +2292,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             incoming_city=city,
             fitting_storage_choice=session.fitting_storage_choice,
             storage_contracts_found_count=len(session.storage_contracts_found),
+            caller_city=_said_city,
         )
         if _regression is not None:
             krok1_regression_blocked_total.inc()
