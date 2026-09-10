@@ -107,9 +107,23 @@ class TestNothingSaidAboutTime:
 class TestHourOnlyWidening:
     """Wave 6-A additions — `allow_hour_only` and what turns it off."""
 
-    def test_a_bare_hour_needs_the_bot_to_have_read_the_list(self) -> None:
-        outcome = PARSER.parse(ctx("на дев'яту", OFFERED, bot="Який час зручніше?"))
+    def test_a_bare_hour_needs_the_bot_to_have_asked_or_listed(self) -> None:
+        """Neither signal present — «9» is as likely an R9 diameter.
+
+        The bot utterance used to be «Який час зручніше?», which prod shows is
+        one of the two ways it asks Krok 4 bare (2026-09-10), so that string
+        now widens on purpose. A turn about the car is the real negative.
+        """
+        outcome = PARSER.parse(
+            ctx("на дев'яту", OFFERED, bot="Яка марка вашого автомобіля?")
+        )
         assert outcome.status != "value", "later in the dialog «9» may be a diameter"
+
+    def test_a_bare_hour_after_the_question_alone_is_enough(self) -> None:
+        """Call `431e60fb` (2026-09-10): the bot asked without reading the list."""
+        outcome = PARSER.parse(ctx("о 9", OFFERED, bot="О котрій зручніше?"))
+        assert outcome.status == "value"
+        assert outcome.value == "09:00"
 
     def test_a_pinned_slot_turns_the_widening_off(self) -> None:
         """Wave 14: once a slot is pinned, a bare hour must not silently move it."""
@@ -122,9 +136,21 @@ class TestHourOnlyWidening:
         PARSER.parse(context)
         assert context.session.selected_fitting_time == "09:00"
 
-    def test_an_ambiguous_hour_is_not_widened(self) -> None:
-        """«на 14 годину» — both 14:00 and 14:20 start with 14."""
+    def test_a_shared_hour_resolves_to_the_slot_on_the_hour(self) -> None:
+        """«на 14 годину» names 14:00, though 14:20 shares the hour."""
         outcome = PARSER.parse(ctx("на 14 годину", OFFERED))
+        assert outcome.status == "value"
+        assert outcome.value == "14:00"
+
+    def test_an_hour_with_nothing_on_it_stays_ambiguous(self) -> None:
+        """Two slots in the hour and none of them on it — still a coin flip."""
+        outcome = PARSER.parse(ctx("на 14 годину", ["14:20", "14:40"]))
+        assert outcome.status == "unresolved"
+        assert outcome.value is None
+
+    def test_named_minutes_are_not_rounded_to_the_hour(self) -> None:
+        """«14:40» is not on offer, and 14:00 is not a substitute for it."""
+        outcome = PARSER.parse(ctx("на 14:40", OFFERED))
         assert outcome.status == "unresolved"
         assert outcome.value is None
 

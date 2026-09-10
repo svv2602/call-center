@@ -77,6 +77,23 @@ _AVAILABILITY_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: The bot asking which hour the caller wants. Deliberately interrogative — the
+#: bare noun «час» is not enough, because «вільний час на 12 вересня уточнюю» and
+#: «Приймаємо цю годину?» are not questions about which hour, and a bare number
+#: after either of those is as likely a diameter. Narrower than the `time` entry
+#: in `pipeline._CTX_KEYWORDS`, which serves STT correction, where a false
+#: positive costs nothing.
+#: The forms are the ones the bot actually used in the last 30 days, not a
+#: guess: «О котрій зручніше?», «Який час зручний?», «на яку годину вам зручно»,
+#: «На якій годині вам зручно?». Note «якийсь час» does not match «який час» —
+#: the stem is followed by «сь», which is why the alternatives are spelled out
+#: rather than written as `як\w+\s+час`.
+_TIME_QUESTION_RE = re.compile(
+    r"о котр\w*|котр\w+\s+годин\w*|який час|яку годину|якій годині|"
+    r"во сколько|в котором часу",
+    re.IGNORECASE,
+)
+
 #: «12 вересня» is a date, not a slot. Without this the rule below would fire
 #: on the day number whenever it happened to be ≤ 20 — behaviour that depends
 #: on the calendar rather than on what the bot said. Deliberately a local copy
@@ -154,6 +171,35 @@ def bot_listed_slots(bot_utterance: str) -> bool:
     return any(_HOUR_MIN <= n <= _HOUR_MAX for n in _extract_numbers(tail))
 
 
+def bot_asked_for_time(bot_utterance: str) -> bool:
+    """True when the bot's last turn asked the caller which hour they want.
+
+    A second, independent reason a bare number is an hour. `bot_listed_slots`
+    answers «did the bot read the times out», which is not the only turn on
+    which «о 12» is a time: the bot routinely asks Krok 4 bare («О котрій
+    зручніше?», `prompts.py:2016`) and then the caller's answer is *only* ever
+    an hour. Call `431e60fb` (2026-09-10) died on exactly that turn.
+
+    The flag this feeds exists to stop a bare «17» being read as an R17
+    diameter. That risk is what makes the marker set narrow: it takes an
+    explicit interrogative about the hour, so a price quote, a Krok 8 summary
+    and a «Приймаємо цю годину?» confirmation all stay out.
+    """
+    if not bot_utterance:
+        return False
+    return bool(_TIME_QUESTION_RE.search(_normalize(bot_utterance)))
+
+
+def hour_only_allowed(bot_utterance: str) -> bool:
+    """Whether a bare hour may be matched against the offered slots.
+
+    The single authority for that decision. It had been spelled out
+    independently at both call sites (`parsers/time_parser.py`, the Wave 14 pin
+    in `core/pipeline.py`), which is two copies of a rule that must not drift.
+    """
+    return bot_listed_slots(bot_utterance) or bot_asked_for_time(bot_utterance)
+
+
 def detect_time_choice(
     customer_text: str,
     offered_times: list[str],
@@ -195,10 +241,33 @@ def detect_time_choice(
                 return candidate
 
     if allow_hour_only:
-        for hour in nums:
+        for i, hour in enumerate(nums):
             if not _HOUR_MIN <= hour <= _HOUR_MAX:
                 continue
+            # The caller named minutes, and the loop above already found that
+            # `HH:MM` is not on offer. Widening here would answer a request for
+            # 11:20 with 11:00 — a time nobody asked for, silently. Measured on
+            # 30 days of prod turns: without this, «11:20», «15:20», «на 12-20»
+            # and «9 20» all became the top of their hour.
+            if i + 1 < len(nums) and 0 <= nums[i + 1] <= 59:
+                continue
             same_hour = [t for t in offered if t.startswith(f"{hour:02d}:")]
+            if not same_hour:
+                continue
+            # A bare hour names the slot on the hour when there is one. Treating
+            # «о 12» as ambiguous because 12:30 also exists reads the caller as
+            # vaguer than they were: a half-past pick is spoken as «дванадцять
+            # тридцять». Call `431e60fb` (2026-09-10) offered the full 09:00-17:30
+            # half-hour grid, the caller said «о 12», this returned None, and TIME
+            # took a `parser_null` charge for the very turn that answered it — the
+            # third charge escalated a fully collected, customer-confirmed booking
+            # to an operator. The LLM had read the same turn as 12:00 («Дванадцята
+            # прийнята»).
+            on_the_hour = f"{hour:02d}:00"
+            if on_the_hour in offered:
+                return on_the_hour
+            # Nothing on the hour: one slot in it is still an unambiguous pick,
+            # several remain a genuine coin flip.
             if len(same_hour) == 1:
                 return same_hour[0]
 

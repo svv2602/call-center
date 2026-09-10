@@ -17,9 +17,10 @@ same three the Wave 14 block in the pipeline assembles:
 
 * `session.fitting_slots_offered` → the `HH:MM` values. The session stores
   `{"date": …, "time": …}` dicts, so the times are projected out here;
-* `time_detect.bot_listed_slots(ctx.last_bot_utterance)` → `allow_hour_only`.
-  A bare «на десяту» is unambiguous only right after the list was read out;
-  later in the dialog «17» is far more likely a wheel diameter;
+* `time_detect.hour_only_allowed(ctx.last_bot_utterance)` → `allow_hour_only`.
+  A bare «на десяту» is unambiguous when the bot has just read the list out or
+  has just asked which hour; anywhere else «17» is far more likely a wheel
+  diameter;
 * `session.selected_fitting_time` → the already pinned slot, which narrows the
   widening exactly as the pipeline does. The pin itself is never overwritten
   here: this parser reports, the engine writes.
@@ -37,7 +38,7 @@ from typing import TYPE_CHECKING
 
 from src.agent.compound_parse import _detect_time_hint, _normalize
 from src.agent.parsers.base import NOT_MENTIONED, ParseOutcome, graded, unresolved
-from src.agent.time_detect import bot_listed_slots, detect_time_choice
+from src.agent.time_detect import detect_time_choice, hour_only_allowed
 
 if TYPE_CHECKING:
     from src.agent.parsers.base import ParseContext
@@ -92,7 +93,7 @@ class TimeParser:
         picked = detect_time_choice(
             text,
             offered,
-            allow_hour_only=(not pinned and bot_listed_slots(ctx.last_bot_utterance)),
+            allow_hour_only=(not pinned and hour_only_allowed(ctx.last_bot_utterance)),
         )
         if picked:
             return graded(picked, _PICKED_CONFIDENCE)

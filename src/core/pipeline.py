@@ -2800,7 +2800,7 @@ class CallPipeline:
             # «Слота на чотирнадцяту двадцять немає»). A pin can only ever
             # select a slot already present in fitting_slots_offered.
             if self._session.fitting_slots_offered:
-                from src.agent.time_detect import bot_listed_slots, detect_time_choice
+                from src.agent.time_detect import detect_time_choice, hour_only_allowed
 
                 _last_bot_slot = ""
                 for _t in reversed(self._session.dialog_history):
@@ -2811,14 +2811,15 @@ class CallPipeline:
                     s["time"] for s in self._session.fitting_slots_offered
                 ]
                 # A bare hour is only unambiguous right after the bot read the
-                # list out; later in the dialog «17» is far more likely a
-                # diameter, so restrict widening to the unpinned case.
+                # list out or asked which hour; later in the dialog «17» is far
+                # more likely a diameter, so restrict widening to the unpinned
+                # case.
                 _picked = detect_time_choice(
                     transcript.text,
                     _offered_times,
                     allow_hour_only=(
                         not self._session.selected_fitting_time
-                        and bot_listed_slots(_last_bot_slot)
+                        and hour_only_allowed(_last_bot_slot)
                     ),
                 )
                 if _picked and _picked != self._session.selected_fitting_time:
