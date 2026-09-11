@@ -116,6 +116,19 @@ false_transfer_blocked_total = Counter(
     ["reason"],
 )
 
+transfer_promise_suppressed_total = Counter(
+    "callcenter_transfer_promise_suppressed_total",
+    "«Connecting you to an operator» sentences withheld from TTS because the "
+    "transfer_to_operator call behind them was blocked by the backend guard",
+    ["reason"],
+)
+
+transfer_promise_unbacked_total = Counter(
+    "callcenter_transfer_promise_unbacked_total",
+    "«Connecting you to an operator» sentences released with no "
+    "transfer_to_operator call behind them at all (spoken as bare prose)",
+)
+
 krok8_confabulation_total = Counter(
     "callcenter_krok8_confabulation_total",
     "Bot produced «Перевіримо: …, Підтверджуєте?» while a checklist "

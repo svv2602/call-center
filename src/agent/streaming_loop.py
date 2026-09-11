@@ -37,8 +37,14 @@ from src.agent.prompts import (
 from src.agent.tool_result_compressor import compress_tool_result
 from src.agent.tools import filter_tools_by_state
 from src.core.audio_sender import send_audio_stream
-from src.core.sentence_buffer import buffer_sentences
-from src.llm.models import LLMTask, Usage
+from src.core.sentence_buffer import BufferEvent, SentenceReady, buffer_sentences
+from src.llm.models import (
+    LLMTask,
+    ToolCallDelta,
+    ToolCallEnd,
+    ToolCallStart,
+    Usage,
+)
 from src.monitoring.metrics import (
     false_transfer_blocked_total,
     history_compression_mode,
@@ -48,6 +54,8 @@ from src.monitoring.metrics import (
     tool_call_errors_total,
     tool_rounds_exhausted_total,
     tool_rounds_per_turn,
+    transfer_promise_suppressed_total,
+    transfer_promise_unbacked_total,
 )
 from src.tts.streaming_tts import synthesize_stream
 
@@ -76,6 +84,8 @@ _FILLER_PRESYNTH_TIMEOUT_SEC = 1.5
 _MAX_EMPTY_RETRIES = 2
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
     from src.agent.agent import ToolRouter
     from src.core.audio_socket import AudioSocketConnection
     from src.core.echo_canceller import EchoCanceller
@@ -285,6 +295,148 @@ def _should_block_false_transfer(
         "НЕ є escalation'ом. Продовжи чекліст, перепитай коротко якщо "
         "щось не зрозумів."
     )
+
+
+#: The apostrophe glyphs that reach us in «з'єдную» — the LLM is not consistent
+#: about which one it emits, and the sentence never matches if we only know one.
+_APOSTROPHES = ("ʼ", "’", "`", "‘", "´")
+
+#: First-person verbs that announce the connection *as it happens*. The tense is
+#: the whole discriminator, and a 30-day corpus of every operator-mentioning bot
+#: sentence is what drew the line: «переключаю на оператора» is a promise, while
+#: «можу переключити вас на оператора» (infinitive offer), «краще поговорити з
+#: оператором» (recommendation), «зверніться до оператора» (imperative) and
+#: «оператори недоступні» (unavailability) are not, and none of them carries a
+#: first-person ending. Perfective futures («переключу», «перемкну») are here
+#: because they promise just as hard as the imperfective present.
+_CONNECTING_VERBS = (
+    "з'єдную",
+    "з'єднаю",
+    "перекладаю",
+    "перемикаю",
+    "перемкну",
+    "переводжу",
+    "переключаю",
+    "переключу",
+    "переключую",
+)
+
+#: Who the caller is being handed to. Required alongside the verb: «переключаю»
+#: on its own could one day mean switching a station or a city, and this filter
+#: deletes audio, so it refuses to guess.
+_HANDOFF_TARGETS = ("оператор", "спеціаліст", "менеджер")
+
+
+def is_transfer_promise(text: str) -> bool:
+    """True when this sentence tells the caller they are being connected now.
+
+    Deliberately narrower than «mentions an operator». The sentence buffer splits
+    on clauses past 25 characters, so what arrives here can be a fragment — but
+    every promise shape seen in 30 days keeps its verb and its noun in the same
+    fragment («з'єдную вас з оператором» and «переключаю на оператора» contain no
+    comma), which is why a per-fragment test is enough.
+    """
+    low = text.lower()
+    for glyph in _APOSTROPHES:
+        low = low.replace(glyph, "'")
+    if not any(verb in low for verb in _CONNECTING_VERBS):
+        return False
+    return any(target in low for target in _HANDOFF_TARGETS)
+
+
+async def hold_unconfirmed_transfer_promise(
+    stream: AsyncIterator[BufferEvent],
+    history: list[dict[str, Any]],
+) -> AsyncIterator[BufferEvent]:
+    """Withhold «I'm connecting you» until the transfer behind it is allowed.
+
+    The prompt instructs the LLM to say one short phrase *and* call
+    `transfer_to_operator` in the same breath (`prompts.py:62`), and the phrase
+    is genuinely load-bearing: a successful AMI redirect tears the channel down
+    before `_close_turn` can speak `TRANSFER_TEXT`, so in 30 days of production
+    that template was never once heard and this sentence was the only thing a
+    transferred caller got. It therefore has to be spoken *before* the tool runs
+    and cannot simply be moved after it.
+
+    What it must not outrun is the guard's verdict. `_should_block_false_transfer`
+    runs where the tool executes, long after `send_audio_stream` has finished, so
+    on 11 of the 12 calls in 30 days where the bot promised an operator and none
+    arrived, the guard did its job and the caller had already heard the promise.
+    Replaying those histories through the real guard is what established that —
+    every one of the five reasons was blocked for all 11.
+
+    So the sentence is held exactly as long as it takes the arguments to stream,
+    and released the moment the verdict is knowable but before anything is done.
+
+    Releasing is the default. A held promise that is followed by no transfer at
+    all is still a lie (call 18e96042: the caller asked for a human in plain
+    words and the LLM only *said* it was connecting), but dropping that one would
+    leave a silent turn rather than an untrue one, and there is no wait-phrase to
+    cover it because no tool ran. It is counted instead of guessed at.
+    """
+    held: list[BufferEvent] | None = None
+    names: dict[str, str] = {}
+    arguments: dict[str, str] = {}
+
+    def resolve(*, drop_promise: bool) -> list[BufferEvent]:
+        nonlocal held
+        pending = held or []
+        held = None
+        if drop_promise:
+            return [
+                e
+                for e in pending
+                if not (isinstance(e, SentenceReady) and is_transfer_promise(e.text))
+            ]
+        return pending
+
+    async for event in stream:
+        if isinstance(event, ToolCallStart):
+            names[event.id] = event.name
+        elif isinstance(event, ToolCallDelta):
+            arguments[event.id] = arguments.get(event.id, "") + event.arguments_chunk
+
+        if held is None and isinstance(event, SentenceReady) and is_transfer_promise(event.text):
+            # Everything after the promise queues behind it so that releasing
+            # later cannot reorder the turn.
+            held = [event]
+            continue
+
+        if held is not None:
+            held.append(event)
+
+            if isinstance(event, ToolCallEnd) and names.get(event.id) == "transfer_to_operator":
+                try:
+                    args = json.loads(arguments.get(event.id) or "{}")
+                except json.JSONDecodeError:
+                    args = {}
+                if not isinstance(args, dict):
+                    args = {}
+                blocked = _should_block_false_transfer(args, history)
+                if blocked is not None:
+                    reason_label = str(args.get("reason", "unknown"))
+                    transfer_promise_suppressed_total.labels(reason=reason_label).inc()
+                    logger.warning(
+                        "Withholding transfer promise — guard blocks reason=%s",
+                        reason_label,
+                    )
+                for queued in resolve(drop_promise=blocked is not None):
+                    yield queued
+                continue
+
+            continue
+
+        yield event
+
+    if held is not None:
+        # Still holding once the stream is exhausted: nothing behind the promise
+        # ever called transfer_to_operator, so it was prose. Released anyway —
+        # see above — but counted, because this is the one shape the filter
+        # knowingly lets through and it should not be invisible.
+        transfer_promise_unbacked_total.inc()
+        logger.warning("Transfer promise spoken with no transfer_to_operator behind it")
+    for queued in resolve(drop_promise=False):
+        yield queued
 
 
 @dataclass(frozen=True)
@@ -551,7 +703,9 @@ class StreamingAgentLoop:
                     max_tokens=1024,
                     provider_override=current_provider_override,
                 )
-                buffered = buffer_sentences(stream)
+                buffered = hold_unconfirmed_transfer_promise(
+                    buffer_sentences(stream), conversation_history
+                )
                 tts_stream = synthesize_stream(buffered, self._tts)
 
                 # Pre-synthesize filler audio (usually cache-hit; capped by
