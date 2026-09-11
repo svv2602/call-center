@@ -30,7 +30,9 @@ from src.agent.interrupts import (
     MAX_INTERRUPT_FIRES,
     PRICE_HANDLER,
     InterruptResult,
+    _disambiguating_question,
     _mentions_price,
+    _pick_booking,
     classify_interrupt_text,
     handle_cancel_interrupt,
     handle_price_interrupt,
@@ -65,7 +67,12 @@ def make_session(**overrides: Any) -> CallSession:
     return session
 
 
-def make_booking(booking_id: str, date: str = "10.09.2026", time: str = "10:00") -> dict[str, Any]:
+def make_booking(
+    booking_id: str,
+    date: str = "10.09.2026",
+    time: str = "10:00",
+    city: str = "Київ",
+) -> dict[str, Any]:
     """A booking dict shaped like `_get_customer_bookings` output."""
     return {
         "booking_id": booking_id,
@@ -74,7 +81,7 @@ def make_booking(booking_id: str, date: str = "10.09.2026", time: str = "10:00")
         "time": time,
         "period": "",
         "person": "Тест",
-        "city": "Київ",
+        "city": city,
         "address": "вул. Тестова, 1",
         "station_name": "Шиномонтаж №1",
     }
@@ -550,6 +557,149 @@ class TestCancelInterruptMultipleBookings:
         assert unclear.handled is True
         assert session.pending_cancel_action == CANCEL_AWAITING_SELECTION
         assert_contract(unclear)
+
+
+class TestSelectionByCity:
+    """The shape that made cancelling unreachable for anyone with two bookings.
+
+    `f7718319` and `e209d7fb` are the same caller, with appointments in Київ and
+    Запоріжжя **on the same date**. The city was the only field that separated
+    them, and it was the one field `_pick_booking` did not read — so all eight
+    of her answers across the two calls were rejected and she hung up.
+    """
+
+    #: Verbatim from the two prod calls, plus the Russian form the STT returns
+    #: when she switches languages mid-call.
+    PROD_ANSWERS = (
+        "скасовуємо запис в Запоріжжі",
+        "прохання Скасувати запис в Запоріжжі",
+        "отмените запис Запорожье",
+        "та що в Запоріжжі",
+        "запис який Запоріжжі",
+    )
+
+    @pytest.fixture
+    def two_cities(self) -> list[dict[str, Any]]:
+        return [
+            make_booking(BOOKING_A, date="2026-09-15", time="09:30", city="Київ"),
+            make_booking(BOOKING_B, date="2026-09-15", time="10:20", city="Запоріжжя"),
+        ]
+
+    @pytest.mark.parametrize("answer", PROD_ANSWERS)
+    def test_every_real_answer_now_resolves(
+        self, answer: str, two_cities: list[dict[str, Any]]
+    ) -> None:
+        assert _pick_booking(answer, two_cities) == two_cities[1]
+
+    def test_the_other_city_picks_the_other_booking(self, two_cities: list[dict[str, Any]]) -> None:
+        assert _pick_booking("скасуйте той, що в Києві", two_cities) == two_cities[0]
+
+    def test_a_city_nobody_is_booked_in_resolves_nothing(
+        self, two_cities: list[dict[str, Any]]
+    ) -> None:
+        assert _pick_booking("скасуйте запис у Харкові", two_cities) is None
+
+    def test_feminine_ordinal_is_accepted(self, two_cities: list[dict[str, Any]]) -> None:
+        # «так друга» — `e209d7fb` turn 9. Only masculine and neuter were listed.
+        assert _pick_booking("так друга", two_cities) == two_cities[1]
+        assert _pick_booking("перша", two_cities) == two_cities[0]
+
+    def test_a_shared_date_still_resolves_nothing(self, two_cities: list[dict[str, Any]]) -> None:
+        # Both appointments are on the 15th, so «на 15 число» narrows nothing.
+        # Staying ambiguous here is the point — the re-ask below is what changed.
+        assert _pick_booking("запис на 15 число", two_cities) is None
+
+    def test_a_shared_date_plus_a_distinct_time_resolves(
+        self, two_cities: list[dict[str, Any]]
+    ) -> None:
+        assert _pick_booking("15 вересня о 10:20", two_cities) == two_cities[1]
+
+    def test_a_city_narrows_a_date_the_bookings_share(
+        self, two_cities: list[dict[str, Any]]
+    ) -> None:
+        """Both are on the 15th, so «на 15 вересня» alone is noise — but paired
+        with a city it is not. The two signals have to *agree*, and here they
+        do: the city points at one booking and the date excludes neither."""
+        assert _pick_booking("скасуйте київський на 15 вересня", two_cities) == two_cities[0]
+
+    def test_no_evidence_refuses_even_when_one_booking_is_left(self) -> None:
+        """The list is re-fetched every turn, so it can shrink between the turn
+        that read it out and the turn that answers. A single remaining booking
+        must still not be selected by an answer that names nothing about it —
+        otherwise «скасуйте запис» cancels whatever happens to be left."""
+        one = [make_booking(BOOKING_A, date="2026-09-15", time="09:30", city="Київ")]
+        assert _pick_booking("скасуйте запис", one) is None
+        assert _pick_booking("не пам'ятаю", one) is None
+        # The caller naming it still works.
+        assert _pick_booking("той, що в Києві", one) == one[0]
+
+    def test_place_and_time_pointing_at_different_bookings_refuses(
+        self, two_cities: list[dict[str, Any]]
+    ) -> None:
+        """Evidence that disagrees is a confused caller, not a near-miss.
+
+        Київ is the 09:30 one. Answering «Київ на 10:20» names one of each, and
+        cancelling on a precedence rule would be a coin flip on somebody's real
+        appointment.
+        """
+        assert _pick_booking("Київ на 10:20", two_cities) is None
+
+    def test_the_reask_names_the_axis_that_separates_them(
+        self, two_cities: list[dict[str, Any]]
+    ) -> None:
+        question = _disambiguating_question(two_cities)
+        assert "Київ" in question and "Запоріжжя" in question
+        # The dead end the caller heard three times in a row.
+        assert question != "Скажіть, будь ласка, який запис скасувати."
+
+    def test_the_reask_prefers_date_when_the_city_is_shared(self) -> None:
+        same_city = [
+            make_booking(BOOKING_A, date="2026-09-15", city="Київ"),
+            make_booking(BOOKING_B, date="2026-09-18", city="Київ"),
+        ]
+        question = _disambiguating_question(same_city)
+        assert "2026-09-15" in question and "2026-09-18" in question
+
+    def test_the_reask_falls_back_to_the_ordinal_when_nothing_separates(self) -> None:
+        identical = [
+            make_booking(BOOKING_A, date="2026-09-15", time="09:30", city="Київ"),
+            make_booking(BOOKING_B, date="2026-09-15", time="09:30", city="Київ"),
+        ]
+        question = _disambiguating_question(identical)
+        assert "перший" in question
+        # Whatever it asks for, `_pick_booking` has to be able to read the answer.
+        assert _pick_booking("перший", identical) == identical[0]
+
+    async def test_the_handler_cancels_the_named_city_end_to_end(
+        self, session: CallSession, router: AsyncMock, two_cities: list[dict[str, Any]]
+    ) -> None:
+        """The seam: a unit test on `_pick_booking` alone would stay green even
+        if the handler never called it."""
+        router.get_customer_bookings.return_value = {"total": 2, "bookings": two_cities}
+
+        listed = await handle_cancel_interrupt(CANCEL_REQUEST, session, router)
+        assert listed.session_updates["pending_cancel_action"] == CANCEL_AWAITING_SELECTION
+
+        picked = await handle_cancel_interrupt("скасовуємо запис в Запоріжжі", session, router)
+        assert session.pending_cancel_action == f"{CANCEL_AWAITING_CONFIRMATION}:{BOOKING_B}"
+        assert_contract(picked)
+
+        done = await handle_cancel_interrupt("так", session, router)
+        router.cancel_fitting.assert_awaited_once_with(booking_id=BOOKING_B)
+        assert_contract(done)
+
+    async def test_an_unreadable_answer_gets_a_narrower_question_not_the_same_one(
+        self, session: CallSession, router: AsyncMock, two_cities: list[dict[str, Any]]
+    ) -> None:
+        router.get_customer_bookings.return_value = {"total": 2, "bookings": two_cities}
+
+        await handle_cancel_interrupt(CANCEL_REQUEST, session, router)
+        reask = await handle_cancel_interrupt("запис на 15 число", session, router)
+
+        router.cancel_fitting.assert_not_awaited()
+        assert "Київ" in reask.reply_to_customer and "Запоріжжя" in reask.reply_to_customer
+        assert session.pending_cancel_action == CANCEL_AWAITING_SELECTION
+        assert_contract(reask)
 
 
 class TestCancelInterruptGuardInvalidBookingId:

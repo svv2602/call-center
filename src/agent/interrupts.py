@@ -56,6 +56,7 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from src.agent.compound_parse import named_cities
 from src.agent.fitting_fsm import FROZEN_STATES, STATES, FsmState
 
 if TYPE_CHECKING:
@@ -902,53 +903,146 @@ def _describe_booking(booking: dict[str, Any]) -> str:
 
 
 #: Ordinal words/digits → zero-based index, for «скасуйте другий».
+#:
+#: Feminine forms are here because the caller does not agree the ordinal with
+#: «запис». The bot reads out «1) … 2) …» and the answer comes back as a bare
+#: «друга» — agreeing with an unspoken «позиція», or with nothing at all. Call
+#: `e209d7fb` answered «так друга» and was re-asked, because only the masculine
+#: and neuter forms were listed.
 _ORDINALS: dict[str, int] = {
     "перший": 0,
     "перше": 0,
     "першу": 0,
+    "перша": 0,
     "первый": 0,
+    "первая": 0,
     "1": 0,
     "другий": 1,
     "друге": 1,
     "другу": 1,
+    "друга": 1,
     "второй": 1,
+    "вторая": 1,
     "2": 1,
     "третій": 2,
     "третє": 2,
     "третю": 2,
+    "третя": 2,
     "третий": 2,
+    "третья": 2,
     "3": 2,
     "четвертий": 3,
+    "четверта": 3,
     "четвертый": 3,
+    "четвертая": 3,
     "4": 3,
 }
+
+
+def _bookings_by_place(text: str, bookings: list[dict[str, Any]]) -> set[int]:
+    """Indices of the bookings whose city the caller named outright.
+
+    `named_cities` is the 1.0 tier only — no landmark inference, no fuzzy STT
+    match. This function picks which appointment gets cancelled, so a guess is
+    worse than a re-ask.
+    """
+    spoken = named_cities(text)
+    if not spoken:
+        return set()
+    return {i for i, b in enumerate(bookings) if str(b.get("city") or "").strip() in spoken}
+
+
+def _bookings_by_datetime(text: str, bookings: list[dict[str, Any]]) -> set[int]:
+    """Indices matched by the 1-2 digit runs in the caller's answer.
+
+    Digits are read against `date` and `time` only. A single decisive run wins
+    outright: «15 вересня о 9:30» mentions a day both of `e209d7fb`'s
+    appointments share, and the caller still named exactly one of them — so the
+    run that narrows to one booking is the answer, and the shared one is noise.
+
+    With nothing decisive the union comes back instead, which is not an answer
+    but is still a signal: it lets the caller tell «the caller said 15th and
+    both are on the 15th» apart from «the caller mentioned no date at all».
+    """
+    union: set[int] = set()
+    for fragment in re.findall(r"\d{1,2}", text):
+        matched = {
+            i
+            for i, b in enumerate(bookings)
+            if re.search(
+                rf"(?<![0-9]){re.escape(fragment)}(?![0-9])",
+                f"{b.get('date') or ''} {b.get('time') or ''}",
+            )
+        }
+        if len(matched) == 1:
+            return matched
+        union |= matched
+    return union
 
 
 def _pick_booking(text: str, bookings: list[dict[str, Any]]) -> dict[str, Any] | None:
     """Choose one booking from a list given the caller's answer.
 
-    Ordinals win over dates; a date fragment must match exactly one booking.
-    Returns None when the answer is ambiguous — the handler re-asks rather than
-    cancelling the wrong appointment.
+    An ordinal is an index the caller read off the list the bot just spoke, so
+    it settles the question on its own. Everything else is evidence, and the
+    evidence has to agree: the place the caller named and the date or time they
+    named must point at the same appointment. «Київ на 10:20» when Київ is the
+    9:30 one is not a near-miss to be resolved by precedence — it is a caller
+    who is confused or misheard, and cancelling either one is a coin flip.
+
+    Place is here because it is how callers actually answer. `f7718319` said
+    «скасовуємо запис в Запоріжжі» three times and `e209d7fb` said «та що в
+    Запоріжжі»; the two appointments shared a date, so the city was the only
+    thing that told them apart, and it was the one field this function did not
+    read. Eight of eight real answers across those two calls were rejected.
+
+    Returns None when the answer is ambiguous — the handler asks a narrower
+    question rather than cancelling the wrong appointment.
     """
     lowered = _norm(text)
     if not lowered or not bookings:
         return None
+
     for word, index in _ORDINALS.items():
         if _whole_word(lowered, word) and index < len(bookings):
             return bookings[index]
-    for fragment in re.findall(r"\d{1,2}", lowered):
-        matches = [
-            b
-            for b in bookings
-            if re.search(
-                rf"(?<![0-9]){re.escape(fragment)}(?![0-9])",
-                f"{b.get('date') or ''} {b.get('time') or ''}",
-            )
-        ]
-        if len(matches) == 1:
-            return matches[0]
+
+    signals = [
+        s
+        for s in (_bookings_by_place(lowered, bookings), _bookings_by_datetime(lowered, bookings))
+        if s
+    ]
+    if not signals:
+        return None
+
+    agreed = set.intersection(*signals)
+    if len(agreed) == 1:
+        return bookings[next(iter(agreed))]
     return None
+
+
+def _disambiguating_question(bookings: list[dict[str, Any]]) -> str:
+    """Ask for the one field that actually separates these appointments.
+
+    Repeating «Скажіть, будь ласка, який запис скасувати.» is what `f7718319`
+    and `e209d7fb` each heard three times: the caller had already answered, in
+    the only terms that distinguished the two bookings, and the bot's reply
+    carried no hint that those terms were not being understood. Naming the
+    axis — and the values on it — gives the caller something to say that the
+    parser above can actually read.
+
+    Falls back to the ordinal, which `_pick_booking` always accepts, when no
+    single field separates them.
+    """
+    for key, prompt in (
+        ("city", "Назвіть місто"),
+        ("date", "Назвіть дату"),
+        ("time", "Назвіть час"),
+    ):
+        values = [str(b.get(key) or "").strip() for b in bookings]
+        if all(values) and len(set(values)) == len(values):
+            return f"{prompt}: {', '.join(values)}?"
+    return "Скажіть номер запису зі списку — перший, другий?"
 
 
 async def handle_cancel_interrupt(
@@ -1049,8 +1143,7 @@ async def handle_cancel_interrupt(
             logger.info("cancel_interrupt: selection unclear — outcome=reask_selection")
             return _result(
                 True,
-                reply=STATES[FsmState.CANCEL_INTERRUPT].silence_reprompt
-                or "Скажіть, будь ласка, який запис скасувати.",
+                reply=_disambiguating_question(bookings),
                 resume_state=resume_state,
                 session_updates=_apply(session, {"interrupt_counts": counts}),
             )
