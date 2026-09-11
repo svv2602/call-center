@@ -53,15 +53,25 @@ def ctx(text: str, *, conn: Any = None) -> ParseContext:
 
 @pytest.fixture
 def alias_lookup() -> Iterator[Any]:
-    """The real `vehicle_alias_lookup` module, importable in a bare venv."""
+    """The real `vehicle_alias_lookup` module, importable in a bare venv.
+
+    `resolve_by_alias` is restored unconditionally. The tests below swap it for
+    a mock on the live module object, and where SQLAlchemy is genuinely
+    installed — CI, prod image — the module is never re-imported, so without
+    this the first test leaves a mock behind and every later `spec=` reads that
+    mock instead of the real function (`InvalidSpecError`).
+    """
     injected = importlib.util.find_spec("sqlalchemy") is None
     if injected:
         stub = types.ModuleType("sqlalchemy")
         stub.text = lambda statement: statement  # type: ignore[attr-defined]
         sys.modules["sqlalchemy"] = stub
+    module = importlib.import_module("src.agent.vehicle_alias_lookup")
+    original = module.resolve_by_alias
     try:
-        yield importlib.import_module("src.agent.vehicle_alias_lookup")
+        yield module
     finally:
+        module.resolve_by_alias = original
         if injected:
             sys.modules.pop("src.agent.vehicle_alias_lookup", None)
             sys.modules.pop("sqlalchemy", None)
