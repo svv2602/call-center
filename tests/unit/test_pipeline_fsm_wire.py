@@ -129,6 +129,21 @@ class Harness:
         self.streaming_loop = streaming_loop
 
         self.session = session or CallSession(uuid.uuid4())
+
+        # Wave 2-C: the pipeline no longer sets `transferred` itself — it asks
+        # the one executor that talks to AMI and reads the outcome back off the
+        # session. A router that merely records the call therefore models a
+        # *failed* transfer, so the stand has to mirror the executor's side
+        # effect for the success path to be reachable at all. `AsyncMock` and
+        # not a plain coroutine function: shadow mode asserts `assert_not_called`.
+        async def _execute(name: str, args: dict[str, Any] | None = None) -> dict[str, str]:
+            if name == "transfer_to_operator":
+                self.session.mark_transfer(str((args or {}).get("reason", "")))
+                return {"status": "transferring"}
+            return {"status": "ok"}
+
+        tool_router.execute = AsyncMock(side_effect=_execute)
+
         self.pipeline = CallPipeline(
             conn=conn,
             stt=MagicMock(spec=[]),
@@ -453,7 +468,12 @@ class TestLiveMode:
         ):
             await h.run("дайте оператора", "ще одна фраза")
 
-        assert h.session.transferred is True
+        # The flag is an outcome of the executor, never the thing the pipeline
+        # sets: asserting it directly is what let the defect pass for 30 days.
+        h.tool_router.execute.assert_awaited_once_with(
+            "transfer_to_operator", {"reason": "intent_classifier_transfer"}
+        )
+        assert h.session.transfer_redirect_initiated() is True
         assert h.session.transfer_reason == "intent_classifier_transfer"
         assert h.llm_turns == []
 
@@ -863,7 +883,10 @@ class TestOpenSubFlowOwnsTheAnswer:
             await h.run("дайте оператора")
 
         cancel.assert_not_called()
-        assert h.session.transferred is True
+        h.tool_router.execute.assert_awaited_once_with(
+            "transfer_to_operator", {"reason": "intent_classifier_transfer"}
+        )
+        assert h.session.transfer_redirect_initiated() is True
         assert h.session.transfer_reason == "intent_classifier_transfer"
 
     async def test_classifier_failure_still_dispatches_an_open_sub_flow(self) -> None:

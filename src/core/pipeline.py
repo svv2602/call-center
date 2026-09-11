@@ -2169,6 +2169,97 @@ class CallPipeline:
             return "PRICE"
         return None
 
+    async def _dispatch_transfer_verdict(self, transcript: Transcript) -> bool:
+        """Hand a TRANSFER verdict to the one executor that can actually transfer.
+
+        Wave 2-C. This branch used to call `CallSession.mark_transfer` directly,
+        which set a flag and nothing else: no working-hours check, no
+        `transfer_attempts_total`, and no AMI redirect — `.redirect(` exists in
+        exactly one place in `src/`, inside the `transfer_to_operator` tool. So
+        the caller was told «з'єдную вас з оператором» by `_close_turn` and then
+        went on talking to the bot. 15 calls in 30 days, all of them inside
+        working hours, so every one of those transfers was possible and simply
+        never attempted.
+
+        The executor is reached through the tool router rather than being copied
+        out of `src/main.py`: it is a closure over `session`, `_ami_client`,
+        `_redis` and `publish_event`, and a second copy of «hours → metric →
+        redirect → flag» is precisely the divergence being repaired here. Going
+        through `ToolRouter.execute` also produces the `call_tool_calls` row that
+        makes this path auditable — the row whose absence is how the defect was
+        found. The same route already carries the PRICE/CANCEL handlers below.
+
+        Returns True only when AMI accepted the redirect. Every other outcome
+        falls through to the normal LLM turn: the caller asked for a human and
+        must hear something true about not getting one, and the LLM (with the
+        tool still available to it) is the only thing on this path that speaks.
+        Taking the turn and staying silent would trade a false promise for no
+        answer at all.
+
+        The customer turn is recorded on the taken-turn branch only. On a
+        fall-through the streaming path records it itself, so recording it here
+        as well would double it in `dialog_history` and in `call_turns`.
+        """
+        tool_router = self._get_tool_router()
+        if tool_router is None:
+            logger.error(
+                "FSM live mode: TRANSFER verdict for call=%s but no tool router — "
+                "cannot reach an operator, falling through to the LLM",
+                self._session.channel_uuid,
+                extra={"call_id": str(self._session.channel_uuid)},
+            )
+            self._note_pipeline_interrupt_dispatch(dispatched=False)
+            return False
+
+        try:
+            outcome = await tool_router.execute(
+                "transfer_to_operator", {"reason": "intent_classifier_transfer"}
+            )
+        except Exception:
+            # Loud, never suppressed: a swallowed failure here is indistinguishable
+            # from the defect this wave repairs.
+            logger.error(
+                "FSM live mode: transfer executor raised for call=%s — treating "
+                "the transfer as not initiated",
+                self._session.channel_uuid,
+                exc_info=True,
+                extra={"call_id": str(self._session.channel_uuid)},
+            )
+            self._note_pipeline_interrupt_dispatch(dispatched=False)
+            return False
+
+        if not self._session.transfer_redirect_initiated():
+            logger.warning(
+                "FSM live mode: TRANSFER verdict for call=%s did NOT reach an "
+                "operator (outcome=%s, executor status=%s) — no promise is "
+                "announced and the turn goes to the LLM",
+                self._session.channel_uuid,
+                self._session.transfer_outcome,
+                (outcome or {}).get("status") if isinstance(outcome, dict) else outcome,
+                extra={"call_id": str(self._session.channel_uuid)},
+            )
+            self._note_pipeline_interrupt_dispatch(dispatched=False)
+            return False
+
+        self._session.add_user_turn(
+            content=transcript.text,
+            stt_confidence=transcript.confidence,
+            detected_language=transcript.language,
+        )
+        await self._log_turn(
+            "customer",
+            transcript.text,
+            stt_confidence=transcript.confidence,
+            language=transcript.language,
+        )
+        logger.info(
+            "FSM live mode: TRANSFER verdict for call=%s redirected to an operator",
+            self._session.channel_uuid,
+            extra={"call_id": str(self._session.channel_uuid)},
+        )
+        self._note_pipeline_interrupt_dispatch(dispatched=True)
+        return True
+
     async def _maybe_handle_intent(self, transcript: Transcript) -> bool:
         """Live-mode side door: let an interrupt handler own this turn.
 
@@ -2230,20 +2321,7 @@ class CallPipeline:
             and result.primary_intent == "TRANSFER"
             and result.confidence >= FSM_INTERRUPT_CONFIDENCE_FLOOR
         ):
-            self._session.add_user_turn(
-                content=transcript.text,
-                stt_confidence=transcript.confidence,
-                detected_language=transcript.language,
-            )
-            await self._log_turn(
-                "customer",
-                transcript.text,
-                stt_confidence=transcript.confidence,
-                language=transcript.language,
-            )
-            self._session.mark_transfer(reason="intent_classifier_transfer")
-            self._note_pipeline_interrupt_dispatch(dispatched=True)
-            return True
+            return await self._dispatch_transfer_verdict(transcript)
 
         if continuation is not None:
             logger.info(
@@ -3588,10 +3666,29 @@ class CallPipeline:
         Returns True when the call must stop looping (transfer announced).
 
         Extracted in Wave 4-A so the FSM short-circuit can reuse the exact same
-        transfer handling instead of duplicating it — a divergence here is how
-        an FSM-driven TRANSFER would end up silently never announced.
+        transfer handling instead of duplicating it. The fear at the time was
+        that a divergence here would leave an FSM-driven TRANSFER silently never
+        announced. Wave 2-C measured the mirror image of that fear: the
+        announcement was the part both paths shared, and the *action* behind it
+        was not. 15 callers in 30 days heard this template and stayed with the
+        bot, because the classifier path set `transferred` without ever asking
+        AMI to move the channel.
+
+        So the announcement no longer keys off `transferred`. It keys off the
+        marker that only the executor which talks to AMI writes. Everything
+        else — a failed redirect, an after-hours refusal, no AMI client, a flag
+        restored from Redis, an outcome some future branch invents — is a
+        refusal to promise (`CallSession.transfer_redirect_initiated`).
+
+        Worth knowing before "fixing" the announcement again: on a successful
+        transfer the caller almost certainly never hears it. AMI tears the
+        channel down first, and across 53 successfully redirected calls in 30
+        days this template was not spoken once, while 13 of the 15 broken-path
+        calls did hear it. The branch below is therefore mostly a stop condition
+        for the loop; the sentence the transferred caller actually hears is the
+        LLM's own, released by `hold_unconfirmed_transfer_promise`.
         """
-        if self._session.transferred:
+        if self._session.transfer_redirect_initiated():
             transfer_msg = self._templates.get("transfer", TRANSFER_TEXT)
             await self._log_turn("bot", transfer_msg)
             await self._speak(transfer_msg)

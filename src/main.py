@@ -3561,6 +3561,26 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
     router.register("search_knowledge_base", _search_knowledge)
 
     async def transfer_to_operator(**kwargs: Any) -> dict[str, str]:
+        """The one executor of an operator transfer. Both paths go through it.
+
+        Wave 2-C: there used to be a second path. The intent classifier called
+        `CallSession.mark_transfer` directly (`pipeline.py:2244`), which set the
+        `transferred` flag without checking working hours, without touching
+        `transfer_attempts_total` and — the part the caller noticed — without
+        ever asking AMI to move the channel. In 30 days that produced 15 calls
+        where the bot said «з'єдную вас з оператором» and then went on talking
+        to the person it had just promised to hand over. The classifier path now
+        calls this function via the tool router, so «working hours → metric →
+        AMI redirect → flag» exists exactly once.
+
+        Returns a dict whose `status` is the outcome the caller must branch on:
+        `transferring` (redirect accepted), `after_hours`, `unavailable`
+        (no AMI client), `error` (no channel mapping, timeout, or AMI refusal).
+        The same outcome is mirrored onto the session — `mark_transfer` on
+        success, `mark_transfer_failed` otherwise — because `_close_turn` in the
+        pipeline decides whether to announce a transfer long after this dict has
+        been consumed.
+        """
         from src.core.working_hours import (
             format_hours_for_speech,
             format_next_open_for_speech,
@@ -3576,6 +3596,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         # tenant is closed right now. Ask the LLM to switch to callback flow.
         if not is_open(session.working_hours):
             transfer_attempts_total.labels(result="after_hours").inc()
+            session.mark_transfer_failed(reason, "after_hours")
             when = next_open_time(session.working_hours)
             hours = format_hours_for_speech(session.working_hours)
             next_phrase = format_next_open_for_speech(when)
@@ -3615,6 +3636,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     )
             if asterisk_channel_name is None:
                 transfer_attempts_total.labels(result="error").inc()
+                session.mark_transfer_failed(reason, "error")
                 logger.error(
                     "No Asterisk channel_name mapping for call %s — "
                     "dialplan curl missing ${CHANNEL(name)}?",
@@ -3641,9 +3663,22 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             except TimeoutError:
                 success = False
                 logger.error("AMI transfer timeout (8s) for call %s", session.channel_uuid)
+            except Exception:
+                # An AMI client that raises is a failed transfer, not a crashed
+                # call — but it must be loud. `contextlib.suppress` on this path
+                # is what turned 3 of 3 lost bookings invisible (37fb2d0); the
+                # same swallow here would put the caller back to hearing a
+                # promise nobody kept.
+                success = False
+                logger.error(
+                    "AMI transfer raised for call %s — treating as a failed transfer",
+                    session.channel_uuid,
+                    exc_info=True,
+                    extra={"call_id": str(session.channel_uuid)},
+                )
 
             if success:
-                session.transferred = True
+                session.mark_transfer(reason)
                 transfer_attempts_total.labels(result="success").inc()
                 logger.info(
                     "Operator transfer via AMI succeeded: call=%s channel=%s reason=%s",
@@ -3655,6 +3690,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 return {"status": "transferring", "message": "З'єдную з оператором"}
             else:
                 transfer_attempts_total.labels(result="error").inc()
+                session.mark_transfer_failed(reason, "error")
                 logger.error(
                     "AMI transfer failed for call %s (channel=%s) — telling customer "
                     "operators unavailable",
@@ -3670,6 +3706,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 }
         else:
             transfer_attempts_total.labels(result="unavailable").inc()
+            session.mark_transfer_failed(reason, "unavailable")
             logger.warning(
                 "Operator transfer requested for call %s but AMI client not available",
                 session.channel_uuid,

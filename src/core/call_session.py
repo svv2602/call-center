@@ -34,6 +34,17 @@ MAX_EMPTY_RESPONSES_BEFORE_ESCALATE = 3
 # the history is a debugging/regression-detection aid, not an audit log.
 FSM_HISTORY_LIMIT = 20
 
+# The one value of `CallSession.transfer_outcome` that means AMI accepted the
+# redirect. Everything else — no attempt at all (None), closed for the day,
+# no channel mapping, AMI down, AMI refused, and any value a future branch
+# invents — means the caller is still on the line with the bot.
+#
+# Wave 2-C: the promise «з'єдную вас з оператором» used to be spoken off the
+# bare `transferred` flag, which the classifier path set without ever calling
+# AMI. 15 callers in 30 days heard it and stayed with the bot. The announcement
+# now keys off this marker, which only the executor that talks to AMI writes.
+TRANSFER_OUTCOME_INITIATED = "initiated"
+
 
 def _clean_count_map(
     raw: object, *, field: str, channel_uuid: object
@@ -114,6 +125,9 @@ class CallSession:
         self.scenario: str | None = None
         self.transferred: bool = False
         self.transfer_reason: str | None = None
+        # Outcome recorded by the transfer executor (`transfer_to_operator` in
+        # `src/main.py`). None = the executor never ran for this call.
+        self.transfer_outcome: str | None = None
         self.order_id: str | None = None
         self.order_draft: dict[str, Any] | None = None
         self.fitting_booked: bool = False
@@ -360,10 +374,50 @@ class CallSession:
         self.empty_response_count = 0
 
     def mark_transfer(self, reason: str) -> None:
-        """Mark the call as transferred to an operator."""
+        """Record that AMI accepted the redirect to an operator.
+
+        Call this ONLY after the redirect has actually been sent and accepted.
+        Wave 2-C: the classifier path used to call it on the strength of an
+        intent verdict alone, which is how 15 callers in 30 days were told
+        «з'єдную вас з оператором» and then kept talking to the bot. The single
+        caller is now the transfer executor in `src/main.py`, on the branch
+        where `_ami_client.redirect(...)` returned success.
+        """
         self.transferred = True
         self.transfer_reason = reason
+        self.transfer_outcome = TRANSFER_OUTCOME_INITIATED
         self.transition_to(CallState.TRANSFERRING)
+
+    def mark_transfer_failed(self, reason: str, outcome: str) -> None:
+        """Record that a transfer was attempted and did NOT reach an operator.
+
+        `outcome` is the executor's own status string (`after_hours`, `error`,
+        `unavailable`, …). Deliberately NOT normalised into a small enum here:
+        the point of storing it is that `transfer_redirect_initiated()` treats
+        every value except `TRANSFER_OUTCOME_INITIATED` as "the caller is still
+        with the bot", so an unexpected string must stay unexpected rather than
+        be folded into a known one.
+
+        `transferred` is left alone: the call did not go anywhere.
+        """
+        self.transfer_reason = reason
+        self.transfer_outcome = outcome
+
+    def transfer_redirect_initiated(self) -> bool:
+        """True when AMI accepted a redirect for this call.
+
+        Stated in its own terms — «the redirect was accepted» — rather than as
+        «not blocked by the promise guard» or «transferred is set». Production
+        logs name only the first guard that fires, so a guard phrased as a
+        retelling of a neighbouring one hides both the missing guard and the
+        broken one (`feedback_earlier_guard_hides_later.md`).
+
+        Default-deny over the whole space of outcomes: only the single literal
+        `TRANSFER_OUTCOME_INITIATED` passes. None, every failure status, and any
+        value a future branch adds are all refusals, so a new outcome cannot
+        silently inherit permission to promise an operator.
+        """
+        return self.transfer_outcome == TRANSFER_OUTCOME_INITIATED
 
     @property
     def messages_for_llm(self) -> list[dict[str, str]]:
@@ -397,6 +451,7 @@ class CallSession:
             "scenario": self.scenario,
             "transferred": self.transferred,
             "transfer_reason": self.transfer_reason,
+            "transfer_outcome": self.transfer_outcome,
             "order_id": self.order_id,
             "order_draft": self.order_draft,
             "fitting_booked": self.fitting_booked,
@@ -472,6 +527,10 @@ class CallSession:
         session.scenario = data.get("scenario")
         session.transferred = data.get("transferred", False)
         session.transfer_reason = data.get("transfer_reason")
+        # Restored explicitly: a session recovered mid-call from Redis must keep
+        # the outcome, otherwise `transfer_redirect_initiated()` would read None
+        # ("no attempt") on a call where the redirect had already been accepted.
+        session.transfer_outcome = data.get("transfer_outcome")
         session.order_id = data.get("order_id")
         session.order_draft = data.get("order_draft")
         session.fitting_booked = data.get("fitting_booked", False)
