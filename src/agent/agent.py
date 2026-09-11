@@ -6,7 +6,6 @@ Manages conversation flow, tool routing, and context window.
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import json
 import logging
 import time
@@ -23,11 +22,13 @@ from src.agent.prompts import (
 )
 from src.agent.tool_result_compressor import compress_tool_result
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
+from src.llm.router import llm_call_id_var
 from src.monitoring.metrics import (
     history_compression_mode,
     history_messages_count,
     llm_stop_reason_total,
     system_prompt_chars,
+    tool_audit_write_failures_total,
     tool_call_errors_total,
     tool_rounds_exhausted_total,
     tool_rounds_per_turn,
@@ -65,6 +66,33 @@ class ToolRouter:
         """Register a handler for a tool name."""
         self._handlers[name] = handler
 
+    @staticmethod
+    def _report_audit_failure(name: str, *, path: str) -> None:
+        """Make a lost `call_tool_calls` row visible: metric + ERROR log.
+
+        The audit row is the single source of truth for "did this tool actually
+        run" — call reviews read it, and a missing row is read as "the tool was
+        never called". Swallowing the write failure silently made that reading
+        unsound (see 37fb2d0: suppress + DEBUG log cost 3 of 3 bookings).
+
+        `path` says WHICH of the two call sites in `execute()` lost the row:
+        "result" — the tool succeeded, "error" — the tool raised. One shared
+        message for both would mask half of the defect.
+
+        Never raises: the call must survive a broken audit write. This trades
+        "lost silently" for "lost loudly", not for "call dropped".
+        """
+        tool_audit_write_failures_total.labels(tool_name=name, path=path).inc()
+        call_id = llm_call_id_var.get(None) or "unknown"
+        logger.exception(
+            "Tool audit write FAILED (path=%s): tool=%s call_id=%s — "
+            "call_tool_calls row is lost, this call's audit is incomplete",
+            path,
+            name,
+            call_id,
+            extra={"call_id": str(call_id)},
+        )
+
     async def execute(self, name: str, args: dict[str, Any]) -> Any:
         """Execute a tool by name. Returns the result dict."""
         handler = self._handlers.get(name)
@@ -87,20 +115,28 @@ class ToolRouter:
             # DB write races with cancellation and is silently dropped, so
             # transferred calls appear in `calls` but not `call_tool_calls`.
             if self._on_execute is not None:
-                with contextlib.suppress(Exception):
-                    await asyncio.shield(
-                        self._on_execute(name, args, result, duration_ms, True)
-                    )
+                try:
+                    await asyncio.shield(self._on_execute(name, args, result, duration_ms, True))
+                except asyncio.CancelledError:
+                    # BaseException, not Exception: cancellation of the call
+                    # is not an audit failure and must propagate.
+                    raise
+                except Exception:
+                    self._report_audit_failure(name, path="result")
             return result
         except Exception as exc:
             duration_ms = int((time.monotonic() - start) * 1000)
             logger.exception("Tool %s failed after %dms", name, duration_ms)
             tool_call_errors_total.labels(tool_name=name, error_type="exception").inc()
             if self._on_execute is not None:
-                with contextlib.suppress(Exception):
+                try:
                     await asyncio.shield(
                         self._on_execute(name, args, {"error": str(exc)}, duration_ms, False)
                     )
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    self._report_audit_failure(name, path="error")
             return {"error": str(exc)}
 
 

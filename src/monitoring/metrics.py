@@ -441,6 +441,13 @@ tool_call_errors_total = Counter(
     ["tool_name", "error_type"],  # error_type: timeout, exception
 )
 
+tool_audit_write_failures_total = Counter(
+    "callcenter_tool_audit_write_failures_total",
+    "Failures of the tool-call audit write (call_tool_calls row lost) by tool "
+    "name and which path in ToolRouter.execute failed",
+    ["tool_name", "path"],  # path: result, error
+)
+
 tool_rounds_per_turn = Histogram(
     "callcenter_tool_rounds_per_turn",
     "Number of tool call rounds per conversation turn",
