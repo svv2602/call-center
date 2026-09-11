@@ -2781,13 +2781,28 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         if not session.fitting_date_guard_fired:
             from src.agent.date_detect import mentions_date
 
+            # A date the FSM parsed came out of the caller's own mouth, so it
+            # answers this guard's question directly. `mentions_date` is blind
+            # to a bare day-of-month («на 14»): on 4065c49d the FSM held
+            # 2026-09-14 and the guard still made the bot re-ask the date the
+            # caller had just given. Inferred fields are excluded — only `city`
+            # is ever inferred today, but a future inference must not become a
+            # back door onto a guard about what the caller actually said.
+            fsm_date = session.fsm_filled_fields.get("date")
+            if "date" in session.fsm_inferred_fields:
+                fsm_date = None
+
             # fitting_requested_weekday is set by the pipeline before the LLM
             # runs, so it covers the blocking path where the current user turn
             # is not yet in dialog_history.
-            if session.fitting_requested_weekday is None and not any(
-                mentions_date(t.content)
-                for t in session.dialog_history
-                if t.speaker == "user" and t.content
+            if (
+                not fsm_date
+                and session.fitting_requested_weekday is None
+                and not any(
+                    mentions_date(t.content)
+                    for t in session.dialog_history
+                    if t.speaker == "user" and t.content
+                )
             ):
                 session.fitting_date_guard_fired = True
                 logger.warning(
