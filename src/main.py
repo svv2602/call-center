@@ -1791,7 +1791,13 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         # long dialogs — call 07-30 16:25, 07-31). We block ONCE per call
         # and force a retry; sentinel "NONE" means "client explicitly rejected".
         storage_contract_raw = (kwargs.get("storage_contract") or "").strip()
-        if storage_contract_raw.upper() == "NONE":
+        # The sentinel is normalised to "" below, which is indistinguishable from
+        # a dropped contract — so remember that it was said. Without this the
+        # guard refuses the very remedy its own message prescribes, and an LLM
+        # that passes "NONE" up front (the caller said «привезу свої» before
+        # book_fitting) is sent back for a round-trip it already made.
+        storage_explicitly_refused = storage_contract_raw.upper() == "NONE"
+        if storage_explicitly_refused:
             kwargs["storage_contract"] = ""
             storage_contract_raw = ""
             # Client explicitly rejected storage — flip choice to "own".
@@ -1804,6 +1810,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         if (
             session.storage_contracts_found
             and not storage_contract_raw
+            and not storage_explicitly_refused
             and not session.storage_contract_guard_triggered
         ):
             session.storage_contract_guard_triggered = True
