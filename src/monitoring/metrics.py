@@ -143,6 +143,15 @@ settled_question_redirect_skipped_total = Counter(
     ["reason"],
 )
 
+control_plane_prose_dropped_total = Counter(
+    "callcenter_control_plane_prose_dropped_total",
+    "Sentences withheld from TTS because the LLM wrote machinery — a tool call, "
+    "a JSON argument object, an admonition marker, a bracketed aside — into what "
+    "it offered as speech. The label is the shape that matched, and the site is "
+    "which of the two text→TTS paths it was caught on",
+    ["form", "site"],  # form: call_syntax/json_args/…; site: stream/summary_fallback
+)
+
 krok8_confabulation_total = Counter(
     "callcenter_krok8_confabulation_total",
     "Bot produced «Перевіримо: …, Підтверджуєте?» while a checklist "

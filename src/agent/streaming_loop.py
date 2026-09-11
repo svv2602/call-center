@@ -38,7 +38,7 @@ from src.agent.prompts import (
     next_fitting_question,
 )
 from src.agent.tool_result_compressor import compress_tool_result
-from src.agent.tools import filter_tools_by_state
+from src.agent.tools import ALL_TOOLS, filter_tools_by_state
 from src.core.audio_sender import send_audio_stream
 from src.core.sentence_buffer import BufferEvent, SentenceReady, buffer_sentences
 from src.llm.models import (
@@ -49,6 +49,7 @@ from src.llm.models import (
     Usage,
 )
 from src.monitoring.metrics import (
+    control_plane_prose_dropped_total,
     false_transfer_blocked_total,
     history_compression_mode,
     history_messages_count,
@@ -630,6 +631,170 @@ async def redirect_settled_question(
         yield queued
 
 
+#: Canonical tool names, read off the registry rather than copied out, so that
+#: tool 21 is covered on the day it is added and not on the day someone
+#: remembers this list exists.
+_TOOL_NAME_ALTERNATION = "|".join(
+    sorted((str(t["name"]) for t in ALL_TOOLS), key=len, reverse=True)
+)
+
+#: The shapes a model produces when it writes *about* the machinery instead of
+#: talking to the caller, each paired with the label the metric reports.
+#:
+#: Described by form, not by inventory. The six calls behind this filter include
+#: `[!IMPORTANT]` (call fa2a523d) — a GitHub-alert marker that occurs nowhere in
+#: `prompts.py` and nowhere else in the repository, so the model did not copy it,
+#: it invented it. A table assembled by listing the prompt's own markup would
+#: therefore have missed the very call that motivated the rule. What is matched
+#: here is machinery *syntax*: an identifier carrying an argument list, a JSON
+#: object, an admonition marker, a bracketed aside, a fence, a tag. None of it
+#: occurs in Ukrainian speech, which is what makes refusing all of it cheap.
+#:
+#: Ordered most specific first — the first match names the shape in the metric.
+_CONTROL_PLANE_FORMS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    # `functions.get_customer_bookings({"phone":…` — a namespaced call. Both
+    # halves must be Latin, so «м. Харків (центр)» is not a call.
+    (
+        "namespaced_call",
+        re.compile(r"[a-z][a-z0-9_]*\.[a-z][a-z0-9_]*\s*\(", re.IGNORECASE),
+    ),
+    # `get_fitting_stations(city="Дніпро"…` — snake_case identifier + arguments.
+    # The underscore is load-bearing: without it «білий Hyundai (седан)» matches.
+    ("call_syntax", re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)+\s*\(", re.IGNORECASE)),
+    # `{"reason":"non_fitting_scope"…}` — a JSON literal. Over 2669 bot turns in
+    # 30 days a brace appears twice, and both times it is this defect.
+    ("json_args", re.compile(r"[{}]")),
+    # `[!IMPORTANT]` — an admonition marker. Carries no whitespace, so the
+    # bracketed-aside rule below cannot see it and it needs its own line.
+    ("admonition", re.compile(r"\[\s*!")),
+    # `[book_fitting виклик…]`, `[Профіль оновлено: …]` — a bracketed aside,
+    # multi-word by construction. `[PHONE_1]`, the PII vault's own placeholder,
+    # has no whitespace inside and is deliberately left alone: it reaches TTS on
+    # real booking confirmations (calls 57494646, 159e7b49) and refusing those
+    # would trade a mispronounced word for a caller who is told nothing.
+    ("bracket_aside", re.compile(r"\[[^\]]*\s")),
+    # A tool name read out as a bare word, with no argument list to give it away
+    # — `[Інструмент book_fitting успішно виконав бронювання]` survives having
+    # its brackets stripped by a future edit only if this line exists.
+    ("tool_name", re.compile(rf"\b(?:{_TOOL_NAME_ALTERNATION})\b")),
+    # `(Крок 8)` — the prompt's step numbering, read aloud. Parenthesised *and*
+    # numbered, so «наступний крок — підтвердження» stays speech.
+    ("step_marker", re.compile(r"\(\s*крок\s*\d", re.IGNORECASE)),
+    # ``` and `<tool_use>` — the other two ways a model writes machinery down.
+    # `tool_code` pseudo-Python has already been spoken to a caller once
+    # (call 43a4b637, recorded in `pii_vault.py`).
+    ("markup_fence", re.compile(r"```|~~~|</?[a-z][a-z0-9_:-]*\s*/?>", re.IGNORECASE)),
+)
+
+
+def _current_call_id() -> str:
+    """The call this turn belongs to, for the log line.
+
+    Taken from the context variable `main.py` already sets from
+    `conn.channel_uuid` before the pipeline starts, rather than threaded through
+    `StreamingAgentLoop.__init__`: that constructor lives in `main.py`, and the
+    log line is not worth a new argument there.
+    """
+    from src.llm.router import llm_call_id_var
+
+    return str(llm_call_id_var.get(None) or "unknown")
+
+
+def control_plane_syntax(text: str) -> str | None:
+    """Name the machinery shape this text carries, or None when it is speech.
+
+    None means «no shape matched», which is the only way through: the rules are
+    forms rather than an allowlist of permitted phrasings, so a seventh shape is
+    refused the moment it looks like syntax and not like Ukrainian.
+    """
+    for label, pattern in _CONTROL_PLANE_FORMS:
+        if pattern.search(text):
+            return label
+    return None
+
+
+async def drop_control_plane_prose(
+    stream: AsyncIterator[BufferEvent],
+    call_id: str = "unknown",
+) -> AsyncIterator[BufferEvent]:
+    """Refuse to speak a sentence that turned out to be machinery.
+
+    In 30 days the model wrote a tool call, or a note to itself about one, into
+    the text of a reply eleven times across ten calls, and every one of them was
+    synthesised and played down the line. Nothing else catches this: the guards
+    all sit on the tool *execution* path, so prose reaches neither them nor
+    `call_tool_calls`, and on d343c327 the caller heard
+    `functions.transfer_to_operator ({"reason":…})` while no transfer happened
+    at all. On e209d7fb the JSON that was read out contained the caller's own
+    phone number.
+
+    The unit of work is a whole sentence, not a fragment, because the shape is
+    routinely cut in half: `buffer_sentences` splits on clauses past 25
+    characters, and `get_fitting_stations(city="Дніпро", for_price=true) Який
+    діаметр…` breaks at the comma *inside the argument list*, leaving
+    `for_price=true)` glued to a perfectly good question. Judging fragments
+    would drop the half that reads as syntax and speak the half that reads as
+    Ukrainian, which is the worst of both. Fragments are therefore held until
+    punctuation ends the sentence, or until a tool call or the end of the stream
+    says no more of it is coming.
+
+    Holding costs nothing on the common path: `redirect_settled_question`
+    downstream already withholds fragments to the same boundary, and measured
+    143 ms at p90 when it is the one doing the holding, since only the first
+    sentence of a turn can delay audio at all.
+
+    The whole sentence is dropped rather than cleaned up. Excising the syntax
+    and speaking the remainder is tempting — four of the six calls leave a real
+    question behind — but a call written as prose did not run, so anything in
+    the same breath about its result is unbacked, and `146788f4` is exactly
+    that: «Інструмент book_fitting успішно виконав бронювання» over a
+    `book_fitting` that had returned an error. A turn emptied by this filter is
+    not silence either; `pipeline.py` answers an empty turn with «Перепрошую, не
+    почула. Скажіть, будь ласка, ще раз.»
+    """
+    held: list[BufferEvent] = []
+    pending = ""
+
+    def settle() -> list[BufferEvent]:
+        nonlocal held, pending
+        queued, text = held, pending
+        held, pending = [], ""
+        if not text:
+            return queued
+        form = control_plane_syntax(text)
+        if form is None:
+            return queued
+        control_plane_prose_dropped_total.labels(form=form, site="stream").inc()
+        logger.warning(
+            "Dropping machinery written as speech: call=%s, form=%s, text=%r",
+            call_id,
+            form,
+            text[:200],
+        )
+        return []
+
+    async for event in stream:
+        if isinstance(event, SentenceReady):
+            held.append(event)
+            pending = f"{pending} {event.text}".strip()
+            if pending.rstrip().endswith((".", "!", "?")):
+                for queued in settle():
+                    yield queued
+            continue
+
+        # A tool call or the end of the stream ends the sentence whether or not
+        # punctuation did: `buffer_sentences` flushes partial text ahead of
+        # both, so nothing more will arrive to complete it. Judging here rather
+        # than flushing blind is what stops half a call syntax from slipping out
+        # under an unterminated fragment.
+        for queued in settle():
+            yield queued
+        yield event
+
+    for queued in settle():
+        yield queued
+
+
 @dataclass(frozen=True)
 class TurnResult:
     """Result of one complete conversation turn (possibly multi-round)."""
@@ -746,8 +911,31 @@ class StreamingAgentLoop:
                 timeout=_summary_timeout_sec,
             )
             if llm_resp.text and llm_resp.text.strip():
+                summary = llm_resp.text.strip()
+                # The second road from LLM text to the speaker. This summary is
+                # synthesised directly (`tts.synthesize(summary)` below in
+                # `run_turn`), so the four-filter chain never sees it — and it
+                # lands in `call_turns` all the same. Asking with `tools=[]`
+                # makes call syntax unlikely but rules out none of the markup
+                # shapes, and the shape that opened this wave was one the model
+                # invented rather than copied. Judged as one block rather than
+                # per sentence, because there is no sentence buffer on this
+                # road; the price of that coarseness is the static fallback,
+                # which is a sentence the caller can act on.
+                form = control_plane_syntax(summary)
+                if form is not None:
+                    control_plane_prose_dropped_total.labels(
+                        form=form, site="summary_fallback"
+                    ).inc()
+                    logger.warning(
+                        "Summary fallback carried machinery (form=%s) — speaking the "
+                        "static fallback instead: %r",
+                        form,
+                        summary[:200],
+                    )
+                    return _fallback_text
                 logger.info("Streaming summary fallback produced text")
-                return llm_resp.text.strip()
+                return summary
         except TimeoutError:
             logger.warning("Streaming summary fallback timed out (%ds)", _summary_timeout_sec)
         except Exception:
@@ -894,9 +1082,21 @@ class StreamingAgentLoop:
                     max_tokens=1024,
                     provider_override=current_provider_override,
                 )
+                # `drop_control_plane_prose` sits innermost, directly on the
+                # sentence buffer, for two reasons. The other two filters reason
+                # about what the bot is *saying* to the caller, and a sentence
+                # that is really a tool call makes them reason about nothing:
+                # «[!IMPORTANT] Клієнт назвав марку авто» reads to
+                # `settled_field_asked` as a question about the car brand. And
+                # production names only the first filter that fires, so a
+                # machinery sentence swallowed by a neighbour would leave this
+                # defect invisible in exactly the way it stayed invisible for
+                # 30 days.
                 buffered = hold_unconfirmed_transfer_promise(
                     redirect_settled_question(
-                        buffer_sentences(stream), fitting_progress, conversation_history
+                        drop_control_plane_prose(buffer_sentences(stream), _current_call_id()),
+                        fitting_progress,
+                        conversation_history,
                     ),
                     conversation_history,
                 )
