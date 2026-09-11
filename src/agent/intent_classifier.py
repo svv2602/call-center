@@ -192,7 +192,21 @@ _KEYWORD_TRIGGERS: dict[str, tuple[str, ...]] = {
     ),
     "CANCEL": _words("скасу відмін отмен прибра убра касова кассова анулю"),
     "RESCHEDULE": _words("перенес перенест перенос змінит змінить перепризнач переназнач"),
-    "TRANSFER": _words("оператор менедж людин человек переклю перекл"),
+    # TRANSFER — объединение с `_OPERATOR_KEYWORDS` (`streaming_loop.py:156`) плюс
+    # «з'єдна» / «соедин» / «сполуч». Литералы СКОПИРОВАНЫ, а не импортированы,
+    # по той же причине, что и у `_STATE_FIELD` выше: `streaming_loop` тянет за
+    # собой пол-агента, а классификатор обязан оставаться дешёвым на импорт.
+    # Не «чинить» дубликат импортом — сведение двух словарей в один модуль это
+    # отдельная задача, и она не делается на файле, который правит соседняя волна.
+    #
+    # Длинные варианты не нужны: проверка идёт подстрокой, «людин» ловит и
+    # «людина», и «жива людина», и «живою людиною»; «менедж» — «менеджера».
+    # Три написания «з'єдна» — это форма входных данных, а не избыточность:
+    # украинский апостроф приходит из STT то как U+0027, то как «`», то никак.
+    "TRANSFER": _words(
+        "оператор operator менедж manager консультант людин человек "
+        "живий живой живого живому перекл з'єдна зєдна з`єдна соедин сполуч"
+    ),
 }
 
 #: Слова, которые сами по себе ничего не значат вне контекста вопроса бота.
@@ -252,6 +266,25 @@ def _triggered_intents(text: str) -> set[str]:
 
 def _has_keyword_trigger(text: str) -> bool:
     return bool(_triggered_intents(text))
+
+
+def _has_transfer_evidence(text: str) -> bool:
+    """True, если в словах САМОГО клиента есть признак просьбы о человеке.
+
+    Предикат сформулирован в своих терминах и намеренно НЕ пересказывает
+    `_should_block_false_transfer` (`streaming_loop.py:215`): тот судит по всей
+    истории звонка и по аргументу `reason` инструмента, этот — только по текущей
+    реплике, потому что классификатор вызван именно на ней. Разделение
+    обязанностей: клиент, попросивший оператора три хода назад и ответивший
+    сейчас «так», получает человека через инструмент, а не через вердикт на
+    слове «так».
+
+    Держать формулировки раздельно важно ещё и потому, что прод в логе называет
+    только ПЕРВЫЙ сработавший гард: пересказ соседнего маскирует и отсутствующий
+    гард, и сломанный.
+    """
+    low = text.lower()
+    return any(kw in low for kw in _KEYWORD_TRIGGERS["TRANSFER"])
 
 
 # ---------------------------------------------------------------------------
@@ -636,6 +669,34 @@ def _apply_context_guard(
     Поля (`extracted_fields`) guard не трогает: его дело — интент, а значение
     поля разберёт парсер текущего состояния FSM.
     """
+    # Default-deny на вердикте TRANSFER. Он единственный обрывает звонок
+    # (`pipeline.py:2228` — `mark_transfer`, ход LLM не случается вовсе), поэтому
+    # обязан опираться на слова клиента, а не только на мнение модели. Замер
+    # 2026-09-11: 15 звонков переведены с `transfer_reason=intent_classifier_transfer`,
+    # 0 записей, и ни в одной из 14 ложных реплик нет ни одного признака просьбы
+    # о человеке.
+    #
+    # Клауза стоит ДО проверки длины сознательно: всё, что ниже, работает только
+    # на короткой реплике, а до перевода дожили ровно длинные.
+    #
+    # Отказ не отнимает у клиента человека, а стоит ему одного хода: интент
+    # остаётся TRANSFER, ход уходит обычному LLM, у которого есть
+    # `transfer_to_operator` со своим тестом на свидетельство и своим
+    # loop-breaker'ом.
+    if result.primary_intent == "TRANSFER" and not _has_transfer_evidence(customer_text):
+        capped = min(result.confidence, _GUARDED_CONFIDENCE)
+        logger.info(
+            "intent_classifier: TRANSFER verdict on %r, but the caller's own words carry "
+            "no request for a human → confidence %.2f→%.2f (below the pipeline floor, "
+            "so the turn goes to the normal LLM; transfer_to_operator stays available)",
+            customer_text,
+            result.confidence,
+            capped,
+        )
+        # `min`, а не присваивание: `confidence == 0.0` — fallback-маркер
+        # «LLM недоступен», downstream по нему откатывается на старого агента.
+        result.confidence = capped
+
     if not _is_short_answer(customer_text):
         return result
 
@@ -645,20 +706,31 @@ def _apply_context_guard(
     # Нет активного состояния (или мы как раз в момент определения интента) —
     # короткая реплика без единого keyword'а не может быть уверенным интентом.
     if state is None or state in _PIN_EXEMPT_STATES:
-        if not triggered and result.confidence >= _CONFIDENCE_THRESHOLD:
-            logger.info(
-                "intent_classifier: short reply %r without lexical evidence and no fsm_state "
-                "→ capping confidence %.2f→%.2f, asking for clarification",
-                customer_text,
-                result.confidence,
-                _GUARDED_CONFIDENCE,
-            )
-            result.confidence = _GUARDED_CONFIDENCE
-            result.requires_clarification = True
-            if not result.clarification_question:
-                result.clarification_question = _default_clarification_question(
-                    result.primary_intent, result.secondary_intents
+        # Кап безусловный. Порог `>= _CONFIDENCE_THRESHOLD` (0.6) стоял здесь
+        # раньше и выкидывал окно [0.5, 0.6): `FSM_INTERRUPT_CONFIDENCE_FLOOR`
+        # в `pipeline.py` — 0.5, то есть вердикт с confidence 0.55 гард не трогал,
+        # а pipeline уже действовал по нему. Две константы не сведены, и сводить
+        # их эта волна не берётся — она снимает лишний порог перед капом.
+        if not triggered:
+            capped = min(result.confidence, _GUARDED_CONFIDENCE)
+            # Уточняющий вопрос — только если confidence реально понизилась.
+            # Иначе `confidence = 0.2` начал бы получать переспрос там, где
+            # раньше просто уходил на LLM-ход, а `0.0` (fallback-маркер) —
+            # там, где downstream обязан молча откатиться на старого агента.
+            if capped < result.confidence:
+                logger.info(
+                    "intent_classifier: short reply %r without lexical evidence and no fsm_state "
+                    "→ capping confidence %.2f→%.2f, asking for clarification",
+                    customer_text,
+                    result.confidence,
+                    capped,
                 )
+                result.confidence = capped
+                result.requires_clarification = True
+                if not result.clarification_question:
+                    result.clarification_question = _default_clarification_question(
+                        result.primary_intent, result.secondary_intents
+                    )
         return result
 
     expected: Intent = _STATE_INTENT.get(state, "BOOK")
