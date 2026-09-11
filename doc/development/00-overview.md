@@ -74,6 +74,31 @@
 8. После звонка: сохранить лог, транскрипцию, метрики
 ```
 
+### Шиномонтаж: FSM поверх этого потока (с 2026-09-10 в live)
+
+Сценарий записи на шиномонтаж — единственный, где между шагами 4 и 5 стоит конечный
+автомат (`src/agent/fitting_fsm.py`, 15 состояний, 48 переходов). Он **пассивный
+наблюдатель**: разбирает реплику клиента своими парсерами
+(`src/agent/parsers/`, 13 штук), заполняет чеклист полей и отдаёт его LLM блоком
+`fitting_progress`. Голос остаётся у LLM — шаг 6 не меняется.
+
+Порядок внутри хода (`src/core/pipeline.py`):
+
+1. `_run_fsm_network_resolve` — единственный шаг FSM, которому разрешён I/O
+   (только в live-режиме; здесь резолвится марка авто по таблице алиасов и станция);
+2. `_run_fsm_deterministic_step` — синхронный, без сети. Этот контракт и делает
+   shadow-режим безопасным на живом трафике;
+3. обработчики interrupt'ов PRICE/CANCEL (`src/agent/interrupts.py`) — единственный путь
+   FSM, который забирает ход и зовёт инструменты сам.
+
+⚠️ **`FSM_VOICE_STATES` пуст и должен таким остаться.** Реплика FSM подавляет ход LLM,
+а ход LLM — единственное место, где выполняются tool calls. Волна 7-0 включила три
+говорящих состояния и была откачена в тот же день (`3b93213`); разбор — в комментарии
+`pipeline.py:536`.
+
+Режимы: `FSM_ENABLED` / `FSM_SHADOW_MODE` дают off / shadow / live. Откат — снять
+переменную окружения, не `git revert`. Детали и итоги: [fsm-refactor.md](./fsm-refactor.md).
+
 ## Структура проекта
 
 ```
@@ -93,7 +118,11 @@ call_center/
 │   ├── agent/               # LLM агент
 │   │   ├── agent.py         # Основная логика агента
 │   │   ├── prompts.py       # Системные промпты
-│   │   └── tools.py         # Tool definitions для LLM
+│   │   ├── tools.py         # Tool definitions для LLM
+│   │   ├── fitting_fsm.py   # FSM записи на монтаж (15 состояний)
+│   │   ├── parsers/         # 13 FieldParser + registry
+│   │   ├── intent_classifier.py
+│   │   └── interrupts.py    # Обработчики PRICE/CANCEL
 │   ├── api/                 # REST API (мониторинг, админка)
 │   │   └── routes.py
 │   ├── store_client/        # Клиент API магазина
@@ -128,6 +157,7 @@ call_center/
 | `search_tires` | 1 (MVP) | Поиск шин по параметрам (авто, размер, бренд, сезон) | `GET /tires/search` |
 | `check_availability` | 1 (MVP) | Проверка наличия конкретного товара | `GET /tires/{id}/availability` |
 | `transfer_to_operator` | 1 (MVP) | Переключение на живого оператора | Asterisk ARI |
+| `create_callback_request` | 1 (MVP) | Заявка на обратный звонок, когда перевод невозможен (`transfer_to_operator` вернул `after_hours`/`error`/`unavailable`) | PostgreSQL `callback_requests` + Telegram |
 | `get_order_status` | 2 | Статус заказа по телефону / номеру заказа | `GET /orders/search`, `GET /orders/{id}` |
 | `create_order_draft` | 2 | Создание черновика заказа | `POST /orders` |
 | `update_order_delivery` | 2 | Указание способа и адреса доставки | `PATCH /orders/{id}/delivery` |
@@ -135,6 +165,7 @@ call_center/
 | `get_pickup_points` | 2 | Список пунктов выдачи (самовывоза) из 1C API, с фильтрацией по городу | 1C REST API |
 | `get_fitting_stations` | 3 | Список точек шиномонтажа | `GET /fitting/stations` |
 | `get_fitting_slots` | 3 | Доступные слоты для записи | `GET /fitting/stations/{id}/slots` |
+| `reserve_fitting_slot` | 3 | Временная бронь слота, пока собираются данные клиента; затем обязателен `book_fitting` | 1C REST API |
 | `book_fitting` | 3 | Запись на шиномонтаж | `POST /fitting/bookings` |
 | `cancel_fitting` | 3 | Отмена или перенос записи на шиномонтаж | `DELETE /fitting/bookings/{id}`, `PATCH /fitting/bookings/{id}` |
 | `get_fitting_price` | 3 | Стоимость шиномонтажа | `GET /fitting/prices` |

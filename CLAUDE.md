@@ -17,6 +17,7 @@ All documentation is written in **Russian**. The AI agent speaks **Ukrainian** t
 ```
 Клиент → SIP Provider → Asterisk 20 → AudioSocket TCP :9092 → Call Processor (Python)
                                                                     ├── STT (Google Cloud, streaming gRPC)
+                                                                    ├── Fitting FSM (passive observer, see below)
                                                                     ├── LLM Agent (Claude API, tool calling)
                                                                     ├── TTS (Google Cloud, uk-UA voice)
                                                                     ├── Tools → Store API (REST)
@@ -26,6 +27,9 @@ All documentation is written in **Russian**. The AI agent speaks **Ukrainian** t
 
 - **AudioSocket protocol:** `[type:1B][length:2B BE][payload:NB]`. Types: 0x01=UUID, 0x10=audio, 0x00=hangup, 0xFF=error. Audio: 8kHz, 16-bit signed linear PCM, little-endian.
 - **Pipeline flow:** AudioSocket → STT (streaming) → LLM (Claude) → TTS → AudioSocket. Supports barge-in.
+- **Fitting FSM** (`src/agent/fitting_fsm.py`, 15 states / 48 transitions, live since 2026-09-10) runs *before* the LLM on every turn and **does not speak**. Order in `src/core/pipeline.py`: `_run_fsm_network_resolve` (the one FSM step allowed I/O, live mode only) → `_run_fsm_deterministic_step` (synchronous, zero I/O — that contract is what makes shadow mode safe) → interrupt handlers for PRICE/CANCEL, which are the only FSM path that takes the turn. What it collects reaches the LLM as the `fitting_progress` block, not as speech.
+- **`FSM_VOICE_STATES` is empty and must stay empty.** An FSM utterance suppresses the LLM turn, and that turn is the only place tool calls execute — Wave 7-0 shipped three speaking states and was reverted the same day (`3b93213`). See the comment at `pipeline.py:536`.
+- **Modes:** `FSM_ENABLED` / `FSM_SHADOW_MODE` give off / shadow / live. Rollback is removing an env var, never a `git revert`.
 - **Multilingual STT:** Primary `uk-UA` + alternative `ru-RU`. Agent always responds in Ukrainian regardless of input language.
 - **Session state** is in Redis (stateless Call Processor for horizontal scaling). TTL prevents memory leaks on abnormal disconnects.
 - **Circuit breaker** (aiobreaker, fail_max=5, timeout=30s) protects Store API calls.
@@ -34,7 +38,7 @@ All documentation is written in **Russian**. The AI agent speaks **Ukrainian** t
 
 Single source of truth for LLM agent tools is in `doc/development/00-overview.md` (section "Канонический список tools"). When referencing tools in any document, use these exact names:
 
-`get_vehicle_tire_sizes`, `search_tires`, `check_availability`, `transfer_to_operator`, `get_order_status`, `create_order_draft`, `update_order_delivery`, `confirm_order`, `get_pickup_points`, `get_fitting_stations`, `get_fitting_slots`, `book_fitting`, `cancel_fitting`, `get_fitting_price`, `get_customer_bookings`, `find_storage`, `search_knowledge_base`, `update_customer_profile`
+`get_vehicle_tire_sizes`, `search_tires`, `check_availability`, `transfer_to_operator`, `create_callback_request`, `get_order_status`, `create_order_draft`, `update_order_delivery`, `confirm_order`, `get_pickup_points`, `get_fitting_stations`, `get_fitting_slots`, `reserve_fitting_slot`, `book_fitting`, `cancel_fitting`, `get_fitting_price`, `get_customer_bookings`, `find_storage`, `search_knowledge_base`, `update_customer_profile`
 
 **Important:** The tool is `create_order_draft` (not `create_order`).
 
