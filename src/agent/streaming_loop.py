@@ -33,6 +33,9 @@ from src.agent.prompts import (
     WAIT_STORAGE_POOL,
     WAIT_THINKING_POOL,
     build_system_prompt_with_context,
+    fitting_confirmation_sentence,
+    fitting_steps_collected,
+    next_fitting_question,
 )
 from src.agent.tool_result_compressor import compress_tool_result
 from src.agent.tools import filter_tools_by_state
@@ -50,6 +53,8 @@ from src.monitoring.metrics import (
     history_compression_mode,
     history_messages_count,
     llm_stop_reason_total,
+    settled_question_redirect_skipped_total,
+    settled_question_redirected_total,
     system_prompt_chars,
     tool_call_errors_total,
     tool_rounds_exhausted_total,
@@ -439,6 +444,192 @@ async def hold_unconfirmed_transfer_promise(
         yield queued
 
 
+#: Which checklist row a sentence is asking the caller about.
+#:
+#: Matched against the whole checklist rather than the two rows seen failing, so
+#: a row that starts regressing tomorrow is covered without another edit here.
+_FIELD_QUESTION_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("name", re.compile(r"як (?:до вас |вас )?(?:звертатися|звати|називати)|ваше ім'я")),
+    ("city", re.compile(r"[ву] якому місті|яке місто|[ву] якому городі")),
+    ("storage", re.compile(r"привозите свої|на зберіганні|свої з собою|зі зберігання")),
+    ("date", re.compile(r"на яку дату|на яке число|яка дата")),
+    ("time", re.compile(r"о котрій|котрій годині|на який час|який час зручн")),
+    ("color", re.compile(r"колір|кольор")),
+    ("brand", re.compile(r"марк[аиуо]")),
+    ("phone", re.compile(r"номер телефону|ваш номер|продиктуйте (?:телефон|номер)")),
+)
+
+#: Imperatives that make a sentence a request even without a question mark —
+#: «Назвіть, будь ласка, колір автомобіля.» ends in a full stop.
+_REQUEST_VERBS = ("назвіть", "скажіть", "уточніть", "продиктуйте", "підкажіть", "нагадайте")
+
+#: A question asking for a *different* value than the settled one is not a
+#: re-ask, so the gate keeps its hands off it. `get_fitting_slots` writes
+#: `selected_fitting_date` on lookup, before the caller has picked anything
+#: (`main.py:2940`), which means the date row reads ✅ at exactly the moment the
+#: bot has to say «Записати на 9 жовтня не можу… На якій іншій даті зручніше?» —
+#: a real sentence from 2026-09-11 that the pattern table would otherwise catch.
+_ASKS_FOR_AN_ALTERNATIVE = re.compile(r"інш|перенос|перенес")
+
+#: How many times the bot may be steered to the same question before the gate
+#: gives up and lets the LLM speak. The replacement is only useful while the
+#: caller can still answer it; `e4fa7fc1` shows the other case, where
+#: `storage_choice_parser` returned not_mentioned on eight turns in a row, and
+#: forcing that question forever would talk past the caller instead of the LLM.
+_MAX_SAME_REDIRECTS = 2
+
+
+def _sentence_is_a_request(text: str) -> bool:
+    """True when the sentence asks the caller for something.
+
+    Without this, «Отже, ви привозите шини свої з собою.» — the bot reading an
+    answer back — matches the storage pattern and would be rewritten into a
+    question the caller has already answered.
+    """
+    low = text.lower()
+    return "?" in low or any(verb in low for verb in _REQUEST_VERBS)
+
+
+def settled_field_asked(text: str, collected: dict[str, bool]) -> str | None:
+    """The checklist row this sentence asks for, if that row is already filled.
+
+    None covers both «asks for nothing» and «asks for something still missing»,
+    because the gate treats them identically: the LLM speaks.
+    """
+    if not _sentence_is_a_request(text):
+        return None
+    low = text.lower().replace("ʼ", "'").replace("’", "'")
+    if _ASKS_FOR_AN_ALTERNATIVE.search(low):
+        return None
+    for field_key, pattern in _FIELD_QUESTION_PATTERNS:
+        if collected.get(field_key) and pattern.search(low):
+            return field_key
+    return None
+
+
+def _assistant_texts(history: list[dict[str, Any]]) -> list[str]:
+    """Every line the bot has spoken, flattened out of the content blocks."""
+    spoken: list[str] = []
+    for msg in history:
+        if msg.get("role") != "assistant":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            spoken.append(content)
+        elif isinstance(content, list):
+            for block in content:
+                if isinstance(block, dict) and block.get("type") == "text":
+                    spoken.append(str(block.get("text", "")))
+    return spoken
+
+
+async def redirect_settled_question(
+    stream: AsyncIterator[BufferEvent],
+    progress: dict[str, Any] | None,
+    history: list[dict[str, Any]],
+) -> AsyncIterator[BufferEvent]:
+    """Speak the step still waiting instead of one the caller already answered.
+
+    On 2026-09-11 three of eight booking calls re-asked a field that was ✅ in
+    the progress block at that very moment, seven times between them, and every
+    single one fired on the turn right after the time slot was accepted:
+    «15:20 прийнято. Назвіть, будь ласка, колір автомобіля.» The LLM walks the
+    Krok numbers in order, so once Krok 4 lands it resumes at Krok 5 — whether
+    or not Kroks 5 and 6 were filled out of order earlier in the call. Both
+    existing defences are prompt text (the ✅/⏳ block itself, added for this bug
+    in July, and the explicit ban in `prompts.py`), and both were in the context
+    window for all seven.
+
+    The unit of work is a sentence, not a fragment. `buffer_sentences` splits on
+    clauses past 25 characters, which cuts «Назвіть,» away from «колір
+    автомобіля.» — neither half is recognisable alone, so fragments are held
+    until the sentence ends. On the 199 bot turns of that day this costs nothing
+    at all for 109 of them and 143 ms at p90, because only the first sentence of
+    a turn can delay audio: after that, generation is running far ahead of
+    playback.
+
+    The replacement is the first unanswered question, which is also what the
+    prompt block points at, so the gate cannot steer somewhere the prompt
+    disagrees with. When nothing is unanswered there is no replacement to make
+    and the LLM speaks — that is deliberate, and it is what keeps a caller
+    correcting a booked-up checklist («ні, на іншу годину») from being talked
+    over.
+    """
+    progress = progress or {}
+    collected = fitting_steps_collected(progress)
+    replacement = next_fitting_question(progress) or fitting_confirmation_sentence(progress)
+    if not replacement or bool(progress.get("booked")):
+        async for event in stream:
+            yield event
+        return
+
+    already_spoken = sum(1 for text in _assistant_texts(history) if replacement in text)
+    held: list[SentenceReady] = []
+    pending = ""
+    # Set once the verdict for the current sentence is in: the rest of it is
+    # either spoken as the LLM wrote it or dropped, but never re-judged, so a
+    # trailing «будь ласка, ще раз» cannot survive its own question.
+    tail: str | None = None
+    redirected = False
+
+    def ends_sentence(text: str) -> bool:
+        return text.rstrip().endswith((".", "!", "?"))
+
+    async for event in stream:
+        if not isinstance(event, SentenceReady):
+            for queued in held:
+                yield queued
+            held, pending, tail = [], "", None
+            yield event
+            continue
+
+        if tail is not None:
+            if tail == "speak":
+                yield event
+            if ends_sentence(event.text):
+                tail = None
+            continue
+
+        held.append(event)
+        pending = f"{pending} {event.text}".strip()
+        field_key = settled_field_asked(pending, collected)
+
+        if field_key is None:
+            if ends_sentence(pending):
+                for queued in held:
+                    yield queued
+                held, pending = [], ""
+            continue
+
+        if already_spoken >= _MAX_SAME_REDIRECTS:
+            settled_question_redirect_skipped_total.labels(reason="repeat").inc()
+            logger.warning(
+                "Not redirecting %s — already steered to %r %d times",
+                field_key,
+                replacement,
+                already_spoken,
+            )
+            for queued in held:
+                yield queued
+            tail = None if ends_sentence(pending) else "speak"
+        else:
+            settled_question_redirected_total.labels(field=field_key).inc()
+            logger.warning(
+                "Redirecting a settled question: asked %s, speaking %r instead",
+                field_key,
+                replacement,
+            )
+            if not redirected:
+                redirected = True
+                already_spoken += 1
+                yield SentenceReady(text=replacement)
+            tail = None if ends_sentence(pending) else "drop"
+        held, pending = [], ""
+
+    for queued in held:
+        yield queued
+
+
 @dataclass(frozen=True)
 class TurnResult:
     """Result of one complete conversation turn (possibly multi-round)."""
@@ -704,7 +895,10 @@ class StreamingAgentLoop:
                     provider_override=current_provider_override,
                 )
                 buffered = hold_unconfirmed_transfer_promise(
-                    buffer_sentences(stream), conversation_history
+                    redirect_settled_question(
+                        buffer_sentences(stream), fitting_progress, conversation_history
+                    ),
+                    conversation_history,
                 )
                 tts_stream = synthesize_stream(buffered, self._tts)
 

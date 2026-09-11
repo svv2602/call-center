@@ -129,6 +129,20 @@ transfer_promise_unbacked_total = Counter(
     "transfer_to_operator call behind them at all (spoken as bare prose)",
 )
 
+settled_question_redirected_total = Counter(
+    "callcenter_settled_question_redirected_total",
+    "Questions aimed at an already-collected checklist row, replaced in the "
+    "TTS stream by the first row still waiting for an answer",
+    ["field"],
+)
+
+settled_question_redirect_skipped_total = Counter(
+    "callcenter_settled_question_redirect_skipped_total",
+    "Settled-row questions left alone despite matching, because steering to "
+    "the same replacement question has already been tried and did not land",
+    ["reason"],
+)
+
 krok8_confabulation_total = Counter(
     "callcenter_krok8_confabulation_total",
     "Bot produced «Перевіримо: …, Підтверджуєте?» while a checklist "

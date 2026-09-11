@@ -1914,6 +1914,90 @@ def build_system_prompt_with_context(
     return "\n".join(parts)
 
 
+#: Checklist rows in Krok order: field key → the question the bot must ask.
+#:
+#: Shared with the streaming gate in `streaming_loop.py`, which substitutes the
+#: first unanswered question for one the LLM aimed at a row that is already ✅.
+#: Keeping one table means the pointer the prompt shows and the sentence the
+#: gate speaks cannot drift apart — the same reason `_build_fitting_progress`
+#: was extracted in Wave 4-A.
+#:
+#: Phone carries no question on purpose: it comes from CallerID and Крок 7 is
+#: satisfied without asking.
+FITTING_STEPS: tuple[tuple[str, str], ...] = (
+    ("name", "Як до вас звертатися?"),
+    ("city", "У якому місті вам зручніше записатися на шиномонтаж?"),
+    ("storage", "Шини привозите свої з собою чи ті, що у нас на зберіганні?"),
+    ("date", "На яку дату записуємо?"),
+    ("time", "О котрій зручніше?"),
+    ("color", "Назвіть, будь ласка, колір автомобіля."),
+    ("brand", "Яка марка вашого авто?"),
+    ("phone", ""),
+)
+
+
+def fitting_steps_collected(p: dict[str, Any]) -> dict[str, bool]:
+    """Which checklist rows already hold an answer, keyed as in `FITTING_STEPS`.
+
+    The city row is true on either half: a station address pins the city even
+    when the caller never named it. Storage tests against None rather than
+    truthiness because "" is not one of its two values and an empty string
+    there means the field was never set.
+    """
+    return {
+        "name": bool(p.get("customer_name")),
+        "city": bool(p.get("city") or p.get("station_address")),
+        "storage": p.get("storage_choice") is not None,
+        "date": bool(p.get("date")),
+        "time": bool(p.get("time")),
+        "color": bool(p.get("plate")),
+        "brand": bool(p.get("brand")),
+        "phone": bool(p.get("caller_phone")),
+    }
+
+
+def next_fitting_question(p: dict[str, Any]) -> str:
+    """The verbatim question for the first row still waiting on an answer.
+
+    Empty when every row is answered — the call is at Крок 8 and the next thing
+    to say is a confirmation, which has to be built from the collected values
+    rather than read off a table.
+    """
+    collected = fitting_steps_collected(p)
+    for field_key, question in FITTING_STEPS:
+        if not collected[field_key]:
+            return question
+    return ""
+
+
+def fitting_confirmation_sentence(p: dict[str, Any]) -> str:
+    """Read the collected booking back for a yes/no, in the bot's own wording.
+
+    Needed because the commonest moment for the LLM to re-ask a filled row is
+    the one where nothing is left to ask: on 2026-09-11 calls `09668c25` and
+    `4e4e9dc2` had all eight rows ✅ and still went back for the colour and the
+    brand. With no ⏳ row there is no question to substitute, so the step the
+    checklist actually points at — Крок 8 — is built here instead.
+
+    The date is spoken as words for the same reason the checklist shows them:
+    reading it off the collected value is what stops the drift that had the bot
+    confirm «десяте вересня» against a stored 07-09 (Wave 3, 2026-09-02).
+
+    Empty when a value is missing, so a caller is never asked to confirm a gap.
+    """
+    collected = fitting_steps_collected(p)
+    if not all(collected[field_key] for field_key, _ in FITTING_STEPS):
+        return ""
+    date_words = date_to_words(p.get("date")) or p.get("date")
+    place = ", ".join(
+        part for part in (p.get("city"), p.get("station_address")) if part
+    )
+    return (
+        f"{p['customer_name']}, перевіримо: {date_words} о {p['time']}, "
+        f"{place}, {p['plate']} {p['brand']}. Підтверджуєте?"
+    )
+
+
 def _render_fitting_progress(p: dict[str, Any]) -> str:
     """Render fitting progress block for LLM.
 
@@ -1946,17 +2030,18 @@ def _render_fitting_progress(p: dict[str, Any]) -> str:
             "(наприклад другий договір, консультація)."
         )
 
+    collected = fitting_steps_collected(p)
     checklist: list[tuple[str, bool, str]] = []
-    checklist.append(("Ім'я", bool(name), name or "ще не назвали"))
+    checklist.append(("Ім'я", collected["name"], name or "ще не назвали"))
     if city or station_addr:
         parts_addr = []
         if city:
             parts_addr.append(city)
         if station_addr:
             parts_addr.append(station_addr)
-        checklist.append(("Місто/точка", True, ", ".join(parts_addr)))
+        checklist.append(("Місто/точка", collected["city"], ", ".join(parts_addr)))
     else:
-        checklist.append(("Місто/точка", False, "не обрано"))
+        checklist.append(("Місто/точка", collected["city"], "не обрано"))
     storage_desc = "не з'ясовано"
     if storage_choice == "own":
         storage_desc = "клієнт привозить свої"
@@ -1966,7 +2051,7 @@ def _render_fitting_progress(p: dict[str, Any]) -> str:
             if storage_contract
             else "зі зберігання (договір ЗАФІКСОВАНИЙ у сесії, передавай storage_contract)"
         )
-    checklist.append(("Зберігання", storage_choice is not None, storage_desc))
+    checklist.append(("Зберігання", collected["storage"], storage_desc))
     # Date row: if not yet chosen but client mentioned a weekday earlier —
     # surface it so the LLM doesn't re-ask ("клієнт просив пʼятницю").
     if not date and requested_weekday is not None:
@@ -1978,7 +2063,7 @@ def _render_fitting_progress(p: dict[str, Any]) -> str:
             f"клієнт ЩЕ РАНІШЕ просив {_wd_names[requested_weekday]} — "
             f"НЕ ПИТАЙ ще раз, одразу виклич get_fitting_slots(date_from=найближча {_wd_names[requested_weekday]})"
         )
-        checklist.append(("Дата", False, date_desc))
+        checklist.append(("Дата", collected["date"], date_desc))
     else:
         # Wave 3 (2026-09-02) — surface canonical UA phrase alongside ISO,
         # so the LLM cites «сьоме вересня» verbatim in the Krok 8
@@ -1987,15 +2072,15 @@ def _render_fitting_progress(p: dict[str, Any]) -> str:
         date_desc = (
             f"{date} ({date_word})" if date and date_word else (date or "не обрано")
         )
-        checklist.append(("Дата", bool(date), date_desc))
+        checklist.append(("Дата", collected["date"], date_desc))
     time_word = time_to_words(time_)
     time_desc = (
         f"{time_} ({time_word})" if time_ and time_word else (time_ or "не обрано")
     )
-    checklist.append(("Час", bool(time_), time_desc))
-    checklist.append(("Колір авто", bool(plate), plate or "не назвали"))
-    checklist.append(("Марка авто", bool(brand), brand or "не назвали"))
-    checklist.append(("Телефон", bool(caller_phone), caller_phone or "нема CallerID"))
+    checklist.append(("Час", collected["time"], time_desc))
+    checklist.append(("Колір авто", collected["color"], plate or "не назвали"))
+    checklist.append(("Марка авто", collected["brand"], brand or "не назвали"))
+    checklist.append(("Телефон", collected["phone"], caller_phone or "нема CallerID"))
 
     # Find next step — first "not done"
     next_step_idx = next(
@@ -2014,16 +2099,7 @@ def _render_fitting_progress(p: dict[str, Any]) -> str:
     # Exact question the bot MUST ask at each step (single-question policy).
     # These override anti-pattern verbosity — bot should say this text
     # verbatim or minimally rephrased.
-    step_questions = [
-        "Як до вас звертатися?",                                     # 0 Ім'я
-        "У якому місті вам зручніше записатися на шиномонтаж?",      # 1 Місто/точка
-        "Шини привозите свої з собою чи ті, що у нас на зберіганні?",  # 2 Зберігання
-        "На яку дату записуємо?",                                     # 3 Дата
-        "О котрій зручніше?",                                         # 4 Час
-        "Назвіть, будь ласка, колір автомобіля.",                    # 5 Колір
-        "Яка марка вашого авто?",                                     # 6 Марка
-        "",                                                            # 7 phone from CallerID (no ask)
-    ]
+    step_questions = [question for _, question in FITTING_STEPS]
 
     lines = ["\n## 🛑 СТАН ЗАПИСУ — читай ПЕРЕД будь-якою дією"]
     # Wave 6 (2026-09-03) — CallerID phone enforcement banner.
