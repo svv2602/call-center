@@ -357,9 +357,16 @@ class TestBareDayOfMonth:
         than being resolved against a question nobody asked."""
         assert resolve_tool_date("11", NOW) == "11"
 
-    def test_a_known_gap_word_ordinals(self) -> None:
-        """«одинадцяте» is left open knowingly. Digits are what STT emits for
-        every number in the prod window, and untested vocabulary in front of a
-        field that books an appointment is worse than a re-ask. Pinned so the
-        gap is a decision on record rather than a surprise."""
-        assert PARSER.parse(self.asked("на одинадцяте")).status == "not_mentioned"
+    def test_the_word_ordinal_gap_is_closed(self) -> None:
+        """This gap was pinned open here, and Wave 18 closed it.
+
+        The reason it was left open — «digits are what STT emits» — did not
+        survive a 30-day corpus: five of the 80 distinct answers to the date
+        question were word ordinals, and the bot reads every date back in that
+        form itself. The gate the old decision protected is untouched, though:
+        a word ordinal is rewritten to digits *before* `_bare_day`, so it goes
+        through that door and never around it. Vocabulary lives in
+        `test_date_parser_ordinals.py`.
+        """
+        assert PARSER.parse(self.asked("на одинадцяте")).value == "2026-09-11"
+        assert PARSER.parse(ctx("на одинадцяте")).status == "not_mentioned"

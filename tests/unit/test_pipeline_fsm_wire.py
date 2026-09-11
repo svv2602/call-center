@@ -4024,3 +4024,26 @@ class TestTheFiveTransfersReplayedThroughTheSeam:
 
         assert h.session.fsm_parser_null_counts.get("DATE", 0) == 0
         assert h.session.fsm_filled_fields.get("date", "").endswith("-11")
+
+    async def test_a_spoken_ordinal_fills_the_date_through_the_seam(self) -> None:
+        """Wave 18 — the caller echoes the bot's own wording for a date.
+
+        `test_date_parser_ordinals.py` holds the vocabulary, but it calls
+        `PARSER.parse` directly, and the budget is only ever spent inside
+        `_run_fsm_deterministic_step`. This drives the words through that step:
+        a rewrite that resolved in the parser but never reached the field
+        would leave the charge standing and the bot re-asking.
+        """
+        h = replay(
+            FsmState.DATE,
+            [
+                ("На яку дату записуємо?", "на чотирнадцяте вересня"),
+            ],
+        )
+        h.session.fsm_filled_fields["storage_choice"] = "own"
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("на чотирнадцяте вересня")
+
+        assert h.session.fsm_parser_null_counts.get("DATE", 0) == 0
+        assert h.session.fsm_filled_fields.get("date", "").endswith("-14")

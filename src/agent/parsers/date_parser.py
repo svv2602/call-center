@@ -155,6 +155,103 @@ _BARE_DAY_CONFIDENCE = 0.8
 #: in February to land on 31 March rather than nowhere.
 _MAX_MONTH_ROLL = 4
 
+#: A day of the month spoken as a word, UA and RU. Stems only — the **endings**
+#: are the discriminator, exactly as in `compound_parse._HOUR_ORDINALS`. The
+#: three readings a number can have in this dialogue take three disjoint sets
+#: of endings, so the ending alone decides which one it is:
+#:
+#:   date (neuter)     «третє», «третього», «третье», «третьего»
+#:   hour (feminine)   «третю», «третьої», «третій»   → `_HOUR_ORDINALS`
+#:   diameter          «п'ятнадцять», «п'ятнадцяти»   → `detect_diameter`
+#:
+#: That is why «на другу» stays an hour and «на друге» becomes the 2nd.
+# fmt: off
+_DAY_ORDINAL_STEMS: tuple[tuple[str, int], ...] = (
+    ("перш", 1), ("перв", 1),
+    ("друг", 2), ("втор", 2),
+    ("трет", 3),
+    ("четверт", 4),
+    ("п'ят", 5), ("пят", 5),
+    ("шост", 6), ("шест", 6),
+    ("сьом", 7), ("седьм", 7),
+    ("восьм", 8),
+    ("дев'ят", 9), ("девят", 9),
+    ("десят", 10),
+    ("одинадцят", 11), ("одиннадцат", 11),
+    ("дванадцят", 12), ("двенадцат", 12),
+    ("тринадцят", 13), ("тринадцат", 13),
+    ("чотирнадцят", 14), ("четырнадцат", 14),
+    ("п'ятнадцят", 15), ("пятнадцат", 15),
+    ("шістнадцят", 16), ("шестнадцат", 16),
+    ("сімнадцят", 17), ("семнадцат", 17),
+    ("вісімнадцят", 18), ("восемнадцат", 18),
+    ("дев'ятнадцят", 19), ("девятнадцат", 19),
+    ("двадцят", 20), ("двадцат", 20),
+    ("тридцят", 30), ("тридцат", 30),
+)
+
+#: 21..31 are two words, and the tens half stays **cardinal**: «двадцять
+#: перше», never «двадцяте перше». So a bare «двадцять» cannot be mistaken for
+#: the 20th — it carries no ordinal ending and `_DAY_ORDINAL_RE` will not match
+#: it on its own.
+_DAY_TENS: dict[str, int] = {
+    "двадцять": 20, "двадцать": 20, "тридцять": 30, "тридцать": 30,
+}
+# fmt: on
+
+_DAY_ORDINAL_LOOKUP: dict[str, int] = dict(_DAY_ORDINAL_STEMS)
+#: Alternation order does not decide «п'ятнадцяте», the mandatory ending does:
+#: «п'ят» matches first, «надцяте» is not an ending, and the engine backtracks
+#: into «п'ятнадцят». This holds only while no stem can *complete* inside a
+#: longer one, which `test_no_stem_can_complete_inside_another` enforces —
+#: sorting longest-first here looked like the safeguard but changed no outcome.
+_DAY_ORDINAL_ALT = "|".join(re.escape(stem) for stem, _ in _DAY_ORDINAL_STEMS)
+#: Neuter and genitive only. Adding a feminine ending here («у», «ій») is what
+#: would turn «на другу» into the 2nd, so this tuple is the whole discriminator.
+_DAY_ORDINAL_ENDINGS: tuple[str, ...] = ("ього", "ьего", "ого", "ье", "ое", "е", "є")
+_DAY_ORDINAL_RE = re.compile(
+    rf"\b(?:({'|'.join(_DAY_TENS)})\s+)?({_DAY_ORDINAL_ALT})"
+    rf"(?:{'|'.join(_DAY_ORDINAL_ENDINGS)})\b"
+)
+
+
+def _ordinals_to_digits(text: str) -> tuple[str, tuple[tuple[int, int], ...]]:
+    """«на чотирнадцяте вересня» → «на 14 вересня», plus the spans it rewrote.
+
+    The bot reads every date back in exactly this form —
+    `ua_datetime.date_to_words` turns `2026-09-14` into «чотирнадцяте
+    вересня» — so a caller who repeats the bot's own wording was, until this
+    rewrite, not understood. Over the 30 days to 2026-09-11 prod carried five
+    such answers («на третє», «на третій вересня», «над пятого», «давайте
+    другого начнем», «давайте на третьего разням»), every one of them read as
+    «no date».
+
+    Rewriting to digits rather than teaching `_detect_date_hint` a second
+    vocabulary keeps one calendar implementation: «чотирнадцяте вересня»
+    becomes the «14 вересня» the detector already resolves, and a lone
+    «чотирнадцяте» becomes the «14» that `_bare_day` already gates behind the
+    bot's question.
+
+    The spans are returned in the **input**'s coordinates, not the rewritten
+    string's — a substitution changes every offset after it, and a span that
+    silently points at the wrong characters is worse than none.
+    """
+    spans: list[tuple[int, int]] = []
+
+    def _replace(match: re.Match[str]) -> str:
+        tens = _DAY_TENS.get(match.group(1) or "", 0)
+        unit = _DAY_ORDINAL_LOOKUP[match.group(2)]
+        day = tens + unit
+        # «двадцять одинадцяте» is not a date, and neither is a 32nd.
+        if tens and unit > 9:
+            return match.group(0)
+        if not 1 <= day <= 31:
+            return match.group(0)
+        spans.append(match.span())
+        return str(day)
+
+    return _DAY_ORDINAL_RE.sub(_replace, text), tuple(spans)
+
 
 def _next_day_of_month(day: int, today: _date) -> _date | None:
     """First calendar date with this day number, today included.
@@ -240,10 +337,11 @@ class DateParser:
             return NOT_MENTIONED
 
         normalized = _normalize(text)
+        rewritten, ordinal_spans = _ordinals_to_digits(normalized)
 
-        hit = _detect_date_hint(normalized)
+        hit = _detect_date_hint(rewritten)
         if hit is None:
-            return self._bare_day(ctx, normalized)
+            return self._bare_day(ctx, rewritten, ordinal_spans)
 
         if hit.confidence < APPLY_THRESHOLD:
             # «найближча» — the caller spoke about the date without naming one.
@@ -266,9 +364,14 @@ class DateParser:
         # Business rules — the 21-day window, +3 working days on a storage
         # contract — stay in the tool layer (`src/main.py`). This parser
         # normalises the form; it does not decide whether the day is bookable.
-        return graded(resolved.isoformat(), hit.confidence, hit.spans)
+        return graded(resolved.isoformat(), hit.confidence, ordinal_spans or hit.spans)
 
-    def _bare_day(self, ctx: ParseContext, normalized: str) -> ParseOutcome:
+    def _bare_day(
+        self,
+        ctx: ParseContext,
+        rewritten: str,
+        ordinal_spans: tuple[tuple[int, int], ...],
+    ) -> ParseOutcome:
         """«на 11» — a day with no month, and only while the bot asked for one.
 
         `_detect_date_hint` refuses this shape on purpose, and it is right to:
@@ -298,25 +401,34 @@ class DateParser:
           «на 16», on the stated grounds that the bare form belongs to
           «the FSM's TIME/PRICE states, which know which question they just
           asked» — which is this gate.
-        * **Digits only, no word ordinals.** Every number in that window
-          arrived from STT as digits. «одинадцяте» is a real gap and is left
-          open knowingly: untested vocabulary in front of a field that books
-          an appointment is worse than a re-ask.
+        * **A word ordinal counts as a digit.** `_ordinals_to_digits` has
+          already turned «одинадцяте» into «11» by the time this runs, so the
+          gap the first version of this docstring left open knowingly is
+          closed — but only through the same gate, never around it.
+
+          The time detector is asked about the **rewritten** text, and the
+          rewrite is what makes that the right side to ask about. An hour
+          ending is never rewritten, so «на другу» arrives at the detector
+          verbatim; a date ending that collapses to a bare digit can *newly*
+          read as an hour — «о першого» becomes «о 1», which is 13:00 — and
+          that reading only exists after the rewrite. An earlier version also
+          checked the pre-rewrite spelling; a sweep of 204k generated
+          utterances found no input where it changed the outcome, so it went.
         """
         if not bot_is_asking(FsmState.DATE, ctx.last_bot_utterance):
             return NOT_MENTIONED
 
-        if len(_DIGIT_RUN_RE.findall(normalized)) != 1:
+        if len(_DIGIT_RUN_RE.findall(rewritten)) != 1:
             return NOT_MENTIONED
 
-        if _detect_time_hint(normalized) is not None:
+        if _detect_time_hint(rewritten) is not None:
             return NOT_MENTIONED
 
-        match = _BARE_DAY_RE.search(normalized)
+        match = _BARE_DAY_RE.search(rewritten)
         if match is None:
             return NOT_MENTIONED
 
-        spans = (match.span(),)
+        spans = ordinal_spans or (match.span(),)
         if ctx.now is None:
             logger.debug("date_parser: bare day %r needs ctx.now — unresolved", match.group(1))
             return unresolved(confidence=_BARE_DAY_CONFIDENCE, spans=spans)
