@@ -15,7 +15,7 @@ import json
 import logging
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -89,8 +89,21 @@ def mock_llm_router() -> MagicMock:
     ходят в LLM (`src/llm/router.py`); `chat_completion` в репозитории нет.
     """
     router = MagicMock(spec=["complete"])
-    router.complete = AsyncMock(return_value=SimpleNamespace(text=llm_json()))
+    router.complete = AsyncMock(return_value=_response(llm_json()))
     return router
+
+
+def _response(text: str) -> SimpleNamespace:
+    """Ответ провайдера в форме настоящего `LLMResponse`.
+
+    `usage` здесь несущее поле, а не декорация: классификатор отдаёт токены в
+    `cost_breakdown` звонка, и ответ без `usage` — это ответ, с которого счёт
+    молча теряется.
+    """
+    return SimpleNamespace(
+        text=text,
+        usage=SimpleNamespace(input_tokens=900, output_tokens=60, cached_input_tokens=128),
+    )
 
 
 async def classify(
@@ -98,11 +111,14 @@ async def classify(
     text: str,
     raw_response: str | None = None,
     context: dict[str, Any] | None = None,
+    on_usage: Any = None,
 ) -> IntentResult:
     """Прогоняет classify_intent с заданным ответом провайдера."""
     if raw_response is not None:
-        router.complete.return_value = SimpleNamespace(text=raw_response)
-    return await classify_intent(text, context if context is not None else ctx(), router)
+        router.complete.return_value = _response(raw_response)
+    return await classify_intent(
+        text, context if context is not None else ctx(), router, on_usage=on_usage
+    )
 
 
 def sent_prompt(router: MagicMock) -> str:
@@ -251,6 +267,82 @@ class TestContextSensitivity:
         # Сигнатура читается из исходника через AST, а не импортом: `src.llm`
         # тянет провайдерские SDK, которых в тестовом окружении может не быть.
         assert set(kwargs) <= _real_router_complete_params()
+
+    async def test_the_call_is_booked_under_its_own_task_type(
+        self, mock_llm_router: MagicMock
+    ) -> None:
+        """Классификатор — не ход агента, и в `llm_usage_log` не должен им быть.
+
+        За две недели прода 567 из 3191 строки `task_type='agent'` были на самом
+        деле классификатором: дашборд приписывал его расход агенту. Роутингу это
+        безразлично — `provider_override` закорачивает разбор task-конфига.
+        """
+        await classify(mock_llm_router, "хочу записатися на шиномонтаж")
+
+        task = mock_llm_router.complete.call_args.kwargs["task"]
+        assert str(task) == "intent_classifier"
+        assert str(task) != "agent"
+
+    async def test_the_sdk_less_fallback_names_the_same_task(
+        self, mock_llm_router: MagicMock
+    ) -> None:
+        """Ветка без LLM SDK обязана называть задачу так же, как enum.
+
+        Она не декоративная: `from src.llm.models import LLMTask` исполняет
+        `src/llm/__init__.py`, а тот тянет router → providers → `import
+        anthropic`. В окружении без SDK импорт падает и в роутер уходит строка.
+        Разъехавшись с enum, она снова разложит расход классификатора по
+        чужому `task_type` — ровно то, что чинил этот коммит.
+        """
+        import sys
+
+        from src.llm.models import LLMTask
+
+        with patch.dict(sys.modules, {"src.llm.models": None}):
+            await classify(mock_llm_router, "хочу записатися на шиномонтаж")
+
+        task = mock_llm_router.complete.call_args.kwargs["task"]
+        assert task == LLMTask.INTENT_CLASSIFIER.value
+        assert isinstance(task, str)
+
+    async def test_tokens_are_handed_to_the_cost_sink(self, mock_llm_router: MagicMock) -> None:
+        """Потраченные токены обязаны дойти до счётчика звонка.
+
+        `cached_input_tokens` в фикстуре ненулевой намеренно. Прод сегодня
+        отдаёт по классификатору 0 (промпт около порога кеша OpenAI), но ноль в
+        фикстуре означает, что обнуление поля в коде тест не заметит — именно
+        такой мутант и выжил в первом прогоне.
+        """
+        seen: list[tuple[int, int, int, str]] = []
+        await classify(
+            mock_llm_router,
+            "хочу записатися на шиномонтаж",
+            on_usage=lambda i, o, c, p: seen.append((i, o, c, p)),
+        )
+
+        assert len(seen) == 1
+        inp, out, cached, provider = seen[0]
+        assert (inp, out, cached) == (900, 60, 128)
+        assert provider == "openai-gpt41-mini"
+
+    async def test_tokens_are_handed_over_even_when_the_answer_is_garbage(
+        self, mock_llm_router: MagicMock
+    ) -> None:
+        """Мусорный ответ оплачен ровно так же, как полезный.
+
+        Учёт стоит до разбора payload намеренно: иначе каждая неудачная
+        классификация уходила бы с звонка бесплатно.
+        """
+        seen: list[tuple[int, int, int, str]] = []
+        result = await classify(
+            mock_llm_router,
+            "хочу записатися",
+            "это вообще не json",
+            on_usage=lambda i, o, c, p: seen.append((i, o, c, p)),
+        )
+
+        assert result.confidence == 0.0  # fallback, разбор провалился
+        assert len(seen) == 1, "токены за неразобранный ответ потеряны"
 
     async def test_yes_without_fsm_state_is_ambiguous_not_confident_price(
         self, mock_llm_router: AsyncMock

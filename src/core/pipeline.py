@@ -2404,6 +2404,25 @@ class CallPipeline:
         self._note_pipeline_interrupt_dispatch(dispatched=True)
         return True
 
+    def _note_intent_classifier_usage(
+        self, input_tokens: int, output_tokens: int, cached_input_tokens: int, provider_key: str
+    ) -> None:
+        """Charge the call for the classifier turn the FSM just bought.
+
+        The classifier runs once per live turn through its own router call, so
+        none of it reached `add_llm_usage` — the two call sites for that are
+        both the agent turn. A fortnight of production put 567 such calls and
+        587K input tokens outside every per-call cost figure in the UI.
+        """
+        if self._cost is None:
+            return
+        self._cost.add_llm_usage(
+            input_tokens,
+            output_tokens,
+            provider_key=provider_key,
+            cached_input_tokens=cached_input_tokens,
+        )
+
     async def _maybe_handle_intent(self, transcript: Transcript) -> bool:
         """Live-mode side door: let an interrupt handler own this turn.
 
@@ -2449,6 +2468,7 @@ class CallPipeline:
                     "tenant": str(self._session.tenant_id or ""),
                 },
                 llm_router=llm_router,
+                on_usage=self._note_intent_classifier_usage,
             )
         except Exception:
             logger.error(

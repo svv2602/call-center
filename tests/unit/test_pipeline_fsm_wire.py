@@ -396,6 +396,38 @@ class TestShadowMode:
 
 
 class TestLiveMode:
+    async def test_classifier_tokens_reach_the_call_cost(self) -> None:
+        """The sink is wired, not merely accepted as a keyword.
+
+        The classifier can report its usage all it likes; what decides whether
+        the call is charged is whether the pipeline hands it somewhere real.
+        Before this, the two `add_llm_usage` call sites were both the agent
+        turn, so a fortnight of production classifier calls — 587K input
+        tokens — sat outside every per-call cost figure in the UI.
+        """
+        from src.monitoring.cost_tracker import CostBreakdown
+
+        async def _classify(**kwargs: Any) -> Any:
+            kwargs["on_usage"](900, 60, 128, "openai-gpt41-mini")
+            return intent("PRICE")
+
+        h = Harness()
+        h.pipeline._cost = CostBreakdown()
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch("src.agent.intent_classifier.classify_intent", _classify),
+            patch(
+                "src.agent.interrupts.handle_price_interrupt",
+                AsyncMock(return_value=interrupt()),
+            ),
+        ):
+            await h.run("скільки коштує монтаж")
+
+        assert h.pipeline._cost._llm_input_tokens == 900
+        assert h.pipeline._cost._llm_output_tokens == 60
+        assert h.pipeline._cost._llm_cached_input_tokens == 128
+        assert h.pipeline._cost.llm_cost > 0
+
     async def test_price_interrupt_owns_the_turn(self) -> None:
         h = Harness()
         ir = interrupt(reply="Монтаж R17 коштує 500 гривень.")

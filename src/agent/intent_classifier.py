@@ -37,7 +37,12 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:  # pragma: no cover - тайп-хинты, в рантайме src.llm не импортируем
+    from collections.abc import Callable
+
     from src.llm.router import LLMRouter
+
+    # (input_tokens, output_tokens, cached_input_tokens, provider_key)
+    UsageSink = Callable[[int, int, int, str], None]
 
 logger = logging.getLogger(__name__)
 
@@ -296,6 +301,7 @@ async def classify_intent(
     customer_text: str,
     session_context: dict[str, Any],
     llm_router: LLMRouter,
+    on_usage: UsageSink | None = None,
 ) -> IntentResult:
     """Классифицирует реплику клиента и извлекает поля через LLM.
 
@@ -309,6 +315,9 @@ async def classify_intent(
             - ``dialog_history_tail``: последние 3-5 реплик (bot+user вперемешку);
             - ``tenant``: например «tvoya-shina».
         llm_router: инстанс `src.llm.router.LLMRouter` (или совместимый объект).
+        on_usage: куда отдать потраченные токены — ``(input, output, cached,
+            provider_key)``. Вызывается сразу после ответа провайдера, до
+            разбора JSON, поэтому неудачная классификация тоже оплачивается.
 
     Returns:
         IntentResult. При любой ошибке — primary_intent="BOOK", confidence=0.0.
@@ -325,7 +334,7 @@ async def classify_intent(
     start = time.monotonic()
     try:
         raw = await asyncio.wait_for(
-            _invoke_llm(llm_router, user_prompt),
+            _invoke_llm(llm_router, user_prompt, on_usage),
             timeout=_LLM_TIMEOUT_SEC,
         )
     except TimeoutError:  # asyncio.TimeoutError is an alias since 3.11
@@ -405,7 +414,7 @@ def _model_name() -> str:
     return os.environ.get("INTENT_CLASSIFIER_MODEL") or _DEFAULT_MODEL
 
 
-async def _invoke_llm(llm_router: Any, user_prompt: str) -> str:
+async def _invoke_llm(llm_router: Any, user_prompt: str, on_usage: UsageSink | None = None) -> str:
     """Вызывает роутер и возвращает сырой текст ответа.
 
     `LLMRouter.complete()` не принимает ``response_format``, поэтому строгость
@@ -415,9 +424,9 @@ async def _invoke_llm(llm_router: Any, user_prompt: str) -> str:
     try:
         from src.llm.models import LLMTask
 
-        task: Any = LLMTask.AGENT
+        task: Any = LLMTask.INTENT_CLASSIFIER
     except Exception:  # pragma: no cover - окружение без LLM SDK
-        task = "agent"
+        task = "intent_classifier"
 
     response = await llm_router.complete(
         task=task,
@@ -426,6 +435,17 @@ async def _invoke_llm(llm_router: Any, user_prompt: str) -> str:
         max_tokens=_MAX_TOKENS,
         provider_override=_provider_key(),
     )
+    if on_usage is not None:
+        # До разбора payload: токены, потраченные на ответ, который окажется
+        # мусором, потрачены точно так же. Раньше сюда не доходило ничего —
+        # стоимость классификатора не попадала в `cost_breakdown` звонка вовсе.
+        usage = response.usage
+        on_usage(
+            usage.input_tokens,
+            usage.output_tokens,
+            usage.cached_input_tokens,
+            _provider_key(),
+        )
     return _response_text(response)
 
 

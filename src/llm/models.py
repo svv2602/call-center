@@ -11,6 +11,12 @@ class LLMTask(enum.StrEnum):
     """Logical LLM task types routed to different providers."""
 
     AGENT = "agent"
+    # Its own type rather than AGENT: the classifier runs once per live FSM turn
+    # and used to be logged as an agent turn, which put 567 of the 3191 "agent"
+    # rows of the last fortnight under the wrong task. Routing is unaffected —
+    # the classifier always passes `provider_override`, which short-circuits the
+    # task-config lookup in `LLMRouter._resolve_chain`.
+    INTENT_CLASSIFIER = "intent_classifier"
     ARTICLE_PROCESSOR = "article_processor"
     QUALITY_SCORING = "quality_scoring"
     PROMPT_OPTIMIZER = "prompt_optimizer"
@@ -42,9 +48,15 @@ class Usage:
     ``cached_input_tokens`` counts how many of the ``input_tokens`` were served
     from the provider's automatic prompt cache — for OpenAI this comes from
     ``usage.prompt_tokens_details.cached_tokens`` (enabled by default since
-    Oct 2024 for prefixes ≥1024 tokens, ~50% cheaper). Anthropic reports it
-    as ``usage.cache_read_input_tokens``. Field is 0 when the provider does
-    not report cache stats.
+    Oct 2024 for prefixes ≥1024 tokens). Anthropic reports it as
+    ``usage.cache_read_input_tokens``. Field is 0 when the provider does not
+    report cache stats.
+
+    How much cheaper these are is a per-model number, not the ~50% this
+    docstring used to claim: gpt-4.1-mini and -nano bill cache reads at 0.25x
+    the input rate, the gpt-5 family, both Claude models, deepseek and the
+    Gemini flashes at 0.10x. The rate lives in
+    ``llm_model_pricing.cached_input_price_per_1m``.
     """
 
     input_tokens: int
