@@ -84,7 +84,7 @@ function _renderPricingTable(items) {
     const tbody = document.getElementById('pricingTableBody');
     if (!tbody) return;
     if (!items.length) {
-        tbody.innerHTML = `<tr><td colspan="8" class="px-3 py-8 text-center text-neutral-400">${t('costs.noData')}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="9" class="px-3 py-8 text-center text-neutral-400">${t('costs.noData')}</td></tr>`;
         return;
     }
     tbody.innerHTML = items.map(r => `
@@ -93,6 +93,7 @@ function _renderPricingTable(items) {
             <td class="px-3 py-2.5 text-sm">${_esc(r.display_name)}</td>
             <td class="px-3 py-2.5 text-sm text-neutral-500 dark:text-neutral-400">${_esc(r.model_name)}</td>
             <td class="px-3 py-2.5 text-sm text-right font-mono">$${r.input_price_per_1m.toFixed(2)}</td>
+            <td class="px-3 py-2.5 text-sm text-right font-mono">${_cachedPrice(r.cached_input_price_per_1m)}</td>
             <td class="px-3 py-2.5 text-sm text-right font-mono">$${r.output_price_per_1m.toFixed(2)}</td>
             <td class="px-3 py-2.5 text-sm text-center">
                 <input type="checkbox" ${r.include_in_comparison ? 'checked' : ''}
@@ -195,6 +196,12 @@ function _showPricingDialog(existing) {
                             class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100">
                     </div>
                 </div>
+                <div>
+                    <label class="block text-sm font-medium text-neutral-700 dark:text-neutral-300 mb-1">${t('costs.cachedPrice')}</label>
+                    <input type="number" step="0.001" id="dlgCachedPrice" value="${existing?.cached_input_price_per_1m ?? ''}"
+                        class="w-full px-3 py-2 text-sm border border-neutral-300 dark:border-neutral-700 rounded-md bg-white dark:bg-neutral-800 text-neutral-900 dark:text-neutral-100">
+                    <p class="mt-1 text-xs text-neutral-500 dark:text-neutral-400">${t('costs.cachedPriceHint')}</p>
+                </div>
             </div>
             <div class="flex justify-end gap-2 mt-5">
                 <button onclick="document.getElementById('costPricingDialog').remove()"
@@ -217,6 +224,8 @@ function _showPricingDialog(existing) {
             input_price_per_1m: parseFloat(document.getElementById('dlgInputPrice').value),
             output_price_per_1m: parseFloat(document.getElementById('dlgOutputPrice').value),
         };
+        const cachedRaw = document.getElementById('dlgCachedPrice').value.trim();
+        if (cachedRaw !== '') body.cached_input_price_per_1m = parseFloat(cachedRaw);
 
         try {
             if (isEdit) {
@@ -263,7 +272,7 @@ function _renderCatalogTable(items) {
     const tbody = document.getElementById('catalogTableBody');
     if (!tbody) return;
     if (!items.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="px-3 py-8 text-center text-neutral-400">${t('costs.noData')}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="px-3 py-8 text-center text-neutral-400">${t('costs.noData')}</td></tr>`;
         return;
     }
     tbody.innerHTML = items.map(r => {
@@ -296,6 +305,7 @@ function _renderCatalogTable(items) {
                 <td class="px-3 py-2.5 text-sm font-mono">${_esc(r.model_key)}</td>
                 <td class="px-3 py-2.5 text-sm">${_esc(r.display_name)}</td>
                 <td class="px-3 py-2.5 text-sm text-right font-mono">$${r.input_price_per_1m.toFixed(2)}</td>
+                <td class="px-3 py-2.5 text-sm text-right font-mono">${_cachedPrice(r.cached_input_price_per_1m)}</td>
                 <td class="px-3 py-2.5 text-sm text-right font-mono">$${r.output_price_per_1m.toFixed(2)}</td>
                 <td class="px-3 py-2.5 text-sm text-right font-mono">${maxTokens}</td>
                 <td class="px-3 py-2.5 text-sm text-center">${statusHtml}</td>
@@ -314,6 +324,13 @@ function _renderSyncStatus(lastSyncAt) {
     } else {
         el.textContent = t('costs.neverSynced');
     }
+}
+
+// Три знака, а не два как у соседних колонок: скидка на кэш у gpt-4.1-nano даёт
+// $0.025/1M, и toFixed(2) округлил бы её до цены, которой нет.
+function _cachedPrice(v) {
+    if (v == null) return `<span class="text-neutral-400" title="${t('costs.cachedPriceFallbackHint')}">—</span>`;
+    return '$' + v.toFixed(3);
 }
 
 function _formatTokens(n) {
@@ -456,7 +473,7 @@ function _renderSummary(items) {
     const tbody = document.getElementById('usageSummaryBody');
     if (!tbody) return;
     if (!items.length) {
-        tbody.innerHTML = `<tr><td colspan="7" class="px-3 py-8 text-center text-neutral-400">${t('costs.noData')}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="8" class="px-3 py-8 text-center text-neutral-400">${t('costs.noData')}</td></tr>`;
         return;
     }
     tbody.innerHTML = items.map(r => `
@@ -465,6 +482,7 @@ function _renderSummary(items) {
             <td class="px-3 py-2.5 text-sm font-mono">${_esc(r.provider_key)}</td>
             <td class="px-3 py-2.5 text-sm text-right">${r.call_count.toLocaleString()}</td>
             <td class="px-3 py-2.5 text-sm text-right font-mono">${r.total_input_tokens.toLocaleString()}</td>
+            <td class="px-3 py-2.5 text-sm text-right font-mono text-neutral-500 dark:text-neutral-400">${(r.total_cached_input_tokens || 0).toLocaleString()}</td>
             <td class="px-3 py-2.5 text-sm text-right font-mono">${r.total_output_tokens.toLocaleString()}</td>
             <td class="px-3 py-2.5 text-sm text-right">${r.avg_latency_ms != null ? Math.round(r.avg_latency_ms) : '—'}</td>
             <td class="px-3 py-2.5 text-sm text-right font-mono font-semibold">$${r.total_cost.toFixed(4)}</td>
@@ -502,7 +520,7 @@ function _renderComparison(data) {
     }).join('');
 
     el.innerHTML = `
-        <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 text-sm">
+        <div class="grid grid-cols-2 md:grid-cols-5 gap-3 mb-4 text-sm">
             <div class="bg-neutral-50 dark:bg-neutral-800 rounded-lg p-3">
                 <div class="text-neutral-500 dark:text-neutral-400">${t('costs.provider')}</div>
                 <div class="font-mono font-semibold">${_esc(data.actual_provider || '—')}</div>
@@ -514,6 +532,10 @@ function _renderComparison(data) {
             <div class="bg-neutral-50 dark:bg-neutral-800 rounded-lg p-3">
                 <div class="text-neutral-500 dark:text-neutral-400">${t('costs.totalInputTokens')}</div>
                 <div class="font-mono font-semibold">${(data.total_input_tokens || 0).toLocaleString()}</div>
+            </div>
+            <div class="bg-neutral-50 dark:bg-neutral-800 rounded-lg p-3">
+                <div class="text-neutral-500 dark:text-neutral-400">${t('costs.totalCachedInputTokens')}</div>
+                <div class="font-mono font-semibold">${(data.total_cached_input_tokens || 0).toLocaleString()}</div>
             </div>
             <div class="bg-neutral-50 dark:bg-neutral-800 rounded-lg p-3">
                 <div class="text-neutral-500 dark:text-neutral-400">${t('costs.totalOutputTokens')}</div>

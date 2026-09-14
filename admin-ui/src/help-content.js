@@ -261,6 +261,7 @@ export const HELP_PAGES = {
             { titleKey: 'help.costAnalysis.pricing.title', contentKey: 'help.costAnalysis.pricing.content' },
             { titleKey: 'help.costAnalysis.catalog.title', contentKey: 'help.costAnalysis.catalog.content' },
             { titleKey: 'help.costAnalysis.catalog.steps', contentKey: 'help.costAnalysis.catalog.stepsContent' },
+            { titleKey: 'help.costAnalysis.cached.title', contentKey: 'help.costAnalysis.cached.content' },
             { titleKey: 'help.costAnalysis.comparison.title', contentKey: 'help.costAnalysis.comparison.content' },
         ],
         tipsKey: 'help.costAnalysis.tips',
