@@ -3209,17 +3209,22 @@ class CallPipeline:
 
             # Anti-hallucination: pin the slot the LLM must use. If the client
             # already picked a specific (date, time) — inject as "selected".
-            # Otherwise inject the list of dates+times returned by the last
-            # get_fitting_slots call so the LLM can't invent a fresh one.
+            # The prompt still shows one or the other (`prompts.py:1857`): a
+            # pinned slot replaces the catalogue rather than joining it.
+            #
+            # The two are gathered independently all the same, because the same
+            # `offered_slots` is what arms `confirm_settled_time`. Making the
+            # list conditional on there being no pin disarmed that gate for the
+            # rest of every call the moment a slot was pinned — and a gate whose
+            # whole job is to stop the bot re-opening a settled choice went
+            # silent exactly once the choice was settled.
             selected_slot: dict[str, str] | None = None
-            offered_slots: list[dict[str, str]] | None = None
             if self._session.selected_fitting_date and self._session.selected_fitting_time:
                 selected_slot = {
                     "date": self._session.selected_fitting_date,
                     "time": self._session.selected_fitting_time,
                 }
-            elif self._session.fitting_slots_offered:
-                offered_slots = list(self._session.fitting_slots_offered)
+            offered_slots = list(self._session.fitting_slots_offered) or None
 
             # Server-side extract requested weekday from user text. Client
             # often names weekday early («на пʼятницю»), then bot goes through

@@ -6,14 +6,19 @@ backend had already pinned 12:20 — and then booked 12:20 while telling the
 caller 12:30 twice. Chasing that led to a replay of the 196 calls that reached
 `get_fitting_slots` in 45 days, and to the narrower defect this gate closes.
 
-The gate does NOT cover `23a189af` itself. There the caller said a bare «на 12»
-and the pin came from the bare-hour widening — the same widening that turns «на
-15.10» into 10:20, five hours from the time asked for. Silencing the bot on that
-evidence would confirm the wrong slot, so the gate arms only when the caller
-named the hour *and* the minutes. That boundary is the point of
-`TestTheBareHourIsLeftAlone`. The 12-hour reading still applies inside it —
-«5:00» arms against an offered 17:00, call `74c61ff8` — because there the
-membership test against the offered list is what bounds the widening.
+A bare «на 12» is read too, but on a shorter leash. The pin then comes from the
+bare-hour widening — the same widening that turns «на 15.10» into 10:20, five
+hours from the time asked for — so it is not allowed to answer the three
+ordinary triggers. «На 9:00 чи 9:40?» after «Алло на 9» is the bot doing its job
+when both are real, and `TestTheBareHourIsLeftAlone` is where that boundary
+lives. The bare hour reaches the caller only through `reslices_the_pinned_hour`:
+the bot cutting the caller's own hour into a minute `get_fitting_slots` never
+returned, which is wrong no matter what the caller meant. That is `e31ae29f` and
+`23a189af`, and `TestTheHourIsCutIntoAMinuteThatIsNotThere` covers both.
+
+The exact-time arm keeps the 12-hour reading — «5:00» arms against an offered
+17:00, call `74c61ff8` — because there the membership test against the offered
+list is what bounds the widening.
 
 Every sentence below is verbatim production text, so a change that stops fixing
 these calls fails here. Fire/silence membership is the measured contract: twelve
@@ -101,6 +106,21 @@ def _said(text: str) -> dict[str, Any]:
     return {"role": "user", "content": [{"type": "text", "text": text}]}
 
 
+def _spoke(text: str) -> dict[str, Any]:
+    return {"role": "assistant", "content": [{"type": "text", "text": text}]}
+
+
+#: The turn that gets the caller talking about times at all. Every firing in the
+#: corpus follows one of these, and `hour_only_allowed` reads it to decide
+#: whether a bare hour may be matched — so a history without it cannot exercise
+#: the widened arm of the gate at all. The file was written that way at first,
+#: which made it silent about the two calls this gate was extended to cover.
+LIST_READ = (
+    "На 15 вересня вільно: 9:00, 9:40, 10:20, 11:00, 11:40, 12:20, 13:00, "
+    "13:40, 14:20, 15:00, 15:40, 16:20, 17:00. Який зручніший?"
+)
+
+
 async def _emit_text(text: str) -> AsyncIterator[Any]:
     """One character at a time, which is how the clause splitter really sees it."""
     for char in text:
@@ -112,12 +132,13 @@ async def _heard(
     text: str,
     offered: list[str] | None,
     customer_text: str,
+    bot_before: str = LIST_READ,
 ) -> str:
     """What the caller would hear, reassembled from the fragments TTS is handed."""
     out = confirm_settled_time(
         buffer_sentences(_emit_text(text)),
         _slots(offered) if offered else None,
-        [_said(customer_text)],
+        [_spoke(bot_before), _said(customer_text)],
     )
     return " ".join([e.text async for e in out if isinstance(e, SentenceReady)])
 
@@ -287,6 +308,30 @@ class TestTheBareHourIsLeftAlone:
         heard = await _heard(bot, GRID_40_FROM_NINE, "на вечер на 5 часов где-то примерно")
         assert heard == bot
 
+    @pytest.mark.asyncio
+    async def test_a_denial_of_a_time_that_never_existed_still_stands(self) -> None:
+        """The bot saying «12:30 немає» is naming it in order to refuse it.
+
+        Same sentence shape as the two defects — a minute of the pinned hour
+        that the grid does not hold — and the opposite meaning. Without the
+        denial veto the gate would replace the refusal with an acceptance and
+        the caller would never learn the time they asked for is not on offer.
+        """
+        bot = "Слоту на дванадцяту тридцять немає."
+        assert await _heard(bot, GRID_40, "давайте на 12") == bot
+
+    @pytest.mark.asyncio
+    async def test_a_confirmation_that_names_a_house_number_survives(self) -> None:
+        """`940d9e57`: «о 10:20 … Героїв Дніпра, сім» read as 10:27.
+
+        `_merge_composites` was gluing the «20» of the booked time to a «сім»
+        six words later, inventing a minute the grid could not hold and turning
+        a correct confirmation into «Добре, 10:20 прийнято.» — which drops the
+        address the caller needs to show up.
+        """
+        bot = "Наталя, готово, записала на 24 серпня о 10:20 на вулицю Героїв Дніпра, сім."
+        assert await _heard(bot, GRID_40_FROM_NINE, "на 10:20 запишіть") == bot
+
     def test_the_widening_really_is_what_separates_them(self) -> None:
         """The precondition, asserted directly against the shipped parser.
 
@@ -299,6 +344,101 @@ class TestTheBareHourIsLeftAlone:
         assert detect_time_choice("давайте на 12", GRID_40, allow_hour_only=False) is None
         assert detect_time_choice("900", GRID_40_FROM_NINE, allow_hour_only=False) == "09:00"
         assert detect_time_choice("11:40", GRID_40_FROM_NINE, allow_hour_only=False) == "11:40"
+
+
+class TestTheRecitalTriggerReadsLiteralsOnly:
+    """Why the third trigger was not taught to hear number words.
+
+    Teaching it `spoken_times` looked like a straight generalisation — a TTS
+    voice reading «дев'ята сорок, десята двадцять» has offered two times and no
+    literals. Replaying the 45 days says otherwise: it turns 36 further
+    sentences into matches, and prices, house numbers and dictated phone digits
+    are all among them. The caller only has to have picked a time on the turn
+    before for one of those to be replaced by an acceptance.
+
+    `reslices_the_pinned_hour` reads spoken times instead, where the pinned hour
+    bounds what a misreading can reach.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "bot",
+        [
+            # 09668c25 — the booked time in words plus a house number in words.
+            # Heard as 09:20 and 19:02: two times, and the address is what the
+            # caller needs in order to turn up at all.
+            "Готово, записала на чотирнадцяте вересня о дев'ятій двадцять "
+            "на вулиці Перемоги, сімдесят два бе у Запоріжжі.",
+            # 0822c935 — a phone number read back digit by digit.
+            "Прийняла номер чотири чотири, чотири вісім, ка.",
+        ],
+    )
+    async def test_words_that_are_not_times_do_not_silence_the_turn(self, bot: str) -> None:
+        assert await _heard(bot, GRID_20, "на 9:20") == bot
+
+    def test_the_predicate_itself_stays_deaf_to_them(self) -> None:
+        assert (
+            lists_alternative_times(
+                "Готово, записала на чотирнадцяте вересня о дев'ятій двадцять "
+                "на вулиці Перемоги, сімдесят два бе у Запоріжжі."
+            )
+            is False
+        )
+
+
+class TestTheHourIsCutIntoAMinuteThatIsNotThere:
+    """The two calls the exact-time arm could never reach.
+
+    Both callers said a bare hour, both grids held exactly one slot in it, and
+    both bots answered by offering the two minutes a 40-minute grid never has.
+    `e31ae29f` then accepted «рівно» and booked 12:20, so the caller was told
+    one time and the shop was told another.
+    """
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("call_id", "customer", "bot", "offered"),
+        [
+            (
+                "e31ae29f",
+                "на 12 Давайте",
+                "Добре, дванадцята рівно чи дванадцята тридцять?",
+                GRID_40_FROM_NINE,
+            ),
+            ("23a189af", "давайте на 12", "На дванадцяту рівно чи дванадцяту тридцять?", GRID_40),
+        ],
+    )
+    async def test_the_pin_is_spoken_instead(
+        self, call_id: str, customer: str, bot: str, offered: list[str]
+    ) -> None:
+        assert await _heard(bot, offered, customer) == "Добре, 12:20 прийнято."
+
+    def test_neither_minute_is_on_the_grid(self) -> None:
+        """The precondition, asserted rather than assumed: if 12:00 or 12:30
+        ever joins the grid the bot's question stops being a contradiction and
+        these tests must be re-argued, not quietly kept green."""
+        for grid in (GRID_40, GRID_40_FROM_NINE):
+            assert "12:00" not in grid
+            assert "12:30" not in grid
+            assert "12:20" in grid
+
+    @pytest.mark.asyncio
+    async def test_a_minute_of_some_other_hour_does_not_arm_it(self) -> None:
+        """Bounded to the hour the caller named, because `spoken_times` reads
+        street numbers and prices as times too. «Перемоги, сімдесят два» is
+        heard as 19:02, and only the hour bound keeps it out."""
+        bot = "Записала на вулиці Перемоги, сімдесят два бе у Запоріжжі."
+        assert await _heard(bot, GRID_40_FROM_NINE, "давайте на 12") == bot
+
+    @pytest.mark.asyncio
+    async def test_a_bare_hour_needs_the_previous_turn_to_have_invited_one(self) -> None:
+        """`hour_only_allowed` reads the bot's own last turn. Asked for a plate
+        and answered «на 12», the caller is not picking a slot at all."""
+        bot = "Добре, дванадцята рівно чи дванадцята тридцять?"
+        heard = await _heard(
+            bot, GRID_40_FROM_NINE, "на 12", bot_before="Назвіть держномер автомобіля."
+        )
+        assert heard == bot
 
 
 class TestTheGateNeedsBothHalves:

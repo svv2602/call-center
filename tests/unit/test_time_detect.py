@@ -488,6 +488,25 @@ class TestTheGapIsWhatIsMeasured:
         assert _extract_numbers("на 15.10") == [15, 10]
         assert _extract_numbers("двадцять п'ять") == [25]
 
+    def test_a_composite_needs_the_two_words_to_be_neighbours(self):
+        """«двадцять» and «сім» only make 27 when nothing stands between them.
+
+        `940d9e57` said «о 10:20 на вулицю Героїв Дніпра, сім» and the merge
+        reached across six words to make the house number into minutes: 10:27,
+        a time the grid does not hold. The tail of a stemmed word and whitespace
+        may sit in the gap; a word or a comma may not.
+        """
+        from src.agent.time_detect import _extract_numbers
+
+        assert _extract_numbers("двадцять сім") == [27]
+        assert _extract_numbers("о 10:20 на вулицю Героїв Дніпра, сім") == [10, 20, 7]
+
+    def test_the_merge_across_a_phrase_cost_a_caller_their_pick(self):
+        """`a3de4520`: «на 10:30 давай 7 вересня» glued the 30 to the 7 and
+        returned nothing, so the caller's exact time was never pinned."""
+        offered = ["09:30", "10:00", "10:30", "11:00"]
+        assert detect_time_choice("мені на 7 вересня на 10:30 давай 7 вересня", offered) == "10:30"
+
     def test_a_composite_number_spans_both_of_its_words(self):
         """«двадцять п'ять» is one number, so its span has to cover both words —
         otherwise the gap to whatever follows starts mid-phrase and the glue

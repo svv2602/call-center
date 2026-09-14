@@ -41,7 +41,9 @@ from src.agent.time_detect import (
     asks_which_time,
     denies_a_slot,
     detect_time_choice,
+    hour_only_allowed,
     lists_alternative_times,
+    reslices_the_pinned_hour,
 )
 from src.agent.tool_result_compressor import compress_tool_result
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
@@ -664,27 +666,35 @@ async def confirm_settled_time(
 ) -> AsyncIterator[BufferEvent]:
     """Accept the slot the caller named instead of asking for it again.
 
-    Fires only when the caller's own last turn named the hour *and* the minutes
-    and the result is on the offered list — `detect_time_choice` with the
-    bare-hour widening switched off. Note what that does and does not exclude:
-    the 12-hour reading still applies, so «5:00» matches an offered 17:00 (call
-    `74c61ff8`), but the membership test bounds it — a time the bot never
-    offered can never arm the gate.
+    Fires only when the caller's own last turn picked a slot off the offered
+    list. The membership test is the whole safety argument: a time the bot never
+    offered can never arm the gate. The 12-hour reading still applies inside it,
+    so «5:00» matches an offered 17:00 (call `74c61ff8`).
 
-    That precondition is the whole safety argument. A bare hour is a different
-    situation: «Алло на 9» against a list holding both 09:00 and 09:40 leaves a
-    real choice open, and «на 15.10» pins 10:20 once the widening is on, so
-    silencing the bot there would confirm a slot five hours from the one asked
-    for. Both shapes are in the corpus; with the widening off both return
-    ``None`` and neither reaches this gate.
+    A bare hour arms a second, narrower reading. `hour_only_allowed` reproduces
+    the widening the Wave-14 pin in `pipeline.py` already applied, so «на 12»
+    against a 40-minute grid resolves to the 12:20 the machine is holding. That
+    reading is *not* trusted against the three triggers above — «На 9:00 чи
+    9:40?» is the bot doing its job when both are real — only against a sentence
+    that contradicts the catalogue outright. Call `e31ae29f` (2026-09-14): no
+    12:00 and no 12:30 anywhere on the list, yet the bot asked «дванадцята рівно
+    чи дванадцята тридцять?» and then accepted «дванадцята рівно» — twenty
+    minutes from the 12:20 it went on to book. Naming a minute of the caller's
+    own hour that does not exist is a contradiction no judgement is needed to
+    see; a denial is excluded because «На 10:00 слоту немає» names one for
+    exactly that reason.
 
-    Measured over 4994 bot sentences from the 196 calls that reached
-    `get_fitting_slots` in 45 days: twelve firings across eight calls, all
-    twelve defects, no other sentence touched. The three triggers matched 279
-    further sentences on turns where the caller had named no full time — the bot
-    legitimately asking which hour, declining one it had not offered, or reading
-    the list out for the first time — and the pick precondition is what keeps
-    the gate off every one of them.
+    Replayed over the 2484 bot turns — 4775 sentences — of the 189 calls that
+    reached `get_fitting_slots` in 45 days: twelve firing turns across twelve
+    calls, no other sentence touched. Ten of those are the exact-time arm and
+    were already firing before the bare hour was let in; the two the widening
+    adds are `e31ae29f` and `23a189af`, and nothing else in the corpus changed.
+    An exact pick arms the gate on 130 bot turns and the widened read on 34 more,
+    so the triggers do most of their work by *not* firing: 253 further sentences
+    match one of the three on turns armed by neither — the bot legitimately
+    asking which hour, declining a time it had not offered, or reading the list
+    out for the first time — and the pick precondition is what keeps the gate
+    off every one of them.
 
     Two of the twelve are anti-patterns `prompts.py` already names by call id
     (lines 588 and 593). They were in the context window when they fired, which
@@ -696,17 +706,34 @@ async def confirm_settled_time(
     into the same breath.
     """
     offered_times = [s["time"] for s in (offered_slots or []) if s.get("time")]
+    said_by_caller = _last_user_text(history)
     picked = (
-        detect_time_choice(_last_user_text(history), offered_times, allow_hour_only=False)
+        detect_time_choice(said_by_caller, offered_times, allow_hour_only=False)
         if offered_times
         else None
     )
-    if not picked:
+    spoken = _assistant_texts(history)
+    widened = (
+        detect_time_choice(said_by_caller, offered_times, allow_hour_only=True)
+        if offered_times and hour_only_allowed(spoken[-1] if spoken else "")
+        else None
+    )
+    settled = picked or widened
+    if not settled:
         async for event in stream:
             yield event
         return
 
-    replacement = f"Добре, {picked} прийнято."
+    def reopens(sentence: str) -> bool:
+        if picked and (
+            asks_which_time(sentence)
+            or denies_a_slot(sentence)
+            or lists_alternative_times(sentence)
+        ):
+            return True
+        return reslices_the_pinned_hour(sentence, settled, offered_times)
+
+    replacement = f"Добре, {settled} прийнято."
     held: list[SentenceReady] = []
     pending = ""
     tail: str | None = None
@@ -733,9 +760,7 @@ async def confirm_settled_time(
         held.append(event)
         pending = f"{pending} {event.text}".strip()
 
-        if not (
-            asks_which_time(pending) or denies_a_slot(pending) or lists_alternative_times(pending)
-        ):
+        if not reopens(pending):
             if ends_sentence(pending):
                 for queued in held:
                     yield queued
@@ -750,7 +775,7 @@ async def confirm_settled_time(
         logger.warning(
             "Caller already picked %s off the offered list — speaking %r "
             "instead of re-opening the choice with %r",
-            picked,
+            settled,
             replacement if not fired else "nothing",
             pending[:120],
         )

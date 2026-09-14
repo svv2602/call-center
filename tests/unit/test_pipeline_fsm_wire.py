@@ -4587,3 +4587,50 @@ class TestTheTimeEntryTool:
             await h.pipeline._run_fsm_entry_tool()
 
         h.tool_router.execute.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# TestTheOfferedListOutlivesThePin — what `confirm_settled_time` is armed with
+# ---------------------------------------------------------------------------
+
+
+class TestTheOfferedListOutlivesThePin:
+    """The catalogue must keep reaching the turn after a slot is pinned.
+
+    `offered_slots` does double duty: the prompt shows it only when nothing is
+    pinned, and `confirm_settled_time` uses it as the list the caller's pick has
+    to be a member of. Handing `None` once a pin exists is right for the first
+    job and fatal for the second — the gate whose whole purpose is to stop the
+    bot re-opening a settled choice goes silent the instant the choice settles.
+    Call `e31ae29f` (2026-09-14) spent the rest of its life in that hole.
+    """
+
+    async def test_the_gate_still_gets_the_list_after_a_pin(self) -> None:
+        h = Harness()
+        h.session.fitting_slots_offered = [
+            {"date": "2026-09-18", "time": t} for t in ("11:40", "12:20", "13:00")
+        ]
+        h.session.selected_fitting_date = "2026-09-18"
+        h.session.selected_fitting_time = "12:20"
+
+        with fsm_flags(enabled=False):
+            await h.run("на 12")
+
+        offered = h.llm_kwargs[-1]["offered_slots"]
+        assert offered is not None
+        assert [s["time"] for s in offered] == ["11:40", "12:20", "13:00"]
+
+    async def test_an_empty_catalogue_is_still_none(self) -> None:
+        """The other half: `[]` must not be passed through as a list.
+
+        An empty list is falsy but not `None`, and downstream the difference
+        between «no slots» and «never asked» is a real one.
+        """
+        h = Harness()
+        h.session.selected_fitting_date = "2026-09-18"
+        h.session.selected_fitting_time = "12:20"
+
+        with fsm_flags(enabled=False):
+            await h.run("на 12")
+
+        assert h.llm_kwargs[-1]["offered_slots"] is None

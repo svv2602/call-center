@@ -142,6 +142,67 @@ _TIME_ACCEPTED_RE = re.compile(
 )
 
 
+#: `_TIME_GLUE_RE` with the comma removed and the word's own ending added.
+#:
+#: The comma earns its place when the caller dictates («на 12,20»), but a bot
+#: reading a list writes it between two *different* slots — «9:00, 9:40» — and
+#: admitting it there glues the minutes of one time to the hour of the next.
+#:
+#: The leading letters are the half of this that is not optional. `_WORD_RE`
+#: matches the *stem*, so the span for «дванадцята» stops after «дванадцят» and
+#: the gap before the minutes reads «а », not « ». Nothing else consults the gap
+#: on spoken text — `_minute_positions` only ever narrows a bare-hour match — so
+#: this shortfall had never shown up. The class cannot cross a space, which is
+#: what keeps «дванадцята і тринадцята» two separate hours.
+_SPOKEN_GLUE_RE = re.compile(r"[а-яіїєґё']*\s*[.:/-]?\s*")
+
+
+def spoken_times(sentence: str) -> list[str]:
+    """Every clock time the sentence names, in digits or in words, as ``HH:MM``.
+
+    The bot is a TTS voice: what it says is «дванадцята рівно чи дванадцята
+    тридцять?», and a scan for `HH:MM` literals scores that zero. Call
+    `e31ae29f` (2026-09-14) invented a half-hour grid for a station that runs on
+    40-minute steps, and every trigger downstream of this read the sentence as
+    mentioning no time at all.
+
+    One pass over the numbers, so a digit time and a spoken one cost the same:
+    «11:00» is an hour and a minute glued by a colon exactly as «одинадцята
+    рівно» is one glued by a space. A number already taken as somebody's minutes
+    is not read again as an hour of its own — the rule `detect_time_choice`
+    applies for the same reason, and without it «о 9:20, 30 гривень» would name
+    two times.
+
+    Counts occurrences, not distinct values: «На 11:40 чи 11:40 точно?» is a
+    known anti-pattern (`prompts.py:588`) that names one value twice, and
+    de-duplicating would stop seeing it.
+    """
+    if not sentence:
+        return []
+    text = _normalize(sentence)
+    text = _DIAMETER_PREFIX_RE.sub(" ", text)
+    text = _QUANTITY_RE.sub(" ", text)
+    text = _DAY_MONTH_RE.sub(" ", text)
+    spans = _extract_spans(text)
+    nums = [value for value, _, _ in spans]
+
+    minutes: set[int] = set()
+    for i in range(len(spans) - 1):
+        if _SPOKEN_GLUE_RE.fullmatch(text[spans[i][2] : spans[i + 1][1]]):
+            minutes.add(i + 1)
+
+    found: list[str] = []
+    for i in range(len(spans) - 1):
+        if i in minutes or i + 1 not in minutes:
+            continue
+        if not 0 <= nums[i + 1] <= 59:
+            continue
+        variants = _hour_variants(nums[i])
+        if variants:
+            found.append(f"{variants[0]:02d}:{nums[i + 1]:02d}")
+    return found
+
+
 def lists_alternative_times(sentence: str) -> bool:
     """True when the sentence reads out two or more times as if the choice were open.
 
@@ -153,10 +214,21 @@ def lists_alternative_times(sentence: str) -> bool:
     denial, where a gate keyed on questions would drop «Слоту … немає.» and then
     let the list through behind the acceptance.
 
-    One literal is not enough: «Отже, записую на 5 серпня о 11:00 — ваше ім'я?»
+    One time is not enough: «Отже, записую на 5 серпня о 11:00 — ваше ім'я?»
     names a time without offering a choice. The acceptance veto carries the rest
-    of the load — Krok 8 reads back two literals («о 13:00, виїзд о 13:40.
+    of the load — Krok 8 reads two back («о 13:00, виїзд о 13:40.
     Підтверджуєте?») and is confirming, not re-opening.
+
+    Counts `HH:MM` literals, not what `spoken_times` hears. Counting the latter
+    was tried and withdrawn: over the 45-day corpus it turned 36 further
+    sentences into matches, and among them were prices («триста сімдесят дві
+    гривні»), house numbers («вулиця Перемоги, сімдесят два бе»), a dictated
+    phone number, and — worst — five correct booking confirmations that name the
+    booked time and the address in one breath. Any of those would have replaced
+    a good sentence with «Добре, HH:MM прийнято.» the moment the caller's
+    previous turn happened to hold a pick. `reslices_the_pinned_hour` reads
+    spoken times instead, where the pinned hour bounds what the misreadings can
+    reach.
     """
     if not sentence:
         return False
@@ -259,10 +331,20 @@ def _extract_spans(text: str) -> list[tuple[int, int, int]]:
             spans.append((_NUM_WORDS[m.group(1)], m.start(), m.end()))
         else:
             spans.append((int(m.group(2)), m.start(), m.end()))
-    return _merge_composites(spans)
+    return _merge_composites(spans, text)
 
 
-def _merge_composites(spans: list[tuple[int, int, int]]) -> list[tuple[int, int, int]]:
+#: What may stand between «двадцять» and «п'ять» for the two to still be one
+#: number: the tail of the stem `_WORD_RE` did not take, and whitespace. A word
+#: or a comma in the gap means they are two numbers that merely stand near each
+#: other — «о 10:20 на вулицю Героїв Дніпра, сім» was being read as 10:27, which
+#: silenced a correct booking confirmation in call `940d9e57`.
+_COMPOSITE_GLUE_RE = re.compile(r"[а-яіїєґё']*\s*")
+
+
+def _merge_composites(
+    spans: list[tuple[int, int, int]], text: str
+) -> list[tuple[int, int, int]]:
     """Collapse «двадцять п'ять» → 25 so it is not read as 20 then 5."""
     merged: list[tuple[int, int, int]] = []
     i = 0
@@ -271,6 +353,7 @@ def _merge_composites(spans: list[tuple[int, int, int]]) -> list[tuple[int, int,
             i + 1 < len(spans)
             and spans[i][0] in (20, 30, 40, 50)
             and 1 <= spans[i + 1][0] <= 9
+            and _COMPOSITE_GLUE_RE.fullmatch(text[spans[i][2] : spans[i + 1][1]])
         ):
             merged.append((spans[i][0] + spans[i + 1][0], spans[i][1], spans[i + 1][2]))
             i += 2
@@ -383,6 +466,37 @@ def bot_asked_for_time(bot_utterance: str) -> bool:
     if not bot_utterance:
         return False
     return bool(_TIME_QUESTION_RE.search(_normalize(bot_utterance)))
+
+
+def reslices_the_pinned_hour(sentence: str, pinned: str, offered_times: list[str]) -> bool:
+    """True when the bot cuts the caller's hour into a minute the catalogue lacks.
+
+    The one contradiction that needs no judgement about what the caller meant.
+    The caller named an hour, the backend resolved it to the single slot that
+    hour holds, and the bot then asks about a *different* minute of the same
+    hour that `get_fitting_slots` never returned. Call `e31ae29f` (2026-09-14):
+    a 40-minute grid with 12:20 in it and neither 12:00 nor 12:30, «на 12»
+    pinned to 12:20, and the bot asked «дванадцята рівно чи дванадцята
+    тридцять?» — then accepted «рівно», leaving the caller twenty minutes from
+    what the machine held. `23a189af` is the same shape.
+
+    Bounded to the pinned hour on purpose. `spoken_times` reads digits and
+    number words alike, and a bot reading out a street address — «на вулиці
+    Перемоги, сімдесят два» — produces times that were never times. Those land
+    in other hours; requiring the pinned one keeps them out without needing the
+    reader to be perfect.
+
+    A denial is the opposite case and is excluded: «На 10:00 слоту немає» names
+    a time that does not exist *in order to say so*, and is the bot at its most
+    correct.
+    """
+    if not sentence or not pinned or not offered_times:
+        return False
+    if denies_a_slot(sentence):
+        return False
+    hour = pinned.split(":")[0]
+    real = set(offered_times)
+    return any(t.split(":")[0] == hour and t not in real for t in spoken_times(sentence))
 
 
 def hour_only_allowed(bot_utterance: str) -> bool:
