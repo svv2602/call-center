@@ -243,29 +243,39 @@ def _normalize(text: str) -> str:
 
 def _extract_numbers(text: str) -> list[int]:
     """Return every number in the utterance, in spoken order."""
-    nums: list[int] = []
+    return [value for value, _, _ in _extract_spans(text)]
+
+
+def _extract_spans(text: str) -> list[tuple[int, int, int]]:
+    """Every number in the utterance as ``(value, start, end)``.
+
+    The span is what lets a caller who repeats themselves — «на 11 давайте на
+    11» — be told apart from one naming an hour and its minutes: the second is
+    written as one token, the first is two sentences apart.
+    """
+    spans: list[tuple[int, int, int]] = []
     for m in _WORD_RE.finditer(text):
         if m.group(1) is not None:
-            nums.append(_NUM_WORDS[m.group(1)])
+            spans.append((_NUM_WORDS[m.group(1)], m.start(), m.end()))
         else:
-            nums.append(int(m.group(2)))
-    return _merge_composites(nums)
+            spans.append((int(m.group(2)), m.start(), m.end()))
+    return _merge_composites(spans)
 
 
-def _merge_composites(nums: list[int]) -> list[int]:
+def _merge_composites(spans: list[tuple[int, int, int]]) -> list[tuple[int, int, int]]:
     """Collapse «двадцять п'ять» → 25 so it is not read as 20 then 5."""
-    merged: list[int] = []
+    merged: list[tuple[int, int, int]] = []
     i = 0
-    while i < len(nums):
+    while i < len(spans):
         if (
-            i + 1 < len(nums)
-            and nums[i] in (20, 30, 40, 50)
-            and 1 <= nums[i + 1] <= 9
+            i + 1 < len(spans)
+            and spans[i][0] in (20, 30, 40, 50)
+            and 1 <= spans[i + 1][0] <= 9
         ):
-            merged.append(nums[i] + nums[i + 1])
+            merged.append((spans[i][0] + spans[i + 1][0], spans[i][1], spans[i + 1][2]))
             i += 2
         else:
-            merged.append(nums[i])
+            merged.append(spans[i])
             i += 1
     return merged
 
@@ -291,6 +301,39 @@ def _hour_variants(n: int) -> list[int]:
     if 1 <= n <= 7:
         return [n + 12]
     return []
+
+
+#: What may stand between an hour and its minutes and still leave them one
+#: spoken token: nothing, a space, or the separator the caller dictated or the
+#: STT guessed. «15.10», «17:15», «12:13», «01 02» qualify; «на 11 давайте на
+#: 11» does not, and that is the whole point of measuring the gap rather than
+#: the distance in the number list.
+_TIME_GLUE_RE = re.compile(r"\s*[.:,/-]?\s*")
+
+
+def _minute_positions(text: str, spans: list[tuple[int, int, int]]) -> set[int]:
+    """Positions holding the minutes of the number written just before them.
+
+    Repetition is the shape this has to survive. Callers repeat their pick more
+    often than they name minutes — «на 9 на 9 на 9 запишите на 9», «добре
+    дівчина 13 на 13» — and on those turns the second number is the same hour
+    said again, not five past. Four such live calls lost their booking to an
+    earlier, blunter version of this rule that looked only at whether the two
+    numbers were adjacent in the list.
+
+    The gap is the only test. Requiring the left number to be a possible hour
+    and the right one to be possible minutes — the conditions the paired scan
+    itself applies — was measured against 1263 replays of real turns and moved
+    no verdict either way: a number too large to be an hour is one the
+    bare-hour scan already refuses, so withholding it changes nothing.
+    """
+    minutes: set[int] = set()
+    for i in range(len(spans) - 1):
+        end = spans[i][2]
+        next_start = spans[i + 1][1]
+        if _TIME_GLUE_RE.fullmatch(text[end:next_start]):
+            minutes.add(i + 1)
+    return minutes
 
 
 def bot_listed_slots(bot_utterance: str) -> bool:
@@ -372,7 +415,8 @@ def detect_time_choice(
     # Drop «R17»-style diameters and «два колеса»-style counts before parsing.
     text = _DIAMETER_PREFIX_RE.sub(" ", text)
     text = _QUANTITY_RE.sub(" ", text)
-    nums = _extract_numbers(text)
+    spans = _extract_spans(text)
+    nums = [value for value, _, _ in spans]
 
     # A dictated phone number produces a long digit run in which some
     # neighbouring pair will eventually look like a valid slot («нуль дев'ять
@@ -394,7 +438,18 @@ def detect_time_choice(
                 return candidate
 
     if allow_hour_only:
+        minutes = _minute_positions(text, spans)
         for i, raw in enumerate(nums):
+            # This number is the minutes of the time before it, and the loop
+            # above already found that time is not on offer. Reading it a
+            # second time as an hour of its own pinned a slot nobody named on
+            # two live calls: `135cf711` (2026-08-31) said «на 15.10» and was
+            # pinned to 10:20, `2bf781f1` (2026-07-31) asked «17:15 є час» and
+            # was pinned to 15:00. On both the bot itself answered correctly
+            # that the time was unavailable, so the pin contradicted the
+            # sentence it was built from.
+            if i in minutes:
+                continue
             # The caller named minutes, and the loop above already found that
             # `HH:MM` is not on offer. Widening here would answer a request for
             # 11:20 with 11:00 — a time nobody asked for, silently. Measured on

@@ -362,3 +362,143 @@ class TestWheelCountIsNotAnHour:
 
     def test_an_hour_next_to_an_unrelated_noun_still_counts(self):
         assert detect_time_choice("давайте о другій", COUNT_GRID, allow_hour_only=True) == "14:00"
+
+
+#: The 40-minute grid the fitting stations return most often, and the grid all
+#: three calls below were offered.
+FORTY_GRID = [
+    "09:00", "09:40", "10:20", "11:00", "11:40", "12:20", "13:00",
+    "13:40", "14:20", "15:00", "15:40", "16:20", "17:00",
+]
+HALF_GRID = [
+    "09:00", "09:30", "10:00", "10:30", "11:00", "11:30", "12:00", "12:30",
+    "13:00", "13:30", "14:00", "14:30", "15:00", "15:30", "16:00", "16:30",
+    "17:00", "17:30",
+]
+TWENTY_GRID = ["08:20", "09:20", "10:20", "11:20", "12:20", "13:20", "14:20", "15:20"]
+
+
+class TestMinutesAreNotAnHourOfTheirOwn:
+    """A number read as minutes must not be offered to the bare-hour scan.
+
+    The paired scan tries «15:10» and finds it is not on offer; the bare-hour
+    scan then picked the `10` up again and answered 10:20 — a slot the caller
+    never named. Two live turns in the 45-day corpus, both fabrications:
+    `135cf711` (2026-08-31) «на 15.10» → 10:20, and `2bf781f1` (2026-07-31)
+    «17:15 є час» → 15:00. In both the LLM read the turn correctly and the bot
+    said the time was unavailable, so the pin was contradicting the sentence it
+    was built from.
+    """
+
+    def test_the_call_that_named_a_time_not_on_the_grid(self):
+        assert detect_time_choice("на 15.10", FORTY_GRID, allow_hour_only=True) is None
+
+    def test_asking_whether_a_time_exists_pins_nothing(self):
+        assert detect_time_choice("17:15 є час", FORTY_GRID, allow_hour_only=True) is None
+
+    @pytest.mark.parametrize(
+        "text,grid",
+        [
+            # A licence plate, dictated one turn after the slot was taken.
+            ("номер 07.01", FORTY_GRID),
+            ("к є 12:13 FM", HALF_GRID),
+            ("01 02", TWENTY_GRID),
+            ("03 03", TWENTY_GRID),
+            ("0.3.02", TWENTY_GRID),
+        ],
+    )
+    def test_dictated_digits_pin_nothing(self, text, grid):
+        """All five are real turns. The live gate happened to be shut on each —
+        a slot was already pinned, or the bot had not read the list out — so
+        none of them reached production. They are here because that protection
+        is incidental to the shape, and the shape is what this rule is about."""
+        assert detect_time_choice(text, grid, allow_hour_only=True) is None
+
+
+class TestTheCallerWhoRepeatsThemselves:
+    """Repetition outnumbers minutes, and must keep resolving.
+
+    An earlier version of the rule above withheld any number whose neighbour
+    could be minutes, which reads «на 11 давайте на 11» as eleven-eleven. That
+    cost four live calls their pin in the same corpus — measured, not feared —
+    which is why the rule looks at the gap between the two numbers in the text
+    rather than at their distance in the number list.
+    """
+
+    @pytest.mark.parametrize(
+        "text,grid,expected",
+        [
+            ("на 11 давайте на 11", FORTY_GRID, "11:00"),
+            ("добре дівчина 13 на 13", FORTY_GRID, "13:00"),
+            ("на 9 на 9 на 9 запишите на 9", FORTY_GRID, "09:00"),
+            ("на дев'яту давайте на 9", FORTY_GRID, "09:00"),
+            # «на 5 часов» is 17:00 on the twelve-hour clock, and the 17 before
+            # it is the weekday's date — two hours named in one breath.
+            ("на четвер 17 на вечер на 5 часов где-то", FORTY_GRID, "17:00"),
+        ],
+    )
+    def test_a_repeated_hour_still_pins(self, text, grid, expected):
+        assert detect_time_choice(text, grid, allow_hour_only=True) == expected
+
+
+class TestTheTimeOnOfferIsStillTaken:
+    """The paired scan is untouched: a dot is a legal separator for an hour."""
+
+    @pytest.mark.parametrize(
+        "text,grid,expected",
+        [
+            ("запишіть на 9.00", HALF_GRID, "09:00"),
+            (".9.00", FORTY_GRID, "09:00"),
+            ("15 15:00", FORTY_GRID, "15:00"),
+            ("17:0", FORTY_GRID, "17:00"),
+            ("9:20 де є по 20", TWENTY_GRID, "09:20"),
+            ("на 12:20", FORTY_GRID, "12:20"),
+        ],
+    )
+    def test_a_time_on_the_grid_resolves(self, text, grid, expected):
+        assert detect_time_choice(text, grid, allow_hour_only=True) == expected
+
+    def test_the_rule_only_touches_the_widened_path(self):
+        """Without `allow_hour_only` the fabrication was never reachable, so the
+        change must be invisible here."""
+        assert detect_time_choice("на 15.10", FORTY_GRID) is None
+        assert detect_time_choice("на 12:20", FORTY_GRID) == "12:20"
+
+
+class TestTheGapIsWhatIsMeasured:
+    """The discriminator itself, asserted rather than inferred from a verdict."""
+
+    def test_one_token_marks_its_second_half_as_minutes(self):
+        from src.agent.time_detect import _extract_spans, _minute_positions, _normalize
+
+        text = _normalize("на 15.10")
+        assert _minute_positions(text, _extract_spans(text)) == {1}
+
+    def test_two_sentences_apart_marks_nothing(self):
+        from src.agent.time_detect import _extract_spans, _minute_positions, _normalize
+
+        text = _normalize("на 11 давайте на 11")
+        assert _minute_positions(text, _extract_spans(text)) == set()
+
+    def test_the_public_helper_still_returns_plain_numbers(self):
+        """`bot_listed_slots` and `test_parsers_time` both consume this — the
+        spans are an internal addition, not a change of contract."""
+        from src.agent.time_detect import _extract_numbers
+
+        assert _extract_numbers("на 15.10") == [15, 10]
+        assert _extract_numbers("двадцять п'ять") == [25]
+
+    def test_a_composite_number_spans_both_of_its_words(self):
+        """«двадцять п'ять» is one number, so its span has to cover both words —
+        otherwise the gap to whatever follows starts mid-phrase and the glue
+        test above reads « п'ять 15» as a separator."""
+        from src.agent.time_detect import _extract_spans
+
+        text = "о двадцять п'ять хвилин"
+        spans = _extract_spans(text)
+        assert [v for v, _, _ in spans] == [25]
+        _, start, end = spans[0]
+        assert text[start:].startswith("двадцять")
+        # The vocabulary is stemmed, so the span ends on «п'ят» rather than on
+        # the whole word — what matters is that it reaches the second word.
+        assert end > text.index("п'ят")
