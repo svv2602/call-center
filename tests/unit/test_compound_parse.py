@@ -243,6 +243,145 @@ class TestSTTGarbage:
         assert result.fields_confidence["city"] < APPLY_THRESHOLD
 
 
+class TestRussianSpeakingCallers:
+    """A caller who names the district in Russian must be understood.
+
+    `_normalize` lowercases and folds apostrophes; it does **not** fold Russian
+    onto Ukrainian, and nothing else does either. `_CITY_STEMS` always knew
+    this and spells the Russian forms out; `_LANDMARKS` did so for 5 of its 21
+    labels, so the other 16 were reachable in one language only.
+
+    Measured on 45 days of `call_turns` (raw customer text, so the count does
+    not depend on the parser under test): «побед» in 5 calls, «донецк» in 2,
+    «героев днепра» in 2, «левый берег» in 1 — every one of them answered
+    `not_mentioned`, which the FSM reads as «said nothing about a station»
+    rather than «could not pin it down».
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # call 24b84e49 2026-09-14, verbatim — the FSM sat in STATION for
+            # the whole call while the LLM went ahead and booked the fitting.
+            "на Победе",
+            "Днепро на Победе на",
+            "хочу на победі записати",  # RU speech through a uk-UA STT model
+            "Набережная Победы",
+            "на Победе шиномонтаж нужен",
+        ],
+    )
+    def test_russian_peremohy_is_the_same_landmark(self, text):
+        result = parse(text)
+        assert result.fields["station_hint"] == "Перемоги"
+
+    def test_russian_peremohy_supplies_no_city_either(self):
+        # Same ambivalence as the Ukrainian stem: a district in Дніпро and a
+        # street in Запоріжжя. Reaching the landmark table in Russian must not
+        # buy a city the Ukrainian rows are deliberately denied.
+        assert "city" not in parse("на Победе").fields
+
+    @pytest.mark.parametrize(
+        ("text", "label", "city"),
+        [
+            ("Холодная гора", "Холодногірська", "Харків"),
+            ("на холодногорской", "Холодногірська", "Харків"),
+            ("жм Победа", "ЖМ Перемога", "Дніпро"),
+            ("Донецкое шоссе", "Донецьке шосе", "Дніпро"),
+            ("Княгини Ольги", "Княгині Ольги", "Дніпро"),
+            ("Приднепровск", "Придніпровськ", "Дніпро"),
+            ("на тополе", "Тополь", "Дніпро"),
+            ("Днепрошина", "Дніпрошина", "Дніпро"),
+        ],
+    )
+    def test_russian_forms_reach_their_ukrainian_label(self, text, label, city):
+        result = parse(text)
+        assert result.fields["station_hint"] == label
+        assert result.fields["city"] == city
+
+    @pytest.mark.parametrize("text", ["Холодная гора", "Холодна гора"])
+    def test_the_two_word_form_of_kholodna_hora_works_in_both_languages(self, text):
+        # The Ukrainian row predates this change and nothing covered it — a
+        # mutation deleting it survived the suite. Pinned here beside the
+        # Russian row it was the model for, since a spelling reachable in one
+        # language only is exactly the defect this class is about.
+        assert parse(text).fields["station_hint"] == "Холодногірська"
+
+    @pytest.mark.parametrize(
+        ("text", "label"),
+        [
+            ("Героев Днепра", "Героїв Дніпра"),
+            ("на левом берегу", "Лівий берег"),
+            ("левый берег", "Лівий берег"),
+            ("правый берег", "Правий берег"),
+        ],
+    )
+    def test_russian_forms_of_the_city_agnostic_labels(self, text, label):
+        result = parse(text)
+        assert result.fields["station_hint"] == label
+        assert "city" not in result.fields
+
+
+class TestObliqueCasesNeedStemsNotPhrases:
+    """A row spelling out the whole phrase matches the nominative and nothing else.
+
+    The defect «запорізьк» was already fixed for (call `4fcb70d4`), found again
+    in three more rows by walking the table. Both halves of these names
+    decline, so the nominative is the one form a caller is least likely to
+    speak: 3 of the 9 prod calls naming Тополь said «на тополі» / «про тополі»
+    / «тополя», and 4 of the 19 naming Донецьке шосе used an oblique case.
+    """
+
+    @pytest.mark.parametrize("text", ["на тополі", "про тополі", "тополя", "на тополе", "Тополь"])
+    def test_topol_declines(self, text):
+        assert parse(text).fields["station_hint"] == "Тополь"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "на Донецькому шосе",
+            "Донецьке шосе",
+            "Донецке шоссе",
+            "по Донецкому шоссе",
+        ],
+    )
+    def test_donetske_shose_declines(self, text):
+        assert parse(text).fields["station_hint"] == "Донецьке шосе"
+
+    @pytest.mark.parametrize(
+        "text", ["на лівому березі", "лівий берег", "на левом берегу", "левый берег"]
+    )
+    def test_both_banks_decline_in_both_languages(self, text):
+        assert parse(text).fields["station_hint"] == "Лівий берег"
+
+
+class TestAGenericLabelLosesToAStreet:
+    """«Лівий берег» names half a city; anything else in the turn beats it.
+
+    Patterns are ordered longest-stem-first, and stem length is a fair proxy
+    for specificity only among rows of comparable scope. These two rows break
+    it by being long *and* vague — long enough to win the tie-break, vague
+    enough that winning is wrong. Prod turn «Левый берег Харьковское шоссе»
+    named the street that actually has a station on it and got the bank.
+    """
+
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            ("Левый берег Харьковское шоссе", "Харківське шосе"),
+            ("лівий берег Харківське шосе", "Харківське шосе"),
+            ("лівий берег, Оболонь", "Оболонь"),
+            ("правый берег Победа", "Перемоги"),
+        ],
+    )
+    def test_the_more_specific_landmark_wins(self, text, expected):
+        assert parse(text).fields["station_hint"] == expected
+
+    def test_the_bank_still_answers_when_it_is_all_the_caller_said(self):
+        # Demoting the generic labels must not disable them: on its own the
+        # bank is still the only search key there is.
+        assert parse("я на лівому березі").fields["station_hint"] == "Лівий берег"
+
+
 class TestConfidence:
     """Unambiguous detections are 1.0; ambiguous ones stay below the threshold."""
 

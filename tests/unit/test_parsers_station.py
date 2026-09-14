@@ -1030,3 +1030,96 @@ class TestTheCityChangePromptIsRefusedWithoutHelpFromTheCity:
         make the test above pass without the rule doing anything."""
         c = proposal_ctx("підтверджую", [KEEP_THIS_STATION], stations=B394F6C1_SNAPSHOT)
         assert resolve_proposed_station(c).value == "000000003"
+
+
+#: Verbatim prod row — the other station «побед» can reach, in another city.
+ZAPORIZHZHIA: dict = {
+    "id": "000000009",
+    "city": "Запоріжжя",
+    "name": "8З (Запорожье, ул. Победы, 72Б)",
+    "phone": "(067) 130-36-32",
+    "address": "м. Запоріжжя, вул. Перемоги, 72б",
+    "district": "Набережна, район Перемоги",
+    "landmarks": "вул. Перемоги 72б, також кажуть Набережная або Победы",
+}
+
+
+class TestTheCallerWhoSpeaksRussian:
+    """Russian names the same places; the resolver must reach the same ids.
+
+    Call `24b84e49` (2026-09-14): the caller said «на Победе» four times and
+    the parser answered `not_mentioned` every time — not «could not pin it
+    down», but «said nothing about a station», so STATION never filled and the
+    FSM sat in that state for the whole call while the LLM booked the fitting
+    on its own. The station the caller meant is `000000003`, which is the
+    address the bot then read out.
+
+    Stations here are the same verbatim prod snapshot the class above uses: a
+    Russian key that matched an invented fixture would prove nothing, because
+    the catalog itself is written in Ukrainian and the Russian forms survive in
+    it only where 1C happened to type them.
+    """
+
+    def test_na_pobede_reaches_the_station_na_peremozi_reaches(self) -> None:
+        ru = ctx("на Победе", stations=B394F6C1_SNAPSHOT, city="Дніпро")
+        resolved = resolve_station_from_session(ru, PARSER.parse(ru))
+
+        assert resolved.status == "value"
+        assert resolved.value == "000000003"
+        assert resolved.confidence == _RESOLVED_CONFIDENCE
+
+        ua = ctx("на перемозі", stations=B394F6C1_SNAPSHOT, city="Дніпро")
+        assert resolve_station_from_session(ua, PARSER.parse(ua)).value == resolved.value
+
+    def test_the_sync_pass_alone_still_pins_nothing(self) -> None:
+        """Reaching the table must not smuggle in an id: §4 holds in Russian."""
+        outcome = PARSER.parse(ctx("на Победе"))
+        assert outcome.status == "unresolved"
+        assert outcome.value == "Перемоги"
+        assert outcome.confidence == _HINT_CONFIDENCE
+
+    def test_without_a_city_the_russian_form_is_refused_like_the_ukrainian_one(
+        self,
+    ) -> None:
+        """Default-deny survives the new row — «Победы» is in Запоріжжя too."""
+        both = [*B394F6C1_SNAPSHOT, ZAPORIZHZHIA]
+        assert (
+            resolve_station_from_session(
+                ctx("на Победе", stations=both), PARSER.parse(ctx("на Победе", stations=both))
+            ).status
+            == "unresolved"
+        )
+
+    def test_the_zaporizhzhia_row_really_is_reachable_by_the_russian_stem(self) -> None:
+        """Guards the fixture above (`feedback_gate_added_to_pass_tests`).
+
+        If «побед» matched nothing in this row the refusal would be one
+        candidate refusing itself, and the test would pass with the city filter
+        switched off entirely.
+        """
+        c = ctx("на Победе", stations=[ZAPORIZHZHIA], city="Запоріжжя")
+        assert resolve_station_from_session(c, PARSER.parse(c)).value == "000000009"
+
+    @pytest.mark.parametrize(
+        ("text", "station_id"),
+        [
+            ("на тополе", "000000005"),
+            ("на тополі", "000000005"),
+            ("Донецкое шоссе", "000000001"),
+            ("на Донецькому шосе", "000000001"),
+            ("Княгини Ольги", "000000019"),
+        ],
+    )
+    def test_the_other_repaired_rows_resolve_end_to_end(self, text: str, station_id: str) -> None:
+        """Both languages *and* both cases, against the one prod snapshot.
+
+        The oblique Ukrainian forms are listed beside the Russian ones on
+        purpose: «тополь» and «донецьке шосе» were spelled out in full, so they
+        matched the nominative and nothing else — the Russian gap and the
+        inflection gap are the same defect seen from two sides.
+        """
+        c = ctx(text, stations=B394F6C1_SNAPSHOT, city="Дніпро")
+        resolved = resolve_station_from_session(c, PARSER.parse(c))
+
+        assert resolved.status == "value"
+        assert resolved.value == station_id

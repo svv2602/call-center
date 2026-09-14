@@ -275,15 +275,25 @@ _LANDMARKS: tuple[tuple[str, str, str | None], ...] = (
     # the truth. Prod agrees: every «Героїв Дніпра» in `call_turns` is the bot
     # naming that address — no caller has ever used it as a landmark.
     ("героїв дніпра", "Героїв Дніпра", None),
+    ("героев днепра", "Героїв Дніпра", None),
     # --- Харків ---
     ("холодногірськ", "Холодногірська", "Харків"),
     ("холодногорск", "Холодногірська", "Харків"),
     ("холодна гора", "Холодногірська", "Харків"),
+    ("холодная гора", "Холодногірська", "Харків"),
     # --- Дніпро ---
     ("жм перемог", "ЖМ Перемога", "Дніпро"),
+    ("жм побед", "ЖМ Перемога", "Дніпро"),
     ("речпорт", "Речпорт", "Дніпро"),
-    ("донецьке шосе", "Донецьке шосе", "Дніпро"),
-    ("донецкое шоссе", "Донецьке шосе", "Дніпро"),
+    # Adjective stem without the noun, like «запорізьк» below and for the same
+    # reason: both halves of the phrase decline («на Донецькому шосе», «Донецке
+    # шоссе»), so a row spelling the whole thing out matches the nominative and
+    # nothing else. Four calls in 45 days said a form the phrase rows missed.
+    # Bare «Донецьк» the city would now land here too — it is not in
+    # `_CITY_STEMS` (only the five served cities are), it is not served, and a
+    # caller who names it is better off at a Dnipro street than silently dropped.
+    ("донецьк", "Донецьке шосе", "Дніпро"),
+    ("донецк", "Донецьке шосе", "Дніпро"),
     # Stems, not the whole phrase — the same shape as «харьковск» above, and for
     # the same reason. Spelled out in full these matched the nominative only, so
     # «на запорожском шоссе» sailed past the landmark pass and the city stem
@@ -296,11 +306,17 @@ _LANDMARKS: tuple[tuple[str, str, str | None], ...] = (
     ("запорожск", "Запорізьке шосе", "Дніпро"),
     ("добровольц", "Добровольців", "Дніпро"),
     ("княгині ольги", "Княгині Ольги", "Дніпро"),
+    ("княгини ольги", "Княгині Ольги", "Дніпро"),
     ("кротов", "Бориса Кротова", "Дніпро"),
     ("придніпровськ", "Придніпровськ", "Дніпро"),
-    ("тополь", "Тополь", "Дніпро"),
+    ("приднепровск", "Придніпровськ", "Дніпро"),
+    # «тополь» matched the nominative only, and the soft sign is exactly what
+    # every other form drops — «на тополі», «про тополі», «тополя» are 3 of the
+    # 9 prod calls that name this district, and RU «на тополе» is a fourth shape.
+    ("топол", "Тополь", "Дніпро"),
     ("караван", "Караван", "Дніпро"),
     ("дніпрошин", "Дніпрошина", "Дніпро"),
+    ("днепрошин", "Дніпрошина", "Дніпро"),
     # --- Ambivalent: a landmark that exists in more than one city ---
     # «Перемоги» is a street in Запоріжжя AND a whole residential district in
     # Дніпро, and the bare word decides neither. `prompts.py:460` already says
@@ -323,9 +339,28 @@ _LANDMARKS: tuple[tuple[str, str, str | None], ...] = (
     # whole table matched against the station catalog — see phase 02.
     ("перемог", "Перемоги", None),
     ("перемоз", "Перемоги", None),
+    # The Russian root of the same word, and the row this whole change exists
+    # for. Five callers in 45 days named this district in Russian — «на Победе»
+    # ×3, «Победы», and the mixed «на победі» STT emits when the caller speaks
+    # Russian into a uk-UA model. All five returned `not_mentioned`: not «we
+    # could not pin it down», but «they said nothing about a station». STATION
+    # therefore never filled, and on `24b84e49` (2026-09-14) the FSM sat in that
+    # state for the whole call while the LLM booked the fitting without it.
+    # The city stays `None` for the same reason the Ukrainian rows carry none.
+    ("побед", "Перемоги", None),
     # --- City-agnostic districts (present in more than one city) ---
+    # Both halves decline and the noun changes its stem («берег» → «березі»), so
+    # each bank needs the nominative and the locative in both languages. Adding
+    # only the Russian pair would leave «на лівому березі» — one prod call —
+    # broken while its Russian twin worked.
     ("лівий берег", "Лівий берег", None),
+    ("лівому берез", "Лівий берег", None),
+    ("левый берег", "Лівий берег", None),
+    ("левом берег", "Лівий берег", None),
     ("правий берег", "Правий берег", None),
+    ("правому берез", "Правий берег", None),
+    ("правый берег", "Правий берег", None),
+    ("правом берег", "Правий берег", None),
     ("автовокзал", "Автовокзал", None),
 )
 
@@ -362,9 +397,20 @@ def _build_landmark_keys() -> dict[str, tuple[str, ...]]:
 
 _LANDMARK_KEYS: dict[str, tuple[str, ...]] = _build_landmark_keys()
 
+#: Labels that name half a city rather than a place inside it. Every other row
+#: is a street, a district or a building, and any of them is a better answer
+#: than «the left bank» when the caller said both.
+#:
+#: Stem length is the tie-break for everything else, and it is a decent proxy
+#: for specificity — but only among rows of comparable scope. These two break
+#: it by being long *and* vague: prod turn «Левый берег Харьковское шоссе»
+#: picked the bank over the street that actually has a station on it, and the
+#: Ukrainian «Лівий берег Харківське шосе» did so before this table was touched.
+_GENERIC_LABELS: frozenset[str] = frozenset({"Лівий берег", "Правий берег"})
+
 _LANDMARK_PATTERNS: tuple[tuple[re.Pattern[str], str, str | None], ...] = tuple(
     (re.compile(r"\b" + re.escape(stem)), label, city)
-    for stem, label, city in sorted(_LANDMARKS, key=lambda t: -len(t[0]))
+    for stem, label, city in sorted(_LANDMARKS, key=lambda t: (t[1] in _GENERIC_LABELS, -len(t[0])))
 )
 
 
