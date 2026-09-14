@@ -36,6 +36,13 @@ wide list, bot did not ask              `0.5`        `unresolved`; feeds the
 The `0.9` level is unreachable in the broad pass, which has no bot utterance —
 one field, two confidences, which is the whole argument for variant A (§3.1).
 
+The table describes both values, but for a long time only one of them had both
+rows. «own» had a wide list and a narrow one; «contract» had the narrow list
+alone, so a contract answer in anything but six exact phrasings produced no
+field, STORAGE ran out of attempts, and `_storage_null_exhausted` defaulted the
+caller to «own» — the opposite of what she said. `_STORAGE_CONTRACT_HINTS`
+below is the missing row; the measurement that found it is in its own comment.
+
 **Ambiguity is not a coin flip.** An utterance carrying both readings («свої
 привезу, чи те що у вас на зберіганні?») yields no value. `detect_storage_choice`
 already does this for the narrow lists; §3.6 extends it to the wide one, so a
@@ -165,6 +172,35 @@ _STORAGE_OWN_HINTS: tuple[str, ...] = (
     "ніколи не здавав",
     "нема сина зберіга",  # STT mangle of «немає жодного зберігання»/«немає нашого»
     "немає сина зберіга",
+    # «без зберігання» — the caller giving up on a contract mid-flow, which is
+    # an answer of «own» and not a mention of storage. It has to be listed here
+    # rather than left to `_STORAGE_CONTRACT_HINTS` below, because that list is
+    # a bare stem and would read this sentence as its opposite. `5eab4e85`,
+    # 2026-08-19: the caller answered Krok 2 with «на зберігання», the contract
+    # lookup found nothing under her number, and she closed it with «давайте без
+    # зберігання / сама привезу шини».
+    "без зберіган",
+    # Bare «привезу». The list carried «привезу з собою» and «свої привезу» but
+    # never the verb on its own, so a one-word answer to a two-option question
+    # parsed as nothing. Sixty-one prod utterances over six weeks contain
+    # «привез», and **every one** of them is the caller bringing tires —
+    # including the negations: `4420cbc1` answered «Алло Ще не привезу», the bot
+    # guessed storage, and the caller corrected it with «Ні не потрібно».
+    # First person only: «привезіть» would be the caller asking *us* to bring
+    # the set out of storage, which is the opposite reading, and a «привез»
+    # stem would swallow it.
+    "привезу",
+    # «твої» / «твои» — literally «yours», which reads like the second option
+    # and is not. Eleven prod utterances: six of them sit directly beside an
+    # unambiguous own marker («твої з собою», «твої з тобою привезу», «твои
+    # собою»), and of the five bare ones two were resolved out loud — `0f8ca012`
+    # was asked «Правильно розумію, шини привозите свої з собою?» and said
+    # «так»; `62bf7bfc` had the bot take it as a contract, go looking, and get
+    # «привезу свої, в мене нема договору на зберігання» back. None of the
+    # eleven ever meant storage. Same family as «тобою»/«тобой» above: the
+    # caller's own possessive comes out in the second person.
+    "твої",
+    "твои",
 )
 
 # Context-scoped: «в мене нема»/«у мене немає» = storage denial ONLY if the bot
@@ -205,6 +241,43 @@ _STORAGE_SELF_EVIDENT_CONTRACT: tuple[str, ...] = (
     "зберігання у вас",
     "зі складу",
 )
+
+#: The contract side of the wide list, and until now it did not exist: «own»
+#: had two tiers — a wide one for STT mangles and a narrow self-evident one —
+#: while «contract» had only the narrow one. So every mangled contract answer
+#: fell straight through to `NOT_MENTIONED`, and `_storage_null_exhausted`
+#: (`fitting_fsm.py`) then wrote «own» into the field, booking a caller whose
+#: tires are on our shelf as if she were bringing her own.
+#:
+#: The asymmetry is measurable. Across 201 answers to the real Krok 2 question
+#: in the 45-day corpus the narrow list matched «contract» **twice** — both
+#: times on the locative «ті що на зберіганні». Thirteen further answers said
+#: the same thing in the accusative or with the preposition chewed off — «на
+#: зберігання», «ті що нас зберіганні», «шины на зберігання», «еще одна
+#: зберігання» — and produced no field at all. The list carries «на
+#: зберіган**ні**» and not «на зберіган**ня**», and that single letter is the
+#: whole defect.
+#:
+#: A bare stem rather than more phrases, because the phrases are what failed:
+#: the caller's words survive STT, the prepositions around them do not. All 20
+#: prod utterances containing «зберіган» are about storage — 15 claiming a
+#: contract, 3 denying one (now covered by `_STORAGE_OWN_HINTS`, which is
+#: consulted first), and 2 self-evident. There is no third context in which the
+#: word appears.
+#:
+#: Wide only, exactly like «собою» and «свої» on the own side: a 0.9 inside
+#: STORAGE where there is nothing left to skip, and 0.5 from the broad pass,
+#: which cannot fill the field from another state. Skipping the state stays the
+#: privilege of `_STORAGE_SELF_EVIDENT_CONTRACT`.
+#:
+#: One language, deliberately, and this is the exception that proves the rule
+#: the own list follows. The own markers are paired UA/RU because callers really
+#: do answer «с собой» and «свои». The Russian «хранен» has **zero** occurrences
+#: in 45 days, and the mechanism is visible in the misses themselves: «шины на
+#: зберігання», «сыны у вас на зберігання», «еще на зберігання» are Russian
+#: sentences carrying the Ukrainian noun, because the caller echoes the word the
+#: question used. A Russian stem here would be a branch no caller can reach.
+_STORAGE_CONTRACT_HINTS: tuple[str, ...] = ("зберіган",)
 
 
 def _bot_is_asking_storage(last_bot_utterance: str) -> bool:
@@ -268,6 +341,7 @@ class StorageChoiceParser:
 
         asking = _bot_is_asking_storage(ctx.last_bot_utterance)
         wide_own = detect_own_tires(text, asking_storage=asking)
+        wide_contract = any(h in lowered for h in _STORAGE_CONTRACT_HINTS)
 
         if (self_evident_own or wide_own) and self_evident_contract:
             logger.debug("storage_choice_parser: both readings present — no value")
@@ -277,8 +351,16 @@ class StorageChoiceParser:
             return graded("own", _SELF_EVIDENT_CONFIDENCE)
         if self_evident_contract:
             return graded("contract", _SELF_EVIDENT_CONFIDENCE)
+        # `wide_own` outranks `wide_contract` deliberately, and the ordering is
+        # the negation rule: every own marker that mentions storage at all is a
+        # denial of it — «нема зберігання», «не здавав на зберігання», «без
+        # зберігання» — so the sentence names the word and rejects the thing.
+        # Reading those two hits as an ambiguity would answer «we could not
+        # tell» to a caller who was perfectly clear.
         if wide_own:
             return graded("own", _ASKED_CONFIDENCE if asking else _UNASKED_CONFIDENCE)
+        if wide_contract:
+            return graded("contract", _ASKED_CONFIDENCE if asking else _UNASKED_CONFIDENCE)
         return NOT_MENTIONED
 
 

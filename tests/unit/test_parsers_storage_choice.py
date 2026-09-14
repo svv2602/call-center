@@ -284,6 +284,213 @@ class TestTheBareStem:
         assert PARSER.parse(ctx("свої на зберіганні", bot=STORAGE_QUESTION)).value is None
 
 
+class TestTheContractSideHasAWideListToo:
+    """Until now it did not, and that was the whole defect.
+
+    «own» had two tiers, «contract» had one. So a contract answer that survived
+    STT in anything but the six self-evident phrasings fell through to
+    `NOT_MENTIONED`, STORAGE ran out of attempts, and `_storage_null_exhausted`
+    wrote «own» into the field — booking a caller whose tires sit on our shelf
+    as if she were bringing her own.
+
+    Measured on the 45-day corpus: of 201 answers to the real Krok 2 question
+    the narrow list matched «contract» **twice**, both on the locative «ті що на
+    зберіганні». Thirteen more said the same thing in the accusative or with the
+    preposition chewed off and produced no field at all. Every phrase below is
+    one of those thirteen, verbatim.
+    """
+
+    #: The question as the bot really asks it — 122 of the 201 answers followed
+    #: exactly this wording.
+    KROK_2 = "Шини привозите свої з собою чи ті, що у нас на зберіганні?"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "на зберігання",  # 5eab4e85 / 891d84f0 / 876cb499
+            "ті що на зберігання",  # 8cde0bb4
+            "ті що нас зберіганні",  # bd04bd50 / 6559865b
+            "ті що нас зберігання",  # d4524b06
+            "шины на зберігання",  # cc5e1361
+            "еще на зберігання",  # 2b190be3 / 3b4616b8
+            "и еще на зберігання",  # cfdd7d65
+            "еще у нас зберігання",  # 40fa9b38
+            "еще одна зберігання",  # bbfeb036
+        ],
+    )
+    def test_the_thirteen_answers_that_used_to_produce_nothing(self, text: str) -> None:
+        outcome = PARSER.parse(ctx(text, bot=self.KROK_2))
+        assert outcome.status == "value"
+        assert outcome.value == "contract"
+
+    def test_one_letter_was_the_difference(self) -> None:
+        """The narrow list carries the locative and not the accusative.
+
+        «на зберіган**ні**» skipped the state; «на зберіган**ня**» matched
+        nothing whatsoever. Both are the same answer, and no caller chooses a
+        case to suit a tuple of literals.
+        """
+        assert detect_storage_choice("ті що на зберіганні") == "contract"
+        assert detect_storage_choice("ті що на зберігання") is None
+
+        locative = PARSER.parse(ctx("ті що на зберіганні", bot=self.KROK_2))
+        accusative = PARSER.parse(ctx("ті що на зберігання", bot=self.KROK_2))
+        assert locative.value == accusative.value == "contract"
+
+    def test_it_stays_wide_and_never_skips_the_state(self) -> None:
+        """Mirror of `TestTheBareStem` — a stem is a nudge, not a state skip.
+
+        The self-evident list is still the only thing allowed to answer for a
+        question that was never asked, which is why `detect_storage_choice`
+        below must stay blind to the stem.
+        """
+        asked = PARSER.parse(ctx("на зберігання", bot=self.KROK_2))
+        assert asked.confidence == _ASKED_CONFIDENCE
+        assert asked.confidence < _SELF_EVIDENT_CONFIDENCE
+
+        unasked = PARSER.parse(ctx("на зберігання"))
+        assert unasked.status == "unresolved"
+        assert unasked.confidence == _UNASKED_CONFIDENCE
+        assert unasked.confidence < APPLY_THRESHOLD
+
+    def test_the_state_skipping_path_never_learned_the_stem(self) -> None:
+        """`detect_storage_choice` is context-free and may skip STORAGE.
+
+        The wide contract list lives in `parse` alone. If it ever leaks into
+        here, a caller who merely says the word «зберігання» in passing stops
+        being asked the question.
+        """
+        assert detect_storage_choice("на зберігання") is None
+        assert detect_storage_choice("еще одна зберігання") is None
+        assert detect_storage_choice("на зберіганні") == "contract"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "шины на зберігання",  # cc5e1361
+            "сыны у вас на зберігання",  # cc5e1361, the turn after
+            "еще на зберігання",  # 2b190be3 / 3b4616b8
+            "и еще на зберігання",  # cfdd7d65
+        ],
+    )
+    def test_the_russian_caller_echoes_the_ukrainian_noun(self, text: str) -> None:
+        """Which is why this list is one language and the own list is two.
+
+        The own markers are paired UA/RU because callers really do answer «с
+        собой» and «свои» — their own words. The storage noun is not theirs: it
+        comes from the question, so it survives the language switch intact.
+        «хранен» has zero occurrences in the 45-day corpus, and a stem no caller
+        can reach is a branch that can only ever be wrong by accident.
+        """
+        assert PARSER.parse(ctx(text, bot=self.KROK_2)).value == "contract"
+
+    def test_the_legacy_nudge_never_learned_it_either(self) -> None:
+        """`detect_own_tires` answers one question: own, yes or no."""
+        assert detect_own_tires("на зберігання", asking_storage=True) is False
+        assert detect_own_tires("на зберігання", asking_storage=False) is False
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "ящина привезу свої в мене нема договору на зберігання",  # 62bf7bfc
+            "нема зберігання",
+            "не здавав на зберігання",
+        ],
+    )
+    def test_a_denial_of_storage_outranks_the_stem(self, text: str) -> None:
+        """The sentence names the word and rejects the thing.
+
+        Every own marker that mentions storage at all is a denial of it, so the
+        two hits are not an ambiguity — reading them as one would answer «we
+        could not tell» to a caller who was perfectly clear.
+        """
+        outcome = PARSER.parse(ctx(text, bot=self.KROK_2))
+        assert outcome.status == "value"
+        assert outcome.value == "own"
+
+    def test_giving_up_on_the_contract_no_longer_reads_as_having_one(self) -> None:
+        """`5eab4e85`, 2026-08-19 — «давайте без зберігання».
+
+        The caller answered Krok 2 with «на зберігання», the lookup found no
+        contract under her number, and she closed it with this. It used to come
+        back «contract» at full confidence — `«бе|з зберігання»` matches the
+        self-evident literal «з зберігання» as a substring — which is the
+        opposite value *and* grounds to skip the state. It is now ambiguous
+        rather than own, because that substring still matches; ambiguous costs a
+        re-ask, which is what the call did anyway.
+        """
+        outcome = PARSER.parse(ctx("давайте без зберігання", bot=self.KROK_2))
+        assert outcome.value != "contract"
+        assert outcome.status == "unresolved"
+
+
+class TestTheOwnListGrewThreeShapes:
+    """Three answers to Krok 2 that the wide own list could not see.
+
+    All three were measured the same way: pull every customer utterance in the
+    45-day corpus containing the stem, and read what the caller meant.
+    """
+
+    KROK_2 = TestTheContractSideHasAWideListToo.KROK_2
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "твої",  # 62bf7bfc / 21f61d17 / 09668c25
+            "твои",  # 23a189af, 2026-09-14
+            "твои твои",  # 0f8ca012
+        ],
+    )
+    def test_the_possessive_comes_out_in_the_second_person(self, text: str) -> None:
+        """«твої» reads like the second option and never once meant it.
+
+        Eleven prod utterances carry the stem. Six sit directly beside an
+        unambiguous own marker — «твої з собою», «твої з тобою привезу», «твои
+        собою». Of the five bare ones two were resolved out loud: `0f8ca012` was
+        asked «Правильно розумію, шини привозите свої з собою?» and said «так»;
+        `62bf7bfc` had the bot take it for a contract, go looking, and get back
+        «привезу свої, в мене нема договору на зберігання».
+
+        Same family as «тобою»/«тобой», which the list has carried since Wave 4.
+        """
+        outcome = PARSER.parse(ctx(text, bot=self.KROK_2))
+        assert outcome.status == "value"
+        assert outcome.value == "own"
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "привезу",  # 431e60fb, 2026-09-10
+            "любое привезу",  # 0a0afc3f, 2026-09-10
+            "Алло Ще не привезу",  # 4420cbc1
+            "ні я привезу їх",  # 6c9fec92
+            "привезу с собой",  # 7180dbb2 — the wide list had «привожу с собой» only
+        ],
+    )
+    def test_the_verb_on_its_own(self, text: str) -> None:
+        """61 prod utterances contain «привез» and every one is the caller
+        bringing tires — including the negation `4420cbc1`, where the bot
+        guessed storage and was corrected with «Ні не потрібно».
+        """
+        outcome = PARSER.parse(ctx(text, bot=self.KROK_2))
+        assert outcome.status == "value"
+        assert outcome.value == "own"
+
+    def test_only_the_first_person_form(self) -> None:
+        """«привезіть» is the caller asking *us* to fetch the set — the opposite
+        reading. A «привез» stem would have swallowed it, so the list carries
+        «привезу» and stops there.
+        """
+        assert detect_own_tires("привезіть зі зберігання", asking_storage=True) is False
+
+    def test_all_three_stay_wide(self) -> None:
+        """None of them may skip the state — they are nudges, like «свої»."""
+        for text in ("твої", "твои", "привезу"):
+            assert detect_storage_choice(text) is None
+            assert PARSER.parse(ctx(text)).status == "unresolved"
+            assert PARSER.parse(ctx(text)).confidence == _UNASKED_CONFIDENCE
+
+
 class TestContextScopedDenials:
     """«не маю» / «в мене нема» are own **only** right after Krok 2."""
 
