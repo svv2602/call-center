@@ -37,6 +37,12 @@ from src.agent.prompts import (
     fitting_steps_collected,
     next_fitting_question,
 )
+from src.agent.time_detect import (
+    asks_which_time,
+    denies_a_slot,
+    detect_time_choice,
+    lists_alternative_times,
+)
 from src.agent.tool_result_compressor import compress_tool_result
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
 from src.core.audio_sender import send_audio_stream
@@ -54,6 +60,7 @@ from src.monitoring.metrics import (
     history_compression_mode,
     history_messages_count,
     llm_stop_reason_total,
+    reopened_time_choice_total,
     settled_question_redirect_skipped_total,
     settled_question_redirected_total,
     system_prompt_chars,
@@ -631,6 +638,132 @@ async def redirect_settled_question(
         yield queued
 
 
+def _last_user_text(history: list[dict[str, Any]]) -> str:
+    """The caller's most recent words, flattened out of the content blocks."""
+    for msg in reversed(history):
+        if msg.get("role") != "user":
+            continue
+        content = msg.get("content")
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            parts = [
+                str(block.get("text", ""))
+                for block in content
+                if isinstance(block, dict) and block.get("type") == "text"
+            ]
+            if any(parts):
+                return " ".join(parts)
+    return ""
+
+
+async def confirm_settled_time(
+    stream: AsyncIterator[BufferEvent],
+    offered_slots: list[dict[str, str]] | None,
+    history: list[dict[str, Any]],
+) -> AsyncIterator[BufferEvent]:
+    """Accept the slot the caller named instead of asking for it again.
+
+    Fires only when the caller's own last turn named the hour *and* the minutes
+    and the result is on the offered list — `detect_time_choice` with the
+    bare-hour widening switched off. Note what that does and does not exclude:
+    the 12-hour reading still applies, so «5:00» matches an offered 17:00 (call
+    `74c61ff8`), but the membership test bounds it — a time the bot never
+    offered can never arm the gate.
+
+    That precondition is the whole safety argument. A bare hour is a different
+    situation: «Алло на 9» against a list holding both 09:00 and 09:40 leaves a
+    real choice open, and «на 15.10» pins 10:20 once the widening is on, so
+    silencing the bot there would confirm a slot five hours from the one asked
+    for. Both shapes are in the corpus; with the widening off both return
+    ``None`` and neither reaches this gate.
+
+    Measured over 4994 bot sentences from the 196 calls that reached
+    `get_fitting_slots` in 45 days: twelve firings across eight calls, all
+    twelve defects, no other sentence touched. The three triggers matched 279
+    further sentences on turns where the caller had named no full time — the bot
+    legitimately asking which hour, declining one it had not offered, or reading
+    the list out for the first time — and the pick precondition is what keeps
+    the gate off every one of them.
+
+    Two of the twelve are anti-patterns `prompts.py` already names by call id
+    (lines 588 and 593). They were in the context window when they fired, which
+    is the argument for spending a gate here rather than a seventh prompt line.
+    Three calls fire twice, and they are why the gate drops *every* match in the
+    turn rather than only the first: `add8354b`, `74c61ff8` and `9c82ce3d` each
+    denied the slot in one sentence and re-read the list in the next, so a gate
+    that stopped after the denial would put the acceptance and the contradiction
+    into the same breath.
+    """
+    offered_times = [s["time"] for s in (offered_slots or []) if s.get("time")]
+    picked = (
+        detect_time_choice(_last_user_text(history), offered_times, allow_hour_only=False)
+        if offered_times
+        else None
+    )
+    if not picked:
+        async for event in stream:
+            yield event
+        return
+
+    replacement = f"Добре, {picked} прийнято."
+    held: list[SentenceReady] = []
+    pending = ""
+    tail: str | None = None
+    fired = False
+
+    def ends_sentence(text: str) -> bool:
+        return text.rstrip().endswith((".", "!", "?"))
+
+    async for event in stream:
+        if not isinstance(event, SentenceReady):
+            for queued in held:
+                yield queued
+            held, pending, tail = [], "", None
+            yield event
+            continue
+
+        if tail is not None:
+            if tail == "speak":
+                yield event
+            if ends_sentence(event.text):
+                tail = None
+            continue
+
+        held.append(event)
+        pending = f"{pending} {event.text}".strip()
+
+        if not (
+            asks_which_time(pending) or denies_a_slot(pending) or lists_alternative_times(pending)
+        ):
+            if ends_sentence(pending):
+                for queued in held:
+                    yield queued
+                held, pending = [], ""
+            continue
+
+        # Every re-opening in the turn is dropped, but the acceptance is spoken
+        # once. A turn that argues with itself twice — `add8354b` denied the
+        # slot and then re-read the whole list — would otherwise have the second
+        # half reach the caller behind an acceptance of the first.
+        reopened_time_choice_total.inc()
+        logger.warning(
+            "Caller already picked %s off the offered list — speaking %r "
+            "instead of re-opening the choice with %r",
+            picked,
+            replacement if not fired else "nothing",
+            pending[:120],
+        )
+        if not fired:
+            fired = True
+            yield SentenceReady(text=replacement)
+        tail = None if ends_sentence(pending) else "drop"
+        held, pending = [], ""
+
+    for queued in held:
+        yield queued
+
+
 #: Canonical tool names, read off the registry rather than copied out, so that
 #: tool 21 is covered on the day it is added and not on the day someone
 #: remembers this list exists.
@@ -1092,9 +1225,21 @@ class StreamingAgentLoop:
                 # machinery sentence swallowed by a neighbour would leave this
                 # defect invisible in exactly the way it stayed invisible for
                 # 30 days.
+                # `confirm_settled_time` sits inside `redirect_settled_question`
+                # so that it judges the LLM's own words and never a replacement
+                # the checklist filter substituted — `next_fitting_question` can
+                # itself return «О котрій зручніше?», and a gate that rewrote
+                # that would be answering its neighbour rather than the caller.
+                # The reverse order is safe in the other direction: this gate's
+                # replacement is an acceptance, not a request, so
+                # `settled_field_asked` never looks at it.
                 buffered = hold_unconfirmed_transfer_promise(
                     redirect_settled_question(
-                        drop_control_plane_prose(buffer_sentences(stream), _current_call_id()),
+                        confirm_settled_time(
+                            drop_control_plane_prose(buffer_sentences(stream), _current_call_id()),
+                            offered_slots,
+                            conversation_history,
+                        ),
                         fitting_progress,
                         conversation_history,
                     ),

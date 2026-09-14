@@ -129,6 +129,100 @@ _TIME_QUESTION_RE = re.compile(
     re.IGNORECASE,
 )
 
+#: The bot taking the time rather than asking about it. A sentence carrying one
+#: of these is an acceptance, a Krok 8 read-back or a booking summary, and every
+#: one of them legitimately repeats the `HH:MM` the caller just picked: «Добре,
+#: 13:00 прийнято.», «Отже, записую на 5 серпня о 11:00 — назвіть ваше ім'я?»,
+#: «перевіримо: чотирнадцяте вересня о 13:00 … Підтверджуєте?». Without the veto
+#: the last two read as questions that mention a time and would be silenced.
+_TIME_ACCEPTED_RE = re.compile(
+    r"прийнят\w*|прийма\w*|запису\w*|запиш\w*|перевірим\w*|підтверд\w*|"
+    r"заброньован\w*|бронюю",
+    re.IGNORECASE,
+)
+
+
+def lists_alternative_times(sentence: str) -> bool:
+    """True when the sentence reads out two or more times as if the choice were open.
+
+    Question mark optional, which is the whole reason this is separate from
+    `asks_which_time`. Three of the twelve firings in the 45-day corpus are
+    plain statements: `159e7b49` answered «на 13:00» by reciting the entire list
+    back — «На четверте вересня вільний час: 9:00, 10:20, 11:40, 13:00, 14:20.»
+    — and `74c61ff8`/`9c82ce3d` put the recital in the sentence *after* the
+    denial, where a gate keyed on questions would drop «Слоту … немає.» and then
+    let the list through behind the acceptance.
+
+    One literal is not enough: «Отже, записую на 5 серпня о 11:00 — ваше ім'я?»
+    names a time without offering a choice. The acceptance veto carries the rest
+    of the load — Krok 8 reads back two literals («о 13:00, виїзд о 13:40.
+    Підтверджуєте?») and is confirming, not re-opening.
+    """
+    if not sentence:
+        return False
+    normalized = _normalize(sentence)
+    if _TIME_ACCEPTED_RE.search(normalized):
+        return False
+    return len(_TIME_TOKEN_RE.findall(normalized)) >= 2
+
+
+def asks_which_time(sentence: str) -> bool:
+    """True when the sentence asks the caller to pick — or re-pick — an hour.
+
+    Two ways to qualify, both measured on the 45-day corpus of bot turns that
+    followed a slot pick:
+
+    * an explicit interrogative about the hour (`_TIME_QUESTION_RE`) — «О котрій
+      зручніше?»;
+    * two or more `HH:MM` literals in one question — «На 11:00 чи 11:30?», «На
+      11:40 чи 11:40 точно?», «З переліку 9:20, 10:20 … який зручніший?».
+
+    Only the second branch takes the acceptance veto, and it takes it inside
+    `lists_alternative_times`, where it separates «На 9:00 чи 9:40?» from the
+    Krok 8 read-back. Vetoing the interrogative branch as well would be a
+    mistake: the corpus holds three questions carrying a booking verb — «На яку
+    годину записувати?», «Далі, на який час записуємо 29 серпня?», «Отже,
+    записуємо на середу, 5 серпня — який час вам підходить?» — and each of them
+    is asking which hour, not confirming one. On an armed turn they are exactly
+    the `891d84f0` defect with a verb attached.
+
+    Deliberately says nothing about whether the question is *warranted* — that
+    judgement belongs to the caller's own words and lives at the call site,
+    which asks it only after `detect_time_choice` matched a full `HH:MM`.
+    """
+    if not sentence or "?" not in sentence:
+        return False
+    if _TIME_QUESTION_RE.search(_normalize(sentence)):
+        return True
+    return lists_alternative_times(sentence)
+
+
+#: The bot telling the caller a time is not available, paired with something
+#: that makes it a time rather than a colour or a spare part. Call `add8354b`
+#: put this in its own sentence *before* the question — «Слота на чотирнадцяту
+#: двадцять немає. З переліку … який зручніший?» — so a gate that only replaced
+#: the question would let the denial through and leave the caller hearing the
+#: slot refused and accepted in the same breath, which is the self-contradiction
+#: `23a189af` was reported for.
+_SLOT_DENIED_RE = re.compile(r"нема\w*|зайнят\w*|недоступн\w*|не вільн\w*", re.IGNORECASE)
+_SLOT_SUBJECT_RE = re.compile(r"слот\w*|час\w*|годин\w*|\d{1,2}:\d{2}", re.IGNORECASE)
+
+
+def denies_a_slot(sentence: str) -> bool:
+    """True when the sentence says a time is unavailable.
+
+    Only ever consulted once the caller has been shown to have named an exact
+    `HH:MM` off the offered list, which is what makes refusing the denial safe:
+    the slot was on the list one turn ago and nothing between then and now
+    removed it. A caller whose pick really was taken reaches this through the
+    bare-hour path instead, where the gate stays off entirely.
+    """
+    if not sentence:
+        return False
+    normalized = _normalize(sentence)
+    return bool(_SLOT_DENIED_RE.search(normalized) and _SLOT_SUBJECT_RE.search(normalized))
+
+
 #: «12 вересня» is a date, not a slot. Without this the rule below would fire
 #: on the day number whenever it happened to be ≤ 20 — behaviour that depends
 #: on the calendar rather than on what the bot said. Deliberately a local copy

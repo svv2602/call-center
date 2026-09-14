@@ -143,6 +143,12 @@ settled_question_redirect_skipped_total = Counter(
     ["reason"],
 )
 
+reopened_time_choice_total = Counter(
+    "callcenter_reopened_time_choice_total",
+    "Questions re-opening a time slot the caller had already named exactly, "
+    "replaced in the TTS stream by an acceptance of that slot",
+)
+
 control_plane_prose_dropped_total = Counter(
     "callcenter_control_plane_prose_dropped_total",
     "Sentences withheld from TTS because the LLM wrote machinery — a tool call, "
