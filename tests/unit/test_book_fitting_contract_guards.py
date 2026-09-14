@@ -46,14 +46,17 @@ def _session(**overrides: Any) -> CallSession:
     """A caller who has passed every earlier guard.
 
     Name/colour/brand satisfy the required-fields and type-as-brand checks;
-    `selected_fitting_date` + `fitting_slots_offered` satisfy Krok 3/4. Without
-    all of those the handler returns long before the four guards under test,
-    and the assertions would pass for the wrong reason.
+    `selected_fitting_date` + `fitting_slots_offered` satisfy Krok 3/4;
+    `fitting_station_ids` satisfies the station cross-check, which is default-deny
+    on an empty set and stands ahead of every guard tested here. Without all of
+    those the handler returns long before the four guards under test, and the
+    assertions would pass for the wrong reason.
     """
     session = CallSession(uuid.uuid4())
     session.fitting_customer_name = "Олена"
     session.fitting_plate = "синій"
     session.fitting_vehicle_brand = "Toyota"
+    session.fitting_station_ids = {STATION, OTHER_STATION}
     session.selected_fitting_date = _tomorrow()
     session.fitting_slots_offered = [
         {"date": _tomorrow(), "time": "10:00"},

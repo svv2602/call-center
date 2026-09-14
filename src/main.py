@@ -26,6 +26,7 @@ from sqlalchemy import text
 
 from src.agent.agent import LLMAgent, ToolRouter
 from src.agent.booking_result import is_booking_confirmed
+from src.agent.color_translit import latin_prefix_to_color
 from src.agent.confirm_detect import booking_was_confirmed
 from src.agent.parsers.date_parser import resolve_tool_date
 from src.agent.prompt_manager import (
@@ -1479,6 +1480,28 @@ def _query_matches(query: str, searchable: str) -> bool:
     return True
 
 
+def _split_auto_number(auto_number: str) -> tuple[str | None, str | None]:
+    """Split a 1C ``AutoNumber`` into ``(colour, brand)``.
+
+    1C returns the two halves of the vehicle glued together —
+    ``UPPERCASE_LATIN_TRANSLIT(колір) + " " + vehicle_info`` — so a booking
+    reads «SIRIY Tiguan» or «CHORNIY Тойота Прадо». The brand half is stored
+    verbatim, Cyrillic and all; the colour half went through the one-way
+    `translit_color_to_latin` and is recovered only for the forms prod has
+    actually produced (see `latin_prefix_to_color`).
+
+    A single token carries no brand: either the colour alone, or the plate
+    debris the pre-2026-08-18 schema left in this field («4448ка», «1873»).
+    Nothing is returned then — half a vehicle is not worth guessing which half.
+    """
+    parts = (auto_number or "").strip().split(maxsplit=1)
+    if len(parts) < 2:
+        return None, None
+    colour = latin_prefix_to_color(parts[0])
+    brand = parts[1].strip() or None
+    return colour, brand
+
+
 def _build_tool_router(session: CallSession, store_client: StoreClient | None = None) -> ToolRouter:
     """Build a ToolRouter with all canonical tools registered."""
     router = ToolRouter()
@@ -1858,7 +1881,13 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             }
         station_id = station_id_raw
         kwargs["station_id"] = station_id
-        session.last_fitting_station_id = station_id
+        # Wave 1-A (2026-09-14): `session.last_fitting_station_id` used to be
+        # assigned right here, on nothing but the `\d{6,12}` shape above. On
+        # call 29ed5791 the LLM invented 000000010, which is numeric, so it
+        # stuck — 1C answered 404, and the invented id then armed the Krok 1
+        # regression guard, which refused the `get_fitting_stations` the LLM
+        # reached for to recover. Old booking cancelled, new one impossible.
+        # The pin now happens where a booking actually exists (below).
 
         # Server-side validation: time must be HH:MM (agent should ask, not invent).
         time_raw = str(kwargs.get("time", "")).strip()
@@ -1878,8 +1907,39 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             }
 
         # Cross-check against known stations for this call (belt + suspenders)
-        if session.fitting_station_ids and station_id not in session.fitting_station_ids:
+        # Wave 1-A (2026-09-14): the condition used to open with
+        # `session.fitting_station_ids and`, which made the whole guard vacuous
+        # whenever the set was empty — and on a reschedule
+        # (`get_customer_bookings → cancel_fitting → get_fitting_slots`) it was
+        # always empty, because only `get_fitting_stations` ever filled it.
+        # An empty set is not «anything goes», it is «nothing to check against»
+        # (`feedback_guards_need_default_deny`).
+        if station_id not in session.fitting_station_ids:
             known_ids = sorted(session.fitting_station_ids)
+            if not known_ids:
+                logger.warning(
+                    "book_fitting: no station has been returned by 1C in call "
+                    "%s, so station_id=%s cannot be verified — refusing",
+                    session.channel_uuid,
+                    station_id,
+                )
+                return {
+                    "error": True,
+                    "action_required": "call_get_fitting_stations",
+                    "reason": "no_known_stations",
+                    # Deliberately worded apart from «Регресія Кроку 1» and from
+                    # the «Невірний station_id» branch below: prod shows only the
+                    # first guard that fired, and two guards reading the same is
+                    # two guards nobody can tell apart afterwards.
+                    "message": (
+                        f"⛔ station_id='{station_id}' не звірити: у цьому "
+                        "дзвінку 1С ще не повертала жодної точки шиномонтажу, "
+                        "тому цей id може не існувати. Виклич "
+                        "get_fitting_stations (city або query з того, що сказав "
+                        "клієнт), візьми поле 'id' з результату і повтори "
+                        "book_fitting уже з ним. Не вигадуй id."
+                    ),
+                }
             # Auto-correct if only one valid station
             if len(known_ids) == 1:
                 logger.warning(
@@ -2064,6 +2124,11 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 if guid:
                     fittings_booked_total.inc()
                     session.fitting_booked = True
+                    # Wave 1-A: the station is pinned here and nowhere earlier
+                    # in this handler — a GUID from 1C is the only evidence the
+                    # id exists. `station_id` is the post-auto-correction value,
+                    # i.e. exactly what went into the request above.
+                    session.last_fitting_station_id = station_id
                     logger.info(
                         "book_fitting success (booking_id withheld from LLM) "
                         "for call %s: guid=%s",
@@ -2163,6 +2228,10 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         result = await client.book_fitting(**kwargs)
         if isinstance(result, dict) and result.get("id"):
             fittings_booked_total.inc()
+            # Same rule as the 1C branch: a booking exists, so the station is
+            # real. `{"error": "Store API 404: ..."}` carries no `id` and pins
+            # nothing — that is the shape call 29ed5791 got back.
+            session.last_fitting_station_id = station_id
         return result
 
     router.register("create_order_draft", _create_order_draft)
@@ -2740,7 +2809,19 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             return response
 
         # 5. Fallback to Store API
-        return await client.get_fitting_stations(city)
+        fallback = await client.get_fitting_stations(city)
+        # Wave 1-A (2026-09-14): this path reaches the LLM only when the Redis
+        # cache is cold and 1C is unreachable, but it hands out station ids all
+        # the same — and `book_fitting`'s cross-check is default-deny now. Left
+        # unfilled, the set stays empty, every booking is refused with
+        # «call get_fitting_stations», and the LLM lands back here: a refusal
+        # loop with no breaker (`feedback_guard_needs_loop_breaker`).
+        if isinstance(fallback, dict):
+            for station in fallback.get("stations") or ():
+                sid = str((station or {}).get("id") or "").strip()
+                if sid:
+                    session.fitting_station_ids.add(sid)
+        return fallback
 
     router.register("get_fitting_stations", _get_fitting_stations)
 
@@ -3340,6 +3421,48 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     if sid in stations_map:
                         entry.update(stations_map[sid])
                     bookings.append(entry)
+
+                # Wave 1-A (2026-09-14) — a reschedule starts here, so this is
+                # where the state it needs has to be written. Call 29ed5791:
+                # this tool returned station 000000003 and «SIRIY Tiguan», the
+                # LLM then cancelled the booking, re-asked colour and brand it
+                # had just been told, and sent an invented 000000010 to 1C —
+                # `book_fitting`'s auto-inject reads `fitting_plate` /
+                # `fitting_vehicle_brand`, and nothing on this path had ever
+                # written them (`codetrap_backend_autoinject_needs_source`).
+                #
+                # Every booking's station is legal for this call — that set is
+                # what `book_fitting`'s cross-check is checked against, and it
+                # is empty on a reschedule until this loop fills it.
+                for booked in bookings:
+                    booked_sid = str(booked.get("station_id") or "").strip()
+                    if booked_sid:
+                        session.fitting_station_ids.add(booked_sid)
+
+                # The vehicle is pinned only when there is exactly one booking.
+                # With two, which car the caller is moving is an open question,
+                # and answering it here would put the wrong brand into 1C
+                # without the caller ever being asked.
+                #
+                # `last_fitting_station_id` is deliberately NOT set: it means
+                # «the caller has chosen a station» and arms the Krok 1
+                # regression guard. Having a booking is not having chosen.
+                if len(bookings) == 1:
+                    booked_colour, booked_brand = _split_auto_number(
+                        str(bookings[0].get("auto_number") or "")
+                    )
+                    if booked_brand:
+                        session.fitting_vehicle_brand = booked_brand
+                    if booked_colour:
+                        session.fitting_plate = booked_colour
+                    logger.info(
+                        "get_customer_bookings: pinned vehicle for call %s "
+                        "from auto_number=%r → colour=%r brand=%r",
+                        session.channel_uuid,
+                        bookings[0].get("auto_number"),
+                        booked_colour,
+                        booked_brand,
+                    )
 
                 return {"total": len(bookings), "bookings": bookings}
             except Exception:
