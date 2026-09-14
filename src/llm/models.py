@@ -53,10 +53,11 @@ class Usage:
     report cache stats.
 
     How much cheaper these are is a per-model number, not the ~50% this
-    docstring used to claim: gpt-4.1-mini and -nano bill cache reads at 0.25x
-    the input rate, the gpt-5 family, both Claude models, deepseek and the
-    Gemini flashes at 0.10x. The rate lives in
-    ``llm_model_pricing.cached_input_price_per_1m``.
+    docstring used to claim. Measured across the ten providers in production it
+    ranges from 0.10x to 0.25x of the input rate, and it moves when a provider
+    reprices. Do not read a ratio off this comment — the authoritative value is
+    ``llm_model_pricing.cached_input_price_per_1m``, refreshed daily from the
+    LiteLLM catalog by ``src.tasks.pricing_sync``.
     """
 
     input_tokens: int
