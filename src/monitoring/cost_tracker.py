@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from src.monitoring.metrics import call_cost_usd
-from src.monitoring.pricing_cache import get_pricing
+from src.monitoring.pricing_cache import get_cached_input_price, get_pricing
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,7 @@ class CostBreakdown:
     _tts_cached: int = 0
     _llm_input_price_per_1m: float = 0.0
     _llm_output_price_per_1m: float = 0.0
+    _llm_cached_input_price_per_1m: float = 0.0
 
     @property
     def total_cost(self) -> float:
@@ -76,8 +77,8 @@ class CostBreakdown:
             provider_key: LLM router provider key (e.g. "gemini-2.5-flash").
                 If empty, falls back to default pricing.
             cached_input_tokens: Subset of ``input_tokens`` served from the
-                provider's automatic prompt cache. Billed at ~50% of standard
-                input rate (OpenAI/Anthropic default). Uncached portion =
+                provider's automatic prompt cache, billed at the model's
+                cache-read rate. Uncached portion =
                 ``input_tokens - cached_input_tokens`` billed at full rate.
         """
         if provider_key:
@@ -87,14 +88,20 @@ class CostBreakdown:
         self._llm_cached_input_tokens += cached_input_tokens
 
         inp_per_1m, out_per_1m = get_pricing(provider_key)
+        # No cache-read rate on record means no discount, not a guessed one. The
+        # 0.5 that used to stand here was right for none of the ten models in
+        # production: the real ratios are 0.25x (gpt-4.1 family) and 0.10x
+        # (gpt-5 family, Claude, deepseek, Gemini flash).
+        cached_per_1m = get_cached_input_price(provider_key)
+        if cached_per_1m is None:
+            cached_per_1m = inp_per_1m
         self._llm_input_price_per_1m = inp_per_1m
         self._llm_output_price_per_1m = out_per_1m
-        # Cached input billed at 50% of standard rate (OpenAI/Anthropic default
-        # for automatic caching). Uncached portion at full rate.
+        self._llm_cached_input_price_per_1m = cached_per_1m
         uncached_input = max(0, input_tokens - cached_input_tokens)
         self.llm_cost += (
             uncached_input / 1_000_000 * inp_per_1m
-            + cached_input_tokens / 1_000_000 * inp_per_1m * 0.5
+            + cached_input_tokens / 1_000_000 * cached_per_1m
             + output_tokens / 1_000_000 * out_per_1m
         )
 
@@ -120,6 +127,7 @@ class CostBreakdown:
             "llm_cached_input_tokens": self._llm_cached_input_tokens,
             "llm_input_price_per_1m": self._llm_input_price_per_1m,
             "llm_output_price_per_1m": self._llm_output_price_per_1m,
+            "llm_cached_input_price_per_1m": self._llm_cached_input_price_per_1m,
             "stt_seconds": round(self._stt_seconds, 1),
             "tts_characters": self._tts_characters,
             "tts_cached_characters": self._tts_cached,

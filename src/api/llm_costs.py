@@ -35,6 +35,19 @@ _q_search = Query(None)
 _q_include_hidden = Query(False)
 
 
+def _cached_rate(pricing_row: Any) -> float:
+    """Per-1M rate for cache-read input tokens on a pricing row.
+
+    A NULL column means the model has no cache-read rate on record, and such
+    tokens are billed at the full input price. Inventing a discount is what the
+    old hardcoded 0.5 did, and it was wrong for every model in production.
+    """
+    cached = pricing_row.cached_input_price_per_1m
+    if cached is None:
+        return float(pricing_row.input_price_per_1m)
+    return float(cached)
+
+
 # --- Pydantic models ---
 
 
@@ -44,6 +57,7 @@ class PricingCreate(BaseModel):
     display_name: str
     input_price_per_1m: float
     output_price_per_1m: float
+    cached_input_price_per_1m: float | None = None
 
 
 class PricingUpdate(BaseModel):
@@ -51,6 +65,7 @@ class PricingUpdate(BaseModel):
     display_name: str | None = None
     input_price_per_1m: float | None = None
     output_price_per_1m: float | None = None
+    cached_input_price_per_1m: float | None = None
     include_in_comparison: bool | None = None
 
 
@@ -81,6 +96,7 @@ async def list_pricing(_: Any = _perm_r) -> dict[str, Any]:
             text("""
                 SELECT id, provider_key, model_name, display_name,
                        input_price_per_1m, output_price_per_1m,
+                       cached_input_price_per_1m,
                        is_system, provider_type, include_in_comparison,
                        catalog_model_key, created_at, updated_at
                 FROM llm_model_pricing
@@ -95,6 +111,11 @@ async def list_pricing(_: Any = _perm_r) -> dict[str, Any]:
                 "display_name": r.display_name,
                 "input_price_per_1m": float(r.input_price_per_1m),
                 "output_price_per_1m": float(r.output_price_per_1m),
+                "cached_input_price_per_1m": (
+                    float(r.cached_input_price_per_1m)
+                    if r.cached_input_price_per_1m is not None
+                    else None
+                ),
                 "is_system": r.is_system,
                 "provider_type": r.provider_type,
                 "include_in_comparison": r.include_in_comparison,
@@ -124,8 +145,9 @@ async def create_pricing(body: PricingCreate, _: Any = _perm_w) -> dict[str, Any
             text("""
                 INSERT INTO llm_model_pricing
                     (provider_key, model_name, display_name,
-                     input_price_per_1m, output_price_per_1m, is_system)
-                VALUES (:pk, :mn, :dn, :ip, :op, false)
+                     input_price_per_1m, output_price_per_1m,
+                     cached_input_price_per_1m, is_system)
+                VALUES (:pk, :mn, :dn, :ip, :op, :cp, false)
                 RETURNING id
             """),
             {
@@ -134,6 +156,7 @@ async def create_pricing(body: PricingCreate, _: Any = _perm_w) -> dict[str, Any
                 "dn": body.display_name,
                 "ip": body.input_price_per_1m,
                 "op": body.output_price_per_1m,
+                "cp": body.cached_input_price_per_1m,
             },
         )
         row = result.first()
@@ -162,6 +185,9 @@ async def update_pricing(
     if body.output_price_per_1m is not None:
         sets.append("output_price_per_1m = :op")
         params["op"] = body.output_price_per_1m
+    if body.cached_input_price_per_1m is not None:
+        sets.append("cached_input_price_per_1m = :cp")
+        params["cp"] = body.cached_input_price_per_1m
     if body.include_in_comparison is not None:
         sets.append("include_in_comparison = :ic")
         params["ic"] = body.include_in_comparison
@@ -293,6 +319,7 @@ async def list_catalog(
             text(f"""
                 SELECT c.model_key, c.provider_type, c.display_name,
                        c.input_price_per_1m, c.output_price_per_1m,
+                       c.cached_input_price_per_1m,
                        c.max_input_tokens, c.max_output_tokens,
                        c.is_new, c.is_hidden, c.synced_at,
                        CASE WHEN p.id IS NOT NULL THEN true ELSE false END AS is_added
@@ -310,6 +337,11 @@ async def list_catalog(
                 "display_name": r.display_name,
                 "input_price_per_1m": float(r.input_price_per_1m),
                 "output_price_per_1m": float(r.output_price_per_1m),
+                "cached_input_price_per_1m": (
+                    float(r.cached_input_price_per_1m)
+                    if r.cached_input_price_per_1m is not None
+                    else None
+                ),
                 "max_input_tokens": r.max_input_tokens,
                 "max_output_tokens": r.max_output_tokens,
                 "is_new": r.is_new,
@@ -357,7 +389,8 @@ async def catalog_add(body: CatalogAddRequest, _: Any = _perm_w) -> dict[str, An
         cat = await conn.execute(
             text("""
                 SELECT model_key, provider_type, display_name,
-                       input_price_per_1m, output_price_per_1m
+                       input_price_per_1m, output_price_per_1m,
+                       cached_input_price_per_1m
                 FROM llm_pricing_catalog WHERE model_key = :mk
             """),
             {"mk": body.model_key},
@@ -381,8 +414,9 @@ async def catalog_add(body: CatalogAddRequest, _: Any = _perm_w) -> dict[str, An
                 INSERT INTO llm_model_pricing
                     (provider_key, model_name, display_name,
                      input_price_per_1m, output_price_per_1m,
+                     cached_input_price_per_1m,
                      is_system, provider_type, include_in_comparison, catalog_model_key)
-                VALUES (:pk, :mn, :dn, :ip, :op, false, :pt, :ic, :cmk)
+                VALUES (:pk, :mn, :dn, :ip, :op, :cp, false, :pt, :ic, :cmk)
                 RETURNING id
             """),
             {
@@ -391,6 +425,11 @@ async def catalog_add(body: CatalogAddRequest, _: Any = _perm_w) -> dict[str, An
                 "dn": display,
                 "ip": float(cat_row.input_price_per_1m),
                 "op": float(cat_row.output_price_per_1m),
+                "cp": (
+                    float(cat_row.cached_input_price_per_1m)
+                    if cat_row.cached_input_price_per_1m is not None
+                    else None
+                ),
                 "pt": cat_row.provider_type,
                 "ic": body.include_in_comparison,
                 "cmk": body.model_key,
@@ -514,10 +553,14 @@ async def usage_summary(
                     u.provider_key,
                     COUNT(*) AS call_count,
                     SUM(u.input_tokens)  AS total_input_tokens,
+                    SUM(u.cached_input_tokens) AS total_cached_input_tokens,
                     SUM(u.output_tokens) AS total_output_tokens,
                     AVG(u.latency_ms)    AS avg_latency_ms,
                     COALESCE(
-                        SUM(u.input_tokens)  / 1000000.0 * p.input_price_per_1m +
+                        SUM(GREATEST(u.input_tokens - u.cached_input_tokens, 0))
+                            / 1000000.0 * p.input_price_per_1m +
+                        SUM(u.cached_input_tokens) / 1000000.0
+                            * COALESCE(p.cached_input_price_per_1m, p.input_price_per_1m) +
                         SUM(u.output_tokens) / 1000000.0 * p.output_price_per_1m,
                         0
                     ) AS total_cost
@@ -525,7 +568,8 @@ async def usage_summary(
                 LEFT JOIN llm_model_pricing p ON p.provider_key = u.provider_key
                 WHERE {where}
                 GROUP BY u.task_type, u.provider_key,
-                         p.input_price_per_1m, p.output_price_per_1m
+                         p.input_price_per_1m, p.output_price_per_1m,
+                         p.cached_input_price_per_1m
                 ORDER BY total_cost DESC
             """),
             params,
@@ -536,6 +580,7 @@ async def usage_summary(
                 "provider_key": r.provider_key,
                 "call_count": r.call_count,
                 "total_input_tokens": int(r.total_input_tokens),
+                "total_cached_input_tokens": int(r.total_cached_input_tokens or 0),
                 "total_output_tokens": int(r.total_output_tokens),
                 "avg_latency_ms": round(float(r.avg_latency_ms), 0) if r.avg_latency_ms else None,
                 "total_cost": round(float(r.total_cost), 6),
@@ -585,6 +630,7 @@ async def model_comparison(
                 SELECT
                     provider_key AS actual_provider,
                     SUM(input_tokens)  AS total_input_tokens,
+                    SUM(cached_input_tokens) AS total_cached_input_tokens,
                     SUM(output_tokens) AS total_output_tokens,
                     COUNT(*) AS call_count
                 FROM llm_usage_log
@@ -609,6 +655,7 @@ async def model_comparison(
 
         # Sum across providers for total tokens
         total_input = sum(r.total_input_tokens for r in usage_rows)
+        total_cached_input = sum(r.total_cached_input_tokens or 0 for r in usage_rows)
         total_output = sum(r.total_output_tokens for r in usage_rows)
         actual_provider = usage_rows[0].actual_provider  # most-used provider
 
@@ -616,7 +663,8 @@ async def model_comparison(
         pricing = await conn.execute(
             text("""
                 SELECT provider_key, display_name,
-                       input_price_per_1m, output_price_per_1m
+                       input_price_per_1m, output_price_per_1m,
+                       cached_input_price_per_1m
                 FROM llm_model_pricing
                 WHERE include_in_comparison = true
                 ORDER BY display_name
@@ -627,7 +675,8 @@ async def model_comparison(
         # Calculate actual cost from per-provider usage (use all pricing for actual calc)
         all_pricing = await conn.execute(
             text("""
-                SELECT provider_key, input_price_per_1m, output_price_per_1m
+                SELECT provider_key, input_price_per_1m, output_price_per_1m,
+                       cached_input_price_per_1m
                 FROM llm_model_pricing
             """)
         )
@@ -638,16 +687,25 @@ async def model_comparison(
         for ur in usage_rows:
             pr = pricing_map.get(ur.actual_provider)
             if pr:
+                cached_tokens = ur.total_cached_input_tokens or 0
                 actual_cost += (
-                    ur.total_input_tokens / 1_000_000 * float(pr.input_price_per_1m)
+                    max(0, ur.total_input_tokens - cached_tokens)
+                    / 1_000_000
+                    * float(pr.input_price_per_1m)
+                    + cached_tokens / 1_000_000 * _cached_rate(pr)
                     + ur.total_output_tokens / 1_000_000 * float(pr.output_price_per_1m)
                 )
 
-        # Calculate hypothetical cost for each comparison model
+        # Hypothetical cost for each comparison model. The cache-hit count is a
+        # property of the workload — the same prompt prefix repeated across
+        # turns — so it carries over to the model being compared against; what
+        # does not carry over is the discount, which `_cached_rate` leaves at
+        # full price for a model with no cache-read rate on record.
         comparisons = []
         for pr in pricing_rows:
             cost = (
-                total_input / 1_000_000 * float(pr.input_price_per_1m)
+                max(0, total_input - total_cached_input) / 1_000_000 * float(pr.input_price_per_1m)
+                + total_cached_input / 1_000_000 * _cached_rate(pr)
                 + total_output / 1_000_000 * float(pr.output_price_per_1m)
             )
             comparisons.append(
@@ -668,6 +726,7 @@ async def model_comparison(
         "actual_provider": actual_provider,
         "actual_cost": round(actual_cost, 6),
         "total_input_tokens": total_input,
+        "total_cached_input_tokens": total_cached_input,
         "total_output_tokens": total_output,
         "comparisons": comparisons,
     }

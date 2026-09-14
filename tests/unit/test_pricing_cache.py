@@ -14,8 +14,33 @@ from src.monitoring import pricing_cache
 def _clean_cache():
     """Ensure cache is empty before and after each test."""
     pricing_cache._cache.clear()
+    pricing_cache._cached_input.clear()
     yield
     pricing_cache._cache.clear()
+    pricing_cache._cached_input.clear()
+
+
+def _pricing_row(provider_key, input_price, output_price, cached_price=None):
+    """A pricing row carrying exactly the columns the refresh query selects.
+
+    The spec is load-bearing. A bare MagicMock answers to
+    ``cached_input_price_per_1m`` with another MagicMock, which is not None and
+    whose ``float()`` is 1.0 — so every provider would quietly acquire a
+    fabricated cache rate of $1 per 1M tokens and the test would stay green.
+    """
+    row = MagicMock(
+        spec=[
+            "provider_key",
+            "input_price_per_1m",
+            "output_price_per_1m",
+            "cached_input_price_per_1m",
+        ]
+    )
+    row.provider_key = provider_key
+    row.input_price_per_1m = input_price
+    row.output_price_per_1m = output_price
+    row.cached_input_price_per_1m = cached_price
+    return row
 
 
 def _make_engine(rows):
@@ -74,8 +99,8 @@ class TestRefreshFromDb:
     @pytest.mark.asyncio
     async def test_refresh_populates_cache(self) -> None:
         rows = [
-            MagicMock(provider_key="gemini-2.5-flash", input_price_per_1m=0.30, output_price_per_1m=2.50),
-            MagicMock(provider_key="anthropic-sonnet", input_price_per_1m=3.00, output_price_per_1m=15.00),
+            _pricing_row("gemini-2.5-flash", 0.30, 2.50, cached_price=0.03),
+            _pricing_row("anthropic-sonnet", 3.00, 15.00, cached_price=0.30),
         ]
         engine = _make_engine(rows)
 
@@ -90,7 +115,7 @@ class TestRefreshFromDb:
         pricing_cache._cache["old-provider"] = (1.0, 2.0)
 
         rows = [
-            MagicMock(provider_key="new-provider", input_price_per_1m=0.50, output_price_per_1m=1.00),
+            _pricing_row("new-provider", 0.50, 1.00),
         ]
         engine = _make_engine(rows)
 
@@ -121,3 +146,51 @@ class TestRefreshFromDb:
 
         assert len(pricing_cache._cache) == 0
         assert pricing_cache.get_pricing("old") == pricing_cache._FALLBACK
+
+
+class TestCachedInputPrice:
+    """Tests for the cache-read rate, which is optional per model."""
+
+    @pytest.mark.asyncio
+    async def test_refresh_loads_the_rate(self) -> None:
+        engine = _make_engine([_pricing_row("openai-gpt41-mini", 0.40, 1.60, cached_price=0.10)])
+
+        await pricing_cache.refresh_from_db(engine)
+
+        assert pricing_cache.get_cached_input_price("openai-gpt41-mini") == 0.10
+
+    @pytest.mark.asyncio
+    async def test_a_null_column_stays_unknown(self) -> None:
+        """No rate on record must not become a rate of zero.
+
+        Zero would make cached tokens free, which is the opposite error from the
+        0.5 multiplier this replaced but just as invented. The caller is meant to
+        see None and fall back to the full input price.
+        """
+        engine = _make_engine([_pricing_row("some-provider", 0.40, 1.60, cached_price=None)])
+
+        await pricing_cache.refresh_from_db(engine)
+
+        assert pricing_cache.get_pricing("some-provider") == (0.40, 1.60)
+        assert pricing_cache.get_cached_input_price("some-provider") is None
+
+    def test_unknown_provider_has_no_rate(self) -> None:
+        assert pricing_cache.get_cached_input_price("never-heard-of-it") is None
+
+    @pytest.mark.asyncio
+    async def test_refresh_drops_a_rate_that_is_gone(self) -> None:
+        pricing_cache._cached_input["stale-provider"] = 0.05
+
+        engine = _make_engine([_pricing_row("new-provider", 0.50, 1.00, cached_price=0.05)])
+
+        await pricing_cache.refresh_from_db(engine)
+
+        assert pricing_cache.get_cached_input_price("stale-provider") is None
+
+    def test_invalidate_clears_the_rate_too(self) -> None:
+        pricing_cache._cache["p"] = (1.0, 2.0)
+        pricing_cache._cached_input["p"] = 0.1
+
+        pricing_cache.invalidate()
+
+        assert pricing_cache.get_cached_input_price("p") is None

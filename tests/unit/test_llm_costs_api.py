@@ -44,8 +44,14 @@ def _make_mock_engine(rows=None, rowcount=1):
 
 
 def _row(**kwargs):
-    """Create a mock row with attribute access."""
-    obj = MagicMock()
+    """Create a mock row with attribute access, spec'd to the columns given.
+
+    Without the spec a column the query has started selecting still answers —
+    with a MagicMock, which compares and does arithmetic in ways no database row
+    does. The fixture has to be updated alongside the SELECT, and the spec is
+    what forces that.
+    """
+    obj = MagicMock(spec=list(kwargs))
     for k, v in kwargs.items():
         setattr(obj, k, v)
     return obj
@@ -67,6 +73,7 @@ SAMPLE_PRICING_ROW = _row(
     display_name="Gemini 2.5 Flash",
     input_price_per_1m=0.30,
     output_price_per_1m=2.50,
+    cached_input_price_per_1m=0.03,
     is_system=True,
     provider_type="gemini",
     include_in_comparison=True,
@@ -315,6 +322,7 @@ class TestUsageSummary:
                 provider_key="gemini-flash",
                 call_count=100,
                 total_input_tokens=5000000,
+                total_cached_input_tokens=4000000,
                 total_output_tokens=800000,
                 avg_latency_ms=250.0,
                 total_cost=3.50,
@@ -357,6 +365,7 @@ class TestModelComparison:
             _row(
                 actual_provider="gemini-flash",
                 total_input_tokens=1000000,
+                total_cached_input_tokens=0,
                 total_output_tokens=200000,
                 call_count=50,
             )
@@ -367,17 +376,29 @@ class TestModelComparison:
                 display_name="Gemini 2.5 Flash",
                 input_price_per_1m=0.30,
                 output_price_per_1m=2.50,
+                cached_input_price_per_1m=0.03,
             ),
             _row(
                 provider_key="anthropic-sonnet",
                 display_name="Claude Sonnet 4.5",
                 input_price_per_1m=3.00,
                 output_price_per_1m=15.00,
+                cached_input_price_per_1m=0.30,
             ),
         ]
         all_pricing_rows = [
-            _row(provider_key="gemini-flash", input_price_per_1m=0.30, output_price_per_1m=2.50),
-            _row(provider_key="anthropic-sonnet", input_price_per_1m=3.00, output_price_per_1m=15.00),
+            _row(
+                provider_key="gemini-flash",
+                input_price_per_1m=0.30,
+                output_price_per_1m=2.50,
+                cached_input_price_per_1m=0.03,
+            ),
+            _row(
+                provider_key="anthropic-sonnet",
+                input_price_per_1m=3.00,
+                output_price_per_1m=15.00,
+                cached_input_price_per_1m=0.30,
+            ),
         ]
 
         engine, mock_conn = _make_mock_engine()
@@ -417,6 +438,102 @@ class TestModelComparison:
         assert gemini["is_actual"] is True
 
     @pytest.mark.asyncio()
+    async def test_cached_tokens_are_charged_at_the_cache_rate(self, app: Any) -> None:
+        """The comparison is meaningless if it prices every input token at full rate.
+
+        On the live agent 92.6% of input tokens come back from the provider's
+        cache, so a comparison that ignores the cache rate is comparing a bill
+        nobody was sent.
+        """
+        usage_rows = [
+            _row(
+                actual_provider="gemini-flash",
+                total_input_tokens=1000000,
+                total_cached_input_tokens=1000000,
+                total_output_tokens=0,
+                call_count=50,
+            )
+        ]
+        comparison_row = _row(
+            provider_key="gemini-flash",
+            display_name="Gemini 2.5 Flash",
+            input_price_per_1m=0.30,
+            output_price_per_1m=2.50,
+            cached_input_price_per_1m=0.03,
+        )
+        all_pricing_row = _row(
+            provider_key="gemini-flash",
+            input_price_per_1m=0.30,
+            output_price_per_1m=2.50,
+            cached_input_price_per_1m=0.03,
+        )
+
+        engine, mock_conn = _make_mock_engine()
+        results = []
+        for rows in ([usage_rows, [comparison_row], [all_pricing_row]]):
+            res = MagicMock()
+            res.fetchall = MagicMock(return_value=rows)
+            results.append(res)
+        mock_conn.execute = AsyncMock(side_effect=results)
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.get("/admin/llm-costs/usage/model-comparison?task_type=agent")
+
+        data = resp.json()
+        assert data["total_cached_input_tokens"] == 1000000
+        assert data["actual_cost"] == pytest.approx(0.03)
+        assert data["comparisons"][0]["cost"] == pytest.approx(0.03)
+
+    @pytest.mark.asyncio()
+    async def test_a_model_with_no_cache_rate_pays_full_price(self, app: Any) -> None:
+        """A NULL rate is not a free ride, and not half price either."""
+        usage_rows = [
+            _row(
+                actual_provider="mystery",
+                total_input_tokens=1000000,
+                total_cached_input_tokens=1000000,
+                total_output_tokens=0,
+                call_count=1,
+            )
+        ]
+        comparison_row = _row(
+            provider_key="mystery",
+            display_name="Mystery",
+            input_price_per_1m=0.30,
+            output_price_per_1m=2.50,
+            cached_input_price_per_1m=None,
+        )
+        all_pricing_row = _row(
+            provider_key="mystery",
+            input_price_per_1m=0.30,
+            output_price_per_1m=2.50,
+            cached_input_price_per_1m=None,
+        )
+
+        engine, mock_conn = _make_mock_engine()
+        results = []
+        for rows in ([usage_rows, [comparison_row], [all_pricing_row]]):
+            res = MagicMock()
+            res.fetchall = MagicMock(return_value=rows)
+            results.append(res)
+        mock_conn.execute = AsyncMock(side_effect=results)
+
+        with (
+            patch("src.api.auth.require_admin", _fake_require_admin),
+            patch("src.api.llm_costs._get_engine", AsyncMock(return_value=engine)),
+        ):
+            async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+                resp = await ac.get("/admin/llm-costs/usage/model-comparison?task_type=agent")
+
+        data = resp.json()
+        assert data["actual_cost"] == pytest.approx(0.30)
+        assert data["comparisons"][0]["cost"] == pytest.approx(0.30)
+
+    @pytest.mark.asyncio()
     async def test_empty_usage(self, app: Any) -> None:
         engine, mock_conn = _make_mock_engine()
 
@@ -450,9 +567,11 @@ class TestCatalogList:
                 display_name="GPT 5 Mini",
                 input_price_per_1m=0.25,
                 output_price_per_1m=2.00,
+                cached_input_price_per_1m=0.025,
                 max_input_tokens=1000000,
                 max_output_tokens=100000,
                 is_new=False,
+                is_hidden=False,
                 synced_at=datetime(2026, 2, 25, tzinfo=UTC),
                 is_added=True,
             )
@@ -573,6 +692,7 @@ class TestCatalogAdd:
                 display_name="GPT 5 Mini",
                 input_price_per_1m=0.25,
                 output_price_per_1m=2.00,
+                cached_input_price_per_1m=0.025,
             )
         )
         dup_result = MagicMock()
@@ -631,6 +751,7 @@ class TestCatalogAdd:
                 display_name="GPT 5 Mini",
                 input_price_per_1m=0.25,
                 output_price_per_1m=2.00,
+                cached_input_price_per_1m=0.025,
             )
         )
         dup_result = MagicMock()
@@ -764,6 +885,7 @@ class TestCatalogListHiddenFilter:
                 display_name="Old Model",
                 input_price_per_1m=1.0,
                 output_price_per_1m=2.0,
+                cached_input_price_per_1m=None,
                 max_input_tokens=None,
                 max_output_tokens=None,
                 is_new=False,
@@ -865,6 +987,7 @@ class TestLlmUsageLogger:
                 model_name="gemini-2.5-flash",
                 input_tokens=1000,
                 output_tokens=200,
+                cached_input_tokens=800,
                 latency_ms=300,
                 call_id="test-call-id",
                 tenant_id=None,
@@ -887,6 +1010,7 @@ class TestLlmUsageLogger:
                 model_name="gemini-2.5-flash",
                 input_tokens=1000,
                 output_tokens=200,
+                cached_input_tokens=0,
                 latency_ms=None,
                 call_id=None,
                 tenant_id=None,

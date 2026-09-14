@@ -99,6 +99,49 @@ class TestParseLitellmJson:
         assert rows[0]["input_price_per_1m"] == 0.3
         assert rows[0]["output_price_per_1m"] == 15.0
 
+    def test_cache_read_cost_is_carried_over(self) -> None:
+        """gpt-4.1-mini's real numbers: $0.40/1M in, $0.10/1M served from cache."""
+        data = {
+            "gpt-4.1-mini": {
+                "mode": "chat",
+                "litellm_provider": "openai",
+                "input_cost_per_token": 4e-7,
+                "output_cost_per_token": 1.6e-6,
+                "cache_read_input_token_cost": 1e-7,
+            },
+        }
+        rows = _parse_litellm_json(data)
+        assert rows[0]["input_price_per_1m"] == 0.4
+        assert rows[0]["cached_input_price_per_1m"] == 0.1
+
+    def test_a_model_without_a_cache_keeps_the_rate_empty(self) -> None:
+        """None, not zero and not a fraction of the input price.
+
+        Zero would make cached tokens free; a fraction is the guess this column
+        exists to stop. The column stays NULL and the cost path charges full.
+        """
+        data = {
+            "no-cache-model": {
+                "mode": "chat",
+                "litellm_provider": "openai",
+                "input_cost_per_token": 4e-7,
+                "output_cost_per_token": 1.6e-6,
+            },
+        }
+        rows = _parse_litellm_json(data)
+        assert rows[0]["cached_input_price_per_1m"] is None
+
+    def test_a_model_with_no_prices_at_all_is_still_skipped(self) -> None:
+        """The cache rate alone must not resurrect a row with no base prices."""
+        data = {
+            "cache-only-model": {
+                "mode": "chat",
+                "litellm_provider": "openai",
+                "cache_read_input_token_cost": 1e-7,
+            },
+        }
+        assert _parse_litellm_json(data) == []
+
     def test_skips_missing_prices(self) -> None:
         data = {
             "no-price-model": {

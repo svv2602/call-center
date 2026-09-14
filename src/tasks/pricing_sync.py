@@ -90,15 +90,25 @@ def _parse_litellm_json(data: dict[str, Any]) -> list[dict[str, Any]]:
         if not provider_type:
             continue
 
-        rows.append({
-            "model_key": key,
-            "provider_type": provider_type,
-            "display_name": _generate_display_name(key),
-            "input_price_per_1m": round(float(input_cost) * 1_000_000, 4),
-            "output_price_per_1m": round(float(output_cost) * 1_000_000, 4),
-            "max_input_tokens": info.get("max_input_tokens"),
-            "max_output_tokens": info.get("max_output_tokens"),
-        })
+        # Absent for models whose provider has no prompt cache. It stays None
+        # all the way to the column, and the cost path then bills cached tokens
+        # at the full input rate rather than guessing a discount.
+        cached_cost = info.get("cache_read_input_token_cost")
+
+        rows.append(
+            {
+                "model_key": key,
+                "provider_type": provider_type,
+                "display_name": _generate_display_name(key),
+                "input_price_per_1m": round(float(input_cost) * 1_000_000, 4),
+                "output_price_per_1m": round(float(output_cost) * 1_000_000, 4),
+                "cached_input_price_per_1m": (
+                    round(float(cached_cost) * 1_000_000, 4) if cached_cost is not None else None
+                ),
+                "max_input_tokens": info.get("max_input_tokens"),
+                "max_output_tokens": info.get("max_output_tokens"),
+            }
+        )
 
     return rows
 
@@ -147,16 +157,20 @@ async def _do_sync() -> dict[str, int]:
                         INSERT INTO llm_pricing_catalog
                             (model_key, provider_type, display_name,
                              input_price_per_1m, output_price_per_1m,
+                             cached_input_price_per_1m,
                              max_input_tokens, max_output_tokens,
                              is_new, synced_at)
                         VALUES
                             (:model_key, :provider_type, :display_name,
                              :input_price, :output_price,
+                             :cached_price,
                              :max_input, :max_output,
                              :is_new, :synced_at)
                         ON CONFLICT (model_key) DO UPDATE SET
                             input_price_per_1m  = EXCLUDED.input_price_per_1m,
                             output_price_per_1m = EXCLUDED.output_price_per_1m,
+                            cached_input_price_per_1m
+                                                = EXCLUDED.cached_input_price_per_1m,
                             max_input_tokens    = EXCLUDED.max_input_tokens,
                             max_output_tokens   = EXCLUDED.max_output_tokens,
                             display_name        = EXCLUDED.display_name,
@@ -169,6 +183,7 @@ async def _do_sync() -> dict[str, int]:
                         "display_name": row["display_name"],
                         "input_price": row["input_price_per_1m"],
                         "output_price": row["output_price_per_1m"],
+                        "cached_price": row["cached_input_price_per_1m"],
                         "max_input": row["max_input_tokens"],
                         "max_output": row["max_output_tokens"],
                         "is_new": not is_first_sync,
@@ -187,14 +202,36 @@ async def _do_sync() -> dict[str, int]:
                     UPDATE llm_model_pricing p
                     SET input_price_per_1m  = c.input_price_per_1m,
                         output_price_per_1m = c.output_price_per_1m,
+                        cached_input_price_per_1m = c.cached_input_price_per_1m,
                         updated_at          = now()
                     FROM llm_pricing_catalog c
                     WHERE p.catalog_model_key = c.model_key
                       AND (p.input_price_per_1m  != c.input_price_per_1m
-                        OR p.output_price_per_1m != c.output_price_per_1m)
+                        OR p.output_price_per_1m != c.output_price_per_1m
+                        OR p.cached_input_price_per_1m
+                           IS DISTINCT FROM c.cached_input_price_per_1m)
                 """)
             )
             auto_updated = auto_result.rowcount
+
+            # Rows nobody linked to the catalog still need the cached rate, and
+            # in production none of them are linked: `catalog_model_key` is NULL
+            # on all ten. Their `model_name` is the LiteLLM key, so match on
+            # that — but only to fill the cached rate. The base prices on those
+            # rows were entered by hand and are not this task's to overwrite.
+            cached_result = await conn.execute(
+                text("""
+                    UPDATE llm_model_pricing p
+                    SET cached_input_price_per_1m = c.cached_input_price_per_1m,
+                        updated_at                = now()
+                    FROM llm_pricing_catalog c
+                    WHERE p.catalog_model_key IS NULL
+                      AND p.model_name = c.model_key
+                      AND p.cached_input_price_per_1m
+                          IS DISTINCT FROM c.cached_input_price_per_1m
+                """)
+            )
+            cached_filled = cached_result.rowcount
 
         # Save last sync timestamp to Redis
         try:
@@ -211,7 +248,12 @@ async def _do_sync() -> dict[str, int]:
     finally:
         await engine.dispose()
 
-    stats = {"inserted": inserted, "updated": updated, "auto_updated": auto_updated}
+    stats = {
+        "inserted": inserted,
+        "updated": updated,
+        "auto_updated": auto_updated,
+        "cached_filled": cached_filled,
+    }
     logger.info("pricing_sync completed: %s", stats)
     return stats
 
