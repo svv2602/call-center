@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import dataclasses
 import datetime
 import inspect
 import logging
@@ -41,6 +42,7 @@ from src.core.pipeline import (
     FSM_MODE_LIVE,
     FSM_MODE_OFF,
     FSM_MODE_SHADOW,
+    FSM_VOICE_STATES,
     MAX_CONSECUTIVE_PIPELINE_INTERRUPT_TURNS,
     MAX_PIPELINE_INTERRUPT_TURNS,
     CallPipeline,
@@ -4070,3 +4072,486 @@ class TestTheFiveTransfersReplayedThroughTheSeam:
 
         assert h.session.fsm_parser_null_counts.get("DATE", 0) == 0
         assert h.session.fsm_filled_fields.get("date", "").endswith("-14")
+
+
+# ---------------------------------------------------------------------------
+# The TIME entry tool
+# ---------------------------------------------------------------------------
+
+#: A Friday, and a Monday three days later. Both are away from `_NOW`, so an
+#: assertion on the day 1C was asked about cannot be satisfied by «today».
+_FRIDAY = "2026-08-07"
+_MONDAY = "2026-08-10"
+_STATION = "000000003"
+
+
+def in_time(
+    *,
+    station_id: str | None = _STATION,
+    date: str | None = _FRIDAY,
+) -> CallSession:
+    """A session parked in TIME with the context that state declares it needs.
+
+    `STATES[TIME].required_context` is `("date", "station_id")`, and in a live
+    call both are already there by the time the machine arrives — that is the
+    whole shape of `e436dc96`, where the FSM held `2026-09-18` from the first
+    turn and `000000003` from the station resolver, and the LLM invented times
+    anyway. Either one can be dropped to assert the step declines.
+    """
+    session = booking_in_progress(FsmState.TIME)
+    session.fsm_filled_fields["storage_choice"] = "own"
+    if station_id is not None:
+        session.fsm_filled_fields["station_id"] = station_id
+    if date is not None:
+        session.fsm_filled_fields["date"] = date
+    return session
+
+
+def slots_from_1c(h: Harness, by_date: dict[str, list[str]]) -> None:
+    """Give the harness router `get_fitting_slots`' production side effect.
+
+    The default router answers `{"status": "ok"}` and touches nothing, so every
+    assertion about what the LLM ended up seeing would read an empty list that
+    the real tool would have filled — and would pass just as well against a
+    wire that fetched nothing. `main.py` *replaces* `fitting_slots_offered`
+    wholesale on each lookup rather than appending, so a second day's answer
+    evicts the first; that is modelled here because the loop-breaker's
+    «already fetched this day» check reads exactly that list.
+    """
+
+    async def _execute(name: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
+        if name == "get_fitting_slots":
+            day = str((args or {}).get("date_from", ""))
+            times = list(by_date.get(day, []))
+            h.session.fitting_slots_offered = [{"date": day, "time": t} for t in times]
+            h.session.selected_fitting_date = day
+            return {"station_id": (args or {}).get("station_id"), "date": day, "slots": times}
+        if name == "transfer_to_operator":
+            h.session.mark_transfer(str((args or {}).get("reason", "")))
+            return {"status": "transferring"}
+        return {"status": "ok"}
+
+    h.tool_router.execute = AsyncMock(side_effect=_execute)
+
+
+def slot_lookups(h: Harness) -> list[dict[str, Any]]:
+    """Every `get_fitting_slots` argument dict the pipeline sent, in order."""
+    return [
+        call.args[1]
+        for call in h.tool_router.execute.await_args_list
+        if call.args and call.args[0] == "get_fitting_slots"
+    ]
+
+
+class TestTheTimeEntryTool:
+    """`_run_fsm_entry_tool` — TIME's `entry_tool`, wired at last.
+
+    `StateConfig.entry_tool` had been declared on five states since the table
+    was written and read **nowhere in `src/`**. Call `e436dc96` (2026-09-14) is
+    the bill for that: the FSM entered TIME already holding
+    `date=2026-09-18` and `station_id=000000003`, the LLM never called
+    `get_fitting_slots`, and the bot offered «Вранці є: 8:20, 9:20, 10:20» out
+    of nothing. The real list arrived 79 seconds later, once the Krok 3/4 guard
+    forced the tool — 09:00, 09:40, 10:20, in 40-minute steps. The 9:20 the
+    caller picked and the bot confirmed had never existed.
+
+    The fix has two halves and the tests keep them apart, because writing the
+    slots into the session is not the same as the LLM seeing them
+    (`codetrap_session_state_is_not_llm_visibility`): the fetch is asserted on
+    the tool router, the visibility on `llm_kwargs` and on the text
+    `prompts.py` renders out of them.
+
+    What this is *not* is Wave 7-0 (`3b93213`, reverted the same day). There the
+    FSM spoke, which suppressed the LLM turn — the only turn in which tool calls
+    execute. Here it fetches and stays silent, so the LLM still owns the turn and
+    now answers it holding the real list. `FSM_VOICE_STATES` stays empty.
+    """
+
+    # --- the fetch -------------------------------------------------------
+
+    async def test_entering_time_asks_1c_about_the_day_the_fsm_holds(self) -> None:
+        """The prod case, inverted: the arguments were there all along."""
+        h = Harness(in_time())
+        slots_from_1c(h, {_FRIDAY: ["09:00", "09:40", "10:20"]})
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("Алло")
+
+        assert slot_lookups(h) == [{"station_id": _STATION, "date_from": _FRIDAY}]
+        assert [s["time"] for s in h.session.fitting_slots_offered] == [
+            "09:00",
+            "09:40",
+            "10:20",
+        ]
+
+    async def test_the_turn_that_enters_time_is_the_turn_that_fetches(self) -> None:
+        """The ordering claim, driven rather than assumed.
+
+        Every other test here parks the session in TIME already, so the step
+        would pass them all from in front of `_run_fsm_deterministic_step` as
+        well — and in front is where it does not work: the transition into TIME
+        happens *inside* that step, so a seam ahead of it still sees STORAGE and
+        misses the entry on every single call. This drives the real hop
+        (STORAGE → DATE → TIME, DATE auto-skipped because the day is already
+        pinned) and asserts the list is there for the very turn that arrives.
+
+        It is also why the fetch cannot ride along with `_run_fsm_network_resolve`,
+        which runs before the seam on purpose.
+        """
+        from src.agent.prompts import _render_fitting_progress
+
+        session = in_time()
+        session.fsm_state = FsmState.STORAGE.value
+        h = Harness(session)
+        slots_from_1c(h, {_FRIDAY: ["09:00", "09:40", "10:20"]})
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("свої з собою")
+
+        assert h.session.fsm_state == FsmState.TIME.value
+        assert slot_lookups(h) == [{"station_id": _STATION, "date_from": _FRIDAY}]
+        block = _render_fitting_progress(h.llm_kwargs[-1]["fitting_progress"])
+        assert "09:00, 09:40, 10:20" in block
+
+    async def test_the_lookup_goes_through_the_tool_router(self) -> None:
+        """So it lands in `call_tool_calls` like any other tool call.
+
+        The store client would have fetched the same list and left no row, and
+        `codetrap_text_emitted_tool_calls_bypass_guards` is the standing lesson
+        about what an unaudited tool call costs a later investigation: the
+        `e436dc96` timeline was reconstructed entirely from that table.
+        """
+        h = Harness(in_time())
+        slots_from_1c(h, {_FRIDAY: ["09:00"]})
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("Алло")
+
+        assert h.tool_router.execute.await_args_list[0].args[0] == "get_fitting_slots"
+
+    async def test_the_fsm_does_not_take_the_turn_to_do_it(self) -> None:
+        """The Wave 7-0 line. Fetching is silent; the LLM still answers.
+
+        If this step ever took the turn, the tool calls that turn would have
+        made stop happening — which is exactly how the speaking states were lost.
+        """
+        h = Harness(in_time())
+        slots_from_1c(h, {_FRIDAY: ["09:00", "09:40"]})
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("Алло")
+
+        assert h.llm_turns == ["Алло"]
+        assert h.assistant_texts[-1] == LLM_REPLY
+        assert not FSM_VOICE_STATES
+
+    # --- what the LLM ends up holding ------------------------------------
+
+    async def test_the_hours_reach_the_llm_and_not_only_the_session(self) -> None:
+        h = Harness(in_time())
+        slots_from_1c(h, {_FRIDAY: ["09:00", "09:40", "10:20"]})
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("Алло")
+
+        assert h.llm_kwargs, "the turn must still reach the LLM"
+        progress = h.llm_kwargs[-1].get("fitting_progress") or {}
+        assert progress.get("available_slots") == ["09:00", "09:40", "10:20"]
+
+    async def test_the_rendered_block_names_the_real_hours(self) -> None:
+        """End of the chain: session → progress → the words in the prompt.
+
+        Asserted on the rendered string rather than the dict because a key the
+        renderer ignores is a key the LLM never sees, and that gap is the defect
+        class this whole fix is about.
+        """
+        from src.agent.prompts import _render_fitting_progress
+
+        h = Harness(in_time())
+        slots_from_1c(h, {_FRIDAY: ["09:00", "09:40", "10:20"]})
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("Алло")
+
+        block = _render_fitting_progress(h.llm_kwargs[-1]["fitting_progress"])
+        assert "09:00, 09:40, 10:20" in block
+        assert "ІНШИХ НЕ ІСНУЄ" in block
+        # The invented list from `e436dc96`. 10:20 is real and appears above;
+        # the two that were never in 1C must not be in the block either.
+        assert "8:20" not in block
+        assert "9:20" not in block
+
+    async def test_without_the_wire_the_llm_is_handed_nothing(self) -> None:
+        """The baseline — and the rollback shape.
+
+        Shadow mode is the pre-fix pipeline as far as this step is concerned, so
+        if the assertions above went green here too the class would be pinning
+        something the pipeline does regardless of the wire. This is also the
+        exact state `e436dc96` was in when it started reading out times: an
+        empty list and a row that says «не обрано».
+        """
+        from src.agent.prompts import _render_fitting_progress
+
+        h = Harness(in_time())
+        slots_from_1c(h, {_FRIDAY: ["09:00", "09:40", "10:20"]})
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("Алло")
+
+        assert slot_lookups(h) == []
+        assert h.session.fitting_slots_offered == []
+        progress = h.llm_kwargs[-1].get("fitting_progress") or {}
+        # `None`, not `[]` — see the comment on the key. Every consumer sifts
+        # this dict with `v not in (None, "", False)`, and an empty list is not
+        # a member of that tuple, so it would read as a value rather than a hole.
+        assert progress.get("available_slots") is None
+        assert "ІНШИХ НЕ ІСНУЄ" not in _render_fitting_progress(progress)
+
+    async def test_the_hours_are_not_offered_to_the_intent_classifier(self) -> None:
+        """`_fsm_filled_fields_snapshot` answers «what has the caller given us».
+
+        A station's opening hours are reference data nobody said out loud, and
+        the snapshot is fed to the intent classifier as evidence of progress.
+        """
+        h = Harness(in_time())
+        h.session.fitting_slots_offered = [{"date": _FRIDAY, "time": "09:00"}]
+
+        snapshot = h.pipeline._fsm_filled_fields_snapshot()
+
+        assert "available_slots" not in snapshot
+        assert snapshot.get("date") == _FRIDAY
+
+    # --- the loop-breaker ------------------------------------------------
+
+    async def test_a_second_turn_in_time_does_not_ask_again(self) -> None:
+        h = Harness(in_time())
+        slots_from_1c(h, {_FRIDAY: ["09:00", "09:40"]})
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("Алло", "Що?")
+
+        assert len(slot_lookups(h)) == 1
+
+    async def test_a_day_the_llm_already_fetched_is_not_fetched_twice(self) -> None:
+        """The LLM got there first — the 1C trip would learn the same thing."""
+        h = Harness(in_time())
+        slots_from_1c(h, {_FRIDAY: ["09:00", "09:40"]})
+        h.session.fitting_slots_offered = [{"date": _FRIDAY, "time": "11:00"}]
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("Алло")
+
+        assert slot_lookups(h) == []
+        assert [s["time"] for s in h.session.fitting_slots_offered] == ["11:00"]
+
+    async def test_a_day_with_no_free_hours_is_not_re_asked_every_turn(self) -> None:
+        """The breaker counts *attempts*, not answers.
+
+        A fully booked day leaves `fitting_slots_offered` empty, which is the
+        same shape as «never fetched» — so a breaker keyed on the answer would
+        send the pipeline back to 1C on every remaining turn of the call.
+        `feedback_guard_needs_loop_breaker`: the cap has to be structural.
+        """
+        h = Harness(in_time())
+        slots_from_1c(h, {_FRIDAY: []})
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("Алло", "Що?")
+
+        assert len(slot_lookups(h)) == 1
+        assert h.session.fitting_slots_offered == []
+
+    async def test_a_failed_lookup_does_not_retry_every_turn(self, caplog) -> None:
+        """1C being down must cost one trip, not one per turn.
+
+        This is why the key is marked *before* the await. It is also why the
+        failure is logged rather than suppressed (`37fb2d0`): the turn carries
+        on without a list, which is today's behaviour, but it says so.
+        """
+        h = Harness(in_time())
+        h.tool_router.execute = AsyncMock(side_effect=RuntimeError("1C timeout"))
+
+        with caplog.at_level(logging.WARNING), fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("Алло", "Що?")
+
+        assert len(slot_lookups(h)) == 1
+        assert [r for r in caplog.records if "fsm_entry_tool failed" in r.getMessage()]
+        assert h.llm_turns == ["Алло", "Що?"]
+
+    async def test_a_different_day_is_a_new_question_and_is_asked(self) -> None:
+        """Changing the date is a continuation, not a repeat.
+
+        `feedback_loop_breaker_vs_multiturn_subflow`: a breaker that cannot tell
+        the two apart fires at the length of a *correct* sub-flow. Keying on
+        `station|date` is what makes «а що в понеділок?» reach 1C.
+        """
+        h = Harness(in_time())
+        slots_from_1c(h, {_FRIDAY: ["09:00"], _MONDAY: ["11:00", "11:40"]})
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.pipeline._run_fsm_entry_tool()
+            h.session.fsm_filled_fields["date"] = _MONDAY
+            await h.pipeline._run_fsm_entry_tool()
+
+        assert [c["date_from"] for c in slot_lookups(h)] == [_FRIDAY, _MONDAY]
+        assert [s["time"] for s in h.session.fitting_slots_offered] == ["11:00", "11:40"]
+
+    async def test_the_breaker_survives_a_redis_round_trip(self) -> None:
+        """The session is rebuilt from Redis between turns.
+
+        A field missing from either half of `to_dict`/`from_dict` is a breaker
+        that resets on every turn, which is indistinguishable from no breaker.
+        """
+        h = Harness(in_time())
+        slots_from_1c(h, {_FRIDAY: ["09:00"]})
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.pipeline._run_fsm_entry_tool()
+
+        assert h.session.fsm_slots_fetched == {f"{_STATION}|{_FRIDAY}"}
+        revived = CallSession.from_dict(h.session.to_dict())
+        assert revived.fsm_slots_fetched == {f"{_STATION}|{_FRIDAY}"}
+
+    # --- when it must decline --------------------------------------------
+
+    @pytest.mark.parametrize(
+        "missing",
+        ["station_id", "date"],
+        ids=["no station", "no date"],
+    )
+    async def test_missing_required_context_asks_nothing(self, missing: str) -> None:
+        """TIME declares both as `required_context`; arriving without one is the
+        FSM having nothing to ask 1C about, not a reason to guess."""
+        h = Harness(in_time(**{missing: None}))  # type: ignore[arg-type]
+        slots_from_1c(h, {_FRIDAY: ["09:00"]})
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("Алло")
+
+        assert slot_lookups(h) == []
+
+    async def test_only_time_runs_its_entry_tool(self) -> None:
+        """Four other states declare one; none of them is wired."""
+        h = Harness(in_time())
+        slots_from_1c(h, {_FRIDAY: ["09:00"]})
+        h.session.fsm_filled_fields["time"] = "09:00"
+        h.session.fsm_state = FsmState.COLOR.value
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.pipeline._run_fsm_entry_tool()
+
+        h.tool_router.execute.assert_not_awaited()
+
+    async def test_the_booking_state_entry_tool_is_never_fired(self) -> None:
+        """The reason there is no generic «run whatever `entry_tool` says» loop.
+
+        BOOK declares `book_fitting`, which *writes*. Firing an entry tool off a
+        state transition there would record a customer's appointment without
+        them having confirmed it — and a refused `book_fitting` has already once
+        been recorded as a booking (`project_empty_vehicle_args_false_booking`).
+        """
+        assert STATES[FsmState.BOOK].entry_tool == "book_fitting"
+
+        h = Harness(in_time())
+        h.session.fsm_state = FsmState.BOOK.value
+
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.pipeline._run_fsm_entry_tool()
+
+        h.tool_router.execute.assert_not_awaited()
+
+    async def test_another_state_declaring_the_same_tool_still_does_not_fire(self) -> None:
+        """The state check and the tool check are not the same guard.
+
+        TIME is today the only state declaring `get_fitting_slots`, so the two
+        agree everywhere and either one alone passes every other test in this
+        class — deleting the state check survived the first mutation run for
+        exactly that reason (`feedback_earlier_guard_hides_later`). Handing DATE
+        the same entry tool leaves only the state check able to refuse. It has
+        to: in DATE the caller has not picked a day yet, so the `date` the step
+        would send 1C is the one the machine is still asking about.
+        """
+        h = Harness(in_time())
+        slots_from_1c(h, {_FRIDAY: ["09:00"]})
+        h.session.fsm_state = FsmState.DATE.value
+        also_slots = dict(STATES)
+        also_slots[FsmState.DATE] = dataclasses.replace(
+            STATES[FsmState.DATE], entry_tool="get_fitting_slots"
+        )
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch.dict("src.agent.fitting_fsm.STATES", also_slots, clear=True),
+        ):
+            await h.pipeline._run_fsm_entry_tool()
+
+        h.tool_router.execute.assert_not_awaited()
+
+    async def test_retargeting_times_entry_tool_stops_the_step(self) -> None:
+        """The state table is the authority on which tool this is.
+
+        If TIME is ever pointed somewhere else, this step declines rather than
+        keeps calling the tool it happened to be written against.
+        """
+        h = Harness(in_time())
+        slots_from_1c(h, {_FRIDAY: ["09:00"]})
+        retargeted = dict(STATES)
+        retargeted[FsmState.TIME] = dataclasses.replace(
+            STATES[FsmState.TIME], entry_tool="book_fitting"
+        )
+
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch.dict("src.agent.fitting_fsm.STATES", retargeted, clear=True),
+        ):
+            await h.pipeline._run_fsm_entry_tool()
+
+        h.tool_router.execute.assert_not_awaited()
+
+    async def test_no_tool_router_is_a_decision_and_says_so(self, caplog) -> None:
+        h = Harness(in_time())
+        h.streaming_loop._tool_router = None
+        h.pipeline._agent = MagicMock(spec=[])
+
+        with caplog.at_level(logging.ERROR), fsm_flags(enabled=True, shadow_mode=False):
+            await h.pipeline._run_fsm_entry_tool()
+
+        assert [r for r in caplog.records if "fsm_entry_tool: no tool router" in r.getMessage()]
+        assert h.session.fsm_slots_fetched == set()
+
+    # --- the modes -------------------------------------------------------
+
+    async def test_shadow_never_calls_a_tool(self) -> None:
+        """§3.2 rule 3. Shadow runs against live traffic on the strength of
+        «no customer-visible side effect»; a 1C lookup that rewrites
+        `selected_fitting_date` is squarely one."""
+        h = Harness(in_time())
+        slots_from_1c(h, {_FRIDAY: ["09:00"]})
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.run("Алло")
+
+        h.tool_router.execute.assert_not_awaited()
+        assert h.session.fsm_slots_fetched == set()
+
+    async def test_the_kill_switch_covers_it_too(self) -> None:
+        h = Harness(in_time())
+        slots_from_1c(h, {_FRIDAY: ["09:00"]})
+
+        with fsm_flags(enabled=False):
+            await h.run("Алло")
+
+        h.tool_router.execute.assert_not_awaited()
+
+    async def test_the_step_refuses_shadow_when_called_directly(self) -> None:
+        """The mode check is inside the step as well as around its call site.
+
+        What reaches a future caller is the method, not the `if` in front of it.
+        """
+        h = Harness(in_time())
+        slots_from_1c(h, {_FRIDAY: ["09:00"]})
+
+        with fsm_flags(enabled=True, shadow_mode=True):
+            await h.pipeline._run_fsm_entry_tool()
+
+        h.tool_router.execute.assert_not_awaited()

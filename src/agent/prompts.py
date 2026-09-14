@@ -2012,6 +2012,7 @@ def _render_fitting_progress(p: dict[str, Any]) -> str:
     requested_weekday = p.get("requested_weekday")  # int 0..6 or None
     krok8_confirmed = bool(p.get("krok8_confirmed"))  # Wave 5: emergency book_fitting marker
     krok8_confab = bool(p.get("krok8_confabulation_pending"))  # Wave 6: previous Krok 8 was hallucinated
+    available_slots = list(p.get("available_slots") or [])  # free «HH:MM» from 1C
 
     if booked:
         return (
@@ -2064,9 +2065,22 @@ def _render_fitting_progress(p: dict[str, Any]) -> str:
         )
         checklist.append(("Дата", collected["date"], date_desc))
     time_word = time_to_words(time_)
-    time_desc = (
-        f"{time_} ({time_word})" if time_ and time_word else (time_ or "не обрано")
-    )
+    if time_:
+        time_desc = f"{time_} ({time_word})" if time_word else time_
+    elif available_slots:
+        # The free hours, verbatim, in the block the LLM is told to read before
+        # acting. Call `e436dc96` (2026-09-14) read out «8:20, 9:20, 10:20»
+        # having never called `get_fitting_slots`; the real list was 09:00,
+        # 09:40, 10:20 in 40-minute steps, and the 9:20 the caller picked and
+        # confirmed never existed. A tool result can also fall out of the
+        # history under compression — this row cannot.
+        time_desc = (
+            "не обрано. ⛔ ВІЛЬНІ ЧАСИ з 1С — ІНШИХ НЕ ІСНУЄ: "
+            + ", ".join(available_slots)
+            + ". Називай ТІЛЬКИ ці, дослівно. Не округлюй і не вигадуй сусідні."
+        )
+    else:
+        time_desc = "не обрано"
     checklist.append(("Час", collected["time"], time_desc))
     checklist.append(("Колір авто", collected["color"], plate or "не назвали"))
     checklist.append(("Марка авто", collected["brand"], brand or "не назвали"))

@@ -143,6 +143,13 @@ class CallSession:
         # Set of (date, time) slots offered by the last get_fitting_slots call so
         # the pipeline can capture the caller's choice from the LLM confirmation.
         self.fitting_slots_offered: list[dict[str, str]] = []
+        # `"{station_id}|{date}"` keys the FSM's TIME entry tool has already
+        # asked 1C about. Counts *attempts*, not answers: a day with no free
+        # slots leaves `fitting_slots_offered` empty, which is the same shape as
+        # «never fetched», so a breaker keyed on the answer would re-ask 1C on
+        # every turn of that call. A new date is a new key, so changing the day
+        # is a continuation and still fetches.
+        self.fsm_slots_fetched: set[str] = set()
         # Station the LLM last acted on via get_fitting_slots / book_fitting —
         # used to inject the picked station even when fitting_stations_seen has
         # multiple entries (customer verbally chose one).
@@ -460,6 +467,7 @@ class CallSession:
             "selected_fitting_date": self.selected_fitting_date,
             "selected_fitting_time": self.selected_fitting_time,
             "fitting_slots_offered": self.fitting_slots_offered,
+            "fsm_slots_fetched": sorted(self.fsm_slots_fetched),
             "last_fitting_station_id": self.last_fitting_station_id,
             "storage_contracts_found": list(self.storage_contracts_found),
             "storage_contract_guard_triggered": self.storage_contract_guard_triggered,
@@ -539,6 +547,7 @@ class CallSession:
         session.selected_fitting_date = data.get("selected_fitting_date")
         session.selected_fitting_time = data.get("selected_fitting_time")
         session.fitting_slots_offered = list(data.get("fitting_slots_offered", []))
+        session.fsm_slots_fetched = set(data.get("fsm_slots_fetched", []))
         session.last_fitting_station_id = data.get("last_fitting_station_id")
         session.storage_contracts_found = list(data.get("storage_contracts_found", []))
         session.storage_contract_guard_triggered = data.get(

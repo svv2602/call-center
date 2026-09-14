@@ -309,6 +309,13 @@ class StateConfig:
     auto_skip_if: Callable[[CallSession], bool] = field(default=_never)
 
     # --- Tools ---
+    #: The tool this state cannot be answered without. Declared on five states;
+    #: exactly one of them is wired — TIME, by
+    #: `CallPipeline._run_fsm_entry_tool`. The rest stay documentation, and BOTH
+    #: BOOK's `book_fitting` and this asymmetry are the reason there is no
+    #: generic «run the entry tool» loop: three of the five are reads, one is a
+    #: booking, and firing that one off a state transition would record a
+    #: customer's appointment without them confirming it.
     entry_tool: str | None = None
     exit_tool: str | None = None
 

@@ -533,6 +533,13 @@ FSM_INTERRUPT_CONFIDENCE_FLOOR = 0.5
 # query was slow.
 _FSM_ARESOLVE_TIMEOUT_SEC = 2.0
 
+# Ceiling on the TIME entry tool (`_run_fsm_entry_tool`). Same reasoning as
+# above and the same caller on the phone, but the trip is to 1C rather than to
+# our own database, so it is given more room: the 1C lookups observed in prod
+# answer in ~50 ms, and anything near this ceiling means 1C is down. A timeout
+# costs the slot list — the LLM then asks for it the way it does today.
+_FSM_ENTRY_TOOL_TIMEOUT_SEC = 4.0
+
 # Main-flow states the FSM is allowed to ask in its own words (Wave 7-0).
 #
 # Empty, and not to be refilled without a redesign. Shipped on 2026-09-10 with
@@ -1041,6 +1048,25 @@ class CallPipeline:
             "requested_weekday": self._session.fitting_requested_weekday,
             "krok8_confirmed": krok8_confirmed,
             "krok8_confabulation_pending": self._session.krok8_confabulation_pending,
+            # The only route by which the free times reach the LLM other than a
+            # raw `get_fitting_slots` tool result. Writing them into the session
+            # is not the same as the LLM seeing them
+            # (`codetrap_session_state_is_not_llm_visibility`), and a list it
+            # cannot see is a list it invents — call `e436dc96` offered three
+            # times that 1C had never returned.
+            #
+            # `None` and not `[]` when there is nothing to show. Every consumer
+            # of this dict sifts it with `v not in (None, "", False)`, and `[]`
+            # is not a member of that tuple — an empty list would read as «the
+            # block carries a value here» in a call that never asked 1C
+            # anything. This is the first list-valued key in the block, so it
+            # is the one that has to bend.
+            "available_slots": [
+                slot["time"]
+                for slot in self._session.fitting_slots_offered
+                if isinstance(slot, dict) and slot.get("time")
+            ]
+            or None,
         }
         for fsm_key, progress_key in _FSM_FIELD_TO_PROGRESS.items():
             if progress.get(progress_key) in (None, ""):
@@ -1054,7 +1080,14 @@ class CallPipeline:
         progress = self._build_fitting_progress(
             self._resolve_selected_station(), krok8_confirmed=False
         )
-        snapshot = {k: v for k, v in progress.items() if v not in (None, "", False)}
+        # `available_slots` is excluded: this snapshot answers «what has the call
+        # collected so far» for the intent classifier, and a catalogue of the
+        # station's free hours is reference data the caller never gave us.
+        snapshot = {
+            k: v
+            for k, v in progress.items()
+            if v not in (None, "", False) and k != "available_slots"
+        }
         snapshot.update(
             {
                 k: v
@@ -1835,6 +1868,117 @@ class CallPipeline:
                 "FSM network resolve failed for call=%s — continuing on the parse() result",
                 self._session.channel_uuid,
                 exc_info=True,
+            )
+
+    async def _run_fsm_entry_tool(self) -> None:
+        """Fetch TIME's slot list from 1C before the LLM is asked about times.
+
+        `StateConfig.entry_tool` has been declared on five states since the
+        table was written and read **nowhere in `src/`** — a dead field. Call
+        `e436dc96` (2026-09-14) is what the dead one cost: the FSM entered TIME
+        holding `date=2026-09-18` and `station_id=000000003`, the LLM never
+        called `get_fitting_slots`, and the bot offered «8:20, 9:20, 10:20» out
+        of nothing. The real list arrived 79 seconds later — 09:00, 09:40, 10:20,
+        in 40-minute steps — and the 9:20 the caller had chosen and confirmed did
+        not exist. This wires the one state where the tool is a *read*.
+
+        **Only TIME, and on purpose.** The other four declare
+        `get_fitting_stations`, `get_customer_bookings` and — BOOK —
+        `book_fitting`, which writes. A generic «run whatever `entry_tool`
+        says» loop would fire a booking on a state transition.
+
+        **After the deterministic step, not with `aresolve`.** The transition
+        into TIME happens *in* that step, so the I/O seam ahead of it still sees
+        STORAGE and would miss the entry every time. And `aresolve` is handed a
+        database connection to resolve the caller's words with; this is a
+        catalogue fetch with customer-visible side effects
+        (`selected_fitting_date`, the `selected_fitting_time` reset), which is
+        not what that protocol is for.
+
+        **It does not take the turn and does not speak.** That is the whole
+        difference from Wave 7-0 (`3b93213`): an FSM utterance suppresses the LLM
+        turn, and the LLM turn is where tool calls happen. Here the FSM fills the
+        session and stays silent, so the LLM still owns the turn — and now
+        answers it holding the real list. `FSM_VOICE_STATES` stays empty.
+
+        Routed through `ToolRouter.execute` rather than the client, so the call
+        lands in `call_tool_calls` like any other and a review can see that the
+        list was fetched and by whom.
+        """
+        if self._fsm_mode() != FSM_MODE_LIVE:
+            return
+        try:
+            from src.agent.fitting_fsm import STATES, FsmEngine, FsmState
+
+            engine = FsmEngine(self._session)
+            engine.start()
+            state = engine.current_state()
+            if state is not FsmState.TIME:
+                return
+            if STATES[state].entry_tool != "get_fitting_slots":
+                # The state table is the authority on what TIME's entry tool is;
+                # if someone retargets it, this step stops rather than keeps
+                # calling the tool it was written against.
+                return
+
+            filled = self._session.fsm_filled_fields
+            station_id = str(filled.get("station_id") or "").strip()
+            date = str(filled.get("date") or "").strip()
+            if not station_id or not date:
+                # TIME declares both as `required_context`, so this is the FSM
+                # having arrived without them — nothing to ask 1C.
+                return
+
+            if any(
+                isinstance(slot, dict) and slot.get("date") == date
+                for slot in self._session.fitting_slots_offered
+            ):
+                # The LLM already fetched this very day: leave it alone rather
+                # than spend a second 1C trip to learn the same thing.
+                return
+
+            key = f"{station_id}|{date}"
+            if key in self._session.fsm_slots_fetched:
+                return
+
+            tool_router = self._get_tool_router()
+            if tool_router is None:
+                logger.error(
+                    "fsm_entry_tool: no tool router for call=%s — TIME entered "
+                    "without a slot list, the LLM has to fetch it itself",
+                    self._session.channel_uuid,
+                    extra={"call_id": str(self._session.channel_uuid)},
+                )
+                return
+
+            # Marked before the await, not after: a 1C that times out leaves the
+            # list empty, which is the condition that got us here, so a breaker
+            # that only counted successes would retry on every turn of the call.
+            self._session.fsm_slots_fetched.add(key)
+            await asyncio.wait_for(
+                tool_router.execute(
+                    "get_fitting_slots",
+                    {"station_id": station_id, "date_from": date},
+                ),
+                timeout=_FSM_ENTRY_TOOL_TIMEOUT_SEC,
+            )
+            logger.info(
+                "fsm_entry_tool call=%s state=TIME tool=get_fitting_slots "
+                "station=%s date=%s offered=%d",
+                self._session.channel_uuid,
+                station_id,
+                date,
+                len(self._session.fitting_slots_offered),
+                extra={"call_id": str(self._session.channel_uuid)},
+            )
+        except Exception:
+            # Never suppressed (`37fb2d0`): the turn continues without a list,
+            # which is exactly today's behaviour, but it says so.
+            logger.warning(
+                "fsm_entry_tool failed for call=%s — TIME continues without a slot list",
+                self._session.channel_uuid,
+                exc_info=True,
+                extra={"call_id": str(self._session.channel_uuid)},
             )
 
     @staticmethod
@@ -2971,6 +3115,14 @@ class CallPipeline:
                     fsm_took_turn = await self._maybe_handle_intent(transcript)
                     if not fsm_took_turn:
                         fsm_took_turn = await self._maybe_speak_fsm_question(transcript)
+                    if not fsm_took_turn:
+                        # Behind the deterministic step because the transition
+                        # into TIME happens inside it, and behind the interrupt
+                        # handlers because a PRICE/CANCEL turn is not on its way
+                        # to the slot question. The LLM turn follows, so what
+                        # this writes is in the session before the prompt is
+                        # built.
+                        await self._run_fsm_entry_tool()
             if fsm_took_turn:
                 if await self._close_turn():
                     break
