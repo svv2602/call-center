@@ -532,6 +532,113 @@ class TestEveryPathThatHandsOutAnIdFillsTheSet:
         assert result.get("status") == "confirmed"
 
 
+class TestReserveFittingSlotIsDefaultDenyToo:
+    """`reserve_fitting_slot` writes to 1C through the same kind of guard.
+
+    It kept the vacuous form one wave longer, and it was weaker in a second
+    way: the condition opened with `station_id and`, so an **empty** id skipped
+    the check altogether and was forwarded to 1C as "". Default-deny closes
+    both, because "" is not a member of the set either.
+
+    Measured before changing (prod, 2026-09-14): 5 calls ever, none since
+    2026-08-03, and `get_fitting_stations` preceded every single one — so the
+    set is filled on the real path and none of the 5 would have been refused.
+    """
+
+    def _session_with_car(self, **overrides: Any) -> CallSession:
+        """`reserve_fitting_slot` refuses outright without plate or brand,
+        and that guard sits *after* the station check — so the stand has to
+        clear it or the assertions pass for the wrong reason."""
+        return _ready_session(fitting_plate="сірий", fitting_vehicle_brand="Tiguan", **overrides)
+
+    @pytest.mark.asyncio
+    async def test_an_empty_set_refuses_and_1c_is_untouched(self) -> None:
+        session = self._session_with_car()
+        onec = _onec_mock()
+        onec.reserve_fitting_slot = AsyncMock(spec=OneCClient.reserve_fitting_slot)
+
+        result = await _run(
+            session,
+            "reserve_fitting_slot",
+            {"station_id": STATION, "date": _tomorrow(), "time": TIME},
+            onec,
+        )
+
+        assert _refused_by(result, "no_known_stations_reserve")
+        onec.reserve_fitting_slot.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_an_empty_station_id_no_longer_slips_past(self) -> None:
+        """`station_id and …` used to skip the guard and send "" to 1C."""
+        session = self._session_with_car(fitting_station_ids={STATION, OTHER_STATION})
+        onec = _onec_mock()
+        onec.reserve_fitting_slot = AsyncMock(spec=OneCClient.reserve_fitting_slot)
+
+        result = await _run(
+            session,
+            "reserve_fitting_slot",
+            {"station_id": "", "date": _tomorrow(), "time": TIME},
+            onec,
+        )
+
+        assert _refused_by(result, "station_not_in_catalog_reserve")
+        onec.reserve_fitting_slot.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_an_invented_station_is_refused(self) -> None:
+        session = self._session_with_car(fitting_station_ids={STATION, OTHER_STATION})
+        onec = _onec_mock()
+        onec.reserve_fitting_slot = AsyncMock(spec=OneCClient.reserve_fitting_slot)
+
+        result = await _run(
+            session,
+            "reserve_fitting_slot",
+            {"station_id": INVENTED_STATION, "date": _tomorrow(), "time": TIME},
+            onec,
+        )
+
+        assert _refused_by(result, "station_not_in_catalog_reserve")
+        onec.reserve_fitting_slot.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_the_two_refusals_are_told_apart(self) -> None:
+        """Prod names only the first guard that fired; so must the reason."""
+        empty = await _run(
+            self._session_with_car(),
+            "reserve_fitting_slot",
+            {"station_id": STATION, "date": _tomorrow(), "time": TIME},
+        )
+        wrong = await _run(
+            self._session_with_car(fitting_station_ids={STATION, OTHER_STATION}),
+            "reserve_fitting_slot",
+            {"station_id": INVENTED_STATION, "date": _tomorrow(), "time": TIME},
+        )
+
+        assert empty["reason"] != wrong["reason"]
+        # And apart from book_fitting's, which the LLM may hit in the same call.
+        assert empty["reason"] != "no_known_stations"
+
+    @pytest.mark.asyncio
+    async def test_a_known_station_still_reserves(self) -> None:
+        """The 5 real prod calls all looked like this — none may start failing."""
+        session = self._session_with_car(fitting_station_ids={STATION, OTHER_STATION})
+        onec = _onec_mock()
+        onec.reserve_fitting_slot = AsyncMock(
+            spec=OneCClient.reserve_fitting_slot,
+            return_value={"success": True, "data": [{"GUID": "res-1"}]},
+        )
+
+        result = await _run(
+            session,
+            "reserve_fitting_slot",
+            {"station_id": STATION, "date": _tomorrow(), "time": TIME},
+            onec,
+        )
+
+        assert result.get("status") == "reserved"
+        assert onec.reserve_fitting_slot.await_args.kwargs["station_id"] == STATION
+
+
 class TestTheRescheduleThatFailedInProd:
     """Task 3.6 — phases 1 and 3 in the order prod ran them.
 

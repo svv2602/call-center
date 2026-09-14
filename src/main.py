@@ -3518,15 +3518,42 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
 
     async def _reserve_fitting_slot(**kwargs: Any) -> dict[str, Any]:
         """Reserve a fitting slot temporarily (without full customer data)."""
-        station_id = kwargs.get("station_id", "")
-        if (
-            station_id
-            and session.fitting_station_ids
-            and station_id not in session.fitting_station_ids
-        ):
-            known = ", ".join(sorted(session.fitting_station_ids))
+        station_id = str(kwargs.get("station_id", "")).strip()
+        # Wave 1-A follow-up (2026-09-14): this used to open with
+        # `station_id and session.fitting_station_ids and`, which let two
+        # shapes straight through to a 1C write — an empty set, read as
+        # «anything goes» rather than «nothing to check against», and an empty
+        # `station_id`, which skipped the guard entirely and was forwarded as
+        # "". Default-deny covers both: "" is not a member either
+        # (`feedback_guards_need_default_deny`).
+        #
+        # Measured before changing: 5 calls ever, none since 2026-08-03, and
+        # `get_fitting_stations` ran before every one of them — so the set is
+        # filled on the real path and this cannot refuse a caller who followed it.
+        if station_id not in session.fitting_station_ids:
+            known_ids = sorted(session.fitting_station_ids)
+            if not known_ids:
+                logger.warning(
+                    "reserve_fitting_slot: no station has been returned by 1C in "
+                    "call %s, so station_id=%r cannot be verified — refusing",
+                    session.channel_uuid,
+                    station_id,
+                )
+                return {
+                    "error": True,
+                    "action_required": "call_get_fitting_stations",
+                    "reason": "no_known_stations_reserve",
+                    "message": (
+                        f"⛔ station_id='{station_id}' не звірити: у цьому дзвінку "
+                        "1С ще не повертала жодної точки шиномонтажу. Виклич "
+                        "get_fitting_stations, візьми поле 'id' з результату. "
+                        "Не вигадуй id і не бронюй слот наосліп."
+                    ),
+                }
+            known = ", ".join(known_ids)
             return {
                 "error": True,
+                "reason": "station_not_in_catalog_reserve",
                 "message": f"Невірний station_id '{station_id}'. "
                 f"Використай station_id з результату get_fitting_stations: {known}",
             }
