@@ -582,6 +582,27 @@ async def bulk_delete_conversations(
 # ── Import real call ──────────────────────────────────────────
 
 
+def _agent_turn_for_tool(agent_slots: list[tuple[Any, str]], tool_at: Any) -> str | None:
+    """The sandbox turn a tool call belongs to, matched on wall-clock time.
+
+    A tool runs while the reply it feeds is still being composed, so it is
+    timestamped before that reply is logged: the owning turn is the first agent
+    turn at or after the tool. A tool that follows the last agent turn — the
+    caller hung up before the reply went out — is kept on that last turn rather
+    than dropped, so the import still shows it was made.
+    """
+    slots = [(ts, sid) for ts, sid in agent_slots if ts is not None]
+    if not slots:
+        return None
+    if tool_at is None:
+        logger.warning("import_call: tool call has no created_at, cannot place it")
+        return None
+    for ts, sid in slots:
+        if ts >= tool_at:
+            return sid
+    return slots[-1][1]
+
+
 @router.post("/conversations/import-call")
 async def import_call(request: ImportCallRequest, user: dict[str, Any] = _perm_w) -> dict[str, Any]:
     """Import a real call from calls/call_turns/call_tool_calls into sandbox."""
@@ -605,7 +626,7 @@ async def import_call(request: ImportCallRequest, user: dict[str, Any] = _perm_w
         # 2. Load turns
         turns_result = await conn.execute(
             text("""
-                SELECT turn_number, speaker, content, llm_latency_ms
+                SELECT turn_number, speaker, content, llm_latency_ms, created_at
                 FROM call_turns WHERE call_id = :call_id
                 ORDER BY turn_number
             """),
@@ -618,7 +639,7 @@ async def import_call(request: ImportCallRequest, user: dict[str, Any] = _perm_w
         # 3. Load tool calls
         tc_result = await conn.execute(
             text("""
-                SELECT turn_number, tool_name, tool_args, tool_result, duration_ms
+                SELECT tool_name, tool_args, tool_result, duration_ms, created_at
                 FROM call_tool_calls WHERE call_id = :call_id
                 ORDER BY created_at
             """),
@@ -642,6 +663,15 @@ async def import_call(request: ImportCallRequest, user: dict[str, Any] = _perm_w
             "original_quality_score": call_row.quality_score,
             "original_duration_seconds": call_row.duration_seconds,
         }
+
+        # `call_tool_calls.turn_number` is not a transcript turn: `src/main.py`
+        # increments a per-call tool counter into that column, so a 105-turn call
+        # carries tool rows numbered 1..13. Matching the two columns hangs tool
+        # calls on unrelated turns — in cc1584b3 all four landed wrong and two of
+        # them on *customer* turns, which cannot hold a tool call at all.
+        # `created_at` is the only shared axis. A tool runs before the reply it
+        # feeds, so its turn is the first agent turn at or after it.
+        agent_slots: list[tuple[Any, str]] = []
 
         user_id = user.get("user_id")
         conv_result = await conn.execute(
@@ -671,7 +701,6 @@ async def import_call(request: ImportCallRequest, user: dict[str, Any] = _perm_w
         # 5. Insert sandbox turns
         speaker_map = {"bot": "agent", "customer": "customer"}
         conversation_history: list[dict[str, Any]] = []
-        turn_number_to_sandbox_id: dict[int, str] = {}
         saved_turns = []
 
         for turn in turns:
@@ -708,7 +737,8 @@ async def import_call(request: ImportCallRequest, user: dict[str, Any] = _perm_w
             turn_row = turn_result.first()
             assert turn_row is not None
             saved_turns.append(dict(turn_row._mapping))
-            turn_number_to_sandbox_id[turn["turn_number"]] = str(turn_row.id)
+            if speaker == "agent":
+                agent_slots.append((turn.get("created_at"), str(turn_row.id)))
 
             # Update running conversation history
             if speaker == "customer":
@@ -718,7 +748,7 @@ async def import_call(request: ImportCallRequest, user: dict[str, Any] = _perm_w
 
         # 6. Insert sandbox tool calls
         for tc in tool_calls:
-            sandbox_turn_id = turn_number_to_sandbox_id.get(tc["turn_number"])
+            sandbox_turn_id = _agent_turn_for_tool(agent_slots, tc.get("created_at"))
             if not sandbox_turn_id:
                 continue
             await conn.execute(

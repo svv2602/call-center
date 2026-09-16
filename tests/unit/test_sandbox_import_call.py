@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -42,11 +42,23 @@ def _make_call_row(
     return row
 
 
+#: Wall clock the fixtures hang off. Rows that do not state a `created_at` get
+#: one ten seconds apart in list order, the way a transcript really arrives.
+_T0 = datetime(2026, 2, 20, 14, 30, 0)
+
+
 def _make_turn_rows(turns: list[dict[str, Any]]) -> list[MagicMock]:
+    """Rows shaped the way `call_turns` and `call_tool_calls` really come back.
+
+    Both tables carry `created_at`, and it is the only column that links them:
+    `call_tool_calls.turn_number` is a per-call tool counter (`src/main.py:1147`),
+    not a transcript turn. A fixture without a timestamp describes a row prod
+    never produces.
+    """
     rows = []
-    for t in turns:
+    for i, t in enumerate(turns):
         row = MagicMock()
-        row._mapping = t
+        row._mapping = {"created_at": _T0 + timedelta(seconds=10 * i), **t}
         rows.append(row)
     return rows
 
@@ -100,6 +112,55 @@ def _conv_row() -> MagicMock:
         "updated_at": datetime(2026, 2, 20, 14, 31, 0),
     }
     return row
+
+
+async def _run_import(
+    turns_data: list[dict[str, Any]],
+    tc_data: list[dict[str, Any]],
+    _patch_engine: Any,
+) -> tuple[list[dict[str, Any]], list[MagicMock]]:
+    """Import a call and hand back the INSERT params plus the sandbox turn rows."""
+    from src.api.sandbox import import_call
+
+    sandbox_rows = [
+        _sandbox_turn_row(t["turn_number"], "agent" if t["speaker"] == "bot" else "customer")
+        for t in turns_data
+    ]
+    turns_result = MagicMock()
+    turns_result.__iter__ = MagicMock(return_value=iter(_make_turn_rows(turns_data)))
+    tc_result = MagicMock()
+    tc_result.__iter__ = MagicMock(return_value=iter(_make_turn_rows(tc_data)))
+
+    results = iter(
+        [
+            _make_result(first=_make_call_row()),
+            turns_result,
+            tc_result,
+            _make_result(first=_conv_row()),
+            *[_make_result(first=r) for r in sandbox_rows],
+            *[MagicMock() for _ in tc_data],
+        ]
+    )
+    executed: list[dict[str, Any]] = []
+
+    async def capture_execute(query, params=None):
+        if params:
+            executed.append(dict(params))
+        return next(results)
+
+    mock_conn = AsyncMock()
+    mock_conn.execute = capture_execute
+
+    @asynccontextmanager
+    async def mock_begin():
+        yield mock_conn
+
+    engine = MagicMock()
+    engine.begin = mock_begin
+    _patch_engine(engine)
+
+    await import_call(ImportCallRequest(call_id=CALL_ID), {"user_id": "test"})
+    return executed, sandbox_rows
 
 
 # ── Model validation ─────────────────────────────────────────
@@ -410,72 +471,144 @@ class TestImportCallEndpoint:
         assert h2[2] == {"role": "user", "content": "Шини"}
 
     @pytest.mark.asyncio
-    async def test_tool_calls_linked_by_turn_number(self, _patch_engine) -> None:
-        """Tool calls should be linked to the correct sandbox turn by turn_number."""
-        from src.api.sandbox import import_call
+    async def test_a_tool_call_lands_on_the_reply_it_fed(self, _patch_engine) -> None:
+        """Placed on the agent turn that follows it, not on a matching integer.
 
-        mock_conn = AsyncMock()
-        executed_params = []
-
-        call_result = _make_result(first=_make_call_row())
+        Shape taken from prod call `cc1584b3`: three `get_fitting_stations` rows
+        numbered 1, 2, 3 across a thirteen-turn transcript. Reading those numbers
+        as turn numbers put every one of them on the wrong turn.
+        """
         turns_data = [
-            {"turn_number": 1, "speaker": "customer", "content": "Hi", "llm_latency_ms": None},
-            {"turn_number": 2, "speaker": "bot", "content": "Hello", "llm_latency_ms": 200},
+            {"turn_number": 0, "speaker": "bot", "content": "Добрий день!", "llm_latency_ms": 300},
+            {"turn_number": 1, "speaker": "customer", "content": "ціна", "llm_latency_ms": None},
+            {"turn_number": 2, "speaker": "bot", "content": "Дві точки", "llm_latency_ms": 400},
+            {"turn_number": 3, "speaker": "customer", "content": "Дніпро", "llm_latency_ms": None},
+            {"turn_number": 4, "speaker": "bot", "content": "Отже, Дніпро?", "llm_latency_ms": 250},
+            {"turn_number": 5, "speaker": "customer", "content": "так", "llm_latency_ms": None},
+            {"turn_number": 6, "speaker": "bot", "content": "Чотири точки", "llm_latency_ms": 500},
         ]
-        turns_result = MagicMock()
-        turns_result.__iter__ = MagicMock(return_value=iter(_make_turn_rows(turns_data)))
-
+        # Ordinals 1..3, exactly as `call_tool_calls.turn_number` stores them,
+        # each timestamped just after the caller spoke and before the reply.
         tc_data = [
             {
+                "turn_number": 1,
+                "tool_name": "get_fitting_stations",
+                "tool_args": {"city": "Київ"},
+                "tool_result": {},
+                "duration_ms": 100,
+                "created_at": _T0 + timedelta(seconds=15),
+            },
+            {
                 "turn_number": 2,
-                "tool_name": "search_tires",
+                "tool_name": "get_fitting_stations",
+                "tool_args": {"city": "Дніпро"},
+                "tool_result": {},
+                "duration_ms": 100,
+                "created_at": _T0 + timedelta(seconds=55),
+            },
+            {
+                "turn_number": 3,
+                "tool_name": "get_fitting_price",
                 "tool_args": {},
                 "tool_result": {},
                 "duration_ms": 100,
+                "created_at": _T0 + timedelta(seconds=300),
             },
         ]
-        tc_result = MagicMock()
-        tc_result.__iter__ = MagicMock(return_value=iter(_make_turn_rows(tc_data)))
 
-        conv = _conv_row()
-        agent_turn = _sandbox_turn_row(2, "agent")
-        agent_turn_id = agent_turn.id
-        customer_turn = _sandbox_turn_row(1, "customer")
+        executed, sandbox_rows = await _run_import(turns_data, tc_data, _patch_engine)
+        by_turn = {r.turn_number: str(r.id) for r in sandbox_rows}
+        placed = [p["turn_id"] for p in executed if "tool_name" in p]
 
-        all_results = [
-            call_result,
-            turns_result,
-            tc_result,
-            _make_result(first=conv),
-            _make_result(first=customer_turn),
-            _make_result(first=agent_turn),
-            MagicMock(),  # tool call insert
+        assert placed == [by_turn[2], by_turn[6], by_turn[6]]
+
+    @pytest.mark.asyncio
+    async def test_a_tool_call_never_lands_on_a_customer_turn(self, _patch_engine) -> None:
+        """A customer turn cannot hold a tool call — the caller ran no tools.
+
+        The turn right after a tool is normally the reply it fed, so this only
+        bites when the caller talks over the bot. That happens: in `cc1584b3`
+        turns 9 and 10 are logged nine milliseconds apart.
+        """
+        turns_data = [
+            {"turn_number": 0, "speaker": "bot", "content": "Вітаю", "llm_latency_ms": 300},
+            {"turn_number": 1, "speaker": "customer", "content": "Дніпро", "llm_latency_ms": None},
+            # barge-in: the caller keeps talking while the lookup is still running
+            {"turn_number": 2, "speaker": "customer", "content": "Перемог", "llm_latency_ms": None},
+            {"turn_number": 3, "speaker": "bot", "content": "Чотири точки", "llm_latency_ms": 400},
+            {"turn_number": 4, "speaker": "customer", "content": "а ціна?", "llm_latency_ms": None},
+            {"turn_number": 5, "speaker": "bot", "content": "Знайшла точку", "llm_latency_ms": 400},
         ]
-        result_iter = iter(all_results)
+        tc_data = [
+            {
+                "turn_number": 1,
+                "tool_name": "get_fitting_stations",
+                "tool_args": {},
+                "tool_result": {},
+                "duration_ms": 100,
+                "created_at": _T0 + timedelta(seconds=15),
+            },
+            {
+                "turn_number": 2,
+                "tool_name": "get_fitting_price",
+                "tool_args": {},
+                "tool_result": {},
+                "duration_ms": 100,
+                "created_at": _T0 + timedelta(seconds=35),
+            },
+        ]
 
-        async def capture_execute(query, params=None):
-            if params:
-                executed_params.append(dict(params))
-            return next(result_iter)
+        executed, sandbox_rows = await _run_import(turns_data, tc_data, _patch_engine)
+        customer_ids = {str(r.id) for r in sandbox_rows if r.speaker == "customer"}
+        placed = [p["turn_id"] for p in executed if "tool_name" in p]
 
-        mock_conn.execute = capture_execute
+        assert placed, "the import dropped every tool call"
+        assert not customer_ids & set(placed)
 
-        @asynccontextmanager
-        async def mock_begin():
-            yield mock_conn
+    @pytest.mark.asyncio
+    async def test_a_tool_call_after_the_last_reply_is_kept(self, _patch_engine) -> None:
+        """The caller hung up before the reply went out — still show the call."""
+        turns_data = [
+            {"turn_number": 0, "speaker": "bot", "content": "Вітаю", "llm_latency_ms": 300},
+            {"turn_number": 1, "speaker": "customer", "content": "Дніпро", "llm_latency_ms": None},
+        ]
+        tc_data = [
+            {
+                "turn_number": 1,
+                "tool_name": "get_fitting_stations",
+                "tool_args": {},
+                "tool_result": {},
+                "duration_ms": 100,
+                "created_at": _T0 + timedelta(seconds=600),
+            },
+        ]
 
-        mock_engine = MagicMock()
-        mock_engine.begin = mock_begin
-        _patch_engine(mock_engine)
+        executed, sandbox_rows = await _run_import(turns_data, tc_data, _patch_engine)
+        last_agent = [r for r in sandbox_rows if r.speaker == "agent"][-1]
+        placed = [p["turn_id"] for p in executed if "tool_name" in p]
 
-        req = ImportCallRequest(call_id=CALL_ID)
-        await import_call(req, {"user_id": "test"})
+        assert placed == [str(last_agent.id)]
 
-        # Find tool call insert params
-        tc_params = [p for p in executed_params if "tool_name" in p]
-        assert len(tc_params) == 1
-        assert tc_params[0]["turn_id"] == str(agent_turn_id)
-        assert tc_params[0]["tool_name"] == "search_tires"
+    @pytest.mark.asyncio
+    async def test_a_call_the_bot_never_spoke_in_drops_its_tools(self, _patch_engine) -> None:
+        """No agent turn means no turn to hang a tool call on."""
+        turns_data = [
+            {"turn_number": 0, "speaker": "customer", "content": "алло", "llm_latency_ms": None},
+        ]
+        tc_data = [
+            {
+                "turn_number": 1,
+                "tool_name": "get_fitting_stations",
+                "tool_args": {},
+                "tool_result": {},
+                "duration_ms": 100,
+                "created_at": _T0 + timedelta(seconds=5),
+            },
+        ]
+
+        executed, _ = await _run_import(turns_data, tc_data, _patch_engine)
+
+        assert [p for p in executed if "tool_name" in p] == []
 
     @pytest.mark.asyncio
     async def test_is_mock_false(self, _patch_engine) -> None:
