@@ -186,7 +186,7 @@ class CallSession:
         # renders a correction banner on the NEXT turn to tell the LLM
         # its confirmation was hallucinated and to ask the ⏳ field.
         self.krok8_confabulation_pending: bool = False
-        self.fitting_plate: str | None = None              # Ідентифікатор авто. З 2026-08-18: колір (напр. "синій"). Історично: держномер. Preparse може ще писати сюди платити, якщо клієнт САМ добровільно назвав.
+        self.fitting_plate: str | None = None              # Ідентифікатор авто. З 2026-08-18: колір (напр. "синій"). Історично: держномер — звідси назва. Справжній держномер сюди ще пише 1С (профіль клієнта, попередній запис); preparse більше НЕ пише (див. preparse.py, 2026-09-16).
         self.fitting_vehicle_brand: str | None = None      # Марка/модель авто
         # storage_choice: None=pending, "own"=клієнт привезе свої, "contract"=зі зберігання
         self.fitting_storage_choice: str | None = None

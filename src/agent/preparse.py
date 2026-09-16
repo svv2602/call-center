@@ -1,9 +1,21 @@
 """Deterministic pre-parser for fitting utterances.
 
-Extracts car brand and licence plate from a client's turn so that the
-LLM progress-block flips «Марка авто» and «Держномер» to ✅ immediately.
-Verbose callers who say everything at once («на завтра, лексус AA1234BB,
-свої шини») skip 2-3 turns of follow-up questions.
+Extracts the car brand from a client's turn so that the LLM progress-block
+flips «Марка авто» to ✅ immediately. Verbose callers who say everything at
+once («на завтра, лексус, свої шини») skip a turn of follow-up questions.
+
+Plate extraction was removed on 2026-09-16. Krok 5 stopped asking for the
+plate on 2026-08-18 — it asks for the *colour*, and `session.fitting_plate`
+kept its old name — so a plate written here filled the colour slot. Over 21
+days and 264 calls the pattern fired twice and was wrong both times: «на
+16.09 на 10:00» reads as prefix «на» + four digits + suffix «на», because
+«на» is a preposition built from two letters the plate alphabet allows.
+Both callers lost their booking — the fabricated plate marked the colour ✅,
+so the bot never asked for it, and the brand guard then refused the booking
+(`2489d6bd`, `60ae3fdd`). Zero correct extractions in the same window.
+
+Real plates still reach the session from 1C: `update_customer_profile` and
+`get_customer_bookings` both write one when the caller has a profile.
 
 Storage-choice detection is handled separately in pipeline.py — a
 richer heuristic already exists there. We deliberately do NOT duplicate
@@ -14,24 +26,6 @@ from __future__ import annotations
 
 import re
 from typing import Any
-
-# Ukrainian licence-plate pattern (DSTU 4278-2004):
-#   2 Cyrillic-look-alike letters + 4 digits + 2 letters.
-# The 12 allowed Cyrillic letters (А В Е І К М Н О Р С Т Х) map 1:1
-# to Latin (A B E I K M H O P C T X) — STT can output either script.
-# Separators (space, dash, dot) are allowed between letter/digit blocks
-# AND between individual digits (STT sometimes gives «12 34» for «1234»).
-_PLATE_LETTER_CLASS = r"[АВЕІКМНОРСТХABEIKMHOPCTX]"
-_PLATE_SEP = r"[\s\-.:_]*"
-_PLATE_RE = re.compile(
-    rf"(?<![A-Za-zА-Яа-яІіЇїЄєҐґ0-9])"
-    rf"(?P<pfx>{_PLATE_LETTER_CLASS}{{2}}){_PLATE_SEP}"
-    rf"(?P<digits>\d(?:{_PLATE_SEP}\d){{3}}){_PLATE_SEP}"
-    rf"(?P<sfx>{_PLATE_LETTER_CLASS}{{2}})"
-    rf"(?![A-Za-zА-Яа-яІіЇїЄєҐґ0-9])",
-    re.IGNORECASE,
-)
-_PLATE_SEP_STRIP = re.compile(r"[\s\-.:_]")
 
 # Car brands the caller might mention on turn 1. Keys are lowercase
 # STT-friendly variants (Ukrainian, Russian, Latin); values are the
@@ -129,21 +123,6 @@ _CAR_BRANDS: dict[str, str] = {
 _CAR_BRAND_KEYS_LONGEST_FIRST = sorted(_CAR_BRANDS.keys(), key=len, reverse=True)
 
 
-def _extract_plate(text: str) -> str | None:
-    """Return normalised plate (upper, no separators) or None.
-
-    Matches «AA1234BB», «АА-12-34-БВ», «AA 12 34 CD» — separators
-    between letter/digit blocks are ignored, and the plate must be
-    surrounded by non-word chars (or line edges) so we don't accidentally
-    pick digits out of embedded numbers like a 7-digit phone number.
-    """
-    m = _PLATE_RE.search(text)
-    if not m:
-        return None
-    digits = _PLATE_SEP_STRIP.sub("", m.group("digits"))
-    return (m.group("pfx") + digits + m.group("sfx")).upper()
-
-
 def _extract_brand(text: str) -> str | None:
     """Return canonical brand name or None. Matches whole words only."""
     lower = text.lower()
@@ -162,15 +141,11 @@ def preparse_fitting(text: str) -> dict[str, Any]:
     LLM-driven values from a later turn).
 
     Currently detects:
-        - plate  → Ukrainian DSTU 4278 plate, normalised uppercase
         - brand  → canonical brand name (Toyota, Lexus, BYD, Zeekr, …)
 
     Storage-choice detection lives in pipeline.py — do not duplicate here.
     """
     out: dict[str, Any] = {}
-    plate = _extract_plate(text)
-    if plate:
-        out["plate"] = plate
     brand = _extract_brand(text)
     if brand:
         out["brand"] = brand

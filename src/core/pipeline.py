@@ -3465,21 +3465,23 @@ class CallPipeline:
                         _picked, self._session.channel_uuid,
                     )
 
-            # Deterministic pre-parser (Phase 3 2026-08-14): pull car brand
-            # and licence plate out of any user turn with regex/keyword match.
-            # Only writes to session when the field is empty — never trample
-            # an LLM-driven value from a later turn. Verbose callers who say
-            # everything at once («на завтра, лексус AA1234BB, свої») now
-            # skip 2-3 follow-up questions.
-            if not self._session.fitting_plate or not self._session.fitting_vehicle_brand:
+            # Deterministic pre-parser (Phase 3 2026-08-14): pull the car brand
+            # out of any user turn with a keyword match. Only writes to session
+            # when the field is empty — never trample an LLM-driven value from
+            # a later turn. Verbose callers who say everything at once («на
+            # завтра, лексус, свої») now skip a follow-up question.
+            #
+            # It also used to extract a licence plate, into `fitting_plate` —
+            # which has meant *colour* since 2026-08-18. See `preparse.py`: in
+            # 21 days the pattern fired twice, read «на 16.09 на 10:00» as a
+            # plate both times, and cost both callers their booking.
+            if not self._session.fitting_vehicle_brand:
                 try:
                     from src.agent.preparse import preparse_fitting
 
                     _extracted = preparse_fitting(transcript.text)
                     if _extracted:
-                        if "plate" in _extracted and not self._session.fitting_plate:
-                            self._session.fitting_plate = _extracted["plate"]
-                        if "brand" in _extracted and not self._session.fitting_vehicle_brand:
+                        if "brand" in _extracted:
                             self._session.fitting_vehicle_brand = _extracted["brand"]
                         logger.info(
                             "Fitting preparse for call %s extracted %s from %r",
