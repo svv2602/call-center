@@ -136,6 +136,28 @@ _TOOL_WAIT_POOLS: dict[str, list[str]] = {
 _MAX_TOOL_WAIT_POOL_LEN = max(len(pool) for pool in _TOOL_WAIT_POOLS.values())
 
 
+# How long after a thinking filler stops playing a tool wait phrase still reads
+# as the same breath. The filler ends roughly when the LLM stream is about to
+# yield its tool call (filler starts 0.3s in, LLM p50 is ~1.5-2s), so the two
+# land within a second of each other in the ordinary case.
+_FILLER_ECHO_WINDOW_SEC = 2.0
+
+
+def _filler_still_ringing(filler_finished_at: float | None, now: float | None = None) -> bool:
+    """True if a thinking filler finished recently enough that a wait phrase
+    now would sound like a second half of it.
+
+    `None` means the caller never heard a filler this round — real audio beat it
+    or pre-synthesis failed — so the wait phrase is the only thing covering the
+    tool call and must still be spoken.
+    """
+    if filler_finished_at is None:
+        return False
+    return (now if now is not None else time.monotonic()) - filler_finished_at < (
+        _FILLER_ECHO_WINDOW_SEC
+    )
+
+
 def _opening_word(text: str) -> str:
     return re.split(r"[\s,.!?]+", text.strip().lower(), maxsplit=1)[0]
 
@@ -1550,10 +1572,26 @@ class StreamingAgentLoop:
                     content = self._pii_vault.mask(content)
                 return {"type": "tool_result", "tool_use_id": tc.id, "content": content}
 
-            # Speak wait-phrase during tool execution.
-            # Always play when tool calls are present — even if LLM already spoke
-            # text, because tool execution + next LLM round can take 10+ seconds.
-            need_wait_phrase = not interrupted and not disconnected
+            # Speak wait-phrase during tool execution — unless the caller is
+            # still hearing the thinking filler from this same round, in which
+            # case the two run together as one babbling stretch. That was the
+            # common case, not the rare one: measured on prod 2026-09-16, the
+            # filler fired on 39 of ~40 rounds and the wait phrase added 19 more
+            # utterances on top, 58 in four calls.
+            #
+            # The silence this gives up is small. Tool execution itself is
+            # 2-150ms at p50 for every tool except book_fitting (~1s), and the
+            # gap that follows belongs to the next LLM round, which opens with a
+            # filler of its own after _FILLER_DELAY_SEC. Packet-level silence is
+            # covered by pipeline's _keepalive_loop regardless.
+            filler_still_ringing = _filler_still_ringing(result.filler_finished_at)
+            if filler_still_ringing:
+                logger.info(
+                    "Suppressing wait-phrase — thinking filler %r ended %.1fs ago",
+                    self._last_thinking_filler,
+                    time.monotonic() - (result.filler_finished_at or 0.0),
+                )
+            need_wait_phrase = not interrupted and not disconnected and not filler_still_ringing
             if need_wait_phrase and not self._conn.is_closed:
                 tool_names = [tc.name for tc in unique_tool_calls]
                 wait_phrase = self._next_tool_wait_phrase(tool_names)

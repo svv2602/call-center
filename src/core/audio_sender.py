@@ -42,6 +42,11 @@ class SendResult:
     provider_key: str = ""
     interrupted: bool = False
     disconnected: bool = False
+    # `time.monotonic()` at which the last thinking filler finished playing, or
+    # None if the caller never heard one this round (real audio arrived first,
+    # or pre-synthesis failed). The caller uses it to avoid stacking a second
+    # wait phrase on top of a filler the caller is still hearing.
+    filler_finished_at: float | None = None
 
 
 @dataclass
@@ -85,6 +90,7 @@ class StreamingAudioSender:
         self._filler_audio = filler_audio
         self._filler_delay_sec = filler_delay_sec
         self._filler_repeat_sec = filler_repeat_sec
+        self._filler_finished_at: float | None = None
         # Lock prevents concurrent send_audio calls (filler vs LLM audio)
         self._send_lock = asyncio.Lock()
 
@@ -135,6 +141,9 @@ class StreamingAudioSender:
                         if self._echo_canceller is not None:
                             self._echo_canceller.record_far_end(filler_audio)
                         await self._send_audio_locked(filler_audio)
+                        # `send_audio` drains in real time, so this is the
+                        # moment the caller stopped hearing the filler.
+                        self._filler_finished_at = time.monotonic()
                     except Exception:
                         logger.debug("Filler phrase send failed", exc_info=True)
                         break
@@ -214,6 +223,7 @@ class StreamingAudioSender:
             provider_key=provider_key,
             interrupted=interrupted,
             disconnected=disconnected,
+            filler_finished_at=self._filler_finished_at,
         )
 
 

@@ -13,17 +13,46 @@ that the 0.3s cadence is an anti-drop measure (calls c11eae66, 8c85d7c5).
 
 from __future__ import annotations
 
+import asyncio
 import itertools
+import time
+from typing import TYPE_CHECKING, Any
+from unittest.mock import patch
 
 import pytest
 
 from src.agent import prompts
 from src.agent.streaming_loop import (
+    _FILLER_DELAY_SEC,
+    _FILLER_ECHO_WINDOW_SEC,
     _TOOL_WAIT_POOLS,
+    _filler_still_ringing,
     _opening_word,
     _pick_tool_wait_phrase,
 )
-from tests.unit.test_streaming_loop import _build_loop
+from tests.unit.test_streaming_loop import _build_loop, _tool_stream
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+
+    from src.llm.models import StreamEvent
+
+
+class _SlowRouter:
+    """Wraps a mock router so the LLM stream starts after a real delay —
+    without one, the filler's sleep is cancelled before it ever fires."""
+
+    def __init__(self, inner: Any, delay_sec: float) -> None:
+        self._inner = inner
+        self._delay_sec = delay_sec
+
+    async def complete_stream(self, *args: Any, **kwargs: Any) -> AsyncIterator[StreamEvent]:
+        await asyncio.sleep(self._delay_sec)
+        async for event in self._inner.complete_stream(*args, **kwargs):
+            yield event
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._inner, name)
 
 ALL_POOLS = {
     name: value
@@ -145,6 +174,64 @@ class TestTheRotationStartsSomewhereDifferentEachCall:
             _build_loop([])[0]._next_tool_wait_phrase(["get_fitting_stations"]) for _ in range(40)
         }
         assert len(firsts) > 1
+
+
+class TestTheWaitPhraseYieldsToAFillerStillPlaying:
+    """A tool round used to speak twice: the thinking filler at +0.3s and then
+    the tool wait phrase, back to back. Measured 2026-09-16, that was 58
+    utterances across four calls.
+    """
+
+    def test_a_filler_that_never_played_leaves_the_wait_phrase_alone(self) -> None:
+        """None is the rounds where nothing else covers the tool call."""
+        assert _filler_still_ringing(None) is False
+
+    def test_a_filler_that_just_ended_suppresses_it(self) -> None:
+        now = time.monotonic()
+        assert _filler_still_ringing(now - 0.2, now=now) is True
+
+    def test_a_filler_from_long_ago_does_not(self) -> None:
+        now = time.monotonic()
+        assert _filler_still_ringing(now - 30.0, now=now) is False
+
+    def test_the_window_has_both_edges(self) -> None:
+        now = time.monotonic()
+        inside = _FILLER_ECHO_WINDOW_SEC - 0.05
+        outside = _FILLER_ECHO_WINDOW_SEC + 0.05
+        assert _filler_still_ringing(now - inside, now=now) is True
+        assert _filler_still_ringing(now - outside, now=now) is False
+
+    @pytest.mark.asyncio
+    async def test_a_slow_round_does_not_speak_twice(self) -> None:
+        """Wiring: the predicate is useless if run_turn never consults it.
+
+        The LLM here takes longer than _FILLER_DELAY_SEC, so the filler really
+        plays before the tool call arrives — the ordinary case on prod.
+        """
+        loop, _, _, _ = _build_loop(
+            [_tool_stream("", "t1", "get_fitting_stations", {"city": "Дніпро"})],
+            tool_results={"get_fitting_stations": {"stations": []}},
+        )
+        loop._llm_router = _SlowRouter(loop._llm_router, delay_sec=_FILLER_DELAY_SEC + 0.25)
+        with patch.object(
+            loop, "_next_tool_wait_phrase", wraps=loop._next_tool_wait_phrase
+        ) as picked:
+            await loop.run_turn("Які у вас точки?", [])
+        picked.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_a_fast_round_still_speaks_the_wait_phrase(self) -> None:
+        """The counterpart: when no filler played, the wait phrase is the only
+        thing covering the tool call and must survive."""
+        loop, _, _, _ = _build_loop(
+            [_tool_stream("", "t1", "get_fitting_stations", {"city": "Дніпро"})],
+            tool_results={"get_fitting_stations": {"stations": []}},
+        )
+        with patch.object(
+            loop, "_next_tool_wait_phrase", wraps=loop._next_tool_wait_phrase
+        ) as picked:
+            await loop.run_turn("Які у вас точки?", [])
+        picked.assert_called_once()
 
 
 class TestOpeningWord:

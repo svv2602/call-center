@@ -527,6 +527,46 @@ class TestFillerAudio:
             assert chunk == b"\xff" * 10
 
     @pytest.mark.asyncio
+    async def test_result_reports_when_the_filler_stopped_playing(self) -> None:
+        """The caller suppresses its own wait phrase off this timestamp, so a
+        filler that plays without reporting itself brings the babbling back."""
+        conn = MockAudioSocketConnection()
+        sender = StreamingAudioSender(
+            conn,
+            filler_audio=b"\xff" * 10,
+            filler_delay_sec=0.1,
+            filler_repeat_sec=1.0,
+        )
+        before = time.monotonic()
+        result = await sender.send(
+            _delayed_events(
+                0.3,
+                AudioReady(audio=b"\x01", text="Готово"),
+                StreamDone(stop_reason="end_turn", usage=Usage(1, 1)),
+            )
+        )
+        assert result.filler_finished_at is not None
+        assert before <= result.filler_finished_at <= time.monotonic()
+
+    @pytest.mark.asyncio
+    async def test_result_reports_nothing_when_the_filler_never_played(self) -> None:
+        """None is what keeps the wait phrase for the rounds that need it."""
+        conn = MockAudioSocketConnection()
+        sender = StreamingAudioSender(
+            conn,
+            filler_audio=b"\xff" * 10,
+            filler_delay_sec=0.2,
+            filler_repeat_sec=0.2,
+        )
+        result = await sender.send(
+            _events(
+                AudioReady(audio=b"\x01", text="Швидко!"),
+                StreamDone(stop_reason="end_turn", usage=Usage(1, 1)),
+            )
+        )
+        assert result.filler_finished_at is None
+
+    @pytest.mark.asyncio
     async def test_filler_stops_on_barge_in(self) -> None:
         """Barge-in mid-wait cancels filler loop cleanly."""
         conn = MockAudioSocketConnection()
