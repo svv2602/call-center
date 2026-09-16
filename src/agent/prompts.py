@@ -2019,6 +2019,7 @@ def _render_fitting_progress(p: dict[str, Any]) -> str:
     krok8_confirmed = bool(p.get("krok8_confirmed"))  # Wave 5: emergency book_fitting marker
     krok8_confab = bool(p.get("krok8_confabulation_pending"))  # Wave 6: previous Krok 8 was hallucinated
     available_slots = list(p.get("available_slots") or [])  # free «HH:MM» from 1C
+    date_no_slots = p.get("date_no_slots")  # day 1С returned no slots for
 
     if booked:
         return (
@@ -2049,9 +2050,22 @@ def _render_fitting_progress(p: dict[str, Any]) -> str:
             else "зі зберігання (договір ЗАФІКСОВАНИЙ у сесії, передавай storage_contract)"
         )
     checklist.append(("Зберігання", collected["storage"], storage_desc))
-    # Date row: if not yet chosen but client mentioned a weekday earlier —
-    # surface it so the LLM doesn't re-ask ("клієнт просив пʼятницю").
-    if not date and requested_weekday is not None:
+    # Date row: a day 1С answered with an empty slot list. Named rather than
+    # dropped, because a blank row invites the same day to be asked for again,
+    # and it is checked before the weekday branch below, which would otherwise
+    # send the lookup straight back to the day that has just been refused.
+    if date_no_slots:
+        _closed_word = date_to_words(date_no_slots)
+        date_desc = (
+            f"{date_no_slots}"
+            + (f" ({_closed_word})" if _closed_word else "")
+            + " — на цю дату вільних слотів НЕМАЄ, 1С повернула порожній список. "
+            "⛔ НЕ кажи клієнту, що на цю дату є вільний час, і НЕ називай на "
+            "ній годину — навіть якщо клієнт наполягає саме на ній. "
+            "Запропонуй ІНШУ дату і виклич get_fitting_slots з НОВОЮ датою."
+        )
+        checklist.append(("Дата", collected["date"], date_desc))
+    elif not date and requested_weekday is not None:
         _wd_names = [
             "понеділок", "вівторок", "середу", "четвер",
             "пʼятницю", "суботу", "неділю",

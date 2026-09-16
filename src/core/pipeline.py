@@ -1073,6 +1073,31 @@ class CallPipeline:
                 value = self._session.fsm_filled_fields.get(fsm_key)
                 if value not in (None, ""):
                     progress[progress_key] = value
+        # A day the station has no room on is not a collected date. The lookup
+        # pins `selected_fitting_date` whether or not it found anything
+        # (`main.py:3110`), so a closed day reaches this block looking exactly
+        # like a chosen one — and the block then renders «✅ Дата», «слоти вже
+        # озвучено», «НЕ викликай get_fitting_slots з новою датою» and «єдина
+        # дозволена дія: Крок 4 (Час)». In `60ae3fdd` 1С had just closed
+        # 2026-09-16; the caller insisted on it and the bot answered «На 16
+        # вересня о 11:40 вільно». That was not the model conceding to the
+        # caller — it was the model obeying a block that contradicted the tool.
+        #
+        # Runs after the gap-fill so it covers an FSM-supplied date too, and
+        # tests the offered slots as well as the closed set because the set is
+        # station-agnostic and never emptied: a later lookup that does find
+        # times for the same day must put the ✅ back.
+        date_chosen = progress["date"]
+        if (
+            date_chosen
+            and date_chosen in self._session.fitting_dates_no_slots
+            and not any(
+                isinstance(slot, dict) and slot.get("date") == date_chosen
+                for slot in self._session.fitting_slots_offered
+            )
+        ):
+            progress["date_no_slots"] = date_chosen
+            progress["date"] = None
         return progress
 
     def _fsm_filled_fields_snapshot(self) -> dict[str, Any]:
