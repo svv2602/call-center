@@ -8,6 +8,7 @@ build_system_prompt_with_context() injects the right dynamic context.
 from __future__ import annotations
 
 import datetime
+from pathlib import Path
 from typing import Any
 from unittest.mock import patch
 
@@ -650,3 +651,42 @@ class TestFittingSplit:
         assert "### Консультація про вартість шиномонтажу" in _MOD_FITTING_TAIL
         # Krok content must NOT leak into TAIL
         assert "Крок 8 — Підтвердження" not in _MOD_FITTING_TAIL
+
+
+class TestNoLiteralOneCIds:
+    """The prompt must never hand the model a 1C id it can paste."""
+
+    def test_no_onec_id_literal_anywhere_in_the_prompt(self) -> None:
+        """A 1C id in the prompt is a tool argument waiting to be guessed.
+
+        Call 3639c0b4 (2026-09-10): the caller picked «Харківське шосе», the
+        backend hid the addresses and asked for the district, and the bot went
+        straight to `get_fitting_slots(station_id="000000006")` — Тимошенка, 7,
+        the other Kyiv point. It did not invent that id; the prompt spelled it
+        out. The id then armed the Krok 1 regression guard, which refused the
+        correction the caller asked for, and the booking was lost.
+
+        Ids belong in tool results only. An example that needs to name the field
+        should describe its shape instead. Storage contract numbers count for the
+        same reason: `book_fitting` takes one as an argument too.
+
+        Scanning the source AST rather than the module's attributes is deliberate:
+        the `3639c0b4` literal sat inside a builder function, where a sweep over
+        module-level constants would never have reached it.
+        """
+        import ast
+        import re
+
+        from src.agent import prompts as prompts_mod
+
+        source = Path(prompts_mod.__file__).read_text(encoding="utf-8")
+        offenders: list[tuple[int, str]] = []
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                for hit in re.findall(r"0{5,}\d{1,7}", node.value):
+                    offenders.append((node.lineno, hit))
+
+        assert not offenders, (
+            "literal 1C ids found in prompt text — the model will copy them "
+            f"instead of reading them off a tool result: {sorted(set(offenders))}"
+        )
