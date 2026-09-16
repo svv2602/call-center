@@ -330,6 +330,12 @@ class CallSession:
         # True while the price handler is waiting for the caller to name a
         # wheel diameter it asked for on a previous turn.
         self.pending_price_interrupt_needs_diameter: bool = False
+        # How many times book_fitting was refused because the caller had never
+        # named the time being booked. Persisted with the rest of the session:
+        # the refusal and the retry land on different turns and the Call
+        # Processor rebuilds from Redis between them, which is exactly how the
+        # first interrupt loop-breaker was lost (`c8c6601`).
+        self.book_time_unchosen_refusals: int = 0
 
     # --- State transitions ---
 
@@ -509,6 +515,7 @@ class CallSession:
             "pending_price_interrupt_needs_diameter": (
                 self.pending_price_interrupt_needs_diameter
             ),
+            "book_time_unchosen_refusals": self.book_time_unchosen_refusals,
             "dialog_history": [
                 {
                     "speaker": t.speaker,
@@ -692,6 +699,8 @@ class CallSession:
                 data.get("channel_uuid"),
                 type(needs_diameter).__name__,
             )
+        refusals = data.get("book_time_unchosen_refusals", 0)
+        session.book_time_unchosen_refusals = refusals if isinstance(refusals, int) else 0
         session.dialog_history = [
             DialogTurn(
                 speaker=t["speaker"],

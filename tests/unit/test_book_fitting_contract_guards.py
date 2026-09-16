@@ -51,6 +51,11 @@ def _session(**overrides: Any) -> CallSession:
     on an empty set and stands ahead of every guard tested here. Without all of
     those the handler returns long before the four guards under test, and the
     assertions would pass for the wrong reason.
+
+    `selected_fitting_time` is what the pipeline writes when the caller picks a
+    slot off the list. Offering slots is not choosing one, and `book_fitting`
+    now refuses a time nobody named — so a stand that only fills
+    `fitting_slots_offered` describes a caller who never answered.
     """
     session = CallSession(uuid.uuid4())
     session.fitting_customer_name = "Олена"
@@ -58,6 +63,7 @@ def _session(**overrides: Any) -> CallSession:
     session.fitting_vehicle_brand = "Toyota"
     session.fitting_station_ids = {STATION, OTHER_STATION}
     session.selected_fitting_date = _tomorrow()
+    session.selected_fitting_time = TIME
     session.fitting_slots_offered = [
         {"date": _tomorrow(), "time": "10:00"},
         {"date": _tomorrow(), "time": TIME},
@@ -260,3 +266,116 @@ class TestAStorageHitIsNotDropped:
         result, booked = await _book(_session())
         assert not _rejected(result)
         booked.assert_awaited_once()
+
+
+def _said(session: CallSession, *utterances: str) -> CallSession:
+    """Put words in the caller's mouth, the way the pipeline records them.
+
+    The guard below reads `dialog_history` directly, so a stand that only sets
+    session fields describes a caller who was never asked anything.
+    """
+    for text in utterances:
+        session.add_user_turn(text)
+    return session
+
+
+class TestTheTimeMustHaveBeenChosen:
+    """Every guard above asks whether the slot is real. This one asks whether
+    the caller wanted it.
+
+    The three shapes are live calls, all booked, all wrong: `fb854e33`
+    (2026-09-16) asked «на завтра в обед» and was booked 09:00; `8b355205`
+    (2026-09-11) never answered the list and was booked 8:20, its head;
+    `159e7b49` (2026-09-03) said «13» to a list the bot read out in words, went
+    unpinned, and was recapped back «о 09:00».
+    """
+
+    @pytest.mark.asyncio
+    async def test_a_time_the_caller_never_named_is_refused(self) -> None:
+        session = _session(selected_fitting_time=None)
+        _said(session, "записатися на шиномонтаж", "на завтра в обед")
+        result, booked = await _book(session)
+        assert _rejected(result)
+        assert result["reason"] == "time_not_chosen"
+        booked.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_the_first_slot_of_the_day_is_not_a_choice(self) -> None:
+        """`8b355205`: the list was read out, the caller answered something
+        else, and the head of the list went to 1C anyway."""
+        session = _session(selected_fitting_time=None)
+        _said(session, "записатися на шиномонтаж")
+        result, booked = await _book(session, time="10:00")
+        assert _rejected(result)
+        assert result["reason"] == "time_not_chosen"
+        booked.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_the_refusal_hands_back_the_hours_to_re_offer(self) -> None:
+        """A refusal the bot cannot act on becomes a re-ask loop."""
+        session = _session(selected_fitting_time=None)
+        _said(session, "не знаю")
+        result, _ = await _book(session)
+        assert result["slots"] == ["10:00", TIME]
+        assert TIME in result["message"]
+
+    @pytest.mark.asyncio
+    async def test_a_spoken_time_books(self) -> None:
+        session = _session(selected_fitting_time=None)
+        _said(session, "давайте на 14:00")
+        result, booked = await _book(session)
+        assert not _rejected(result)
+        booked.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_a_bare_hour_the_pin_missed_still_books(self) -> None:
+        """`159e7b49`: the bot spelled the list out («тринадцята»), so the
+        pipeline refused to widen to a bare hour and pinned nothing. The
+        caller had still said it."""
+        session = _session(selected_fitting_time=None)
+        _said(session, "14")
+        result, booked = await _book(session)
+        assert not _rejected(result)
+        booked.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_the_pipeline_pin_alone_is_enough(self) -> None:
+        """Compound preparse pins a slot without a turn that reads as a pick."""
+        session = _session(selected_fitting_time=TIME)
+        result, booked = await _book(session)
+        assert not _rejected(result)
+        booked.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_the_bots_own_words_do_not_count_as_the_callers(self) -> None:
+        """`fb854e33` was booked 09:00 after the bot, not the caller, produced
+        the hour. Reading the whole transcript instead of the caller's half
+        would have let exactly that through."""
+        session = _session(selected_fitting_time=None)
+        session.add_assistant_turn(f"Вільний час: 10:00, {TIME}. Який зручніше?")
+        _said(session, "ничего")
+        result, booked = await _book(session)
+        assert _rejected(result)
+        assert result["reason"] == "time_not_chosen"
+        booked.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_a_caller_who_never_answers_reaches_an_operator(self) -> None:
+        """A caller the STT cannot render answers no better on the third ask.
+        The way out is a human — never the time the bot guessed."""
+        session = _session(selected_fitting_time=None)
+        _said(session, "записатися на шиномонтаж")
+        for _ in range(2):
+            assert (await _book(session))[0]["reason"] == "time_not_chosen"
+        result, booked = await _book(session)
+        assert result["action_required"] == "transfer_to_operator"
+        booked.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_the_refusal_count_survives_the_redis_round_trip(self) -> None:
+        """The refusal and the retry land on different turns, and the Call
+        Processor rebuilds the session from Redis between them — which is how
+        the first interrupt loop-breaker was lost (`c8c6601`)."""
+        session = _session(selected_fitting_time=None, book_time_unchosen_refusals=2)
+        restored = CallSession.from_dict(session.to_dict())
+        assert restored.book_time_unchosen_refusals == 2

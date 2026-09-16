@@ -92,6 +92,7 @@ from src.monitoring.cost_tracker import CostBreakdown
 from src.monitoring.metrics import (
     active_calls,
     book_fitting_confirmation_total,
+    book_fitting_unchosen_time_total,
     call_duration_seconds,
     call_scenario_total,
     calls_resolved_by_bot_total,
@@ -2040,6 +2041,71 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                         "Не переходь до підтвердження, не кажи «записую»."
                     ),
                 }
+            # Wave 1-B (2026-09-16) — the time must have been *chosen*, not just
+            # be real. Every guard above checks the slot exists; none checks the
+            # caller asked for it, so when an answer is unusable the LLM books
+            # the first slot of the day on its own: `fb854e33` said «на завтра в
+            # обед» and was booked 09:00, `8b355205` never answered the list and
+            # was booked 8:20 — the head of it.
+            #
+            # Two legs because neither alone holds. `selected_fitting_time` is
+            # the pipeline's pin, but it widens to a bare hour only when the bot
+            # read the list out in digits (`159e7b49` said «13» to a list spoken
+            # in words and went unpinned), and it is overwritten three lines
+            # below. The second leg re-asks the question directly of the whole
+            # dialog. Replayed over the 68 confirmed bookings of the preceding
+            # 14 days the pair refuses 4: three are this defect, the fourth an
+            # elliptical «это 30» that costs one re-ask.
+            if time_raw and session.selected_fitting_time != time_raw:
+                from src.agent.time_detect import detect_time_choice
+
+                caller_named_it = any(
+                    detect_time_choice(turn.content or "", [time_raw], allow_hour_only=True)
+                    for turn in session.dialog_history
+                    if turn.speaker == "user"
+                )
+                if not caller_named_it:
+                    session.book_time_unchosen_refusals += 1
+                    logger.warning(
+                        "book_fitting: time=%s on %s never named by the caller "
+                        "for call %s (refusal #%d)",
+                        time_raw, booking_date_str, session.channel_uuid,
+                        session.book_time_unchosen_refusals,
+                    )
+                    book_fitting_unchosen_time_total.inc()
+                    # A caller the STT cannot render answers no better on the
+                    # third ask than the first — `8b355205` spent the whole call
+                    # returning «записатися на шиномонтаж» to every question.
+                    # Without a cap this guard would re-ask forever
+                    # (`feedback_guard_needs_loop_breaker`); the way out is a
+                    # human, never a time nobody picked.
+                    if session.book_time_unchosen_refusals > 2:
+                        return {
+                            "error": True,
+                            "action_required": "transfer_to_operator",
+                            "message": (
+                                "⛔ Клієнт так і не назвав час. НЕ записуй. "
+                                "Виклич `transfer_to_operator` і скажи: "
+                                "«З'єдную вас з оператором, він допоможе "
+                                "підібрати час.»"
+                            ),
+                        }
+                    return {
+                        "error": True,
+                        "action_required": "ask_which_time",
+                        "reason": "time_not_chosen",
+                        "slots": sorted(offered_times_for_date),
+                        "message": (
+                            f"⛔ Клієнт НЕ називав час {time_raw}. Записувати "
+                            "можна тільки ту годину, яку клієнт назвав сам. "
+                            "⛔ НЕ підставляй перший слот зі списку. "
+                            "Перепитай: «О котрій вам зручніше?» — і озвуч "
+                            f"вільні години: {', '.join(sorted(offered_times_for_date))}. "
+                            "Виклич book_fitting лише після того, як клієнт "
+                            "назве конкретну годину."
+                        ),
+                    }
+
             # All good — lock in the client's choice.
             if booking_date_str and time_raw:
                 session.selected_fitting_date = booking_date_str

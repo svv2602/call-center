@@ -184,9 +184,23 @@ book_fitting_confirmation_total = Counter(
     "Shadow measurement only — nothing is rejected. Confirmation is the one "
     "checklist item with neither a rendered row nor a server check, so a "
     "transcript survey put the compliant share at roughly half; a guard built "
-    "on that estimate would refuse real bookings. Flip to a hard default-deny "
-    "gate only once this counter says the signal is reliable.",
+    "on that estimate would refuse real bookings. Measured 2026-09-16 and it "
+    "agrees: 23 yes / 15 no over 14 prod days, 40 / 28 replayed over the same "
+    "68 confirmed bookings. Not a gate — a default-deny on it refuses two "
+    "bookings in five. `book_fitting_unchosen_time_total` is the gate that "
+    "shipped instead; keep this one as the recap-compliance signal it measures.",
     ["confirmed"],  # "yes" | "no"
+)
+
+book_fitting_unchosen_time_total = Counter(
+    "callcenter_book_fitting_unchosen_time_total",
+    "book_fitting was refused because the caller had never named the time "
+    "being booked. Left unguarded the LLM falls back to the first slot of the "
+    "day: `fb854e33` asked for midday and was booked 09:00. Replay over the 14 "
+    "days to 2026-09-16 put this at 4 of 68 confirmed bookings, three of them "
+    "the defect. A sustained rise means the two detection legs stopped "
+    "recognising how callers phrase a choice, not that callers stopped making "
+    "one.",
 )
 
 krok1_regression_blocked_total = Counter(
