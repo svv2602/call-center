@@ -108,6 +108,45 @@ class TestNoEchoOfTheThinkingFiller:
         assert phrase in pool
 
 
+class TestTheThinkingPoolIsBigEnough:
+    """Measured 2026-09-16: the thinking filler fires on ~every round, ~10 per
+    call. Frequency is fixed by LLM latency (0% of calls answer under 800ms),
+    so the pool size is what decides how often a caller hears the same word.
+    """
+
+    def test_the_pool_covers_a_whole_call(self) -> None:
+        assert len(prompts.WAIT_THINKING_POOL) >= 10
+
+    def test_one_call_worth_of_rounds_never_repeats(self) -> None:
+        loop, _, _, _ = _build_loop([])
+        picks = [loop._next_thinking_filler() for _ in range(len(prompts.WAIT_THINKING_POOL))]
+        assert len(set(picks)) == len(picks)
+        assert set(picks) == set(prompts.WAIT_THINKING_POOL)
+
+    def test_the_pick_is_published_for_the_tool_phrase_to_avoid(self) -> None:
+        """The avoid-echo machinery reads _last_thinking_filler — a pick that
+        forgets to record itself would silently re-enable the echo."""
+        loop, _, _, _ = _build_loop([])
+        phrase = loop._next_thinking_filler()
+        assert loop._last_thinking_filler == phrase
+
+
+class TestTheRotationStartsSomewhereDifferentEachCall:
+    """Rotation varies phrases inside one call, but a counter starting at 0
+    made every call replay the same cycle from the same phrase.
+    """
+
+    def test_thinking_filler_does_not_always_open_with_the_same_phrase(self) -> None:
+        firsts = {_build_loop([])[0]._next_thinking_filler() for _ in range(40)}
+        assert len(firsts) > 1
+
+    def test_tool_wait_phrase_does_not_always_open_with_the_same_phrase(self) -> None:
+        firsts = {
+            _build_loop([])[0]._next_tool_wait_phrase(["get_fitting_stations"]) for _ in range(40)
+        }
+        assert len(firsts) > 1
+
+
 class TestOpeningWord:
     @pytest.mark.parametrize(
         ("text", "expected"),

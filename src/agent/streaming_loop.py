@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import random
 import re
 import time
 from dataclasses import dataclass
@@ -127,6 +128,12 @@ _TOOL_WAIT_POOLS: dict[str, list[str]] = {
     "search_knowledge_base": WAIT_KNOWLEDGE_POOL,
     "find_storage": WAIT_STORAGE_POOL,
 }
+
+
+# Upper bound for the per-call random start offset of the tool wait rotation.
+# `_pick_tool_wait_phrase` takes the index modulo its pool, so any non-negative
+# value is valid; the longest pool is the only one that can use the full range.
+_MAX_TOOL_WAIT_POOL_LEN = max(len(pool) for pool in _TOOL_WAIT_POOLS.values())
 
 
 def _opening_word(text: str) -> str:
@@ -1031,10 +1038,15 @@ class StreamingAgentLoop:
         self._is_modular = is_modular
         self._agent_name = agent_name
         self._echo_canceller = echo_canceller
-        self._thinking_counter = 0
+        # Both counters start at a random offset rather than 0. Rotation alone
+        # varies the phrases *within* a call, but with a fixed start every call
+        # replayed the same cycle from the same first phrase — a caller who
+        # phones twice hears a metronome. The offset is per-call, so the
+        # rotation guarantees the tests pin still hold inside one call.
+        self._thinking_counter = random.randrange(len(WAIT_THINKING_POOL))
         # Rotates the tool wait phrase; paired with _last_thinking_filler so the
         # two filler sources never open with the same word back-to-back.
-        self._tool_wait_counter = 0
+        self._tool_wait_counter = random.randrange(_MAX_TOOL_WAIT_POOL_LEN)
         self._last_thinking_filler = ""
 
     @property
@@ -1120,6 +1132,17 @@ class StreamingAgentLoop:
             logger.warning("Streaming summary fallback failed", exc_info=True)
 
         return _fallback_text
+
+    def _next_thinking_filler(self) -> str:
+        """Pick this round's thinking filler and advance the rotation.
+
+        Records the pick in `_last_thinking_filler` so the tool wait phrase
+        chosen later in the same round can avoid echoing its opening word.
+        """
+        phrase = WAIT_THINKING_POOL[self._thinking_counter % len(WAIT_THINKING_POOL)]
+        self._thinking_counter += 1
+        self._last_thinking_filler = phrase
+        return phrase
 
     def _next_tool_wait_phrase(self, tool_names: list[str]) -> str:
         """Pick this round's wait phrase and advance the rotation.
@@ -1312,9 +1335,7 @@ class StreamingAgentLoop:
                 # the whole turn — we just skip filler for this round).
                 filler_audio: bytes | None = None
                 if not self._conn.is_closed:
-                    phrase = WAIT_THINKING_POOL[self._thinking_counter % len(WAIT_THINKING_POOL)]
-                    self._thinking_counter += 1
-                    self._last_thinking_filler = phrase
+                    phrase = self._next_thinking_filler()
                     try:
                         filler_audio = await asyncio.wait_for(
                             self._tts.synthesize(phrase),

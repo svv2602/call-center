@@ -2509,12 +2509,35 @@ WAIT_ACK_POOL = [
 ]
 
 # Ultra-short thinking fillers — played when LLM is slow to start responding.
-# Triggered after ~3 seconds of silence in the streaming path.
+#
+# This pool is heard more often than any other text the bot speaks. Measured on
+# prod 2026-09-16 over 4 calls: 39 thinking fillers against ~40 rounds, i.e. it
+# fires on essentially every round, ~10 times per call. At four phrases each one
+# landed ~2.5 times per call, and because the rotation counter starts at 0 in
+# every call the caller always heard the same cycle in the same order — testers
+# reported the repetition as the annoyance, not the waiting itself.
+#
+# Firing less often is not available: `callcenter_llm_provider_latency_ms` shows
+# 0% of LLM calls under 800ms and only 3.4% under 1s, and first audio also waits
+# on a whole buffered sentence plus TTS (median time-to-first-audio 4.7s). Any
+# filler delay short enough to cover that silence fires on nearly every round,
+# so variety is the only axis left. Ten phrases bring it to ~1 per call.
+#
+# Every entry must open with a distinct word (test_wait_phrase_variety pins it)
+# — rotation only sounds different if consecutive entries do. Entries must also
+# stand alone at any position, because the start index is randomised per call:
+# a phrase implying earlier waiting («Ще трошки») would open some calls wrongly.
 WAIT_THINKING_POOL = [
     "Секундочку.",
     "Хвилинку.",
     "Зараз.",
     "Одну мить.",
+    "Момент.",
+    "Дивлюся.",
+    "Перевіряю.",
+    "Зачекайте.",
+    "Уточнюю.",
+    "Буквально секунду.",
 ]
 
 FAREWELL_ORDER_TEXT = "Дякую за замовлення! До побачення!"
