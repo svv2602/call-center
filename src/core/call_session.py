@@ -336,6 +336,11 @@ class CallSession:
         # Processor rebuilds from Redis between them, which is exactly how the
         # first interrupt loop-breaker was lost (`c8c6601`).
         self.book_time_unchosen_refusals: int = 0
+        # True once the caller has overruled a colour the bot read back to
+        # them. From that point the session's colour outranks whatever the
+        # LLM passes to book_fitting — in `79c1d7c5` the model kept sending
+        # the stale «сірий» it had already been corrected on.
+        self.fitting_color_corrected: bool = False
 
     # --- State transitions ---
 
@@ -516,6 +521,7 @@ class CallSession:
                 self.pending_price_interrupt_needs_diameter
             ),
             "book_time_unchosen_refusals": self.book_time_unchosen_refusals,
+            "fitting_color_corrected": self.fitting_color_corrected,
             "dialog_history": [
                 {
                     "speaker": t.speaker,
@@ -701,6 +707,7 @@ class CallSession:
             )
         refusals = data.get("book_time_unchosen_refusals", 0)
         session.book_time_unchosen_refusals = refusals if isinstance(refusals, int) else 0
+        session.fitting_color_corrected = bool(data.get("fitting_color_corrected", False))
         session.dialog_history = [
             DialogTurn(
                 speaker=t["speaker"],

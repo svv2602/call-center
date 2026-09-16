@@ -379,3 +379,43 @@ class TestTheTimeMustHaveBeenChosen:
         session = _session(selected_fitting_time=None, book_time_unchosen_refusals=2)
         restored = CallSession.from_dict(session.to_dict())
         assert restored.book_time_unchosen_refusals == 2
+
+
+class TestACorrectedColourOutranksTheArgument:
+    """Wave 1-C — the caller repainted the car; the model kept the old value.
+
+    The session auto-inject above only fills an *empty* `auto_number`, so in
+    `79c1d7c5` the model went on passing the «сірий» it had already been
+    corrected on and 1C got the wrong car. The override is scoped to a
+    correction the pipeline actually recorded: without the flag, an argument
+    that disagrees with the pin is the model knowing something the pin does
+    not (a second car, a plate the caller volunteered) and must win.
+
+    Transliteration to Latin happens inside `OneCClient.book_fitting_rest`,
+    which is the mock here — so these assertions read Ukrainian.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_stale_colour_is_replaced(self) -> None:
+        session = _session(fitting_plate="синій", fitting_color_corrected=True)
+        _, booked = await _book(session, auto_number="сірий")
+        assert booked.await_args.kwargs["auto_number"] == "синій"
+
+    @pytest.mark.asyncio
+    async def test_without_a_correction_the_argument_stands(self) -> None:
+        session = _session(fitting_plate="синій", fitting_color_corrected=False)
+        _, booked = await _book(session, auto_number="сірий")
+        assert booked.await_args.kwargs["auto_number"] == "сірий"
+
+    @pytest.mark.asyncio
+    async def test_an_agreeing_argument_is_left_alone(self) -> None:
+        session = _session(fitting_plate="синій", fitting_color_corrected=True)
+        _, booked = await _book(session, auto_number="синій")
+        assert booked.await_args.kwargs["auto_number"] == "синій"
+
+    @pytest.mark.asyncio
+    async def test_an_empty_argument_still_takes_the_pin(self) -> None:
+        """The pre-existing auto-inject must not be shadowed by the override."""
+        session = _session(fitting_plate="синій", fitting_color_corrected=True)
+        _, booked = await _book(session, auto_number="")
+        assert booked.await_args.kwargs["auto_number"] == "синій"

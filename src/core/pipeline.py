@@ -3321,27 +3321,53 @@ class CallPipeline:
             # because the old hints stored only nominative masculine forms
             # («червоний», «білий», «чорний», «серый»). Now every root
             # matches all UA/RU gender/case inflections + STT mutations.
-            if not self._session.fitting_plate:
-                _text_lc = transcript.text.lower()
-                # Scope to Krok 5: bot's last utterance mentions «колір» or
-                # «марк». Avoids false-positive on «сірий» as unrelated
-                # descriptor earlier in the call.
-                _last_bot_color = ""
-                for _t in reversed(self._session.dialog_history):
-                    if _t.speaker == "assistant" and _t.content:
-                        _last_bot_color = _t.content.lower()
-                        break
-                _asking_color = (
-                    "колір" in _last_bot_color
-                    or "цвет" in _last_bot_color
-                    or "марк" in _last_bot_color
-                )
-                if _asking_color:
-                    from src.agent.color_detect import detect_color
+            _text_lc = transcript.text.lower()
+            # Scope to Krok 5: bot's last utterance mentions «колір» or
+            # «марк». Avoids false-positive on «сірий» as unrelated
+            # descriptor earlier in the call.
+            _last_bot_color = ""
+            for _t in reversed(self._session.dialog_history):
+                if _t.speaker == "assistant" and _t.content:
+                    _last_bot_color = _t.content.lower()
+                    break
+            _asking_color = "колір" in _last_bot_color or "цвет" in _last_bot_color
+            _asking_brand = "марк" in _last_bot_color
+            # Wave 1-C (2026-09-16) — a colour the bot just read back is a
+            # colour the caller is entitled to correct. `79c1d7c5` recapped
+            # «сірий Mini Cooper» (pinned off the profile, never asked for),
+            # heard «синій Міні Купер», and answered «Колір авто вже
+            # зафіксований як сірий» — then booked сірий. `21d0b864` heard «ні
+            # не підтверджую сірий джип» and repeated the жовтий recap verbatim.
+            # Collected is not settled (`feedback_collected_is_not_settled`).
+            from src.agent.color_detect import detect_color
 
-                    _matched = detect_color(_text_lc)
-                    if _matched:
-                        self._session.fitting_plate = _matched
+            _pinned_color = self._session.fitting_plate
+            # The pin must itself be a colour: preparse can still put a DSTU
+            # plate here, and a plate read back does not license repainting.
+            _color_read_back = bool(
+                _pinned_color
+                and detect_color(_pinned_color.lower())
+                and _pinned_color.lower() in _last_bot_color
+            )
+            if _asking_color or _asking_brand or _color_read_back:
+                _matched = detect_color(_text_lc)
+                # An empty slot takes whatever the caller names. A filled one
+                # moves only when the colour itself was on the table — asked
+                # for or read back. On a brand question «сірий Опель» is the
+                # caller describing the car they already gave a colour for,
+                # not repainting it.
+                _may_overwrite = _asking_color or _color_read_back
+                if _matched and _matched != _pinned_color and (
+                    not _pinned_color or _may_overwrite
+                ):
+                    self._session.fitting_plate = _matched
+                    if _pinned_color:
+                        self._session.fitting_color_corrected = True
+                        logger.info(
+                            "Color corrected %r → %r by the caller for call=%s",
+                            _pinned_color, _matched, self._session.channel_uuid,
+                        )
+                    else:
                         logger.info(
                             "Color auto-detected %r for call=%s "
                             "(prevents LLM auto_number drop)",

@@ -1623,6 +1623,22 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         if not auto_number and session.fitting_plate:
             auto_number = session.fitting_plate.strip()
             kwargs["auto_number"] = auto_number
+        # Wave 1-C (2026-09-16) — a corrected colour outranks the argument.
+        # The auto-inject above only fills an EMPTY field, so in `79c1d7c5`
+        # the model kept passing the «сірий» the caller had already replaced
+        # with «синій» and 1C got the wrong car.
+        elif (
+            session.fitting_color_corrected
+            and session.fitting_plate
+            and auto_number.lower() != session.fitting_plate.strip().lower()
+        ):
+            logger.warning(
+                "book_fitting auto_number=%r overridden by the caller's "
+                "correction %r for call %s",
+                auto_number, session.fitting_plate, session.channel_uuid,
+            )
+            auto_number = session.fitting_plate.strip()
+            kwargs["auto_number"] = auto_number
         if not vehicle_info and session.fitting_vehicle_brand:
             vehicle_info = session.fitting_vehicle_brand.strip()
             kwargs["vehicle_info"] = vehicle_info

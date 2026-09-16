@@ -104,6 +104,12 @@ _COLOR_ROOTS: tuple[tuple[re.Pattern[str], str], ...] = (
 # colors, given only when they appear standalone (with word boundaries).
 _FALSE_POSITIVE_WORDS: frozenset[str] = frozenset(
     {
+        # «середа»/«середу»/«серед» and «біля» are not exotic here the way the
+        # rest of this list is — they are the vocabulary of the flow this
+        # detector runs inside («запишіть на середу», «точка біля Тополя»).
+        # «на середу» reads as «сірий» and «біля 15 години» as «білий».
+        "серед",                          # Wednesday, among — shares "сер"
+        "біля", "бiля",                   # near — shares "біл"; STT emits both i's
         "серпень", "серпня",             # August — shares "сер"
         "серпанок",                       # haze
         "сергій", "сергей", "сергеевич",  # name — shares "сер"
