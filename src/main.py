@@ -3134,6 +3134,205 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
     router.register("get_fitting_slots", _get_fitting_slots)
     router.register("book_fitting", _book_fitting_with_metric)
 
+    def _pad_hhmm(value: str) -> str:
+        """«9:00» and «09:00» are the same slot; 1C only ever says the latter."""
+        hh, _, mm = value.partition(":")
+        return f"{int(hh):02d}:{mm}" if hh.isdigit() else value
+
+    async def _reschedule_fitting(booking_id: str, kwargs: dict[str, Any]) -> Any:
+        """Move a booking, creating the new one before releasing the old.
+
+        Through 2026-09-16 `action="reschedule"` was in the tool schema and
+        nowhere in the handler: it cancelled, answered «Запис скасовано», and
+        left re-booking to the LLM. Both callers it was ever tried on lost
+        their slot — fb854e33 got no second `book_fitting` at all, 29ed5791
+        aimed one at an invented station and collected a 404 — and in both the
+        bot went on to tell the caller they were booked.
+
+        Booking first makes a failure survivable: the original still stands and
+        the caller hears the truth. 1C dedups on `IdTelegram`, which
+        `book_fitting_rest` makes unique per request, so holding two bookings
+        for the moment between the two calls is safe.
+        """
+        original = session.fitting_known_bookings.get(booking_id)
+        if original is None:
+            logger.warning(
+                "reschedule: booking_id=%r absent from get_customer_bookings "
+                "result for call %s — refusing",
+                booking_id, session.channel_uuid,
+            )
+            return {
+                "error": True,
+                "message": (
+                    f"⛔ Деталі запису {booking_id!r} невідомі, перенести не можу. "
+                    "Виклич `get_customer_bookings(phone=...)` і візьми `booking_id` "
+                    "з результату."
+                ),
+            }
+
+        station_id = str(original.get("station_id") or "").strip()
+        new_date = (
+            resolve_tool_date(str(kwargs.get("new_date") or "").strip())
+            or str(original.get("date") or "").strip()
+        )
+        new_time = _pad_hhmm(_extract_time(str(kwargs.get("new_time") or "").strip()))
+        if not station_id or not new_date or not new_time:
+            return {
+                "error": True,
+                "action_required": "ask_new_time",
+                "message": (
+                    "⛔ Перенесення потребує НОВОГО часу, який назвав клієнт. "
+                    f"Виклич `get_fitting_slots(station_id='{station_id or '…'}', "
+                    f"date_from='{new_date or 'YYYY-MM-DD'}')`, озвуч вільні часи, "
+                    "дочекайся вибору — і лише тоді `cancel_fitting("
+                    "action='reschedule', new_date=..., new_time=...)`. "
+                    "⛔ НЕ ВИГАДУЙ час."
+                ),
+            }
+
+        # The new time has to exist. Without this the reschedule path would be
+        # the one way back into booking an hour 1C never offered — the defect
+        # `0c7248b` closed on the first-booking path.
+        try:
+            schedule = await _onec_client.get_station_schedule(
+                station_id=station_id, date_from=new_date, date_to=new_date,
+            )
+            count_posts = await _get_station_count_posts(station_id)
+            free = [
+                t
+                for s in schedule.get("data", [])
+                if count_posts - int(s.get("Quantity", 0)) > 0
+                and (t := _extract_time(s.get("Time", "")))
+            ]
+        except Exception:
+            logger.warning(
+                "reschedule: station schedule lookup failed for call %s",
+                session.channel_uuid, exc_info=True,
+            )
+            return {
+                "error": True,
+                "message": (
+                    "Не вдалося перевірити вільний час. Попередній запис "
+                    "лишається чинним. Спробуй ще раз за хвилину."
+                ),
+            }
+
+        if new_time not in {_pad_hhmm(t) for t in free}:
+            logger.warning(
+                "reschedule: time=%s not free at station=%s on %s for call %s "
+                "(free=%s) — original booking kept",
+                new_time, station_id, new_date, session.channel_uuid, free,
+            )
+            return {
+                "error": True,
+                "reason": "slot_not_free",
+                "slots": free,
+                "message": (
+                    f"⛔ {new_time} на {new_date} НЕ вільний, перенесення не "
+                    "виконано — попередній запис лишається чинним. Озвуч "
+                    "клієнту саме ці вільні часи і дочекайся вибору: "
+                    f"{', '.join(free) if free else 'на цю дату вільних немає'}."
+                ),
+            }
+
+        colour, brand = _split_auto_number(str(original.get("auto_number") or ""))
+        try:
+            booked = await _onec_client.book_fitting_rest(
+                person=str(original.get("person") or session.fitting_customer_name or ""),
+                phone=session.caller_phone or "",
+                station_id=station_id,
+                date=new_date,
+                time=new_time,
+                vehicle_info=brand or session.fitting_vehicle_brand or "",
+                auto_number=colour or session.fitting_plate or "",
+            )
+        except Exception:
+            logger.warning(
+                "reschedule: 1C book failed for call %s — original %s kept",
+                session.channel_uuid, booking_id, exc_info=True,
+            )
+            booked = {}
+
+        new_guid = ""
+        if booked.get("success"):
+            data_list = booked.get("data", [])
+            new_guid = data_list[0].get("GUID", "") if data_list else ""
+        if not new_guid:
+            logger.warning(
+                "reschedule: no GUID for call %s (1C said %s) — original %s kept",
+                session.channel_uuid, str(booked)[:200], booking_id,
+            )
+            return {
+                "error": True,
+                "reason": "rebook_failed",
+                "message": (
+                    f"⛔ Новий запис на {new_date} {new_time} створити не вдалося. "
+                    "ПОПЕРЕДНІЙ ЗАПИС НЕ СКАСОВАНО і лишається чинним — скажи "
+                    "клієнту саме це, не кажи що перенесла. Запропонуй інший час "
+                    "або переведи на оператора."
+                ),
+            }
+
+        # Only now is it safe to let the old slot go.
+        cancelled = False
+        try:
+            cancel_result = await _onec_client.cancel_fitting_rest(booking_id)
+            data_list = cancel_result.get("data", [])
+            cancelled = bool(data_list[0].get("Canceled", False)) if data_list else False
+        except Exception:
+            logger.warning(
+                "reschedule: cancel of old booking %s failed for call %s",
+                booking_id, session.channel_uuid, exc_info=True,
+            )
+        if not cancelled:
+            # The caller is booked twice. That needs a human, but it is not the
+            # caller's problem and not something to read out to them.
+            logger.error(
+                "reschedule: call %s now holds TWO bookings — new %s created, "
+                "old %s could not be cancelled",
+                session.channel_uuid, new_guid, booking_id,
+            )
+
+        session.fitting_booked = True
+        session.last_fitting_station_id = station_id
+        session.selected_fitting_date = new_date
+        session.selected_fitting_time = new_time
+        session.fitting_known_bookings.pop(booking_id, None)
+        session.fitting_known_bookings[new_guid] = {
+            **original, "booking_id": new_guid, "date": new_date, "time": new_time,
+        }
+        fittings_booked_total.inc()
+
+        if _call_logger is not None:
+            try:
+                call_uuid = (
+                    session.channel_uuid
+                    if isinstance(session.channel_uuid, uuid_mod.UUID)
+                    else uuid_mod.UUID(str(session.channel_uuid))
+                )
+                await asyncio.shield(
+                    _call_logger.set_fitting_booking_id(call_uuid, new_guid)
+                )
+            except Exception as _exc:
+                logger.warning(
+                    "reschedule: set_fitting_booking_id failed for call %s: %s",
+                    session.channel_uuid, _exc,
+                )
+
+        logger.info(
+            "reschedule: call %s moved %s → %s at station %s (%s %s)",
+            session.channel_uuid, booking_id, new_guid, station_id, new_date, new_time,
+        )
+        return {
+            "status": "rescheduled",
+            "date": new_date,
+            "time": new_time,
+            "message": (
+                f"Запис перенесено на {new_date} о {new_time}. Клієнту скажи: "
+                "«Готово, перенесла на [дата] о [час].» БЕЗ згадки номера броні."
+            ),
+        }
+
     async def _cancel_fitting(**kwargs: Any) -> Any:
         """Cancel fitting: try 1C REST, fallback to Store API."""
         # Wave 5 (2026-09-03) — guard against LLM-invented booking_id.
@@ -3170,6 +3369,12 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     "unknown, тощо)."
                 ),
             }
+        if (
+            str(kwargs.get("action", "")).strip().lower() == "reschedule"
+            and _onec_client is not None
+        ):
+            return await _reschedule_fitting(booking_id, kwargs)
+
         if _onec_client is not None:
             try:
                 result = await _onec_client.cancel_fitting_rest(booking_id)
@@ -3438,6 +3643,9 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     booked_sid = str(booked.get("station_id") or "").strip()
                     if booked_sid:
                         session.fitting_station_ids.add(booked_sid)
+                    booked_gid = str(booked.get("booking_id") or "").strip()
+                    if booked_gid:
+                        session.fitting_known_bookings[booked_gid] = booked
 
                 # The vehicle is pinned only when there is exactly one booking.
                 # With two, which car the caller is moving is an open question,

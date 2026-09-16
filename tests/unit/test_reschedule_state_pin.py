@@ -74,7 +74,25 @@ def _onec_mock(**returns: Any) -> AsyncMock:
         spec=OneCClient.get_fitting_stations_rest,
         return_value=returns.get("stations", {"data": []}),
     )
+    onec.get_station_schedule = AsyncMock(
+        spec=OneCClient.get_station_schedule,
+        return_value=returns.get("schedule", _schedule(TIME)),
+    )
+    onec.cancel_fitting_rest = AsyncMock(
+        spec=OneCClient.cancel_fitting_rest,
+        return_value=returns.get("cancel", {"success": True, "data": [{"Canceled": True}]}),
+    )
     return onec
+
+
+def _schedule(*free_times: str) -> dict[str, Any]:
+    """A StationSchedule answer. `_redis` is None under test, so posts == 1
+    and Quantity 0 is the only way a slot reads as free."""
+    return {
+        "data": [
+            {"Time": f"2026-09-17T{t}:00", "Quantity": 0} for t in free_times
+        ]
+    }
 
 
 def _booking(station_id: str, auto_number: str, guid: str = "guid-1") -> dict[str, Any]:
@@ -95,11 +113,14 @@ def _ready_session(**overrides: Any) -> CallSession:
 
     Krok 3/4 needs `selected_fitting_date` + `fitting_slots_offered`; without
     them `book_fitting` returns long before the station cross-check and the
-    assertions below would pass for the wrong reason.
+    assertions below would pass for the wrong reason. `selected_fitting_time`
+    is the caller's pick — offering a slot is not choosing it, and a time
+    nobody named is refused.
     """
     session = CallSession(uuid.uuid4())
     session.fitting_customer_name = "Олена"
     session.selected_fitting_date = _tomorrow()
+    session.selected_fitting_time = TIME
     session.fitting_slots_offered = [{"date": _tomorrow(), "time": TIME}]
     for key, value in overrides.items():
         setattr(session, key, value)
@@ -121,7 +142,15 @@ async def _run(
         patch("src.main._redis", None),
     ):
         router = _build_tool_router(session, store_client=store)
-        return await router.execute(tool, args)
+        try:
+            return await router.execute(tool, args)
+        finally:
+            # Prod records this in the router's on-execute callback, which is
+            # only wired when `_call_logger` is set — and it is None here. A
+            # second `_run` on the same session would otherwise see a tool it
+            # just ran as never having run (`cancel_fitting` requires
+            # `get_customer_bookings` in this set).
+            session.tools_called.add(tool)
 
 
 def _book_args(**kwargs: Any) -> dict[str, Any]:
@@ -665,3 +694,210 @@ class TestTheRescheduleThatFailedInProd:
         assert sent["station_id"] == STATION
         assert sent["vehicle_info"] == "Tiguan"
         assert sent["auto_number"] == "сірий"
+
+
+# --------------------------------------------------------------------------
+# Phase 4 — the reschedule is one operation, and it books before it cancels
+# --------------------------------------------------------------------------
+
+
+class TestRescheduleIsAtomic:
+    """`action="reschedule"` used to be schema-only: the handler cancelled and
+    left re-booking to the LLM.
+
+    Both live callers it was tried on lost their slot. fb854e33 (2026-09-16)
+    got no second `book_fitting` at all and was told «Ви записані на 9:00»
+    about a booking that had just been cancelled; 29ed5791 (2026-09-14) got one
+    aimed at an invented station and a 404. Cancel-first is what made either
+    survivable, so the ordering is the invariant under test — not the wording.
+    """
+
+    async def _with_known_booking(
+        self, onec: AsyncMock, session: CallSession, guid: str = "guid-1"
+    ) -> None:
+        """Drive the real `get_customer_bookings` so the reschedule reads state
+        that handler actually wrote, not state the test invented."""
+        onec.get_customer_bookings_rest.return_value = {
+            "success": True,
+            "data": [_booking(STATION, "SIRIY Tiguan", guid=guid)],
+        }
+        await _run(session, "get_customer_bookings", {"phone": "0501234567"}, onec=onec)
+
+    async def test_the_new_booking_is_created_before_the_old_is_released(self) -> None:
+        calls: list[str] = []
+        onec = _onec_mock()
+        session = _ready_session()
+        await self._with_known_booking(onec, session)
+
+        onec.book_fitting_rest.side_effect = lambda **_: (
+            calls.append("book"), {"success": True, "data": [{"GUID": "new-guid"}]}
+        )[1]
+        onec.cancel_fitting_rest.side_effect = lambda *_, **__: (
+            calls.append("cancel"), {"success": True, "data": [{"Canceled": True}]}
+        )[1]
+
+        result = await _run(
+            session,
+            "cancel_fitting",
+            {"booking_id": "guid-1", "action": "reschedule",
+             "new_date": "2026-09-17", "new_time": TIME},
+            onec=onec,
+        )
+
+        assert result["status"] == "rescheduled"
+        assert calls == ["book", "cancel"]
+
+    async def test_a_failed_rebook_leaves_the_original_standing(self) -> None:
+        """fb854e33's outcome, made impossible: no GUID, so nothing is cancelled
+        and the bot is told in so many words not to claim a move."""
+        onec = _onec_mock(book={"success": False, "errors": ["Ошибка записи"]})
+        session = _ready_session()
+        await self._with_known_booking(onec, session)
+
+        result = await _run(
+            session,
+            "cancel_fitting",
+            {"booking_id": "guid-1", "action": "reschedule",
+             "new_date": "2026-09-17", "new_time": TIME},
+            onec=onec,
+        )
+
+        assert _refused_by(result, "rebook_failed")
+        onec.cancel_fitting_rest.assert_not_awaited()
+
+    async def test_a_time_the_grid_never_held_is_refused(self) -> None:
+        """The reschedule path must not become the way back into booking an
+        hour 1C never offered — the defect `0c7248b` closed on first booking."""
+        onec = _onec_mock(schedule=_schedule("09:00", "09:40", "10:20"))
+        session = _ready_session()
+        await self._with_known_booking(onec, session)
+
+        result = await _run(
+            session,
+            "cancel_fitting",
+            {"booking_id": "guid-1", "action": "reschedule",
+             "new_date": "2026-09-17", "new_time": "14:00"},
+            onec=onec,
+        )
+
+        assert _refused_by(result, "slot_not_free")
+        assert result["slots"] == ["09:00", "09:40", "10:20"]
+        onec.book_fitting_rest.assert_not_awaited()
+        onec.cancel_fitting_rest.assert_not_awaited()
+
+    async def test_a_bare_hour_still_matches_a_padded_grid(self) -> None:
+        """1C says «09:00», a caller says «дев'ята» and the LLM writes «9:00».
+        Refusing that would send the caller round a loop over punctuation."""
+        onec = _onec_mock(schedule=_schedule("09:00"))
+        session = _ready_session()
+        await self._with_known_booking(onec, session)
+
+        result = await _run(
+            session,
+            "cancel_fitting",
+            {"booking_id": "guid-1", "action": "reschedule",
+             "new_date": "2026-09-17", "new_time": "9:00"},
+            onec=onec,
+        )
+
+        assert result["status"] == "rescheduled"
+
+    async def test_no_new_time_cancels_nothing(self) -> None:
+        """fb854e33 reached `cancel_fitting` on «перенеси» alone. Asking is the
+        only correct move, and the old booking must survive the asking."""
+        onec = _onec_mock()
+        session = _ready_session()
+        await self._with_known_booking(onec, session)
+
+        result = await _run(
+            session,
+            "cancel_fitting",
+            {"booking_id": "guid-1", "action": "reschedule", "new_date": "2026-09-17"},
+            onec=onec,
+        )
+
+        assert _rejected(result)
+        assert result["action_required"] == "ask_new_time"
+        onec.cancel_fitting_rest.assert_not_awaited()
+        onec.book_fitting_rest.assert_not_awaited()
+
+    async def test_the_station_comes_from_the_booking_not_from_the_model(self) -> None:
+        """29ed5791 sent 000000010, which no tool in that call had ever
+        returned. The LLM is no longer asked, so it cannot answer wrongly."""
+        onec = _onec_mock()
+        session = _ready_session()
+        await self._with_known_booking(onec, session)
+
+        await _run(
+            session,
+            "cancel_fitting",
+            {"booking_id": "guid-1", "action": "reschedule",
+             "new_date": "2026-09-17", "new_time": TIME,
+             "station_id": INVENTED_STATION},
+            onec=onec,
+        )
+
+        assert onec.book_fitting_rest.await_args.kwargs["station_id"] == STATION
+
+    async def test_the_car_is_carried_over_not_re_asked(self) -> None:
+        """«SIRIY Tiguan» came back from 1C; a reschedule that dropped it would
+        put an empty car into the new booking and the СТО could not identify it."""
+        onec = _onec_mock()
+        session = _ready_session()
+        await self._with_known_booking(onec, session)
+
+        await _run(
+            session,
+            "cancel_fitting",
+            {"booking_id": "guid-1", "action": "reschedule",
+             "new_date": "2026-09-17", "new_time": TIME},
+            onec=onec,
+        )
+
+        sent = onec.book_fitting_rest.await_args.kwargs
+        assert sent["vehicle_info"] == "Tiguan"
+        assert sent["auto_number"] == "сірий"
+
+    async def test_an_unknown_booking_id_is_not_rescheduled(self) -> None:
+        """Only an id `get_customer_bookings` actually returned may be moved."""
+        onec = _onec_mock()
+        session = _ready_session()
+        await self._with_known_booking(onec, session)
+
+        result = await _run(
+            session,
+            "cancel_fitting",
+            {"booking_id": "guid-does-not-exist", "action": "reschedule",
+             "new_date": "2026-09-17", "new_time": TIME},
+            onec=onec,
+        )
+
+        assert _rejected(result)
+        onec.cancel_fitting_rest.assert_not_awaited()
+        onec.book_fitting_rest.assert_not_awaited()
+
+    async def test_a_plain_cancel_is_still_a_plain_cancel(self) -> None:
+        """The reschedule branch must not swallow `action="cancel"`."""
+        onec = _onec_mock()
+        session = _ready_session()
+        await self._with_known_booking(onec, session)
+
+        result = await _run(
+            session,
+            "cancel_fitting",
+            {"booking_id": "guid-1", "action": "cancel"},
+            onec=onec,
+        )
+
+        assert result["status"] == "cancelled"
+        onec.book_fitting_rest.assert_not_awaited()
+
+    async def test_get_customer_bookings_records_what_a_reschedule_will_need(self) -> None:
+        """The wiring, pinned on its own: a corpus test on the reschedule alone
+        would stay green if this write disappeared
+        (`codetrap_corpus_tests_dont_cover_the_wiring`)."""
+        onec = _onec_mock()
+        session = _ready_session()
+        await self._with_known_booking(onec, session)
+
+        assert session.fitting_known_bookings["guid-1"]["station_id"] == STATION

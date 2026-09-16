@@ -132,6 +132,11 @@ class CallSession:
         self.order_draft: dict[str, Any] | None = None
         self.fitting_booked: bool = False
         self.fitting_station_ids: set[str] = set()  # station IDs from get_fitting_stations
+        # booking_id → the entry get_customer_bookings returned for it. A
+        # reschedule rebuilds the booking from here rather than from whatever
+        # the LLM remembers: on 29ed5791 it supplied an invented station_id and
+        # 1C answered 404 after the original had already been cancelled.
+        self.fitting_known_bookings: dict[str, dict[str, Any]] = {}
         # Full station dicts (id, name, city, address, district, phone) seen during
         # the call — used to inject the picked station into every LLM turn so the
         # model doesn't hallucinate a different city/address when memory drifts.
@@ -463,6 +468,7 @@ class CallSession:
             "order_draft": self.order_draft,
             "fitting_booked": self.fitting_booked,
             "fitting_station_ids": sorted(self.fitting_station_ids),
+            "fitting_known_bookings": self.fitting_known_bookings,
             "fitting_stations_seen": self.fitting_stations_seen,
             "selected_fitting_date": self.selected_fitting_date,
             "selected_fitting_time": self.selected_fitting_time,
@@ -543,6 +549,7 @@ class CallSession:
         session.order_draft = data.get("order_draft")
         session.fitting_booked = data.get("fitting_booked", False)
         session.fitting_station_ids = set(data.get("fitting_station_ids", []))
+        session.fitting_known_bookings = data.get("fitting_known_bookings", {}) or {}
         session.fitting_stations_seen = list(data.get("fitting_stations_seen", []))
         session.selected_fitting_date = data.get("selected_fitting_date")
         session.selected_fitting_time = data.get("selected_fitting_time")
