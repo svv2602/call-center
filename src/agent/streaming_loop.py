@@ -383,11 +383,20 @@ async def hold_unconfirmed_transfer_promise(
     So the sentence is held exactly as long as it takes the arguments to stream,
     and released the moment the verdict is knowable but before anything is done.
 
-    Releasing is the default. A held promise that is followed by no transfer at
-    all is still a lie (call 18e96042: the caller asked for a human in plain
-    words and the LLM only *said* it was connecting), but dropping that one would
-    leave a silent turn rather than an untrue one, and there is no wait-phrase to
-    cover it because no tool ran. It is counted instead of guessed at.
+    A held promise followed by no transfer at all is prose, and prose is what it
+    usually is: over 21 days 13 of 318 calls heard one, and on 12 of the 14 turns
+    the promise is an *opener* the LLM glues onto an ordinary question before
+    carrying on — «Одну секунду, з'єдную вас з оператором. Як до вас
+    звертатися?» (53761bd9), and two of those calls went on to book. It surfaces
+    when the previous turn was unintelligible, which is why the model reaches for
+    the one script the prompt gives it (`prompts.py:830`).
+
+    So the unbacked promise is dropped when there is anything behind it. That
+    used to be rejected as trading an untrue turn for a silent one; it is not,
+    because the buffer splits «Одну секунду,» off as its own fragment ahead of
+    the promise and the question survives underneath. When the promise really is
+    the tail of the turn — 2 of the 14 — dropping it *would* leave silence, so
+    there it is still spoken. Both outcomes are counted.
     """
     held: list[BufferEvent] | None = None
     names: dict[str, str] = {}
@@ -443,14 +452,24 @@ async def hold_unconfirmed_transfer_promise(
 
         yield event
 
+    drop_unbacked = False
     if held is not None:
         # Still holding once the stream is exhausted: nothing behind the promise
-        # ever called transfer_to_operator, so it was prose. Released anyway —
-        # see above — but counted, because this is the one shape the filter
-        # knowingly lets through and it should not be invisible.
-        transfer_promise_unbacked_total.inc()
-        logger.warning("Transfer promise spoken with no transfer_to_operator behind it")
-    for queued in resolve(drop_promise=False):
+        # ever called transfer_to_operator, so it was prose.
+        drop_unbacked = any(
+            isinstance(e, SentenceReady) and not is_transfer_promise(e.text)
+            for e in held
+        )
+        transfer_promise_unbacked_total.labels(
+            outcome="dropped" if drop_unbacked else "spoken"
+        ).inc()
+        logger.warning(
+            "Transfer promise with no transfer_to_operator behind it — %s",
+            "dropped, the rest of the turn stands"
+            if drop_unbacked
+            else "spoken, it is the whole turn",
+        )
+    for queued in resolve(drop_promise=drop_unbacked):
         yield queued
 
 

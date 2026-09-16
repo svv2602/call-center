@@ -202,36 +202,89 @@ class TestTheGuardVerdictDecidesWhetherItIsSpoken:
         assert _spoken(out) == []
 
 
-class TestReleasingIsTheDefault:
+class TestAnUnbackedPromiseTurnsOnWhatFollowsIt:
+    """Prose promises split in two, and the two halves deserve opposite answers.
+
+    Replaying the 14 such turns from the 21 days to 2026-09-16 through this
+    filter puts 12 in the first shape and 2 in the second.
+    """
+
     @pytest.mark.asyncio
-    async def test_a_promise_with_no_tool_call_is_still_spoken(self) -> None:
+    async def test_a_promise_used_as_an_opener_is_dropped(self) -> None:
+        """Call 53761bd9, verbatim: «Одну секунду, з'єдную вас з оператором.
+        Як до вас звертатися?» — and then the bot carried straight on with the
+        booking. The caller should hear the question and not the promise."""
+        question = "Як до вас звертатися?"
+        events = [SentenceReady(text=PROMISE), SentenceReady(text=question), _done()]
+        out = await _collect(events, ALLOWED_HISTORY)
+        assert _spoken(out) == [question]
+
+    @pytest.mark.asyncio
+    async def test_a_promise_that_is_the_whole_turn_is_still_spoken(self) -> None:
         """Call 18e96042: the caller asked for a human and the LLM only said so.
 
-        Dropping this would trade an untrue turn for a silent one — no tool ran,
-        so there is no wait-phrase to cover the gap. It is counted instead
-        (`transfer_promise_unbacked_total`) so the shape stays visible.
+        Here dropping really would trade an untrue turn for a silent one — no
+        tool ran, so there is no wait-phrase to cover the gap.
         """
         events = [SentenceReady(text="Добре, переключаю на оператора."), _done()]
         out = await _collect(events, ALLOWED_HISTORY)
         assert _spoken(out) == ["Добре, переключаю на оператора."]
 
     @pytest.mark.asyncio
-    async def test_an_unbacked_promise_is_counted(self) -> None:
-        """Releasing it is a deliberate choice, so it may not also be silent.
+    async def test_a_second_promise_is_not_content_to_keep_the_first_for(self) -> None:
+        """Two ways of saying the same untrue thing still leave nothing behind."""
+        events = [
+            SentenceReady(text=PROMISE),
+            SentenceReady(text="Переключаю на оператора."),
+            _done(),
+        ]
+        out = await _collect(events, ALLOWED_HISTORY)
+        assert _spoken(out) == [PROMISE, "Переключаю на оператора."]
 
-        This counter is the only trace the prose-only shape leaves; without it
-        the decision to let it through would be unreviewable.
-        """
-        before = _counter_value(transfer_promise_unbacked_total)
+    @pytest.mark.asyncio
+    async def test_a_dropped_promise_moves_only_the_dropped_counter(self) -> None:
+        """Asserted one label at a time on purpose: incrementing both by one is
+        the same arithmetic whether or not the labels are the right way round."""
+        before_dropped = _counter_value(transfer_promise_unbacked_total, outcome="dropped")
+        before_spoken = _counter_value(transfer_promise_unbacked_total, outcome="spoken")
+        await _collect(
+            [SentenceReady(text=PROMISE), SentenceReady(text="Дніпро?"), _done()],
+            ALLOWED_HISTORY,
+        )
+        assert _counter_value(
+            transfer_promise_unbacked_total, outcome="dropped"
+        ) == before_dropped + 1
+        assert _counter_value(
+            transfer_promise_unbacked_total, outcome="spoken"
+        ) == before_spoken
+
+    @pytest.mark.asyncio
+    async def test_a_spoken_promise_moves_only_the_spoken_counter(self) -> None:
+        before_dropped = _counter_value(transfer_promise_unbacked_total, outcome="dropped")
+        before_spoken = _counter_value(transfer_promise_unbacked_total, outcome="spoken")
         await _collect([SentenceReady(text=PROMISE), _done()], ALLOWED_HISTORY)
-        assert _counter_value(transfer_promise_unbacked_total) == before + 1
+        assert _counter_value(
+            transfer_promise_unbacked_total, outcome="spoken"
+        ) == before_spoken + 1
+        assert _counter_value(
+            transfer_promise_unbacked_total, outcome="dropped"
+        ) == before_dropped
 
     @pytest.mark.asyncio
     async def test_a_backed_promise_is_not_counted_as_unbacked(self) -> None:
-        before = _counter_value(transfer_promise_unbacked_total)
+        before = sum(
+            _counter_value(transfer_promise_unbacked_total, outcome=o)
+            for o in ("dropped", "spoken")
+        )
         events = [SentenceReady(text=PROMISE), *_transfer_call("customer_request")]
         await _collect(events, ALLOWED_HISTORY)
-        assert _counter_value(transfer_promise_unbacked_total) == before
+        assert (
+            sum(
+                _counter_value(transfer_promise_unbacked_total, outcome=o)
+                for o in ("dropped", "spoken")
+            )
+            == before
+        )
 
     @pytest.mark.asyncio
     async def test_a_different_tool_behind_the_promise_releases_it(self) -> None:

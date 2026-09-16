@@ -125,8 +125,13 @@ transfer_promise_suppressed_total = Counter(
 
 transfer_promise_unbacked_total = Counter(
     "callcenter_transfer_promise_unbacked_total",
-    "«Connecting you to an operator» sentences released with no "
-    "transfer_to_operator call behind them at all (spoken as bare prose)",
+    "«Connecting you to an operator» sentences with no transfer_to_operator "
+    "call behind them at all. outcome=dropped — the turn had other content and "
+    "the caller heard that instead; outcome=spoken — the promise was the whole "
+    "turn, so removing it would leave silence, and that one is still spoken. "
+    "Measured over the 21 days to 2026-09-16: 12 of 14 such turns were the "
+    "droppable shape, the LLM using the transfer script as an opener.",
+    ["outcome"],
 )
 
 settled_question_redirected_total = Counter(
