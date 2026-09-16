@@ -400,6 +400,60 @@ class TestContextualFarewell:
         result = await pipeline._generate_contextual_farewell()
         assert result is None
 
+    @pytest.mark.parametrize(
+        "leaked",
+        [
+            'Одну секунду. functions.transfer_to_operator ({"reason":"non_fitting_scope"})',
+            "[Інструмент book_fitting успішно виконав бронювання]\n\nВи записані!",
+            'update_customer_profile name="Микита" До побачення!',
+            "[!IMPORTANT] Наступний крок — book_fitting (Крок 8). До побачення!",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_farewell_carrying_machinery_falls_back(self, leaked: str) -> None:
+        """Machinery written as prose never goes out as the goodbye.
+
+        Shapes taken from turns prod really spoke before the stream filter
+        shipped. This farewell is produced by `LLMAgent.process_message`, which
+        never passes through that filter, so the guard has to sit here too.
+        """
+        session = CallSession(uuid.uuid4())
+        for i in range(4):
+            session.add_user_turn(f"Turn {i}")
+            session.add_assistant_turn(f"Response {i}")
+
+        pipeline = self._make_pipeline(session)
+        pipeline._agent.process_message = AsyncMock(return_value=(leaked, []))
+
+        assert await pipeline._generate_contextual_farewell() is None
+
+    @pytest.mark.parametrize(
+        "clean",
+        [
+            "До побачення! Гарного дня!",
+            "Дякую, що звернулися до нас! Гарного дня, до побачення!",
+            "Була рада допомогти! До побачення, гарного вам дня!",
+            "Дякую! Якщо знадобиться допомога, звертайтеся. Гарного дня!",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_a_real_farewell_is_spoken_unchanged(self, clean: str) -> None:
+        """Every goodbye prod actually said in 35 days must still go out.
+
+        The guard is only free because it flags nothing the bot legitimately
+        says: across 3088 logged bot turns it matched 24, all of them genuine
+        machinery. These four are the real farewells from that same corpus.
+        """
+        session = CallSession(uuid.uuid4())
+        for i in range(4):
+            session.add_user_turn(f"Turn {i}")
+            session.add_assistant_turn(f"Response {i}")
+
+        pipeline = self._make_pipeline(session)
+        pipeline._agent.process_message = AsyncMock(return_value=(clean, []))
+
+        assert await pipeline._generate_contextual_farewell() == clean
+
 
 # ---------------------------------------------------------------------------
 # 5. Network name in greeting

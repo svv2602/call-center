@@ -48,12 +48,14 @@ from src.agent.prompts import (
     compute_order_stage,
     detect_scenario_from_text,
 )
+from src.agent.streaming_loop import control_plane_syntax
 from src.core.audio_socket import AUDIO_FRAME_BYTES, AudioSocketConnection, PacketType
 from src.core.call_session import SILENCE_TIMEOUT_SEC, CallSession, CallState
 from src.monitoring.metrics import (
     audiosocket_to_stt_ms,
     barge_in_total,
     bot_filler_stripped_total,
+    control_plane_prose_dropped_total,
     false_booking_claim_total,
     fsm_compound_preparse_fields_total,
     fsm_interrupt_total,
@@ -3987,7 +3989,25 @@ class CallPipeline:
                 timeout=_FAREWELL_LLM_TIMEOUT_SEC,
             )
             if response_text and response_text.strip():
-                return response_text.strip()
+                farewell = response_text.strip()
+                # The streaming loop filters machinery written as prose, but this
+                # farewell comes from `LLMAgent.process_message` and reaches the
+                # caller without passing through that stream. Same producer, same
+                # failure: 24 turns in 21 calls spoke tool syntax aloud before the
+                # stream filter shipped. Returning None hands the caller the
+                # template, which is what the call site already expects.
+                form = control_plane_syntax(farewell)
+                if form is not None:
+                    control_plane_prose_dropped_total.labels(form=form, site="farewell").inc()
+                    logger.warning(
+                        "Contextual farewell carried machinery (form=%s) — falling back "
+                        "to the template: call=%s text=%r",
+                        form,
+                        self._session.channel_uuid,
+                        farewell[:200],
+                    )
+                    return None
+                return farewell
         except TimeoutError:
             logger.warning("Contextual farewell LLM timed out: %s", self._session.channel_uuid)
         except Exception:
