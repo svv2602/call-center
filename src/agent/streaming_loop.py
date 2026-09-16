@@ -59,6 +59,7 @@ from src.llm.models import (
 from src.monitoring.metrics import (
     control_plane_prose_dropped_total,
     false_transfer_blocked_total,
+    guard_refusal_repeated_total,
     history_compression_mode,
     history_messages_count,
     llm_stop_reason_total,
@@ -1247,6 +1248,21 @@ class StreamingAgentLoop:
 
         turn_start = time.monotonic()
 
+        # (tool, canonical args) pairs a guard has already refused this turn.
+        # A guard verdict is a pure function of session state, so re-asking the
+        # identical question inside one turn cannot get a different answer — and
+        # the model does re-ask: over 21 days 47 of the refusals in 18 calls were
+        # verbatim repeats, 29 of them `past_krok_2`. Repeats are what made that
+        # one guard pathological (3.7 refusals per call against ~1.0 for every
+        # other guard, which the model obeys first time). Five rounds of the same
+        # refusal leave the turn with nothing to say, so the caller hears the
+        # exhaustion fallback — «На жаль, я вичерпала…» in `8e5fe347`, «Здається,
+        # виникла невелика технічна…» in `fb854e33` — instead of an answer.
+        # Only `error is True` counts. A transient failure is a string («Сервіс
+        # тимчасово не відповідає»), and retrying one of those is legitimate.
+        refused_this_turn: dict[str, str] = {}
+        ended_on_refusal_loop = False
+
         tool_round = 0
         while tool_round < self._max_tool_rounds:
             # Stream LLM → sentence buffer → TTS → audio sender
@@ -1440,10 +1456,14 @@ class StreamingAgentLoop:
                 seen_keys.add(dedup_key)
                 unique_tool_calls.append(tc)
 
+            suppressed_ids: set[str] = set()
+
             # Execute tool calls in parallel (with per-tool timeout).
             # If LLM produced no text before the tool call, speak a contextual
             # wait-phrase in parallel so the caller doesn't hear silence.
-            async def _execute_one_tool(tc: Any) -> dict[str, Any]:
+            async def _execute_one_tool(
+                tc: Any, _suppressed: set[str] = suppressed_ids
+            ) -> dict[str, Any]:
                 try:
                     args = json.loads(tc.arguments_json) if tc.arguments_json else {}
                 except json.JSONDecodeError:
@@ -1468,6 +1488,29 @@ class StreamingAgentLoop:
                             "tool_use_id": tc.id,
                             "content": block_msg,
                         }
+                refusal_key = tc.name + ":" + json.dumps(args, sort_keys=True)
+                already_refused = refused_this_turn.get(refusal_key)
+                if already_refused is not None:
+                    guard_refusal_repeated_total.labels(
+                        tool_name=tc.name, reason=already_refused
+                    ).inc()
+                    logger.warning(
+                        "Tool %s already refused this turn (reason=%s) — not run again",
+                        tc.name,
+                        already_refused,
+                    )
+                    _suppressed.add(tc.id)
+                    return {
+                        "type": "tool_result",
+                        "tool_use_id": tc.id,
+                        "content": (
+                            f"⛔ Ти вже викликав `{tc.name}` з тими самими аргументами "
+                            "у цьому ході, і сервер відмовив. Відповідь не зміниться — "
+                            "не викликай його знову. Або виконай ту дію, яку сервер "
+                            "назвав у попередній відмові, або скажи клієнту словами, "
+                            "що відбувається."
+                        ),
+                    }
                 try:
                     raw = await asyncio.wait_for(
                         self._tool_router.execute(tc.name, args),
@@ -1477,6 +1520,10 @@ class StreamingAgentLoop:
                     logger.error("Tool %s timed out after %ds", tc.name, _TOOL_TIMEOUT_SEC)
                     tool_call_errors_total.labels(tool_name=tc.name, error_type="timeout").inc()
                     raw = {"error": "Сервіс тимчасово не відповідає, спробуйте ще раз"}
+                if isinstance(raw, dict) and raw.get("error") is True:
+                    refused_this_turn[refusal_key] = str(
+                        raw.get("reason") or raw.get("action_required") or "unspecified"
+                    )
                 content = compress_tool_result(tc.name, raw)
                 if self._pii_vault is not None:
                     content = self._pii_vault.mask(content)
@@ -1518,6 +1565,22 @@ class StreamingAgentLoop:
             conversation_history.append({"role": "user", "content": tool_results})
 
             tool_round += 1
+            if unique_tool_calls and len(suppressed_ids) == len(unique_tool_calls):
+                # The round asked for nothing but calls this turn has already
+                # been refused, so another round has nothing new to work with.
+                # The condition is deliberately "the whole round", not "any
+                # repeat": in `8e5fe347` the model interleaved a working
+                # `get_fitting_price` between refusals, and that is a
+                # continuation, not a loop. Stopping here does not send the turn
+                # anywhere it was not already going — five rounds of the same
+                # refusal end at the same exhaustion fallback, just later.
+                logger.warning(
+                    "Tool round %d contained only already-refused repeats — "
+                    "ending the turn instead of spending the remaining rounds",
+                    tool_round,
+                )
+                ended_on_refusal_loop = True
+                break
             if tool_round >= self._max_tool_rounds:
                 logger.warning("Max tool rounds reached (%d)", self._max_tool_rounds)
                 break
@@ -1526,8 +1589,11 @@ class StreamingAgentLoop:
         tool_rounds_per_turn.observe(tool_round)
         llm_stop_reason_total.labels(reason=stop_reason).inc()
 
-        # Fallback: if max tool rounds exhausted with no spoken text, ask LLM for summary
-        if not spoken_parts and tool_round >= self._max_tool_rounds:
+        # Fallback: if the rounds ran out with no spoken text, ask LLM for a summary.
+        # A turn cut short on a refusal loop needs this just as much — it has spent
+        # fewer rounds, but it has exactly as little to say, and without the fallback
+        # the caller would get silence.
+        if not spoken_parts and (tool_round >= self._max_tool_rounds or ended_on_refusal_loop):
             tool_rounds_exhausted_total.inc()
             summary = await self._request_summary_fallback(system, conversation_history)
             if summary:

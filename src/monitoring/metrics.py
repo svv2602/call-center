@@ -475,6 +475,16 @@ tool_call_errors_total = Counter(
     ["tool_name", "error_type"],  # error_type: timeout, exception
 )
 
+guard_refusal_repeated_total = Counter(
+    "callcenter_guard_refusal_repeated_total",
+    "Tool calls suppressed because an identical call was already refused by a "
+    "guard earlier in the same turn. Before this existed, 47 such repeats "
+    "landed across 18 calls in 21 days and burned the turn's round budget: "
+    "`past_krok_2` alone averaged 3.7 refusals per call against ~1.0 for every "
+    "other guard",
+    ["tool_name", "reason"],
+)
+
 tool_audit_write_failures_total = Counter(
     "callcenter_tool_audit_write_failures_total",
     "Failures of the tool-call audit write (call_tool_calls row lost) by tool "
