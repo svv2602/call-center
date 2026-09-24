@@ -183,6 +183,11 @@ class TestOtherReasonsNeedEvidenceToo:
             "де мій заказ",
             "коли буде доставка",
             "у мене питання по гарантії",
+            # a7477e1b / 450edbcf — both blocked before 2026-09-24.
+            "оплата за шини",
+            "мне звонили по поводу шин я хотел уточнить их выписку",
+            "чи є в наявності 205 55 16",
+            "мені потрібен рахунок",
         ],
     )
     def test_genuine_out_of_scope_still_transfers(self, last_turn: str) -> None:
@@ -199,6 +204,14 @@ class TestOtherReasonsNeedEvidenceToo:
             {"reason": "negative_emotion", "summary": "..."}, history
         )
         assert result is None
+
+    def test_bringing_own_tyres_is_in_scope(self) -> None:
+        """Bare «шини» is not off-topic: every storage answer contains it."""
+        history = _hist("Дніпро", "свої шини привезу з собою")
+        result = _should_block_false_transfer(
+            {"reason": "non_fitting_scope", "summary": "..."}, history
+        )
+        assert result is not None
 
     def test_storage_question_is_in_scope(self) -> None:
         """«шини на зберіганні» is a checklist question, not an escape hatch."""

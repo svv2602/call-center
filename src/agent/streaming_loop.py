@@ -210,12 +210,21 @@ _ESCALATION_KEYWORDS = (
 )
 
 # Topics the fitting-only bot genuinely cannot serve. Deliberately excludes
-# «зберігання» — «шини на зберіганні» is a question the checklist itself asks.
+# «зберігання» — «шини на зберіганні» is a question the checklist itself asks —
+# and bare «шин», which every «свої шини» answer would carry.
+#
+# Payment, invoices, goods and stock were missing until 2026-09-24. «оплата за
+# шини» (a7477e1b) and «уточнить выписку по шинам» (450edbcf) had the LLM reach
+# for a transfer, get blocked with «продовжуй чекліст», and ask a caller who
+# wanted the accounts desk for their name and city. Over 40 days these stems
+# occur in 3 customer turns, all three off-topic, none in a booking call.
 _OUT_OF_SCOPE_KEYWORDS = (
     "кредит", "розстрочк", "рассрочк",
     "купити", "купить", "куплю", "придбат",
     "замовл", "заказ", "доставк",
     "гаранті", "гаранти", "поверн", "возврат", "рекламац",
+    "оплат", "сплат", "платіж", "платеж", "рахун",
+    "виписк", "выписк", "товар", "наявн", "наличи",
 )
 
 _GUARD_MARKER = "⛔ HALLUCINATION_GUARD"
