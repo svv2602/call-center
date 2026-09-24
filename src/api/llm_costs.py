@@ -253,6 +253,7 @@ async def sync_system_pricing(_: Any = _perm_w) -> dict[str, Any]:
         "gemini-3-flash": ("gemini-3-flash-preview", "Gemini 3 Flash (preview)", 0.3, 2.5),
         "openai-gpt5-mini": ("gpt-5-mini", "GPT-5 Mini", 0.25, 2.0),
         "openai-gpt5-nano": ("gpt-5-nano", "GPT-5 Nano", 0.05, 0.4),
+        "openai-gpt6-luna": ("gpt-6-luna", "GPT-6 Luna", 0.10, 0.50),
     }
 
     providers = DEFAULT_ROUTING_CONFIG.get("providers", {})

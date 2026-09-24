@@ -319,6 +319,7 @@ class TestListModels:
                 "deepseek-chat": {"enabled": False},
                 "openai-gpt5-mini": {"enabled": False},
                 "openai-gpt5-nano": {"enabled": False},
+                "openai-gpt6-luna": {"enabled": False},
             },
             "sandbox": {"default_model": "gemini-2.5-flash"},
         }
@@ -356,6 +357,7 @@ class TestListModels:
                 "gemini-3-flash": {"enabled": False},
                 "openai-gpt5-mini": {"enabled": False},
                 "openai-gpt5-nano": {"enabled": False},
+                "openai-gpt6-luna": {"enabled": False},
             },
         }
         mock_redis.get = AsyncMock(return_value=json.dumps(redis_config))

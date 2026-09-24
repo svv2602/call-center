@@ -185,6 +185,19 @@ DEFAULT_ROUTING_CONFIG: dict[str, Any] = {
             "base_url": "https://api.openai.com/v1",
             "enabled": True,
         },
+        # Released 2026-09-22 at $0.10/$0.50 per 1M — cheaper than gpt-4.1-mini.
+        # Not routed to any task: it is a reasoning-effort model like gpt-5-mini,
+        # which failed the voice A/B both ways (slow on "low", no tool calls on
+        # "minimal"). Measure it with `scripts/llm_ab_replay.py` before routing.
+        # No `reasoning_effort` here on purpose — which levels it accepts is
+        # part of what that replay finds out.
+        "openai-gpt6-luna": {
+            "type": "openai",
+            "model": "gpt-6-luna",
+            "api_key_env": "OPENAI_API_KEY",
+            "base_url": "https://api.openai.com/v1",
+            "enabled": True,
+        },
     },
     "tasks": {
         "agent": {"primary": "gemini-2.5-flash", "fallbacks": ["openai-gpt41-mini"]},
