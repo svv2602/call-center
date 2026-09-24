@@ -247,9 +247,7 @@ class TestContextSensitivity:
         assert "Дніпро" in prompt
         assert "17" in prompt
 
-    async def test_llm_call_matches_real_router_signature(
-        self, mock_llm_router: MagicMock
-    ) -> None:
+    async def test_llm_call_matches_real_router_signature(self, mock_llm_router: MagicMock) -> None:
         """Вызов обязан быть совместим с настоящим `LLMRouter.complete`.
 
         Моки отвечают на что угодно, поэтому «зелёные тесты» сами по себе не
@@ -894,18 +892,14 @@ class TestRequestShape:
     def test_system_prompt_under_2k_chars(self) -> None:
         assert len(_SYSTEM_PROMPT) < 2000
 
-    async def test_system_prompt_is_sent_via_system_kwarg(
-        self, mock_llm_router: MagicMock
-    ) -> None:
+    async def test_system_prompt_is_sent_via_system_kwarg(self, mock_llm_router: MagicMock) -> None:
         """`LLMRouter.complete` берёт system отдельным аргументом, не сообщением."""
         await classify(mock_llm_router, "хочу записатися на шиномонтаж")
         kwargs = mock_llm_router.complete.call_args.kwargs
         assert kwargs["system"] is _SYSTEM_PROMPT
         assert [m["role"] for m in kwargs["messages"]] == ["user"]
 
-    async def test_provider_override_pins_the_cheap_model(
-        self, mock_llm_router: MagicMock
-    ) -> None:
+    async def test_provider_override_pins_the_cheap_model(self, mock_llm_router: MagicMock) -> None:
         """Классификатор не должен уезжать на дорогую модель агента."""
         await classify(mock_llm_router, "хочу записатися на шиномонтаж")
         kwargs = mock_llm_router.complete.call_args.kwargs
@@ -930,3 +924,100 @@ class TestRequestShape:
         caplog.set_level(logging.INFO)
         await classify(mock_llm_router, "хочу записатися на шиномонтаж")
         assert "intent_classifier_latency_ms" in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# verdict_cannot_matter — skipping the LLM must not change a single turn
+# ---------------------------------------------------------------------------
+
+#: The most frequent short replies in 1028 live customer turns (2026-09-10..24).
+_SHORT_NO_TRIGGER = (
+    "так",
+    "Олексій",
+    "сірий",
+    "Volkswagen",
+    "17",
+    "Оболонь",
+    "11:00",
+    "свої",
+    "з собою",
+    "в Днепре",
+    "на завтра",
+    "дякую",
+    "Алло",
+    "так так",
+    "так підтверджую",
+    "спасибо",
+    "13:00",
+    "на понеділок",
+)
+
+_MAIN_FLOW_STATES = (
+    None,
+    "WELCOME",
+    "INTENT",
+    "CITY",
+    "STATION",
+    "STORAGE",
+    "DATE",
+    "TIME",
+    "COLOR",
+    "BRAND",
+    "CONFIRM",
+    "BOOK",
+    "DONE",
+)
+
+#: `FSM_INTERRUPT_CONFIDENCE_FLOOR` in `pipeline.py`. Imported lazily below —
+#: the pipeline module is heavy — and asserted equal, so a change there fails here.
+_FLOOR = 0.5
+
+
+class TestVerdictCannotMatter:
+    def test_floor_matches_the_pipeline(self) -> None:
+        from src.core.pipeline import FSM_INTERRUPT_CONFIDENCE_FLOOR
+
+        assert FSM_INTERRUPT_CONFIDENCE_FLOOR == _FLOOR
+
+    @pytest.mark.parametrize("state", _MAIN_FLOW_STATES)
+    @pytest.mark.parametrize("text", _SHORT_NO_TRIGGER)
+    def test_no_verdict_could_take_the_turn(self, text: str, state: str | None) -> None:
+        """Whatever the LLM says, the guard leaves the turn to the normal LLM."""
+        from src.agent.intent_classifier import (
+            IntentResult,
+            _apply_context_guard,
+            verdict_cannot_matter,
+        )
+
+        context = {"fsm_state": state}
+        assert verdict_cannot_matter(text, context) is True
+        for intent in ("BOOK", "PRICE", "CANCEL", "RESCHEDULE", "TRANSFER"):
+            verdict = IntentResult(primary_intent=intent, confidence=0.95)
+            guarded = _apply_context_guard(verdict, text, context)
+            takes_turn = (
+                guarded.primary_intent in ("PRICE", "CANCEL", "TRANSFER")
+                and guarded.confidence >= _FLOOR
+            )
+            assert not takes_turn, (text, state, intent, guarded)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "скасувати",  # CANCEL keyword
+            "оператора",  # TRANSFER keyword
+            "скільки",  # PRICE keyword
+            "подскажите артист монтажу в Днепре",  # STT garble of «вартість»
+            "Добрый день мы не требуйте знать",  # 81f2eeac: long, no keyword at all
+        ],
+    )
+    def test_evidence_or_length_still_asks_the_llm(self, text: str) -> None:
+        from src.agent.intent_classifier import verdict_cannot_matter
+
+        assert verdict_cannot_matter(text, {"fsm_state": "CITY"}) is False
+
+    @pytest.mark.parametrize("state", ["PRICE_INTERRUPT", "CANCEL_INTERRUPT", "TRANSFER"])
+    def test_side_states_still_ask_the_llm(self, state: str) -> None:
+        """There the expected intent is not BOOK, and a matching verdict passes the guard."""
+        from src.agent.intent_classifier import verdict_cannot_matter
+
+        assert verdict_cannot_matter("17", {"fsm_state": state}) is False

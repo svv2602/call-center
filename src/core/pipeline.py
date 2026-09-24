@@ -2486,6 +2486,28 @@ class CallPipeline:
             self._note_pipeline_interrupt_dispatch(dispatched=False)
             return False
 
+        from src.agent.intent_classifier import classify_intent, verdict_cannot_matter
+
+        session_context = {
+            "fsm_state": self._session.fsm_state,
+            "current_step": self._session.fsm_state,
+            "filled_fields": self._fsm_filled_fields_snapshot(),
+            "dialog_history_tail": self._dialog_history_tail(),
+            "tenant": str(self._session.tenant_id or ""),
+        }
+        # «так», «сірий», «17»: the guard would overrule any verdict on these,
+        # so the caller should not sit through 1.2 s of silence waiting for one.
+        if continuation is None and verdict_cannot_matter(transcript.text, session_context):
+            logger.info(
+                "FSM live mode: %r cannot change the turn in fsm_state=%s for call=%s — "
+                "intent classification skipped",
+                transcript.text[:40],
+                self._session.fsm_state,
+                self._session.channel_uuid,
+            )
+            self._note_pipeline_interrupt_dispatch(dispatched=False)
+            return False
+
         llm_router = self._get_llm_router()
         if llm_router is None:
             logger.error(
@@ -2500,17 +2522,9 @@ class CallPipeline:
         # A continuation does not need one; anything else falls through.
         result = None
         try:
-            from src.agent.intent_classifier import classify_intent
-
             result = await classify_intent(
                 customer_text=transcript.text,
-                session_context={
-                    "fsm_state": self._session.fsm_state,
-                    "current_step": self._session.fsm_state,
-                    "filled_fields": self._fsm_filled_fields_snapshot(),
-                    "dialog_history_tail": self._dialog_history_tail(),
-                    "tenant": str(self._session.tenant_id or ""),
-                },
+                session_context=session_context,
                 llm_router=llm_router,
                 on_usage=self._note_intent_classifier_usage,
             )

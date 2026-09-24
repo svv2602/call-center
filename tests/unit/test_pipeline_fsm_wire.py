@@ -4634,3 +4634,49 @@ class TestTheOfferedListOutlivesThePin:
             await h.run("на 12")
 
         assert h.llm_kwargs[-1]["offered_slots"] is None
+
+
+class TestClassifierSkippedWhenItCannotMatter:
+    """«так», «сірий», «17»: 60% of live turns, 1.2 s of silence each, for nothing."""
+
+    async def test_short_answer_in_the_main_flow_goes_straight_to_the_llm(self) -> None:
+        h = Harness()
+        h.session.fsm_state = "COLOR"
+        classify = AsyncMock(return_value=intent("PRICE", 0.95))
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch("src.agent.intent_classifier.classify_intent", classify),
+        ):
+            await h.run("сірий")
+
+        classify.assert_not_called()
+        assert h.llm_turns == ["сірий"]
+
+    async def test_a_keyword_still_asks_the_classifier(self) -> None:
+        h = Harness()
+        h.session.fsm_state = "COLOR"
+        classify = AsyncMock(return_value=intent("BOOK"))
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch("src.agent.intent_classifier.classify_intent", classify),
+        ):
+            await h.run("скільки")
+
+        classify.assert_awaited_once()
+
+    async def test_an_open_sub_flow_still_asks_the_classifier(self) -> None:
+        """The continuation branch runs after the classifier: TRANSFER outranks it."""
+        h = Harness()
+        h.session.pending_cancel_action = TestOpenSubFlowOwnsTheAnswer.CONFIRMING
+        classify = AsyncMock(return_value=intent("BOOK"))
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch("src.agent.intent_classifier.classify_intent", classify),
+            patch(
+                "src.agent.interrupts.handle_cancel_interrupt",
+                AsyncMock(return_value=interrupt(reply="Скасувала запис.")),
+            ),
+        ):
+            await h.run("так")
+
+        classify.assert_awaited_once()

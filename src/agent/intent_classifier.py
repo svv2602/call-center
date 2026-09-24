@@ -297,6 +297,30 @@ def _has_transfer_evidence(text: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def verdict_cannot_matter(customer_text: str, session_context: dict[str, Any]) -> bool:
+    """True, если исход классификации известен до вызова LLM.
+
+    Короткая реплика без единого keyword'а в основном потоке записи — «так»,
+    «сірий», «Volkswagen», «17». Что бы ни ответила модель, `_apply_context_guard`
+    опустит TRANSFER/PRICE/CANCEL ниже `FSM_INTERRUPT_CONFIDENCE_FLOOR` (0.5 в
+    `pipeline.py`) или оставит BOOK — и ход в любом случае уходит обычному LLM.
+
+    Замер 2026-09-24: это 615 из 1028 реплик клиента с запуска FSM, и каждая
+    платила за вызов 1.2 с в медиане (p90 1.8 с, таймаут 2 с) тишины перед
+    ответом. Эквивалентность с гардом пинует тест, прогоняющий гард на каждом
+    вердикте — правка одного без другого его уронит.
+
+    Не для открытого подсценария: там ход и так забирает continuation, решение
+    принимает вызывающий. И не для PRICE_INTERRUPT/CANCEL_INTERRUPT — там
+    ожидаемый интент не BOOK, и совпавший с ним вердикт гард пропускает.
+    """
+    text = (customer_text or "").strip()
+    if not text or not _is_short_answer(text) or _has_keyword_trigger(text):
+        return False
+    return _STATE_INTENT.get(_effective_state(session_context or {}) or "", "BOOK") == "BOOK"
+
+
+
 async def classify_intent(
     customer_text: str,
     session_context: dict[str, Any],
