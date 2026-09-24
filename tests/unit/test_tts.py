@@ -236,6 +236,69 @@ class TestSSMLFallback:
         assert actual_input.text == "Дякую за дзвінок!"
 
 
+class TestTransientErrorRetry:
+    """A dropped connection to Google is retried once and never costs SSML."""
+
+    @staticmethod
+    def _engine(side_effect: list[object]) -> GoogleTTSEngine:
+        from unittest.mock import AsyncMock
+
+        engine = GoogleTTSEngine()
+        engine._client = AsyncMock()
+        engine._voice = "fake-voice"
+        engine._audio_config = "fake-config"
+        engine._client.synthesize_speech = AsyncMock(side_effect=side_effect)
+        return engine
+
+    @staticmethod
+    def _response(audio: bytes) -> object:
+        from unittest.mock import MagicMock
+
+        response = MagicMock()
+        response.audio_content = audio
+        return response
+
+    @pytest.mark.asyncio
+    async def test_503_on_first_request_is_retried(self) -> None:
+        from google.api_core.exceptions import ServiceUnavailable
+
+        engine = self._engine(
+            [ServiceUnavailable("Stream removed"), self._response(b"\x01" * 10)]
+        )
+
+        audio = await engine._synthesize_uncached("Добрий день")
+
+        assert audio == b"\x01" * 10
+        assert engine._client.synthesize_speech.call_count == 2
+        # Both attempts were SSML: the retry must not be the plain-text fallback.
+        for call in engine._client.synthesize_speech.call_args_list:
+            assert call.kwargs["input"].ssml
+
+    @pytest.mark.asyncio
+    async def test_503_does_not_switch_ssml_off(self) -> None:
+        from google.api_core.exceptions import ServiceUnavailable
+
+        engine = self._engine([ServiceUnavailable("a"), ServiceUnavailable("b")])
+
+        with pytest.raises(ServiceUnavailable):
+            await engine._synthesize_uncached("Добрий день")
+
+        assert engine._ssml_supported is True
+        assert engine._client.synthesize_speech.call_count == 2
+
+    @pytest.mark.asyncio
+    async def test_invalid_request_is_not_retried(self) -> None:
+        from google.api_core.exceptions import InvalidArgument
+
+        engine = self._engine([InvalidArgument("bad"), InvalidArgument("bad")])
+        engine._ssml_supported = False
+
+        with pytest.raises(InvalidArgument):
+            await engine._synthesize_uncached("Тест")
+
+        assert engine._client.synthesize_speech.call_count == 1
+
+
 class TestTTSEngineHotReload:
     """Test that get_engine()/set_engine() hot-reload works correctly."""
 

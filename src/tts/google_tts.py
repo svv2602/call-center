@@ -10,6 +10,7 @@ import xml.sax.saxutils
 from typing import TYPE_CHECKING
 
 from cachetools import LRUCache
+from google.api_core import exceptions as gexc
 from google.cloud import texttospeech_v1 as texttospeech
 
 from src.agent.prompts import (
@@ -46,6 +47,9 @@ _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+")
 # Stress marks are no longer used in prompts; strip any residual ones
 # that may come from LLM output or external content.
 _COMBINING_ACUTE = "\u0301"
+
+# Errors that say the connection failed, not that the request was wrong.
+_TRANSIENT_ERRORS = (gexc.ServiceUnavailable, gexc.DeadlineExceeded, gexc.InternalServerError)
 
 # TTS pronunciation substitutions — applied before SSML conversion.
 # Fixes words that the TTS engine reads with incorrect stress or as
@@ -281,6 +285,11 @@ class GoogleTTSEngine:
                 return await self._call_tts_api(
                     texttospeech.SynthesisInput(ssml=self._to_ssml(text)), text
                 )
+            except _TRANSIENT_ERRORS:
+                # A dropped connection says nothing about the voice. Treating it
+                # as «SSML unsupported» switched SSML off for the rest of the
+                # process on 2026-09-24 — a 503 on the warmup ping did it.
+                raise
             except Exception:
                 self._ssml_supported = False
                 logger.info(
@@ -291,12 +300,28 @@ class GoogleTTSEngine:
         return await self._call_tts_api(texttospeech.SynthesisInput(text=text), text)
 
     async def _call_tts_api(self, synthesis_input: texttospeech.SynthesisInput, text: str) -> bytes:
-        """Send synthesis request to Google TTS and return raw PCM audio."""
-        response = await self._client.synthesize_speech(  # type: ignore[union-attr]
-            input=synthesis_input,
-            voice=self._voice,
-            audio_config=self._audio_config,
-        )
+        """Send synthesis request to Google TTS and return raw PCM audio.
+
+        Retries once on a transient error. The HTTP/2 connection to Google is
+        dropped from time to time between calls, and the first request after
+        that fails with `503 Stream removed` while the second reconnects and
+        succeeds. Without the retry that first request was the greeting: in
+        September 18 of 328 calls opened with silence, and in 14 of them the
+        caller hung up without saying a word.
+        """
+        try:
+            response = await self._client.synthesize_speech(  # type: ignore[union-attr]
+                input=synthesis_input,
+                voice=self._voice,
+                audio_config=self._audio_config,
+            )
+        except _TRANSIENT_ERRORS as exc:
+            logger.warning("TTS transient error, retrying once: %s", exc)
+            response = await self._client.synthesize_speech(  # type: ignore[union-attr]
+                input=synthesis_input,
+                voice=self._voice,
+                audio_config=self._audio_config,
+            )
 
         audio = response.audio_content
 
