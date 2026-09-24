@@ -77,6 +77,11 @@ except ImportError:  # pragma: no cover - Wave 1-C not merged yet
     )
 
 
+#: Said after a price quote instead of a resume phrase when no booking is under
+#: way yet — there is nothing to return to, only something to offer.
+PRICE_ONLY_BOOKING_OFFER = "Бажаєте записатися на шиномонтаж?"
+
+
 class FsmState(enum.StrEnum):
     """States of the fitting flow (§2.1).
 

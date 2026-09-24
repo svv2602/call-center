@@ -57,7 +57,7 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from src.agent.compound_parse import named_cities
-from src.agent.fitting_fsm import FROZEN_STATES, STATES, FsmState
+from src.agent.fitting_fsm import FROZEN_STATES, PRICE_ONLY_BOOKING_OFFER, STATES, FsmState
 
 if TYPE_CHECKING:
     from src.core.call_session import CallSession
@@ -585,6 +585,28 @@ def _resume(session: CallSession) -> tuple[str | None, str]:
     return state.value, STATES[state].resume_phrase
 
 
+#: Fields that mean a booking is actually under way. City and name are not
+#: among them: both are collected for a price quote too.
+_BOOKING_SESSION_FIELDS = (
+    "last_fitting_station_id",
+    "selected_fitting_date",
+    "selected_fitting_time",
+    "fitting_plate",
+    "fitting_vehicle_brand",
+)
+_BOOKING_FSM_FIELDS = ("station_id", "storage_choice", "date", "time", "color", "brand")
+
+
+def _booking_underway(session: CallSession) -> bool:
+    """True once the caller has given the booking something beyond a city."""
+    if any(getattr(session, name, None) for name in _BOOKING_SESSION_FIELDS):
+        return True
+    if getattr(session, "fitting_storage_choice", None) is not None:
+        return True
+    filled = getattr(session, "fsm_filled_fields", None) or {}
+    return any(filled.get(name) not in (None, "") for name in _BOOKING_FSM_FIELDS)
+
+
 def _join(*parts: str) -> str:
     """Join non-empty sentence fragments with single spaces."""
     return " ".join(part.strip() for part in parts if part and part.strip())
@@ -772,6 +794,12 @@ async def handle_price_interrupt(
     counts = _bump(session, PRICE_HANDLER, entry=entry)
     city = _resolve_city(session)
     resume_state, resume_phrase = _resume(session)
+    if resume_phrase and not _booking_underway(session):
+        # The FSM walks WELCOME → CITY → STATION on the city alone, so a caller
+        # who only asked the price is «parked» in a booking they never started.
+        # «Повертаємось до вибору точки шиномонтажу» (9c0a73ce, 2026-09-24)
+        # returned them to nothing and asked them nothing.
+        resume_phrase = PRICE_ONLY_BOOKING_OFFER
 
     # --- Diameter -----------------------------------------------------------
     # The session value wins (it is what `_get_fitting_price`'s Wave 12 guard

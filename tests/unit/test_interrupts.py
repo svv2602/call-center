@@ -864,3 +864,41 @@ class TestClassifyInterruptText:
         # then declines — a question charged to nobody's budget.
         for text in ("а скільки це коштує?", "що по ціні", "Київ", "ну"):
             assert (classify_interrupt_text(text) == "price") is _mentions_price(text)
+
+
+class TestPriceOnlyCallerIsOfferedABooking:
+    """9c0a73ce: «Повертаємось до вибору точки» to a caller who only asked the price."""
+
+    async def test_city_alone_gets_an_offer_not_a_return(self, router: AsyncMock) -> None:
+        from src.agent.fitting_fsm import PRICE_ONLY_BOOKING_OFFER
+
+        session = make_session(
+            fsm_state=FsmState.STATION.value,
+            fitting_diameter_client=18,
+            last_fitting_station_id=None,
+        )
+        session.fsm_filled_fields = {"intent": "fitting", "city": "Дніпро"}
+
+        result = await handle_price_interrupt(PRICE_QUESTION, session, router)
+
+        assert result.reply_to_customer.endswith(PRICE_ONLY_BOOKING_OFFER)
+        assert STATES[FsmState.STATION].resume_phrase not in result.reply_to_customer
+        assert result.resume_state == FsmState.STATION.value
+        assert_contract(result)
+
+    @pytest.mark.parametrize(
+        "field", ["station_id", "storage_choice", "date", "time", "color", "brand"]
+    )
+    async def test_any_booking_field_keeps_the_resume_phrase(
+        self, field: str, router: AsyncMock
+    ) -> None:
+        session = make_session(
+            fsm_state=FsmState.STATION.value,
+            fitting_diameter_client=18,
+            last_fitting_station_id=None,
+        )
+        session.fsm_filled_fields = {"city": "Дніпро", field: "x"}
+
+        result = await handle_price_interrupt(PRICE_QUESTION, session, router)
+
+        assert result.reply_to_customer.endswith(STATES[FsmState.STATION].resume_phrase)
