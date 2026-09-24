@@ -15,6 +15,13 @@ What decides the verdict is what sank gpt-5-mini on 2026-08-14:
   gpt-5-mini kept the latency but stopped calling tools.
 - ``phantom`` — turns that announce a lookup («шукаю», «перевіряю»…) without
   making any tool call: the bot pretending to search.
+- ``transfer`` — share of turns that call ``transfer_to_operator``. A model can
+  keep the tool rate up by giving the call away: in the first smoke run Luna
+  on "none" transferred on 4 of 9 turns where gpt-4.1-mini carried on booking.
+
+Every gate is relative to the first variant, not an absolute number: on that
+same smoke run gpt-4.1-mini itself had a ttft p50 of 1.7 s, so the 1.5 s bar
+first written here would have failed the incumbent.
 
 A variant is ``provider_key`` or ``provider_key:effort``; the second form
 clones the provider with that ``reasoning_effort``, so one run can sweep the
@@ -84,7 +91,10 @@ _LOOKUP_RE = re.compile(
     re.IGNORECASE,
 )
 
-TTFT_GATE_MS = 1500
+# How much slower than the baseline a variant may be at the ttft median.
+TTFT_SLACK = 1.15
+# Absolute slack on tool and transfer rates before a difference counts.
+RATE_SLACK = 0.05
 
 
 @dataclass
@@ -306,43 +316,51 @@ def _cost(variant: Variant) -> float | None:
 
 
 def _summary(variants: list[Variant]) -> None:
-    baseline = variants[0]
-    base_rate: float | None = None
     header = (
         f"{'variant':<28}{'turns':>6}{'err':>5}{'ttft p50':>10}{'ttft p95':>10}"
-        f"{'turn p50':>10}{'out tok':>9}{'tool rate':>11}{'phantom':>9}{'$/turn':>10}  verdict"
+        f"{'turn p50':>10}{'out tok':>9}{'tool rate':>11}{'transfer':>10}{'phantom':>9}"
+        f"{'$/turn':>10}  verdict"
     )
     print(header)
     print("-" * len(header))
+    base: dict[str, Any] = {}
     for v in variants:
         ok = [r for r in v.rows if not r.error]
+        n = len(ok) or 1
         ttfts = [r.ttft_ms for r in ok if r.ttft_ms is not None]
         lat = [r.latency_ms for r in ok]
         out = [r.output_tokens for r in ok]
-        rate = sum(1 for r in ok if r.tool_calls) / len(ok) if ok else 0.0
-        phantom = sum(1 for r in ok if r.phantom)
+        stats = {
+            "p50": _pct(ttfts, 0.5),
+            "rate": sum(1 for r in ok if r.tool_calls) / n,
+            "transfer": sum(1 for r in ok if "transfer_to_operator" in r.tool_calls) / n,
+            "phantom": sum(1 for r in ok if r.phantom) / n,
+        }
         cost = _cost(v)
-        if v is baseline:
-            base_rate = rate
+        if not base:
+            base = stats
             verdict = "baseline"
         else:
             fails = []
             if len(ok) < len(v.rows):
                 fails.append(f"{len(v.rows) - len(ok)} errors")
-            p50 = _pct(ttfts, 0.5)
-            if p50 is None or p50 > TTFT_GATE_MS:
-                fails.append(f"ttft p50 > {TTFT_GATE_MS}")
-            if base_rate is not None and rate < base_rate - 0.05:
+            if stats["p50"] is None or (
+                base["p50"] is not None and stats["p50"] > base["p50"] * TTFT_SLACK
+            ):
+                fails.append("slower first token")
+            if stats["rate"] < base["rate"] - RATE_SLACK:
                 fails.append("fewer tool calls")
-            if phantom > sum(1 for r in baseline.rows if r.phantom and not r.error):
+            if stats["transfer"] > base["transfer"] + RATE_SLACK:
+                fails.append("more transfers")
+            if stats["phantom"] > base["phantom"] + RATE_SLACK:
                 fails.append("more phantom lookups")
             verdict = "FAIL: " + ", ".join(fails) if fails else "pass"
         print(
             f"{v.name:<28}{len(v.rows):>6}{len(v.rows) - len(ok):>5}"
-            f"{_pct(ttfts, 0.5) or '-':>10}{_pct(ttfts, 0.95) or '-':>10}"
+            f"{stats['p50'] or '-':>10}{_pct(ttfts, 0.95) or '-':>10}"
             f"{_pct(lat, 0.5) or '-':>10}"
             f"{statistics.median(out) if out else '-':>9}"
-            f"{rate:>10.0%} {phantom:>8}"
+            f"{stats['rate']:>10.0%} {stats['transfer']:>9.0%} {stats['phantom']:>8.0%}"
             f"{f'{cost / len(v.rows):.5f}' if cost is not None and v.rows else '-':>10}"
             f"  {verdict}"
         )
