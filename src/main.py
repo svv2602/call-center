@@ -83,6 +83,7 @@ from src.api.vehicles import router as vehicles_router
 from src.api.websocket import router as websocket_router
 from src.config import Settings, get_settings
 from src.core.audio_socket import AudioSocketConnection, AudioSocketServer
+from src.core.audio_stats import InboundAudioStats
 from src.core.call_session import CallSession, CallState, SessionStore
 from src.core.pipeline import CallPipeline
 from src.events.publisher import publish_event
@@ -810,6 +811,8 @@ async def handle_call(conn: AudioSocketConnection) -> None:
 
     # Per-call cost tracker (created outside try block so it's always available for cleanup)
     cost = CostBreakdown(llm_model=settings.anthropic.model)
+    # Same reason: the call-end row records it even when the pipeline crashed.
+    audio_stats = InboundAudioStats()
 
     _embedding_gen = None
     try:
@@ -1277,6 +1280,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             echo_canceller=echo_canceller,
             session_store=_session_store,
             db_engine=_db_engine,
+            audio_stats=audio_stats,
         )
         await pipeline.run()
 
@@ -1353,6 +1357,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 transfer_reason=session.transfer_reason if session.transferred else None,
                 cost_breakdown=cost.to_dict(),
                 total_cost_usd=cost.total_cost,
+                audio_stats=audio_stats.to_dict(),
             )
         except Exception:
             logger.warning("log_call_end failed", exc_info=True)

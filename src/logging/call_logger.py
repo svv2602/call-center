@@ -160,6 +160,7 @@ class CallLogger:
         transfer_reason: str | None = None,
         cost_breakdown: dict[str, Any] | None = None,
         total_cost_usd: float | None = None,
+        audio_stats: dict[str, Any] | None = None,
     ) -> None:
         """Log the end of a call."""
         await self._execute(
@@ -171,7 +172,8 @@ class CallLogger:
                 transferred_to_operator = :transferred,
                 transfer_reason = :transfer_reason,
                 cost_breakdown = CAST(:cost_breakdown AS jsonb),
-                total_cost_usd = :total_cost_usd
+                total_cost_usd = :total_cost_usd,
+                audio_stats = CAST(:audio_stats AS jsonb)
             WHERE id = :id
             """,
             {
@@ -183,6 +185,7 @@ class CallLogger:
                 "transfer_reason": transfer_reason,
                 "cost_breakdown": json.dumps(cost_breakdown) if cost_breakdown else None,
                 "total_cost_usd": total_cost_usd,
+                "audio_stats": json.dumps(audio_stats) if audio_stats else None,
             },
         )
 

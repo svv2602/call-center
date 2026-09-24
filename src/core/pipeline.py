@@ -757,6 +757,7 @@ if TYPE_CHECKING:
     from src.agent.agent import LLMAgent
     from src.agent.parsers.base import ParseOutcome
     from src.agent.streaming_loop import StreamingAgentLoop
+    from src.core.audio_stats import InboundAudioStats
     from src.core.call_session import SessionStore
     from src.core.echo_canceller import EchoCanceller
     from src.monitoring.cost_tracker import CostBreakdown
@@ -800,6 +801,7 @@ class CallPipeline:
         echo_canceller: EchoCanceller | None = None,
         session_store: SessionStore | None = None,
         db_engine: Any = None,
+        audio_stats: InboundAudioStats | None = None,
     ) -> None:
         self._conn = conn
         self._stt = stt
@@ -824,6 +826,7 @@ class CallPipeline:
         # no-op without it, which keeps «no engine ⇒ no I/O» checkable in one
         # place instead of at each resolver.
         self._db_engine = db_engine
+        self._audio_stats = audio_stats
         self._turn_counter = 0
         self._llm_history: list[dict[str, Any]] = []  # persistent LLM context for streaming path
         # Wave 4-A. Resolved once per call so the flag cannot flip mid-call.
@@ -2679,6 +2682,8 @@ class CallPipeline:
             logger.info(
                 "Pipeline: greeting done, entering LISTENING for %s", self._session.channel_uuid
             )
+            if self._audio_stats is not None:
+                self._audio_stats.mark_listening()
 
             # Main loop
             self._session.transition_to(CallState.LISTENING)
@@ -2807,6 +2812,8 @@ class CallPipeline:
             if packet.type == PacketType.AUDIO:
                 t0 = time.monotonic()
                 audio = packet.payload
+                if self._audio_stats is not None:
+                    self._audio_stats.observe(audio, bot_speaking=self._speaking)
                 if self._echo_canceller is not None:
                     audio = self._echo_canceller.process(audio, speaking=self._speaking)
                 await self._stt.feed_audio(audio)
