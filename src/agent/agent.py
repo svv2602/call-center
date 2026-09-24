@@ -66,6 +66,32 @@ class ToolRouter:
         """Register a handler for a tool name."""
         self._handlers[name] = handler
 
+    async def _record_cancelled(self, name: str, args: dict[str, Any], start: float) -> None:
+        """Write the row for a handler the call ended under.
+
+        A hangup — or the channel torn down by the transfer this very tool asked
+        for — cancels the call task while the handler is still awaiting, and the
+        result never reaches the hook below. The row is written anyway; the
+        result is unknown, and it says so instead of guessing.
+        """
+        if self._on_execute is None:
+            return
+        duration_ms = int((time.monotonic() - start) * 1000)
+        try:
+            await asyncio.shield(
+                self._on_execute(
+                    name,
+                    args,
+                    {"cancelled": "the call ended while the tool was running"},
+                    duration_ms,
+                    False,
+                )
+            )
+        except asyncio.CancelledError:
+            pass
+        except Exception:
+            self._report_audit_failure(name, path="cancelled")
+
     @staticmethod
     def _report_audit_failure(name: str, *, path: str) -> None:
         """Make a lost `call_tool_calls` row visible: metric + ERROR log.
@@ -102,7 +128,11 @@ class ToolRouter:
 
         start = time.monotonic()
         try:
-            result = await handler(**args)
+            try:
+                result = await handler(**args)
+            except asyncio.CancelledError:
+                await self._record_cancelled(name, args, start)
+                raise
             duration_ms = int((time.monotonic() - start) * 1000)
             logger.info(
                 "Tool %s executed in %dms",

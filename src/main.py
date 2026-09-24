@@ -217,6 +217,16 @@ _ami_client: Any = None  # AsteriskAMIClient for operator blind transfer (ARI re
 
 _SENTINEL = object()  # sentinel for optional pre-fetched values
 
+# Strong references for fire-and-forget tasks, so the loop cannot collect one
+# mid-flight (RUF006).
+_background_tasks: set[asyncio.Task[Any]] = set()
+
+
+def _spawn_background(coro: Any) -> None:
+    task = asyncio.create_task(coro)
+    _background_tasks.add(task)
+    task.add_done_callback(_background_tasks.discard)
+
 
 @app.get("/health")
 async def health_check() -> dict[str, object]:
@@ -4131,7 +4141,14 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     asterisk_channel_name,
                     reason,
                 )
-                await publish_event("call:transferred", {"call_id": str(session.channel_uuid)})
+                # Not awaited. The redirect is already tearing the channel down,
+                # and the call task is cancelled at its next await; when that
+                # await was this one, the result never reached the audit hook
+                # and 62 of 63 transfers in September left no `call_tool_calls`
+                # row. Returning without an await lets `ToolRouter` record it.
+                _spawn_background(
+                    publish_event("call:transferred", {"call_id": str(session.channel_uuid)})
+                )
                 return {"status": "transferring", "message": "З'єдную з оператором"}
             else:
                 transfer_attempts_total.labels(result="error").inc()

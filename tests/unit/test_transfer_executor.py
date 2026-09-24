@@ -24,6 +24,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
@@ -275,6 +276,7 @@ class TestBothPathsReachTheOperator:
         h = Harness()
 
         await h.run_classifier_path()
+        await asyncio.sleep(0)  # the event is published in the background
 
         assert h.published == [("call:transferred", {"call_id": str(h.session.channel_uuid)})]
 
@@ -291,6 +293,109 @@ class TestBothPathsReachTheOperator:
 
         main_src = (root / "src" / "main.py").read_text(encoding="utf-8")
         assert main_src.count("session.mark_transfer(") == 1
+
+
+# ---------------------------------------------------------------------------
+# 4.1b — the redirect tears the channel down before the audit is written
+# ---------------------------------------------------------------------------
+
+
+def _cancel_at_next_await(harness: Harness) -> None:
+    """Accept the redirect and cancel the call task, as Asterisk's hangup does.
+
+    `cancel()` from inside the running task is delivered at its next suspension
+    point, which is exactly where production loses the audit row. The harness
+    publisher does not suspend, so it is replaced with one that does — the real
+    `publish_event` talks to Redis.
+    """
+
+    async def _redirect(**_kwargs: Any) -> bool:
+        task = asyncio.current_task()
+        assert task is not None
+        task.cancel()
+        return True
+
+    async def _publish(event_type: str, data: dict[str, Any] | None = None) -> None:
+        await asyncio.sleep(0)
+        harness.published.append((event_type, data or {}))
+
+    harness.ami.redirect.side_effect = _redirect
+    harness._publish = _publish
+
+
+async def _run_until_cancelled(coro: Any) -> None:
+    with pytest.raises(asyncio.CancelledError):
+        await asyncio.create_task(coro)
+    # Shielded writes finish on their own tasks.
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+
+class TestAuditSurvivesTheRedirect:
+    """62 of 63 September transfers have no `call_tool_calls` row."""
+
+    @pytest.mark.asyncio
+    async def test_tool_path_writes_its_row(self) -> None:
+        h = Harness()
+        _cancel_at_next_await(h)
+
+        await _run_until_cancelled(h.run_tool_path())
+
+        assert h.session.transfer_redirect_initiated() is True
+        assert [(n, r.get("status")) for n, _a, r in h.audit] == [
+            ("transfer_to_operator", "transferring")
+        ]
+
+    @pytest.mark.asyncio
+    async def test_the_transfer_event_is_still_published(self) -> None:
+        h = Harness()
+        _cancel_at_next_await(h)
+
+        await _run_until_cancelled(h.run_tool_path())
+
+        assert h.published == [("call:transferred", {"call_id": str(h.session.channel_uuid)})]
+
+    @pytest.mark.asyncio
+    async def test_classifier_path_keeps_the_customer_turn(self) -> None:
+        h = Harness()
+        _cancel_at_next_await(h)
+
+        await _run_until_cancelled(h.run_classifier_path("мені потрібен оператор"))
+
+        user_turns = [t.content for t in h.session.dialog_history if t.speaker == "user"]
+        assert user_turns == ["мені потрібен оператор"]
+        assert [n for n, _a, _r in h.audit] == ["transfer_to_operator"]
+
+    @pytest.mark.asyncio
+    async def test_any_tool_cut_off_by_hangup_leaves_a_row(self) -> None:
+        """The router records a cancelled handler instead of dropping it."""
+        from src.agent.agent import ToolRouter
+
+        router = ToolRouter()
+        audit: list[tuple[str, Any, bool]] = []
+
+        async def _hook(name: str, args: Any, result: Any, _ms: int, success: bool) -> None:
+            audit.append((name, result, success))
+
+        async def _slow(**_kwargs: Any) -> dict[str, str]:
+            await asyncio.Event().wait()
+            return {"never": "reached"}
+
+        router.register("get_fitting_slots", _slow)
+        router.set_execute_hook(_hook)
+
+        task = asyncio.create_task(router.execute("get_fitting_slots", {"date": "2026-09-25"}))
+        await asyncio.sleep(0)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        await asyncio.sleep(0)
+
+        assert len(audit) == 1
+        name, result, success = audit[0]
+        assert name == "get_fitting_slots"
+        assert "cancelled" in result
+        assert success is False
 
 
 # ---------------------------------------------------------------------------

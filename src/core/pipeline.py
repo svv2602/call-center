@@ -2389,6 +2389,15 @@ class CallPipeline:
             outcome = await tool_router.execute(
                 "transfer_to_operator", {"reason": "intent_classifier_transfer"}
             )
+        except asyncio.CancelledError:
+            # A redirect that went through tears the channel down, and the call
+            # task can be cancelled before `execute` returns. The caller's words
+            # are what the transfer was decided on; 5 of 22 such transfers in
+            # September have no customer turn at all.
+            if self._session.transfer_redirect_initiated():
+                with contextlib.suppress(asyncio.CancelledError):
+                    await asyncio.shield(self._record_customer_turn(transcript))
+            raise
         except Exception:
             # Loud, never suppressed: a swallowed failure here is indistinguishable
             # from the defect this wave repairs.
@@ -2415,6 +2424,18 @@ class CallPipeline:
             self._note_pipeline_interrupt_dispatch(dispatched=False)
             return False
 
+        # Shielded for the same reason as above: the redirect has been accepted
+        # and a cancellation can land on this await.
+        await asyncio.shield(self._record_customer_turn(transcript))
+        logger.info(
+            "FSM live mode: TRANSFER verdict for call=%s redirected to an operator",
+            self._session.channel_uuid,
+            extra={"call_id": str(self._session.channel_uuid)},
+        )
+        self._note_pipeline_interrupt_dispatch(dispatched=True)
+        return True
+
+    async def _record_customer_turn(self, transcript: Transcript) -> None:
         self._session.add_user_turn(
             content=transcript.text,
             stt_confidence=transcript.confidence,
@@ -2426,13 +2447,6 @@ class CallPipeline:
             stt_confidence=transcript.confidence,
             language=transcript.language,
         )
-        logger.info(
-            "FSM live mode: TRANSFER verdict for call=%s redirected to an operator",
-            self._session.channel_uuid,
-            extra={"call_id": str(self._session.channel_uuid)},
-        )
-        self._note_pipeline_interrupt_dispatch(dispatched=True)
-        return True
 
     def _note_intent_classifier_usage(
         self, input_tokens: int, output_tokens: int, cached_input_tokens: int, provider_key: str
