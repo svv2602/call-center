@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from src.agent.agent import MAX_HISTORY_MESSAGES, MAX_TOOL_CALLS_PER_TURN
+from src.agent.booking_consent import BOOKING_OFFER
 from src.agent.history_compressor import summarize_old_messages
 from src.agent.prompts import (
     SYSTEM_PROMPT,
@@ -58,6 +59,7 @@ from src.llm.models import (
     Usage,
 )
 from src.monitoring.metrics import (
+    booking_offer_redirected_total,
     control_plane_prose_dropped_total,
     false_transfer_blocked_total,
     guard_refusal_repeated_total,
@@ -589,6 +591,99 @@ def _assistant_texts(history: list[dict[str, Any]]) -> list[str]:
                 if isinstance(block, dict) and block.get("type") == "text":
                     spoken.append(str(block.get("text", "")))
     return spoken
+
+
+#: Checklist rows that belong to a booking only. Name, city and phone are
+#: collected for a price quote or a callback too, so asking them is no sign the
+#: bot has started booking.
+_BOOKING_ONLY_FIELDS = frozenset({"storage", "date", "time", "color", "brand"})
+
+
+def booking_field_asked(text: str) -> str | None:
+    """The booking-only checklist row this sentence asks for, if any."""
+    if not _sentence_is_a_request(text):
+        return None
+    low = text.lower().replace("ʼ", "'").replace("’", "'")
+    for field_key, pattern in _FIELD_QUESTION_PATTERNS:
+        if field_key in _BOOKING_ONLY_FIELDS and pattern.search(low):
+            return field_key
+    return None
+
+
+class BookingOfferGate:
+    """One turn's worth of `offer_booking_before_checklist` state.
+
+    Shared across the LLM rounds of a turn: the filter is rebuilt per round,
+    and a round after a tool call must neither offer a second time nor resume
+    the booking script the first round was stopped in.
+    """
+
+    __slots__ = ("active", "offered")
+
+    def __init__(self, active: bool) -> None:
+        self.active = active
+        self.offered = False
+
+
+async def offer_booking_before_checklist(
+    stream: AsyncIterator[BufferEvent],
+    gate: BookingOfferGate,
+) -> AsyncIterator[BufferEvent]:
+    """Offer to book instead of starting a booking the caller never agreed to.
+
+    `active` is decided by the pipeline: a price has been quoted, the caller
+    has neither asked to book nor said yes to an offer, and the offer has not
+    already been made twice (`booking_consent`). On 2026-09-24 the quote ended
+    «У вас легковий чи позашляховик?», the caller answered «позашляховик» and
+    the bot went on to «Шини привозите свої з собою…».
+
+    The first sentence asking a booking-only row becomes the offer, and the
+    rest of the turn is dropped: whatever followed was the booking script.
+    Fragments are held until the sentence ends, as in
+    `redirect_settled_question`, because «Назвіть,» alone asks nothing.
+    """
+    if not gate.active:
+        async for event in stream:
+            yield event
+        return
+
+    held: list[SentenceReady] = []
+    pending = ""
+
+    async for event in stream:
+        if not isinstance(event, SentenceReady):
+            if not gate.offered:
+                for queued in held:
+                    yield queued
+                held, pending = [], ""
+            yield event
+            continue
+        if gate.offered:
+            continue
+
+        held.append(event)
+        pending = f"{pending} {event.text}".strip()
+        field_key = booking_field_asked(pending)
+        if field_key is not None:
+            booking_offer_redirected_total.labels(field=field_key).inc()
+            logger.warning(
+                "Price consult: bot asked %s before the caller agreed to book — "
+                "offering the booking instead: %r",
+                field_key,
+                pending[:120],
+            )
+            gate.offered = True
+            held, pending = [], ""
+            yield SentenceReady(text=BOOKING_OFFER)
+            continue
+        if pending.rstrip().endswith((".", "!", "?")):
+            for queued in held:
+                yield queued
+            held, pending = [], ""
+
+    if not gate.offered:
+        for queued in held:
+            yield queued
 
 
 async def redirect_settled_question(
@@ -1208,12 +1303,15 @@ class StreamingAgentLoop:
         selected_slot: dict[str, str] | None = None,
         offered_slots: list[dict[str, str]] | None = None,
         fitting_progress: dict[str, Any] | None = None,
+        offer_booking_first: bool = False,
     ) -> TurnResult:
         """Run a full conversation turn with streaming audio output.
 
         May loop multiple times if the LLM returns tool calls.
         Mutates conversation_history in place.
         """
+        booking_offer_gate = BookingOfferGate(offer_booking_first)
+
         # Mask PII before sending to LLM
         if self._pii_vault is not None:
             user_text = self._pii_vault.mask(user_text)
@@ -1347,15 +1445,23 @@ class StreamingAgentLoop:
                 # The reverse order is safe in the other direction: this gate's
                 # replacement is an acceptance, not a request, so
                 # `settled_field_asked` never looks at it.
+                # `offer_booking_before_checklist` sits outside the checklist
+                # redirect: a question the redirect substituted is still a
+                # booking question, and still not the caller's to answer yet.
                 buffered = hold_unconfirmed_transfer_promise(
-                    redirect_settled_question(
-                        confirm_settled_time(
-                            drop_control_plane_prose(buffer_sentences(stream), _current_call_id()),
-                            offered_slots,
+                    offer_booking_before_checklist(
+                        redirect_settled_question(
+                            confirm_settled_time(
+                                drop_control_plane_prose(
+                                    buffer_sentences(stream), _current_call_id()
+                                ),
+                                offered_slots,
+                                conversation_history,
+                            ),
+                            fitting_progress,
                             conversation_history,
                         ),
-                        fitting_progress,
-                        conversation_history,
+                        booking_offer_gate,
                     ),
                     conversation_history,
                 )

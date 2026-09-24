@@ -134,6 +134,13 @@ transfer_promise_unbacked_total = Counter(
     ["outcome"],
 )
 
+booking_offer_redirected_total = Counter(
+    "callcenter_booking_offer_redirected_total",
+    "Checklist questions asked after a price quote the caller never agreed to "
+    "book on, replaced in the TTS stream by an offer to book",
+    ["field"],
+)
+
 settled_question_redirected_total = Counter(
     "callcenter_settled_question_redirected_total",
     "Questions aimed at an already-collected checklist row, replaced in the "

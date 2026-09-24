@@ -3644,7 +3644,13 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             service_type=service_type,
         )
 
-    router.register("get_fitting_price", _get_fitting_price)
+    async def _get_fitting_price_marked(**kwargs: Any) -> dict[str, Any]:
+        result = await _get_fitting_price(**kwargs)
+        if isinstance(result, dict) and result.get("prices"):
+            session.fitting_price_quoted = True
+        return result
+
+    router.register("get_fitting_price", _get_fitting_price_marked)
 
     async def _get_customer_bookings(**kwargs: Any) -> dict[str, Any]:
         """Get customer bookings from 1C REST API."""

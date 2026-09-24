@@ -202,6 +202,10 @@ class CallSession:
         # invents an R16 default price before the customer stated a diameter
         # (Wave 3 P0 regression, call ebe7dfcb 2026-09-07).
         self.fitting_diameter_client: int | None = None
+        # Set once a price has been read to the caller. Until the caller agrees
+        # to book, the checklist questions that follow are not theirs to answer
+        # (`offer_booking_before_checklist`, 2026-09-24).
+        self.fitting_price_quoted: bool = False
         # Wave 14 (2026-09-07) — set once `_get_fitting_slots` has already
         # bounced the LLM for picking a date the customer never named. One
         # bounce per call only: a client who answers vaguely («будь-коли»)
@@ -496,6 +500,7 @@ class CallSession:
             "fitting_storage_contract": self.fitting_storage_contract,
             "fitting_requested_weekday": self.fitting_requested_weekday,
             "fitting_diameter_client": self.fitting_diameter_client,
+            "fitting_price_quoted": self.fitting_price_quoted,
             "fitting_date_guard_fired": self.fitting_date_guard_fired,
             "fitting_dates_no_slots": sorted(self.fitting_dates_no_slots),
             "fitting_weekday_bounced_since_lookup": self.fitting_weekday_bounced_since_lookup,
@@ -581,6 +586,7 @@ class CallSession:
         session.fitting_storage_contract = data.get("fitting_storage_contract")
         session.fitting_requested_weekday = data.get("fitting_requested_weekday")
         session.fitting_diameter_client = data.get("fitting_diameter_client")
+        session.fitting_price_quoted = bool(data.get("fitting_price_quoted", False))
         session.fitting_date_guard_fired = bool(
             data.get("fitting_date_guard_fired", False)
         )
