@@ -860,7 +860,21 @@ async def handle_price_interrupt(
         )
 
     prices = result.get("prices") or []
-    body = _format_prices(prices if isinstance(prices, list) else [])
+    prices = prices if isinstance(prices, list) else []
+    if not station_id and city:
+        # Without a station the tool returns every point in the network, and
+        # prices differ by city (Київ 396 / Харків 372 for R18 on 2026-09-25).
+        # The first rows were Kyiv's, quoted as «у місті Дніпро» — right by
+        # luck there, wrong for Kharkiv. The station used to arrive through a
+        # price-lookup pin, removed in c910136 because it chose the caller's
+        # station for them; the city is what the quote actually needs.
+        wanted = city.strip().lower()
+        prices = [
+            p
+            for p in prices
+            if isinstance(p, dict) and str(p.get("city") or "").strip().lower() == wanted
+        ]
+    body = _format_prices(prices)
     closing_updates = _apply(
         session,
         {

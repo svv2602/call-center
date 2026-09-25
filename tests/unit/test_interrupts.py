@@ -902,3 +902,49 @@ class TestPriceOnlyCallerIsOfferedABooking:
         result = await handle_price_interrupt(PRICE_QUESTION, session, router)
 
         assert result.reply_to_customer.endswith(STATES[FsmState.STATION].resume_phrase)
+
+
+#: 354ff3b5 (2026-09-25): what `get_fitting_price(tire_diameter=18)` returned
+#: with no station — the whole network, Kyiv first.
+NETWORK_R18 = {
+    "prices": [
+        {"city": "Київ", "point_id": "000000015", "price": 396, "category": "car"},
+        {"city": "Київ", "point_id": "000000015", "price": 438, "category": "suv"},
+        {"city": "Харків", "point_id": "000000028", "price": 372, "category": "car"},
+        {"city": "Харків", "point_id": "000000028", "price": 420, "category": "suv"},
+    ]
+}
+
+
+class TestPriceQuoteWithoutAStation:
+    """c910136 stopped a price lookup from pinning a station; the city must hold."""
+
+    async def test_the_callers_city_is_quoted_not_the_first_row(self, router: AsyncMock) -> None:
+        router.get_fitting_price.return_value = NETWORK_R18
+        session = make_session(last_fitting_station_id=None, fitting_diameter_client=18)
+        session.fsm_filled_fields = {"city": "Харків"}
+
+        result = await handle_price_interrupt(PRICE_QUESTION, session, router)
+
+        assert "372" in result.reply_to_customer
+        assert "396" not in result.reply_to_customer
+
+    async def test_a_city_with_no_prices_is_not_given_anothers(self, router: AsyncMock) -> None:
+        router.get_fitting_price.return_value = NETWORK_R18
+        session = make_session(last_fitting_station_id=None, fitting_diameter_client=18)
+        session.fsm_filled_fields = {"city": "Суми"}
+
+        result = await handle_price_interrupt(PRICE_QUESTION, session, router)
+
+        assert "396" not in result.reply_to_customer
+        assert "372" not in result.reply_to_customer
+        assert "не бачу ціни" in result.reply_to_customer
+
+    async def test_a_pinned_station_is_trusted_as_is(self, router: AsyncMock) -> None:
+        """The tool already filtered by `point_id`; the city filter must not second-guess it."""
+        session = make_session(fitting_diameter_client=17)  # pinned ST-1 in Київ
+        session.fsm_filled_fields = {"city": "Харків"}
+
+        result = await handle_price_interrupt(PRICE_QUESTION, session, router)
+
+        assert "450" in result.reply_to_customer
