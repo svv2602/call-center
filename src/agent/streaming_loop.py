@@ -1055,6 +1055,32 @@ def control_plane_syntax(text: str) -> str | None:
     return None
 
 
+#: Where written-out machinery ends: a closing bracket of any kind, or a line break.
+_MACHINERY_END = re.compile(r"[)\]}]|\n")
+
+
+def _checklist_question_after_machinery(text: str) -> str | None:
+    """A checklist question left behind the machinery, safe to speak on its own.
+
+    26c5ebc3 (2026-09-25): «update_customer_profile(name="Константин")\nУ якому
+    місті вам зручніше записатися на шиномонтаж?» — three times running. The
+    whole sentence went, the turn came out empty, and a caller who had just
+    said their name heard «Перепрошую, не почула». A question about the next
+    checklist row claims nothing about the call that did not run, which is what
+    the whole-sentence rule below guards against; anything else is still dropped.
+    """
+    ends = [m.end() for m in _MACHINERY_END.finditer(text)]
+    if not ends:
+        return None
+    rest = text[ends[-1] :].strip()
+    if not rest or control_plane_syntax(rest) is not None or not _sentence_is_a_request(rest):
+        return None
+    low = rest.lower().replace("ʼ", "'").replace("’", "'")
+    if not any(pattern.search(low) for _, pattern in _FIELD_QUESTION_PATTERNS):
+        return None
+    return rest
+
+
 async def drop_control_plane_prose(
     stream: AsyncIterator[BufferEvent],
     call_id: str = "unknown",
@@ -1085,8 +1111,9 @@ async def drop_control_plane_prose(
     143 ms at p90 when it is the one doing the holding, since only the first
     sentence of a turn can delay audio at all.
 
-    The whole sentence is dropped rather than cleaned up. Excising the syntax
-    and speaking the remainder is tempting — four of the six calls leave a real
+    The whole sentence is dropped rather than cleaned up — with one exception,
+    a checklist question after the machinery (`_checklist_question_after_machinery`).
+    Excising the syntax and speaking the remainder in general is tempting — four of the six calls leave a real
     question behind — but a call written as prose did not run, so anything in
     the same breath about its result is unbacked, and `146788f4` is exactly
     that: «Інструмент book_fitting успішно виконав бронювання» over a
@@ -1113,6 +1140,10 @@ async def drop_control_plane_prose(
             form,
             text[:200],
         )
+        question = _checklist_question_after_machinery(text)
+        if question:
+            logger.info("Kept the checklist question behind it: call=%s, %r", call_id, question)
+            return [SentenceReady(text=question)]
         return []
 
     async for event in stream:

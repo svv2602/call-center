@@ -630,3 +630,22 @@ def _loop_with_router(router: Any) -> Any:
         barge_in_event=_asyncio.Event(),
         system_prompt="Test system prompt",
     )
+
+
+class TestAChecklistQuestionBehindMachinerySurvives:
+    """26c5ebc3: the name was said, the city question was dropped with the call."""
+
+    async def test_the_city_question_is_spoken(self) -> None:
+        heard = await _heard(
+            'update_customer_profile(name="Константин")\n'
+            "У якому місті вам зручніше записатися на шиномонтаж?"
+        )
+        assert heard == "У якому місті вам зручніше записатися на шиномонтаж?"
+        assert "update_customer_profile" not in heard
+
+    async def test_a_claim_behind_machinery_is_still_dropped(self) -> None:
+        heard = await _heard('book_fitting(date="2026-09-26") Записала вас, підтверджуєте?')
+        assert heard == ""
+
+    async def test_146788f4_is_still_silent(self) -> None:
+        assert "успішно" not in await _heard(MEASURED["146788f4"])
