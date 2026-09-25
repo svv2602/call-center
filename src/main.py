@@ -3584,7 +3584,13 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
 
         # 3. Return from cache/1C with filters
         if all_prices is not None:
-            filtered = all_prices
+            # A tenant's excluded stations are hidden from `get_fitting_stations`
+            # but were still in the price list: «Камион Aeolus» (000000022), a
+            # truck point in Дніпро at 219 грн for R18 against the city's 396,
+            # sat in every network-wide quote the FSM read from.
+            filtered = [
+                p for p in all_prices if str(p.get("point_id")) not in session.excluded_station_ids
+            ]
             if station_id:
                 filtered = [p for p in filtered if p.get("point_id") == station_id]
             if tire_diameter:

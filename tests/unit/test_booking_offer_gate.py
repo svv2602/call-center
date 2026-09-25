@@ -338,3 +338,31 @@ class TestGreetingIsNotAnOffer:
 
     def test_the_menu_does_not_use_up_an_offer(self) -> None:
         assert offers_spoken([("assistant", GREETING)]) == 0
+
+
+class TestExcludedStationPrices:
+    """«Камион Aeolus» (000000022) is hidden from the tenant but was in every quote."""
+
+    async def test_an_excluded_station_is_not_quoted(self) -> None:
+        from unittest.mock import AsyncMock
+
+        from src.onec_client.client import OneCClient
+        from src.store_client.client import StoreClient
+        from tests.unit.test_reschedule_state_pin import _onec_mock, _run
+
+        onec = _onec_mock()
+        onec.get_fitting_prices = AsyncMock(
+            spec=OneCClient.get_fitting_prices,
+            return_value={
+                "data": [
+                    {"city": "Дніпро", "point_id": "000000022", "price": 219},
+                    {"city": "Дніпро", "point_id": "000000003", "price": 396},
+                ]
+            },
+        )
+        session = CallSession(uuid.uuid4())
+        session.excluded_station_ids = {"000000022"}
+
+        result = await _run(session, "get_fitting_price", {}, onec, AsyncMock(spec=StoreClient))
+
+        assert [p["point_id"] for p in result["prices"]] == ["000000003"]
