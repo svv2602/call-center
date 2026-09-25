@@ -222,6 +222,10 @@ _SENTINEL = object()  # sentinel for optional pre-fetched values
 _background_tasks: set[asyncio.Task[Any]] = set()
 
 
+#: More free times than this are spoken as a range, not listed.
+_SLOTS_READ_OUT_MAX = 4
+
+
 def _record_storage_contracts(session: CallSession, data: Any) -> None:
     """Note every contract number a 1C `find_storage` answer carries.
 
@@ -3293,6 +3297,15 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     "date": date_from,
                     "slots": avail_times,  # bare list of "HH:MM" strings
                 }
+                # A long list is a range, not a menu. On 26c5ebc3 (2026-09-25)
+                # thirteen times read out took 21 s of a single turn.
+                if len(avail_times) > _SLOTS_READ_OUT_MAX:
+                    response["speak"] = (
+                        f"Вільних часів {len(avail_times)} — НЕ перелічуй їх. Скажи: "
+                        f"«Вільно з {avail_times[0]} до {avail_times[-1]}. О котрій вам "
+                        "зручніше?» Якщо клієнт назве час, якого немає в slots, — "
+                        "запропонуй найближчий зі slots."
+                    )
                 # Below-loop rename compat: preserve `avail` bool for empty-check
                 avail = avail_times
                 # Empty-slots hint: give the LLM concrete text so it doesn't

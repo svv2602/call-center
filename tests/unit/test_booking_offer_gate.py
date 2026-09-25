@@ -397,3 +397,74 @@ class TestAfterANoEveryQuestionEnds:
     async def test_before_a_no_a_city_question_is_left_alone(self) -> None:
         heard = await _heard("У якому місті вас цікавить вартість?", BookingOfferGate(GATE_OFFER))
         assert "місті" in heard
+
+
+class TestARepeatedSentenceIsSaidOnce:
+    """26c5ebc3: the storage question twice in one breath."""
+
+    async def test_the_loop_drops_the_second_copy(self) -> None:
+        q = "Шини привозите свої з собою чи ті, що у нас на зберіганні?"
+        loop, tts = _loop_saying(f"{q} {q}")
+        await loop.run_turn("так", [])
+        assert sum(q in t for t in tts.texts) == 1
+
+    async def test_short_fragments_may_repeat(self) -> None:
+        from src.agent.streaming_loop import drop_repeated_sentences
+
+        async def _two() -> AsyncIterator[Any]:
+            yield SentenceReady(text="Так,")
+            yield SentenceReady(text="Так,")
+
+        out = [e.text async for e in drop_repeated_sentences(_two())]
+        assert out == ["Так,", "Так,"]
+
+
+class TestALongSlotListIsARange:
+    async def test_many_free_times_come_with_a_range_to_speak(self) -> None:
+        from tests.unit.test_reschedule_state_pin import _schedule
+
+        times = [f"{h:02d}:{m:02d}" for h in range(9, 16) for m in (0, 30)][:13]
+        session = CallSession(uuid.uuid4())
+        session.fitting_station_ids = {"000000006"}
+        session.fsm_filled_fields["date"] = "2026-09-26"
+        onec = _onec_like(_schedule(*times))
+        from unittest.mock import AsyncMock
+
+        from src.store_client.client import StoreClient
+        from tests.unit.test_reschedule_state_pin import _run
+
+        result = await _run(
+            session,
+            "get_fitting_slots",
+            {"station_id": "000000006", "date_from": "2026-09-26"},
+            onec,
+            AsyncMock(spec=StoreClient),
+        )
+        assert "speak" in result, result
+        assert "НЕ перелічуй" in result["speak"]
+
+    async def test_a_few_free_times_are_listed(self) -> None:
+        from tests.unit.test_reschedule_state_pin import _schedule
+
+        session = CallSession(uuid.uuid4())
+        session.fitting_station_ids = {"000000006"}
+        session.fsm_filled_fields["date"] = "2026-09-26"
+        from unittest.mock import AsyncMock
+
+        from src.store_client.client import StoreClient
+        from tests.unit.test_reschedule_state_pin import _run
+
+        result = await _run(
+            session,
+            "get_fitting_slots",
+            {"station_id": "000000006", "date_from": "2026-09-26"},
+            _onec_like(_schedule("09:00", "10:00")),
+            AsyncMock(spec=StoreClient),
+        )
+        assert "speak" not in result
+
+
+def _onec_like(schedule: dict[str, Any]) -> Any:
+    from tests.unit.test_reschedule_state_pin import _onec_mock
+
+    return _onec_mock(schedule=schedule)

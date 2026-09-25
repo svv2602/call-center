@@ -621,6 +621,33 @@ def booking_field_asked(text: str, *, any_row: bool = False) -> str | None:
     return None
 
 
+#: Shorter fragments repeat legitimately («так,», «добре,»).
+_REPEAT_MIN_CHARS = 20
+
+
+async def drop_repeated_sentences(
+    stream: AsyncIterator[BufferEvent],
+) -> AsyncIterator[BufferEvent]:
+    """Say a sentence once per turn.
+
+    26c5ebc3 (2026-09-25): «Шини привозите свої з собою чи ті, що у нас на
+    зберіганні? Шини привозите свої з собою чи ті, що у нас на зберіганні?» —
+    no tool call, no substitution in the log, the model simply wrote it twice.
+    Runs last, so a sentence one filter substituted and the LLM also wrote
+    is caught as well.
+    """
+    spoken: set[str] = set()
+    async for event in stream:
+        if isinstance(event, SentenceReady):
+            key = " ".join(event.text.lower().split())
+            if len(key) >= _REPEAT_MIN_CHARS:
+                if key in spoken:
+                    logger.info("Dropping a repeated sentence: %r", event.text[:80])
+                    continue
+                spoken.add(key)
+        yield event
+
+
 class BookingOfferGate:
     """One turn's worth of `offer_booking_before_checklist` state.
 
@@ -1510,22 +1537,24 @@ class StreamingAgentLoop:
                 # `offer_booking_before_checklist` sits outside the checklist
                 # redirect: a question the redirect substituted is still a
                 # booking question, and still not the caller's to answer yet.
-                buffered = hold_unconfirmed_transfer_promise(
-                    offer_booking_before_checklist(
-                        redirect_settled_question(
-                            confirm_settled_time(
-                                drop_control_plane_prose(
-                                    buffer_sentences(stream), _current_call_id()
+                buffered = drop_repeated_sentences(
+                    hold_unconfirmed_transfer_promise(
+                        offer_booking_before_checklist(
+                            redirect_settled_question(
+                                confirm_settled_time(
+                                    drop_control_plane_prose(
+                                        buffer_sentences(stream), _current_call_id()
+                                    ),
+                                    offered_slots,
+                                    conversation_history,
                                 ),
-                                offered_slots,
+                                fitting_progress,
                                 conversation_history,
                             ),
-                            fitting_progress,
-                            conversation_history,
+                            booking_offer_gate,
                         ),
-                        booking_offer_gate,
-                    ),
-                    conversation_history,
+                        conversation_history,
+                    )
                 )
                 tts_stream = synthesize_stream(buffered, self._tts)
 
