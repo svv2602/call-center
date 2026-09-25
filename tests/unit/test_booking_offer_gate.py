@@ -10,7 +10,16 @@ from __future__ import annotations
 import uuid
 from typing import TYPE_CHECKING, Any
 
-from src.agent.booking_consent import BOOKING_OFFER, caller_agreed_to_book, offers_spoken
+from src.agent.booking_consent import (
+    BOOKING_DECLINED_FAREWELL,
+    BOOKING_OFFER,
+    GATE_FAREWELL,
+    GATE_OFFER,
+    caller_agreed_to_book,
+    caller_declined_booking,
+    gate_mode,
+    offers_spoken,
+)
 from src.agent.streaming_loop import BookingOfferGate, offer_booking_before_checklist
 from src.core.call_session import CallSession
 from src.core.pipeline import CallPipeline
@@ -90,7 +99,7 @@ class TestFilter:
         heard = await _heard(
             "Для позашляховика 438 гривень за колесо. Шини привозите свої з собою "
             "чи ті, що у нас на зберіганні?",
-            BookingOfferGate(active=True),
+            BookingOfferGate(GATE_OFFER),
         )
         assert heard.endswith(BOOKING_OFFER)
         assert "зберіганні" not in heard
@@ -99,24 +108,24 @@ class TestFilter:
     async def test_the_rest_of_the_turn_is_dropped(self) -> None:
         heard = await _heard(
             "Шини привозите свої з собою? На яку дату вас записати?",
-            BookingOfferGate(active=True),
+            BookingOfferGate(GATE_OFFER),
         )
         assert heard == BOOKING_OFFER
 
     async def test_inactive_gate_changes_nothing(self) -> None:
         text = "Шини привозите свої з собою чи ті, що у нас на зберіганні?"
-        heard = await _heard(text, BookingOfferGate(active=False))
+        heard = await _heard(text, BookingOfferGate(None))
         assert "зберіганні" in heard
         assert BOOKING_OFFER not in heard
 
     async def test_city_and_name_are_not_booking_questions(self) -> None:
         text = "У якому місті вас цікавить вартість? Як до вас звертатися?"
-        heard = await _heard(text, BookingOfferGate(active=True))
+        heard = await _heard(text, BookingOfferGate(GATE_OFFER))
         assert BOOKING_OFFER not in heard
         assert "місті" in heard
 
     async def test_a_second_round_neither_offers_again_nor_resumes(self) -> None:
-        gate = BookingOfferGate(active=True)
+        gate = BookingOfferGate(GATE_OFFER)
         first = await _heard("Шини свої з собою?", gate)
 
         async def _round_two() -> AsyncIterator[Any]:
@@ -157,10 +166,10 @@ def _session(turns: list[tuple[str, str]], *, quoted: bool) -> CallSession:
 
 class TestPipelineDecision:
     def test_on_after_a_quote_without_consent(self) -> None:
-        assert _pipeline(_session(PRICE_CALL, quoted=True))._offer_booking_first() is True
+        assert _pipeline(_session(PRICE_CALL, quoted=True))._booking_gate_mode() == GATE_OFFER
 
     def test_off_without_a_quote(self) -> None:
-        assert _pipeline(_session(PRICE_CALL, quoted=False))._offer_booking_first() is False
+        assert _pipeline(_session(PRICE_CALL, quoted=False))._booking_gate_mode() is None
 
     def test_off_after_two_offers(self) -> None:
         turns = [
@@ -170,7 +179,7 @@ class TestPipelineDecision:
             ("assistant", BOOKING_OFFER),
             ("user", "позашляховик"),
         ]
-        assert _pipeline(_session(turns, quoted=True))._offer_booking_first() is False
+        assert _pipeline(_session(turns, quoted=True))._booking_gate_mode() is None
 
     def test_the_flag_survives_the_redis_snapshot(self) -> None:
         session = _session(PRICE_CALL, quoted=True)
@@ -209,7 +218,7 @@ class TestWiredIntoTheTurn:
 
     async def test_the_offer_reaches_tts_instead_of_the_checklist(self) -> None:
         loop, tts = _loop_saying(STORAGE_QUESTION)
-        await loop.run_turn("позашляховик", [], offer_booking_first=True)
+        await loop.run_turn("позашляховик", [], booking_gate_mode=GATE_OFFER)
         assert any(BOOKING_OFFER in t for t in tts.texts)
         assert not any("зберіганні" in t for t in tts.texts)
 
@@ -225,7 +234,7 @@ class TestWiredIntoTheTurn:
         h = Harness(session)
         with fsm_flags(enabled=False):
             await h.run("позашляховик")
-        assert h.llm_kwargs[-1]["offer_booking_first"] is True
+        assert h.llm_kwargs[-1]["booking_gate_mode"] == GATE_OFFER
 
     async def test_a_price_quote_marks_the_session(self) -> None:
         """`get_fitting_price` as registered — the flag lives in the wiring."""
@@ -255,3 +264,77 @@ async def _quote(onec_prices: dict[str, Any]) -> tuple[CallSession, Any]:
     session = CallSession(uuid.uuid4())
     result = await _run(session, "get_fitting_price", {"station_id": "000000003"}, onec, store)
     return session, result
+
+
+#: 354ff3b5 (2026-09-25), verbatim: the FSM quoted and offered, the caller said no.
+FSM_OFFER_CALL = [
+    ("assistant", GREETING),
+    ("user", "вартість у Дніпрі"),
+    ("assistant", "Який діаметр коліс?"),
+    ("user", "18"),
+    (
+        "assistant",
+        "Шиномонтаж R18 у місті Дніпро: легкові — 396 грн, позашляховики — 438 грн. "
+        "Бажаєте записатися на шиномонтаж?",
+    ),
+    ("user", "Ні дякую"),
+]
+
+
+class TestDeclined:
+    def test_no_to_the_fsm_offer_is_a_decline(self) -> None:
+        assert caller_declined_booking(FSM_OFFER_CALL) is True
+        assert gate_mode(FSM_OFFER_CALL) == GATE_FAREWELL
+
+    def test_a_later_yes_overrides_the_no(self) -> None:
+        turns = [*FSM_OFFER_CALL, ("assistant", BOOKING_OFFER), ("user", "так")]
+        assert gate_mode(turns) is None
+
+    def test_asking_to_book_after_a_no_overrides_it(self) -> None:
+        turns = [*FSM_OFFER_CALL, ("assistant", "Добре."), ("user", "хоча запишіть на завтра")]
+        assert gate_mode(turns) is None
+
+    def test_an_off_topic_answer_is_not_a_decline(self) -> None:
+        turns = [*FSM_OFFER_CALL[:-1], ("user", "позашляховик")]
+        assert caller_declined_booking(turns) is False
+        assert gate_mode(turns) == GATE_OFFER
+
+    def test_the_fsm_offer_counts_toward_the_cap(self) -> None:
+        turns = [
+            *FSM_OFFER_CALL[:-1],
+            ("user", "позашляховик"),
+            ("assistant", BOOKING_OFFER),
+            ("user", "позашляховик"),
+        ]
+        assert offers_spoken(turns) == 2
+        assert gate_mode(turns) is None
+
+    async def test_the_booking_question_becomes_the_farewell(self) -> None:
+        heard = await _heard(
+            "Шини привозите свої з собою чи ті, що у нас на зберіганні?",
+            BookingOfferGate(GATE_FAREWELL),
+        )
+        assert heard == BOOKING_DECLINED_FAREWELL
+
+    def test_the_farewell_ends_the_call(self) -> None:
+        """It must carry a `_FAREWELL_MARKERS` phrase, or the caller waits out the silence ladder."""
+        from src.core.pipeline import _is_farewell
+
+        assert _is_farewell(BOOKING_DECLINED_FAREWELL)
+
+    async def test_the_pipeline_passes_farewell_after_a_no(self) -> None:
+        from tests.unit.test_pipeline_fsm_wire import Harness, fsm_flags
+
+        h = Harness(_session(FSM_OFFER_CALL[:-1], quoted=True))
+        with fsm_flags(enabled=False):
+            await h.run("Ні дякую")
+        assert h.llm_kwargs[-1]["booking_gate_mode"] == GATE_FAREWELL
+
+
+class TestGreetingIsNotAnOffer:
+    def test_yes_to_the_menu_is_not_consent(self) -> None:
+        """«так» to «записатися, дізнатися вартість, скасувати…?» picks nothing."""
+        assert caller_agreed_to_book([("assistant", GREETING), ("user", "так")]) is False
+
+    def test_the_menu_does_not_use_up_an_offer(self) -> None:
+        assert offers_spoken([("assistant", GREETING)]) == 0

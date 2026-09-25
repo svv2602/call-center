@@ -2435,19 +2435,17 @@ class CallPipeline:
         self._note_pipeline_interrupt_dispatch(dispatched=True)
         return True
 
-    def _offer_booking_first(self) -> bool:
-        """Should a checklist question this turn become an offer to book?
+    def _booking_gate_mode(self) -> str | None:
+        """What a booking question this turn becomes — see `booking_consent.gate_mode`.
 
-        Only after a price quote, only while the caller has neither asked to
-        book nor said yes to an offer, and at most twice: a caller who ignores
-        the offer twice is steering somewhere, and the LLM follows them.
+        Only after a price quote: before one, a booking question is the booking
+        the caller called for.
         """
         if not self._session.fitting_price_quoted or self._session.fitting_booked:
-            return False
-        from src.agent.booking_consent import caller_agreed_to_book, offers_spoken
+            return None
+        from src.agent.booking_consent import gate_mode
 
-        turns = [(t.speaker, t.content) for t in self._session.dialog_history]
-        return not caller_agreed_to_book(turns) and offers_spoken(turns) < 2
+        return gate_mode([(t.speaker, t.content) for t in self._session.dialog_history])
 
     async def _record_customer_turn(self, transcript: Transcript) -> None:
         self._session.add_user_turn(
@@ -3678,7 +3676,7 @@ class CallPipeline:
                             selected_slot=selected_slot,
                             offered_slots=offered_slots,
                             fitting_progress=fitting_progress,
-                            offer_booking_first=self._offer_booking_first(),
+                            booking_gate_mode=self._booking_gate_mode(),
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )
@@ -3852,7 +3850,7 @@ class CallPipeline:
                             selected_slot=selected_slot,
                             offered_slots=offered_slots,
                             fitting_progress=fitting_progress,
-                            offer_booking_first=self._offer_booking_first(),
+                            booking_gate_mode=self._booking_gate_mode(),
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )

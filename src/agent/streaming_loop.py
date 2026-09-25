@@ -17,7 +17,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from src.agent.agent import MAX_HISTORY_MESSAGES, MAX_TOOL_CALLS_PER_TURN
-from src.agent.booking_consent import BOOKING_OFFER
+from src.agent.booking_consent import (
+    BOOKING_DECLINED_FAREWELL,
+    BOOKING_OFFER,
+    GATE_FAREWELL,
+)
 from src.agent.history_compressor import summarize_old_messages
 from src.agent.prompts import (
     SYSTEM_PROMPT,
@@ -618,11 +622,16 @@ class BookingOfferGate:
     the booking script the first round was stopped in.
     """
 
-    __slots__ = ("active", "offered")
+    __slots__ = ("mode", "offered")
 
-    def __init__(self, active: bool) -> None:
-        self.active = active
+    def __init__(self, mode: str | None) -> None:
+        #: `GATE_OFFER`, `GATE_FAREWELL`, or None for off.
+        self.mode = mode
         self.offered = False
+
+    @property
+    def replacement(self) -> str:
+        return BOOKING_DECLINED_FAREWELL if self.mode == GATE_FAREWELL else BOOKING_OFFER
 
 
 async def offer_booking_before_checklist(
@@ -631,18 +640,19 @@ async def offer_booking_before_checklist(
 ) -> AsyncIterator[BufferEvent]:
     """Offer to book instead of starting a booking the caller never agreed to.
 
-    `active` is decided by the pipeline: a price has been quoted, the caller
-    has neither asked to book nor said yes to an offer, and the offer has not
-    already been made twice (`booking_consent`). On 2026-09-24 the quote ended
+    `gate.mode` is decided by the pipeline (`booking_consent.gate_mode`): off
+    once the caller has agreed; a farewell once they have said no to an offer
+    (354ff3b5, 2026-09-25: «Ні дякую» → «Шини привозите свої…»); otherwise the
+    offer, at most twice. On 2026-09-24 the quote ended
     «У вас легковий чи позашляховик?», the caller answered «позашляховик» and
     the bot went on to «Шини привозите свої з собою…».
 
-    The first sentence asking a booking-only row becomes the offer, and the
-    rest of the turn is dropped: whatever followed was the booking script.
+    The first sentence asking a booking-only row becomes the replacement, and
+    the rest of the turn is dropped: whatever followed was the booking script.
     Fragments are held until the sentence ends, as in
     `redirect_settled_question`, because «Назвіть,» alone asks nothing.
     """
-    if not gate.active:
+    if gate.mode is None:
         async for event in stream:
             yield event
         return
@@ -668,13 +678,14 @@ async def offer_booking_before_checklist(
             booking_offer_redirected_total.labels(field=field_key).inc()
             logger.warning(
                 "Price consult: bot asked %s before the caller agreed to book — "
-                "offering the booking instead: %r",
+                "saying %r instead: %r",
                 field_key,
+                gate.replacement,
                 pending[:120],
             )
             gate.offered = True
             held, pending = [], ""
-            yield SentenceReady(text=BOOKING_OFFER)
+            yield SentenceReady(text=gate.replacement)
             continue
         if pending.rstrip().endswith((".", "!", "?")):
             for queued in held:
@@ -1303,14 +1314,14 @@ class StreamingAgentLoop:
         selected_slot: dict[str, str] | None = None,
         offered_slots: list[dict[str, str]] | None = None,
         fitting_progress: dict[str, Any] | None = None,
-        offer_booking_first: bool = False,
+        booking_gate_mode: str | None = None,
     ) -> TurnResult:
         """Run a full conversation turn with streaming audio output.
 
         May loop multiple times if the LLM returns tool calls.
         Mutates conversation_history in place.
         """
-        booking_offer_gate = BookingOfferGate(offer_booking_first)
+        booking_offer_gate = BookingOfferGate(booking_gate_mode)
 
         # Mask PII before sending to LLM
         if self._pii_vault is not None:
