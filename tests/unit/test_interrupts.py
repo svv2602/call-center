@@ -956,3 +956,60 @@ class TestQuoteSaysPerWheel:
         session = make_session(fitting_diameter_client=17)
         result = await handle_price_interrupt(PRICE_QUESTION, session, router)
         assert result.reply_to_customer.count("за колесо") == 2
+
+
+class TestPriceAsksForTheCityFirst:
+    """«дізнатися вартість» with no city now reaches the handler directly."""
+
+    def _bare(self, **overrides: Any) -> CallSession:
+        session = make_session(last_fitting_station_id=None, fsm_state=FsmState.CITY.value)
+        session.fitting_stations_seen = []
+        for name, value in overrides.items():
+            setattr(session, name, value)
+        return session
+
+    async def test_no_station_and_no_city_asks_the_city(self, router: AsyncMock) -> None:
+        from src.agent.fitting_fsm import PRICE_CITY_QUESTION
+
+        session = self._bare(fitting_diameter_client=18)
+        result = await handle_price_interrupt("дізнатися вартість", session, router)
+
+        assert result.reply_to_customer == PRICE_CITY_QUESTION
+        assert session.pending_price_interrupt_needs_city is True
+        router.get_fitting_price.assert_not_awaited()
+        assert_contract(result)
+
+    async def test_the_answer_quotes_that_citys_price(self, router: AsyncMock) -> None:
+        router.get_fitting_price.return_value = NETWORK_R18
+        session = self._bare(fitting_diameter_client=18, pending_price_interrupt_needs_city=True)
+
+        result = await handle_price_interrupt("Харків", session, router)
+
+        assert "372" in result.reply_to_customer
+        assert "396" not in result.reply_to_customer
+        assert session.pending_price_interrupt_needs_city is False
+
+    async def test_the_answer_without_a_diameter_asks_for_it(self, router: AsyncMock) -> None:
+        session = self._bare(pending_price_interrupt_needs_city=True)
+
+        result = await handle_price_interrupt("у Харкові", session, router)
+
+        assert result.reply_to_customer == STATES[FsmState.PRICE_INTERRUPT].question_template
+        assert session.pending_price_interrupt_needs_city is False
+        assert session.pending_price_interrupt_needs_diameter is True
+
+    async def test_an_unrelated_answer_disarms(self, router: AsyncMock) -> None:
+        session = self._bare(pending_price_interrupt_needs_city=True)
+
+        result = await handle_price_interrupt("ну не знаю", session, router)
+
+        assert result.handled is False
+        assert session.pending_price_interrupt_needs_city is False
+
+    async def test_a_city_in_the_question_itself_is_used(self, router: AsyncMock) -> None:
+        router.get_fitting_price.return_value = NETWORK_R18
+        session = self._bare(fitting_diameter_client=18)
+
+        result = await handle_price_interrupt("вартість у Харкові", session, router)
+
+        assert "372" in result.reply_to_customer

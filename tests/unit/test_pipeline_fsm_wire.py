@@ -182,17 +182,13 @@ class Harness:
         session transcript is the only place both paths converge.
         """
         return [
-            t.content
-            for t in self.session.dialog_history
-            if t.speaker == "assistant" and t.content
+            t.content for t in self.session.dialog_history if t.speaker == "assistant" and t.content
         ]
 
     @property
     def customer_texts(self) -> list[str]:
         return [
-            t.content
-            for t in self.session.dialog_history
-            if t.speaker != "assistant" and t.content
+            t.content for t in self.session.dialog_history if t.speaker != "assistant" and t.content
         ]
 
     async def run(self, *texts: str) -> None:
@@ -203,8 +199,7 @@ class Harness:
         round that would pollute `spoken` with a re-prompt template.
         """
         queue = [
-            Transcript(text=t, is_final=True, confidence=0.95, language="uk-UA")
-            for t in texts
+            Transcript(text=t, is_final=True, confidence=0.95, language="uk-UA") for t in texts
         ]
         pipeline = self.pipeline
         conn = self.conn
@@ -244,6 +239,16 @@ def interrupt(
 
 
 FITTING_TEXT = "хочу записатися на шиномонтаж у Дніпрі"
+
+#: A price question STT mangled past the handler's markers («вартість» →
+#: «артист»). Since 2026-09-25 a marked price question skips the classifier,
+#: so tests about the classifier's own verdict need one it still sees.
+GARBLED_PRICE_TEXT = "підкажіть артист монтажу будь ласка"
+
+#: Marked as a price question, but with a request for a human in it — the one
+#: shape that still waits on the classifier's verdict, and so the one where the
+#: pipeline can still decline to dispatch a question the seam recognised.
+PRICE_WITH_HUMAN_TEXT = "скільки коштує монтаж чи краще з оператором"
 
 
 # ---------------------------------------------------------------------------
@@ -367,9 +372,7 @@ class TestShadowMode:
         assert not hasattr(h.session, "fsm_shadow_reply")
         assert h.pipeline._fsm_shadow_reply not in h.session.to_dict().values()
 
-    async def test_engine_failure_is_logged_at_error_and_the_call_survives(
-        self, caplog
-    ) -> None:
+    async def test_engine_failure_is_logged_at_error_and_the_call_survives(self, caplog) -> None:
         h = Harness()
         with (
             caplog.at_level(logging.ERROR, logger="src.core.pipeline"),
@@ -421,7 +424,7 @@ class TestLiveMode:
                 AsyncMock(return_value=interrupt()),
             ),
         ):
-            await h.run("скільки коштує монтаж")
+            await h.run(GARBLED_PRICE_TEXT)
 
         assert h.pipeline._cost._llm_input_tokens == 900
         assert h.pipeline._cost._llm_output_tokens == 60
@@ -566,17 +569,13 @@ class TestShortCircuitRequiresProgress:
         return h
 
     async def test_handled_but_not_advanced_and_no_updates_falls_through(self) -> None:
-        h = await self._run(
-            interrupt(reply="Те саме речення.", advanced=False, session_updates={})
-        )
+        h = await self._run(interrupt(reply="Те саме речення.", advanced=False, session_updates={}))
         assert h.llm_turns == ["скільки коштує монтаж"]
         assert "Те саме речення." not in h.spoken
         assert LLM_REPLY in h.assistant_texts
 
     async def test_advanced_alone_is_enough(self) -> None:
-        h = await self._run(
-            interrupt(reply="Ціна 500 гривень.", advanced=True, session_updates={})
-        )
+        h = await self._run(interrupt(reply="Ціна 500 гривень.", advanced=True, session_updates={}))
         assert "Ціна 500 гривень." in h.spoken
         assert h.llm_turns == []
 
@@ -612,9 +611,7 @@ class TestShortCircuitRequiresProgress:
 class TestInterruptCapAtPipeline:
     async def test_exhausted_total_budget_skips_classification_entirely(self) -> None:
         h = Harness()
-        h.session.interrupt_counts[_PIPELINE_DISPATCH_TOTAL_KEY] = (
-            MAX_PIPELINE_INTERRUPT_TURNS
-        )
+        h.session.interrupt_counts[_PIPELINE_DISPATCH_TOTAL_KEY] = MAX_PIPELINE_INTERRUPT_TURNS
         with (
             fsm_flags(enabled=True, shadow_mode=False),
             patch("src.agent.intent_classifier.classify_intent") as classify,
@@ -669,8 +666,7 @@ class TestInterruptCapAtPipeline:
             await h.run(*["скільки коштує монтаж"] * 12)
 
         assert (
-            h.session.interrupt_counts[_PIPELINE_DISPATCH_TOTAL_KEY]
-            <= MAX_PIPELINE_INTERRUPT_TURNS
+            h.session.interrupt_counts[_PIPELINE_DISPATCH_TOTAL_KEY] <= MAX_PIPELINE_INTERRUPT_TURNS
         )
         assert h.spoken.count("Відповідь про ціну.") <= MAX_PIPELINE_INTERRUPT_TURNS
 
@@ -777,10 +773,10 @@ class TestLowConfidenceFallback:
             ),
             patch("src.agent.interrupts.handle_price_interrupt") as price,
         ):
-            await h.run("скільки коштує монтаж")
+            await h.run(GARBLED_PRICE_TEXT)
 
         price.assert_not_called()
-        assert h.llm_turns == ["скільки коштує монтаж"]
+        assert h.llm_turns == [GARBLED_PRICE_TEXT]
 
     async def test_classifier_fallback_marker_falls_through(self) -> None:
         """`primary=BOOK, confidence=0.0` is the documented "LLM is down" marker."""
@@ -1127,9 +1123,7 @@ class TestCompoundToFsmMapping:
 
     def test_no_reference_date_means_no_date(self) -> None:
         """Default-deny: without `now` the seam produces no `date` key."""
-        mapped = map_compound_fields_to_fsm(
-            {"date_hint": "завтра"}, customer_text="давайте завтра"
-        )
+        mapped = map_compound_fields_to_fsm({"date_hint": "завтра"}, customer_text="давайте завтра")
         assert "date" not in mapped
 
     @pytest.mark.parametrize(
@@ -1459,7 +1453,9 @@ class TestShadowStaysOffline:
         assert not isinstance(step, ast.AsyncFunctionDef)
         assert not any(isinstance(n, ast.Await) for n in ast.walk(step))
         called = {
-            n.func.attr for n in ast.walk(step) if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
+            n.func.attr
+            for n in ast.walk(step)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Attribute)
         }
         assert "aresolve" not in called
 
@@ -1719,12 +1715,11 @@ class TestPipelineFreezeLifecycle:
         state: FsmState = FsmState.CITY,
         confidence: float = 0.9,
         session: CallSession | None = None,
+        text: str = PRICE_TEXT,
     ) -> Harness:
         h = Harness(session or booking_in_progress(state))
         handler = (
-            AsyncMock(side_effect=ir)
-            if isinstance(ir, Exception)
-            else AsyncMock(return_value=ir)
+            AsyncMock(side_effect=ir) if isinstance(ir, Exception) else AsyncMock(return_value=ir)
         )
         with (
             fsm_flags(enabled=True, shadow_mode=False),
@@ -1734,7 +1729,7 @@ class TestPipelineFreezeLifecycle:
             ),
             patch("src.agent.interrupts.handle_price_interrupt", handler),
         ):
-            await h.run(PRICE_TEXT)
+            await h.run(text)
         return h
 
     async def test_live_interrupt_freezes_speaks_and_comes_back(self) -> None:
@@ -1778,11 +1773,11 @@ class TestPipelineFreezeLifecycle:
         assert h.llm_turns == [PRICE_TEXT]
 
     async def test_low_confidence_never_freezes(self) -> None:
-        h = await self._run(interrupt(), confidence=0.2)
+        h = await self._run(interrupt(), confidence=0.2, text=GARBLED_PRICE_TEXT)
 
         assert freeze_hops(h.session) == [], "a turn below the confidence floor froze the FSM"
         assert h.session.fsm_state == FsmState.CITY.value
-        assert h.llm_turns == [PRICE_TEXT]
+        assert h.llm_turns == [GARBLED_PRICE_TEXT]
 
     async def test_a_dispatched_interrupt_does_not_cost_the_state_a_parser_null(
         self,
@@ -1811,11 +1806,13 @@ class TestPipelineFreezeLifecycle:
         an operator. The seam now recognises the question by markers, which it
         can do in shadow too, and charges the separate interrupt budget.
         """
-        h = await self._run(interrupt(), confidence=0.2)
+        h = await self._run(interrupt(), confidence=0.2, text=PRICE_WITH_HUMAN_TEXT)
 
         assert h.session.fsm_parser_null_counts.get(FsmState.CITY.value) in (None, 0)
         assert h.session.fsm_interrupt_turn_counts.get(FsmState.CITY.value) == 1
-        assert h.llm_turns == [PRICE_TEXT], "the fallthrough to the LLM must still happen"
+        assert h.llm_turns == [PRICE_WITH_HUMAN_TEXT], (
+            "the fallthrough to the LLM must still happen"
+        )
 
     async def test_repeated_undispatched_questions_do_not_reach_an_operator(
         self,
@@ -1830,7 +1827,13 @@ class TestPipelineFreezeLifecycle:
                 AsyncMock(return_value=intent("PRICE", 0.2)),
             ),
         ):
-            await h.run(PRICE_TEXT, "а скільки це коштує?", "що по ціні")
+            # Each carries a word for a human, the shape that still waits on
+            # the classifier (a marked price question alone skips it).
+            await h.run(
+                PRICE_WITH_HUMAN_TEXT,
+                "а скільки це коштує, може менеджер знає?",
+                "що по ціні, дайте людину",
+            )
 
         assert h.session.fsm_state == FsmState.CITY.value
         assert h.session.fsm_interrupt_turn_counts[FsmState.CITY.value] == 3
@@ -1849,7 +1852,7 @@ class TestPipelineFreezeLifecycle:
                 AsyncMock(return_value=intent("PRICE", 0.2)),
             ),
         ):
-            await h.run(*[PRICE_TEXT] * cap)
+            await h.run(*[PRICE_WITH_HUMAN_TEXT] * cap)
 
         assert h.session.fsm_state == STATES[FsmState.CITY].escalate_target.value
 
@@ -4037,8 +4040,7 @@ class TestTheFiveTransfersReplayedThroughTheSeam:
             FsmState.CITY,
             [
                 (
-                    "Перепрошую, Віталію! У якому місті вам зручніше записатися на "
-                    "шиномонтаж?",
+                    "Перепрошую, Віталію! У якому місті вам зручніше записатися на шиномонтаж?",
                     "места изюм",
                 ),
                 (
@@ -4066,8 +4068,7 @@ class TestTheFiveTransfersReplayedThroughTheSeam:
             FsmState.DATE,
             [
                 (
-                    "Правильно розумію: потрібно, щоб ми доставили ваші шини зі "
-                    "зберігання?",
+                    "Правильно розумію: потрібно, щоб ми доставили ваші шини зі зберігання?",
                     "и я привезу с собою",
                 ),
                 ("На яку дату записуємо?", "на 11"),
@@ -4664,8 +4665,8 @@ class TestClassifierSkippedWhenItCannotMatter:
 
         classify.assert_awaited_once()
 
-    async def test_an_open_sub_flow_still_asks_the_classifier(self) -> None:
-        """The continuation branch runs after the classifier: TRANSFER outranks it."""
+    async def test_an_open_sub_flow_asks_the_classifier_only_about_a_human(self) -> None:
+        """Only TRANSFER outranks a continuation, and only with the caller's words for it."""
         h = Harness()
         h.session.pending_cancel_action = TestOpenSubFlowOwnsTheAnswer.CONFIRMING
         classify = AsyncMock(return_value=intent("BOOK"))
@@ -4679,4 +4680,64 @@ class TestClassifierSkippedWhenItCannotMatter:
         ):
             await h.run("так")
 
+        classify.assert_not_called()
+
+    async def test_asking_for_a_human_mid_sub_flow_still_asks_the_classifier(self) -> None:
+        h = Harness()
+        h.session.pending_cancel_action = TestOpenSubFlowOwnsTheAnswer.CONFIRMING
+        classify = AsyncMock(return_value=intent("BOOK"))
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch("src.agent.intent_classifier.classify_intent", classify),
+            patch(
+                "src.agent.interrupts.handle_cancel_interrupt",
+                AsyncMock(return_value=interrupt(reply="Скасувала запис.")),
+            ),
+        ):
+            await h.run("дайте оператора")
+
         classify.assert_awaited_once()
+
+    async def test_a_marked_price_question_skips_the_classifier(self) -> None:
+        """da525a9a: the classifier timed out and the price went the slow LLM way."""
+        h = Harness()
+        classify = AsyncMock(return_value=intent("BOOK", 0.0))
+        price = AsyncMock(return_value=interrupt(reply="Монтаж R17 коштує 500 гривень."))
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch("src.agent.intent_classifier.classify_intent", classify),
+            patch("src.agent.interrupts.handle_price_interrupt", price),
+        ):
+            await h.run("вартість вантажу Харкові Скажіть будь ласка")
+
+        classify.assert_not_called()
+        price.assert_awaited_once()
+        assert h.llm_turns == []
+
+    async def test_price_words_with_a_request_for_a_human_ask_the_classifier(self) -> None:
+        h = Harness()
+        classify = AsyncMock(return_value=intent("BOOK"))
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch("src.agent.intent_classifier.classify_intent", classify),
+        ):
+            await h.run("скільки коштує, з'єднайте з оператором")
+
+        classify.assert_awaited_once()
+
+
+class TestPriceCityContinuation:
+    def test_an_asked_city_keeps_the_price_sub_flow_open(self) -> None:
+        h = Harness()
+        h.session.pending_price_interrupt_needs_city = True
+        assert h.pipeline._open_interrupt_kind() == "PRICE"
+
+    def test_the_flag_survives_the_redis_snapshot(self) -> None:
+        session = CallSession(uuid.uuid4())
+        session.pending_price_interrupt_needs_city = True
+        assert CallSession.from_dict(session.to_dict()).pending_price_interrupt_needs_city is True
+
+    def test_the_handler_may_write_it(self) -> None:
+        from src.core.pipeline import FSM_SESSION_UPDATE_WHITELIST
+
+        assert "pending_price_interrupt_needs_city" in FSM_SESSION_UPDATE_WHITELIST

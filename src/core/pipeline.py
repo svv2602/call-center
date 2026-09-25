@@ -607,6 +607,7 @@ _PIPELINE_DISPATCH_STREAK_KEY = "_pipeline_dispatch_streak"
 FSM_SESSION_UPDATE_WHITELIST: frozenset[str] = frozenset(
     {
         "pending_price_interrupt_needs_diameter",
+        "pending_price_interrupt_needs_city",
         "interrupt_counts",
         "fitting_diameter_client",
         "pending_cancel_action",
@@ -2339,7 +2340,9 @@ class CallPipeline:
         """
         if getattr(self._session, "pending_cancel_action", None):
             return "CANCEL"
-        if getattr(self._session, "pending_price_interrupt_needs_diameter", False):
+        if getattr(self._session, "pending_price_interrupt_needs_diameter", False) or getattr(
+            self._session, "pending_price_interrupt_needs_city", False
+        ):
             return "PRICE"
         return None
 
@@ -2498,7 +2501,12 @@ class CallPipeline:
             self._note_pipeline_interrupt_dispatch(dispatched=False)
             return False
 
-        from src.agent.intent_classifier import classify_intent, verdict_cannot_matter
+        from src.agent.intent_classifier import (
+            _has_transfer_evidence,
+            classify_intent,
+            verdict_cannot_matter,
+        )
+        from src.agent.interrupts import classify_interrupt_text
 
         session_context = {
             "fsm_state": self._session.fsm_state,
@@ -2520,6 +2528,34 @@ class CallPipeline:
             self._note_pipeline_interrupt_dispatch(dispatched=False)
             return False
 
+        # The classifier's verdict is foregone in two more places, and waiting
+        # for it cost the caller 1.2-2 s each (da525a9a, 2026-09-25: the price
+        # went the slow LLM way because the classifier timed out on turn one).
+        # - The caller's words open the price sub-flow by the handler's own
+        #   markers: 115 of 116 such turns since 2026-09-01 are price
+        #   questions. A request for a human in the same breath still goes
+        #   to the classifier, which ranks TRANSFER first.
+        # - An open sub-flow owns the turn unless the verdict is TRANSFER, and
+        #   the classifier's guard caps a TRANSFER without the caller's own
+        #   evidence below the floor — so without that evidence it cannot win.
+        has_transfer_words = _has_transfer_evidence(transcript.text)
+        fast_intent: str | None = None
+        if (
+            continuation is None
+            and not has_transfer_words
+            and classify_interrupt_text(transcript.text) == "price"
+        ):
+            fast_intent = "PRICE"
+        skip_classifier = fast_intent is not None or (
+            continuation is not None and not has_transfer_words
+        )
+        if skip_classifier:
+            logger.info(
+                "FSM live mode: %s for call=%s — intent classification skipped",
+                "price markers" if fast_intent else f"{continuation} sub-flow continues",
+                self._session.channel_uuid,
+            )
+
         llm_router = self._get_llm_router()
         if llm_router is None:
             logger.error(
@@ -2533,19 +2569,20 @@ class CallPipeline:
         # `None` means «no verdict», which is not the same as a verdict of BOOK.
         # A continuation does not need one; anything else falls through.
         result = None
-        try:
-            result = await classify_intent(
-                customer_text=transcript.text,
-                session_context=session_context,
-                llm_router=llm_router,
-                on_usage=self._note_intent_classifier_usage,
-            )
-        except Exception:
-            logger.error(
-                "FSM live mode: intent classification failed for call=%s",
-                self._session.channel_uuid,
-                exc_info=True,
-            )
+        if not skip_classifier:
+            try:
+                result = await classify_intent(
+                    customer_text=transcript.text,
+                    session_context=session_context,
+                    llm_router=llm_router,
+                    on_usage=self._note_intent_classifier_usage,
+                )
+            except Exception:
+                logger.error(
+                    "FSM live mode: intent classification failed for call=%s",
+                    self._session.channel_uuid,
+                    exc_info=True,
+                )
 
         # Checked before the continuation branch: a caller who asks for a human
         # mid-sub-flow gets one. This is the only verdict that outranks an open
@@ -2567,6 +2604,8 @@ class CallPipeline:
                 -1.0 if result is None else result.confidence,
             )
             intent_to_handle = continuation
+        elif fast_intent is not None:
+            intent_to_handle = fast_intent
         elif result is None:
             self._note_pipeline_interrupt_dispatch(dispatched=False)
             return False

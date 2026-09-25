@@ -81,6 +81,10 @@ except ImportError:  # pragma: no cover - Wave 1-C not merged yet
 #: way yet — there is nothing to return to, only something to offer.
 PRICE_ONLY_BOOKING_OFFER = "Бажаєте записатися на шиномонтаж?"
 
+#: Asked by the price handler before quoting when neither a station nor a city
+#: is known — prices differ by city, and the network's first row is Kyiv's.
+PRICE_CITY_QUESTION = "У якому місті вас цікавить вартість?"
+
 
 class FsmState(enum.StrEnum):
     """States of the fitting flow (§2.1).

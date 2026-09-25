@@ -57,7 +57,13 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from src.agent.compound_parse import named_cities
-from src.agent.fitting_fsm import FROZEN_STATES, PRICE_ONLY_BOOKING_OFFER, STATES, FsmState
+from src.agent.fitting_fsm import (
+    FROZEN_STATES,
+    PRICE_CITY_QUESTION,
+    PRICE_ONLY_BOOKING_OFFER,
+    STATES,
+    FsmState,
+)
 
 if TYPE_CHECKING:
     from src.core.call_session import CallSession
@@ -758,10 +764,27 @@ async def handle_price_interrupt(
     """
     text = customer_text or ""
     awaiting_diameter = bool(getattr(session, "pending_price_interrupt_needs_diameter", False))
+    awaiting_city = bool(getattr(session, "pending_price_interrupt_needs_city", False))
     diameter_in_text = _extract_diameter(text)
+    spoken_cities = named_cities(text)
+    city_in_text = next(iter(spoken_cities)) if len(spoken_cities) == 1 else None
 
     # --- Default-deny gate -------------------------------------------------
-    if awaiting_diameter:
+    if awaiting_city:
+        # Continuation: accept a city (the FSM seam or the words themselves),
+        # or the caller repeating the price question.
+        if not (_resolve_city(session) or city_in_text or _mentions_price(text)):
+            logger.info(
+                "price_interrupt: awaiting city but turn %r names none — disarming, "
+                "outcome=skipped",
+                text[:60],
+            )
+            return _result(
+                False,
+                session_updates=_apply(session, {"pending_price_interrupt_needs_city": False}),
+            )
+        entry = False
+    elif awaiting_diameter:
         # Continuation: accept a number, or the caller repeating the question.
         if diameter_in_text is None and not _mentions_price(text):
             logger.info(
@@ -789,10 +812,37 @@ async def handle_price_interrupt(
         updates: dict[str, Any] = {}
         if awaiting_diameter:
             updates["pending_price_interrupt_needs_diameter"] = False
+        if awaiting_city:
+            updates["pending_price_interrupt_needs_city"] = False
         return _result(False, session_updates=_apply(session, updates))
 
     counts = _bump(session, PRICE_HANDLER, entry=entry)
-    city = _resolve_city(session)
+    city = _resolve_city(session) or city_in_text
+
+    # --- City ---------------------------------------------------------------
+    # Asked before the diameter, as the prompt's own price scenario does: with
+    # neither a station nor a city the tool returns the whole network and the
+    # first rows are Kyiv's (R18: Київ 396, Харків 372). Since 2026-09-25 a
+    # marked price question reaches this handler without the classifier, so
+    # «дізнатися вартість» with no city at all is its commonest opening.
+    if not _station_id(session) and not city:
+        logger.info(
+            "price_interrupt: no station and no city fires=%d outcome=asked_city",
+            counts.get(PRICE_HANDLER, 0),
+        )
+        return _result(
+            True,
+            reply=PRICE_CITY_QUESTION,
+            resume_state=_resume(session)[0],
+            session_updates=_apply(
+                session,
+                {"pending_price_interrupt_needs_city": True, "interrupt_counts": counts},
+            ),
+            advanced=True,
+        )
+    if awaiting_city:
+        _apply(session, {"pending_price_interrupt_needs_city": False})
+
     resume_state, resume_phrase = _resume(session)
     if resume_phrase and not _booking_underway(session):
         # The FSM walks WELCOME → CITY → STATION on the city alone, so a caller

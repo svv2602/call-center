@@ -334,6 +334,9 @@ class CallSession:
         # True while the price handler is waiting for the caller to name a
         # wheel diameter it asked for on a previous turn.
         self.pending_price_interrupt_needs_diameter: bool = False
+        # True while the price handler is waiting for the city it asked for:
+        # prices differ by city, and a quote without one read Kyiv's.
+        self.pending_price_interrupt_needs_city: bool = False
         # How many times book_fitting was refused because the caller had never
         # named the time being booked. Persisted with the rest of the session:
         # the refusal and the retry land on different turns and the Call
@@ -525,6 +528,7 @@ class CallSession:
             "pending_price_interrupt_needs_diameter": (
                 self.pending_price_interrupt_needs_diameter
             ),
+            "pending_price_interrupt_needs_city": self.pending_price_interrupt_needs_city,
             "book_time_unchosen_refusals": self.book_time_unchosen_refusals,
             "fitting_color_corrected": self.fitting_color_corrected,
             "dialog_history": [
@@ -711,6 +715,9 @@ class CallSession:
                 data.get("channel_uuid"),
                 type(needs_diameter).__name__,
             )
+        session.pending_price_interrupt_needs_city = (
+            data.get("pending_price_interrupt_needs_city") is True
+        )
         refusals = data.get("book_time_unchosen_refusals", 0)
         session.book_time_unchosen_refusals = refusals if isinstance(refusals, int) else 0
         session.fitting_color_corrected = bool(data.get("fitting_color_corrected", False))
