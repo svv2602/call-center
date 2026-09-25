@@ -948,3 +948,11 @@ class TestPriceQuoteWithoutAStation:
         result = await handle_price_interrupt(PRICE_QUESTION, session, router)
 
         assert "450" in result.reply_to_customer
+
+
+class TestQuoteSaysPerWheel:
+    async def test_every_price_is_per_wheel(self, router: AsyncMock) -> None:
+        """Without «за колесо» a caller hears the price of the whole car."""
+        session = make_session(fitting_diameter_client=17)
+        result = await handle_price_interrupt(PRICE_QUESTION, session, router)
+        assert result.reply_to_customer.count("за колесо") == 2

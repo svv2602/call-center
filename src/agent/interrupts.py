@@ -726,14 +726,14 @@ def _format_prices(prices: list[dict[str, Any]]) -> str:
         for item in by_category.get(category, []):
             value = item.get("price")
             if value not in (None, ""):
-                fragments.append(f"{label} — {value} грн")
+                fragments.append(f"{label} — {value} грн за колесо")
                 break
     if fragments:
         return ", ".join(fragments)
 
     for item in prices:
         if isinstance(item, dict) and item.get("price") not in (None, ""):
-            return f"{item['price']} грн"
+            return f"{item['price']} грн за колесо"
     return ""
 
 
