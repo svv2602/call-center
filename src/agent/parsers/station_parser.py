@@ -300,7 +300,13 @@ def resolve_proposed_station(ctx: ParseContext) -> ParseOutcome:
             return NOT_MENTIONED
         stations = in_city
 
-    hint = _detect_station_hint(_normalize(" ".join(recent)))
+    # The landmark comes from the proposal itself, not the whole window. On
+    # 26c5ebc3 (2026-09-25) the window held «Знайшла точку біля Лук'яненка …
+    # Записуємо туди?» *and* the turn before it, which listed every Kyiv point
+    # starting with «Харківському шосе»; the joined text resolved to that one,
+    # and the caller's «так» to Тимошенка, 7 pinned Харківське шосе, 165.
+    proposal = next((u for u in recent if u and proposed_station([u])), "")
+    hint = _detect_station_hint(_normalize(proposal))
     if hint is None or not isinstance(hint.value, str):
         logger.debug("station_proposal: bot turn carries no landmark — unresolved")
         return NOT_MENTIONED

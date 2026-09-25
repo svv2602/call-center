@@ -138,3 +138,45 @@ class TestTheWindowStopsAtThePendingQuestion:
         turns = [CITY_CHANGE_PROMPT, KEEP_THIS_STATION]
         assert any(m in KEEP_THIS_STATION.lower() for m in _PROPOSE_MARKERS)
         assert proposed_station(turns) is False
+
+
+def test_the_landmark_comes_from_the_proposal_not_the_listing_before_it() -> None:
+    """26c5ebc3: «так» to Тимошенка, 7 pinned Харківське шосе, 165.
+
+    The window held the proposal and the turn before it, which listed every
+    Kyiv point starting with Харківське шосе; the joined text resolved to that.
+    """
+    import uuid
+
+    from src.agent.parsers.base import ParseContext
+    from src.agent.parsers.station_parser import resolve_proposed_station
+    from src.core.call_session import CallSession
+
+    session = CallSession(uuid.uuid4())
+    session.add_assistant_turn(
+        "Ось усі точки у Києві: на Харківському шосе, сто шістдесят п'ять; "
+        "на вулиці Маршала Тимошенка, сім."
+    )
+    session.add_user_turn(content="Лук'янівка")
+    session.add_assistant_turn(
+        "Знайшла точку біля Лук'яненка, на вулиці Маршала Тимошенка, сім у Києві. Записуємо туди?"
+    )
+    session.fitting_stations_seen = [
+        {
+            "id": "000000015",
+            "city": "Київ",
+            "address": "м. Київ, Харьківске шосе, 165",
+            "district": "Харківське шосе, Лівий берег",
+        },
+        {
+            "id": "000000006",
+            "city": "Київ",
+            "address": "м. Київ, вул. Маршала Тимошенка, 7",
+            "district": "Оболонь",
+            "landmarks": "Лук'яненка",
+        },
+    ]
+
+    outcome = resolve_proposed_station(ParseContext(customer_text="так", session=session))
+
+    assert outcome.value == "000000006"
