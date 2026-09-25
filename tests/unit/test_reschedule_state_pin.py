@@ -122,6 +122,10 @@ def _ready_session(**overrides: Any) -> CallSession:
     session.selected_fitting_date = _tomorrow()
     session.selected_fitting_time = TIME
     session.fitting_slots_offered = [{"date": _tomorrow(), "time": TIME}]
+    # By Krok 8 the bot has asked for the car; without that the brand guard
+    # (2026-09-25) refuses first and the station checks under test never run.
+    # Asked rather than stored, so the vehicle-pin tests still see no brand.
+    session.add_assistant_turn("Яка марка вашого авто?")
     for key, value in overrides.items():
         setattr(session, key, value)
     return session

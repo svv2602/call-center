@@ -222,6 +222,21 @@ _SENTINEL = object()  # sentinel for optional pre-fetched values
 _background_tasks: set[asyncio.Task[Any]] = set()
 
 
+def _brand_has_a_source(session: CallSession, known_before: str | None) -> bool:
+    """Is there any source for the car brand besides the LLM's own argument?"""
+    if known_before or session.fsm_filled_fields.get("brand"):
+        return True
+    if session.profile_has_vehicle:
+        return True
+    from src.agent.streaming_loop import _FIELD_QUESTION_PATTERNS
+
+    brand_question = dict(_FIELD_QUESTION_PATTERNS)["brand"]
+    return any(
+        t.speaker == "assistant" and brand_question.search((t.content or "").lower())
+        for t in session.dialog_history
+    )
+
+
 def _spawn_background(coro: Any) -> None:
     task = asyncio.create_task(coro)
     _background_tasks.add(task)
@@ -1024,6 +1039,11 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         if profile_name:
             session.fitting_customer_name = profile_name
             session.name_from_profile = True
+        # A known car is a source for the brand guard in `book_fitting`, but it
+        # is not written as the brand: a regular may come in another car.
+        session.profile_has_vehicle = bool(
+            customer_profile_raw and customer_profile_raw.get("vehicles")
+        )
 
         # Modular prompt assembly: if no DB/A-B prompt, assemble from modules
         is_modular = False
@@ -1711,6 +1731,10 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                     ),
                 }
 
+        # Read before the progress write below overwrites it with the LLM's own
+        # argument — the brand guard needs to know what was there first.
+        _brand_known_before = session.fitting_vehicle_brand
+
         # Progress tracking: save whatever we know so the LLM's progress block
         # reflects the latest state — even if the call is rejected below.
         if customer_name:
@@ -1735,6 +1759,31 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 "error": True,
                 "message": f"Неможливо записати без: {', '.join(missing)}. "
                 "Поверніся до чеклісту і запитай у клієнта відсутні дані.",
+            }
+
+        # The brand must come from somewhere other than the LLM's argument.
+        # 26c5ebc3 (2026-09-25): the colour answer was misheard as «всі ігри»,
+        # re-asked, answered «сірий» — and «всі ігри» went to 1C as the car.
+        # The bot never asked the brand. Any one source is enough, so a refusal
+        # costs at most the one question it demands, and asking it satisfies
+        # the guard next time: on 104 confirmed bookings this refuses 12 — 7
+        # with no brand at all, this call, and 4 where the bot never asked.
+        if not _brand_has_a_source(session, _brand_known_before):
+            logger.warning(
+                "book_fitting: vehicle_info=%r has no source — brand never asked, "
+                "parsed or known — refusing for call %s",
+                vehicle_info,
+                session.channel_uuid,
+            )
+            session.fitting_vehicle_brand = _brand_known_before
+            return {
+                "error": True,
+                "reason": "brand_not_asked",
+                "message": (
+                    f"⛔ Марку авто клієнт ще не називав — «{vehicle_info}» не з його "
+                    "відповіді на питання про марку. Спитай: «Яка марка вашого авто?» "
+                    "і передай його відповідь у vehicle_info."
+                ),
             }
 
         # SHADOW ONLY — measure, never reject. Confirmation (Krok 8) is the one

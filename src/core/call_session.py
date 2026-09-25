@@ -188,6 +188,8 @@ class CallSession:
         self.krok8_confabulation_pending: bool = False
         self.fitting_plate: str | None = None              # Ідентифікатор авто. З 2026-08-18: колір (напр. "синій"). Історично: держномер — звідси назва. Справжній держномер сюди ще пише 1С (профіль клієнта, попередній запис); preparse більше НЕ пише (див. preparse.py, 2026-09-16).
         self.fitting_vehicle_brand: str | None = None      # Марка/модель авто
+        # The caller's profile lists at least one car (set at call start).
+        self.profile_has_vehicle: bool = False
         # storage_choice: None=pending, "own"=клієнт привезе свої, "contract"=зі зберігання
         self.fitting_storage_choice: str | None = None
         self.fitting_storage_contract: str | None = None   # Обраний Number коли choice="contract"
@@ -499,6 +501,7 @@ class CallSession:
             "name_from_profile": self.name_from_profile,
             "fitting_plate": self.fitting_plate,
             "fitting_vehicle_brand": self.fitting_vehicle_brand,
+            "profile_has_vehicle": self.profile_has_vehicle,
             "fitting_storage_choice": self.fitting_storage_choice,
             "fitting_storage_contract": self.fitting_storage_contract,
             "fitting_requested_weekday": self.fitting_requested_weekday,
@@ -586,6 +589,7 @@ class CallSession:
         session.name_from_profile = data.get("name_from_profile", False)
         session.fitting_plate = data.get("fitting_plate")
         session.fitting_vehicle_brand = data.get("fitting_vehicle_brand")
+        session.profile_has_vehicle = data.get("profile_has_vehicle") is True
         session.fitting_storage_choice = data.get("fitting_storage_choice")
         session.fitting_storage_contract = data.get("fitting_storage_contract")
         session.fitting_requested_weekday = data.get("fitting_requested_weekday")
