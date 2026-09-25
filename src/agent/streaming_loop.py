@@ -21,6 +21,8 @@ from src.agent.booking_consent import (
     BOOKING_DECLINED_FAREWELL,
     BOOKING_OFFER,
     GATE_FAREWELL,
+    GATE_OFFER,
+    is_booking_offer,
 )
 from src.agent.history_compressor import summarize_old_messages
 from src.agent.prompts import (
@@ -622,12 +624,14 @@ class BookingOfferGate:
     the booking script the first round was stopped in.
     """
 
-    __slots__ = ("mode", "offered")
+    __slots__ = ("llm_offered", "mode", "offered")
 
     def __init__(self, mode: str | None) -> None:
         #: `GATE_OFFER`, `GATE_FAREWELL`, or None for off.
         self.mode = mode
         self.offered = False
+        #: The LLM made the offer itself earlier in this turn.
+        self.llm_offered = False
 
     @property
     def replacement(self) -> str:
@@ -674,6 +678,15 @@ async def offer_booking_before_checklist(
         held.append(event)
         pending = f"{pending} {event.text}".strip()
         field_key = booking_field_asked(pending)
+        if field_key is not None and gate.mode == GATE_OFFER and gate.llm_offered:
+            # The LLM already asked «Записуємо на шиномонтаж?» and then ran on
+            # into the checklist; a second offer would only repeat it
+            # (da525a9a, 2026-09-25: «Записуємо на шиномонтаж? Записати вас на
+            # шиномонтаж?»). Stop the turn at its own offer.
+            booking_offer_redirected_total.labels(field=field_key).inc()
+            gate.offered = True
+            held, pending = [], ""
+            continue
         if field_key is not None:
             booking_offer_redirected_total.labels(field=field_key).inc()
             logger.warning(
@@ -688,6 +701,8 @@ async def offer_booking_before_checklist(
             yield SentenceReady(text=gate.replacement)
             continue
         if pending.rstrip().endswith((".", "!", "?")):
+            if is_booking_offer(pending):
+                gate.llm_offered = True
             for queued in held:
                 yield queued
             held, pending = [], ""

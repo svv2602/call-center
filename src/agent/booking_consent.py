@@ -41,6 +41,11 @@ _CALLER_BOOKING = re.compile(r"запис|запиш")
 _BOT_OFFER = re.compile(r"запис(?:ати|уємо|уємось|атися|ую)\b[^?,]*\?")
 
 
+def is_booking_offer(text: str) -> bool:
+    """True when this bot sentence offers to book («Записуємо на шиномонтаж?»)."""
+    return bool(_BOT_OFFER.search((text or "").lower()))
+
+
 def _offer_answers(turns: Sequence[tuple[str, str]]) -> list[str]:
     """How the caller answered each booking offer, oldest first: yes / no / unclear."""
     from src.agent.interrupts import _yes_no

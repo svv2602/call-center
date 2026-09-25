@@ -366,3 +366,20 @@ class TestExcludedStationPrices:
         result = await _run(session, "get_fitting_price", {}, onec, AsyncMock(spec=StoreClient))
 
         assert [p["point_id"] for p in result["prices"]] == ["000000003"]
+
+
+class TestNoDoubleOffer:
+    async def test_the_llms_own_offer_is_not_repeated(self) -> None:
+        """da525a9a: «Записуємо на шиномонтаж? Записати вас на шиномонтаж?»."""
+        heard = await _heard(
+            "Записуємо на шиномонтаж? Шини привозите свої з собою чи ті, що у нас на зберіганні?",
+            BookingOfferGate(GATE_OFFER),
+        )
+        assert heard == "Записуємо на шиномонтаж?"
+
+    async def test_after_a_no_the_farewell_still_replaces(self) -> None:
+        heard = await _heard(
+            "Записуємо на шиномонтаж? Шини привозите свої з собою?",
+            BookingOfferGate(GATE_FAREWELL),
+        )
+        assert heard.endswith(BOOKING_DECLINED_FAREWELL)
