@@ -4741,3 +4741,25 @@ class TestPriceCityContinuation:
         from src.core.pipeline import FSM_SESSION_UPDATE_WHITELIST
 
         assert "pending_price_interrupt_needs_city" in FSM_SESSION_UPDATE_WHITELIST
+
+
+class TestTheLlmSeesTheFsmExchange:
+    """dd835342: FSM quoted and offered, «Ні дякую», the LLM asked for a city."""
+
+    async def test_the_next_llm_turn_carries_the_fsm_turn(self) -> None:
+        h = Harness()
+        reply = "Шиномонтаж R18 у місті Дніпро: 396 грн за колесо. Бажаєте записатися?"
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.interrupts.handle_price_interrupt",
+                AsyncMock(return_value=interrupt(reply=reply)),
+            ),
+        ):
+            await h.run("вартість монтажу 18 колеса в Дніпрі", "Ні дякую")
+
+        history = h.llm_kwargs[-1]["conversation_history"]
+        contents = [m.get("content") for m in history]
+        assert "вартість монтажу 18 колеса в Дніпрі" in contents
+        assert reply in contents
+        assert contents.index(reply) == contents.index("вартість монтажу 18 колеса в Дніпрі") + 1

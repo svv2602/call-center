@@ -605,13 +605,18 @@ def _assistant_texts(history: list[dict[str, Any]]) -> list[str]:
 _BOOKING_ONLY_FIELDS = frozenset({"storage", "date", "time", "color", "brand"})
 
 
-def booking_field_asked(text: str) -> str | None:
-    """The booking-only checklist row this sentence asks for, if any."""
+def booking_field_asked(text: str, *, any_row: bool = False) -> str | None:
+    """The checklist row this sentence asks for, if any.
+
+    Booking-only rows by default. `any_row` widens it to name and city too:
+    once the caller has declined, even «у якому місті вас цікавить?» is the bot
+    pressing on (dd835342, 2026-09-25).
+    """
     if not _sentence_is_a_request(text):
         return None
     low = text.lower().replace("ʼ", "'").replace("’", "'")
     for field_key, pattern in _FIELD_QUESTION_PATTERNS:
-        if field_key in _BOOKING_ONLY_FIELDS and pattern.search(low):
+        if (any_row or field_key in _BOOKING_ONLY_FIELDS) and pattern.search(low):
             return field_key
     return None
 
@@ -677,7 +682,7 @@ async def offer_booking_before_checklist(
 
         held.append(event)
         pending = f"{pending} {event.text}".strip()
-        field_key = booking_field_asked(pending)
+        field_key = booking_field_asked(pending, any_row=gate.mode == GATE_FAREWELL)
         if field_key is not None and gate.mode == GATE_OFFER and gate.llm_offered:
             # The LLM already asked «Записуємо на шиномонтаж?» and then ran on
             # into the checklist; a second offer would only repeat it

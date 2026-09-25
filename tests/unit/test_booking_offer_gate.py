@@ -383,3 +383,17 @@ class TestNoDoubleOffer:
             BookingOfferGate(GATE_FAREWELL),
         )
         assert heard.endswith(BOOKING_DECLINED_FAREWELL)
+
+
+class TestAfterANoEveryQuestionEnds:
+    async def test_a_city_question_becomes_the_farewell(self) -> None:
+        """dd835342: «Ні дякую» → «Підкажіть, у якому місті вас цікавить шиномонтаж?»."""
+        heard = await _heard(
+            "Підкажіть, у якому місті вас цікавить шиномонтаж?",
+            BookingOfferGate(GATE_FAREWELL),
+        )
+        assert heard == BOOKING_DECLINED_FAREWELL
+
+    async def test_before_a_no_a_city_question_is_left_alone(self) -> None:
+        heard = await _heard("У якому місті вас цікавить вартість?", BookingOfferGate(GATE_OFFER))
+        assert "місті" in heard

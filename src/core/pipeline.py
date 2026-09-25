@@ -2213,6 +2213,11 @@ class CallPipeline:
         fsm_interrupt_total.labels(interrupt_type=kind).inc()
         self._session.reset_empty_response()
         self._session.add_assistant_turn(reply)
+        # The LLM reads `_llm_history`, not the session. Without this the whole
+        # FSM exchange was invisible to it: dd835342 (2026-09-25) quoted a price
+        # and offered a booking through the FSM, the caller said «Ні дякую», and
+        # the LLM — seeing only the greeting — asked which city they meant.
+        self._llm_history.append({"role": "assistant", "content": reply})
         await self._log_turn("bot", reply)
         await self._persist_session()
         await self._speak(reply)
@@ -2449,6 +2454,11 @@ class CallPipeline:
         from src.agent.booking_consent import gate_mode
 
         return gate_mode([(t.speaker, t.content) for t in self._session.dialog_history])
+
+    def _mask_for_llm(self, text: str) -> str:
+        """The caller's words as the streaming loop would hand them to the LLM."""
+        vault = getattr(self._streaming_loop, "_pii_vault", None)
+        return vault.mask(text) if vault is not None else text
 
     async def _record_customer_turn(self, transcript: Transcript) -> None:
         self._session.add_user_turn(
@@ -2716,6 +2726,7 @@ class CallPipeline:
             stt_confidence=transcript.confidence,
             language=transcript.language,
         )
+        self._llm_history.append({"role": "user", "content": self._mask_for_llm(transcript.text)})
         await self._dispatch_interrupt_reply(interrupt, kind=intent_to_handle.lower())
         self._note_pipeline_interrupt_dispatch(
             dispatched=True, continuation=continuation is not None
