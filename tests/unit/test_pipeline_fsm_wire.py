@@ -4763,3 +4763,48 @@ class TestTheLlmSeesTheFsmExchange:
         assert "вартість монтажу 18 колеса в Дніпрі" in contents
         assert reply in contents
         assert contents.index(reply) == contents.index("вартість монтажу 18 колеса в Дніпрі") + 1
+
+
+class TestStorageChoiceReachesTheSession:
+    """26c5ebc3: «на зберіганні» stayed in the FSM, the 3-day guard never ran."""
+
+    async def test_a_storage_answer_sets_the_session_choice_and_contract(self) -> None:
+        session = booking_in_progress(FsmState.STORAGE)
+        session.storage_contracts_found = ["00000110727"]
+        h = Harness(session)
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("на зберіганні")
+
+        assert h.session.fitting_storage_choice == "contract"
+        assert h.session.fitting_storage_contract == "00000110727"
+
+    async def test_two_contracts_leave_the_choice_to_the_llm(self) -> None:
+        session = booking_in_progress(FsmState.STORAGE)
+        session.storage_contracts_found = ["A-1", "B-2"]
+        h = Harness(session)
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("на зберіганні")
+
+        assert h.session.fitting_storage_choice == "contract"
+        assert h.session.fitting_storage_contract is None
+
+    async def test_own_tyres_clear_contracts_the_preload_found(self) -> None:
+        session = booking_in_progress(FsmState.STORAGE)
+        session.storage_contracts_found = ["00000110727"]
+        h = Harness(session)
+        with fsm_flags(enabled=True, shadow_mode=False):
+            await h.run("свої з собою")
+
+        assert h.session.fitting_storage_choice == "own"
+        assert h.session.storage_contracts_found == []
+
+
+def test_the_preload_answer_is_recorded_for_the_guards() -> None:
+    from src.main import _record_storage_contracts
+
+    session = CallSession(uuid.uuid4())
+    _record_storage_contracts(
+        session,
+        {"success": True, "data": [{"ID": "000006652", "Number": "00000110727"}]},
+    )
+    assert session.storage_contracts_found == ["00000110727"]

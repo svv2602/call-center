@@ -222,6 +222,30 @@ _SENTINEL = object()  # sentinel for optional pre-fetched values
 _background_tasks: set[asyncio.Task[Any]] = set()
 
 
+def _record_storage_contracts(session: CallSession, data: Any) -> None:
+    """Note every contract number a 1C `find_storage` answer carries.
+
+    1C response shapes vary — accept "data" / "result" / "contracts" and any
+    dict with "Number" or "NumberContract". Used by the `find_storage` tool and
+    by the call-start preload, which used to feed only the prompt text: on
+    26c5ebc3 (2026-09-25) the caller had contract 00000110727, said «на
+    зберіганні», the LLM never called the tool, and the book_fitting guard that
+    reads this list stayed silent.
+    """
+    if not isinstance(data, dict):
+        return
+    for key in ("data", "result", "contracts"):
+        candidates = data.get(key)
+        if not isinstance(candidates, list):
+            continue
+        for item in candidates:
+            if not isinstance(item, dict):
+                continue
+            num = item.get("Number") or item.get("NumberContract") or item.get("number")
+            if num and str(num) not in session.storage_contracts_found:
+                session.storage_contracts_found.append(str(num))
+
+
 def _brand_has_a_source(session: CallSession, known_before: str | None) -> bool:
     """Is there any source for the car brand besides the LLM's own argument?"""
     if known_before or session.fsm_filled_fields.get("brand"):
@@ -1031,6 +1055,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         promotions_context = format_promotions_context(promos)
         caller_history_text = format_caller_history(caller_history_raw)
         storage_context_text = format_storage_context(storage_raw)
+        # Known to the guards, not only to the prompt. Not written as the
+        # storage choice: the caller may bring their own this time.
+        _record_storage_contracts(session, storage_raw)
         customer_profile_text = format_customer_profile(customer_profile_raw)
         profile_name = customer_profile_raw.get("name") if customer_profile_raw else None
         # Progress-block pre-fill: mark name as ✅ from the start when caller is
@@ -3876,20 +3903,7 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 result = data if isinstance(data, dict) else {"result": data}
                 # Extract contract Numbers so the book_fitting guard can catch
                 # the case where LLM later forgets to pass storage_contract=.
-                # 1C response shapes vary — accept "data" / "result" / "contracts"
-                # and any dict with "Number" or "NumberContract".
-                for key in ("data", "result", "contracts"):
-                    candidates = result.get(key)
-                    if isinstance(candidates, list):
-                        for item in candidates:
-                            if isinstance(item, dict):
-                                num = (
-                                    item.get("Number")
-                                    or item.get("NumberContract")
-                                    or item.get("number")
-                                )
-                                if num and str(num) not in session.storage_contracts_found:
-                                    session.storage_contracts_found.append(str(num))
+                _record_storage_contracts(session, result)
                 # Progress: if any contract was found, tentatively mark Krok 2
                 # as "contract" so the progress block reflects the branch.
                 # LLM will confirm with client; if client rejects, book_fitting

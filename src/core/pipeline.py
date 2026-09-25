@@ -3408,16 +3408,16 @@ class CallPipeline:
                         self._session.fitting_storage_choice == "contract"
                     )
                     self._session.fitting_storage_choice = "own"
-                    # Flip cleanup: when find_storage previously auto-locked
-                    # us to a contract, clear the contract state AND clear
-                    # storage_contracts_found so book_fitting's "storage
-                    # forgot to pass NumberContract" guard does not force a
-                    # sentinel retry. The client explicitly said «свої з
-                    # собою» — respect that.
+                    # The caller said «свої з собою»: clear any contract so
+                    # book_fitting's "storage forgot to pass NumberContract"
+                    # guard does not force a sentinel retry. Since 2026-09-25
+                    # the call-start preload fills `storage_contracts_found`
+                    # too, so this is cleared whether or not a contract had
+                    # been locked in, not only on a contract→own flip.
+                    self._session.storage_contracts_found = []
+                    self._session.storage_contract_guard_triggered = False
                     if _was_contract:
                         self._session.fitting_storage_contract = None
-                        self._session.storage_contracts_found = []
-                        self._session.storage_contract_guard_triggered = False
                         logger.info(
                             "Storage FLIPPED contract→own for call=%s "
                             "(client said own-tires); cleared contract state",
@@ -3428,6 +3428,28 @@ class CallPipeline:
                             "Storage auto-detected 'own' from user text: call=%s",
                             self._session.channel_uuid,
                         )
+
+            # The caller chose tyres from storage and the FSM heard it; the
+            # guards that depend on it read the session, not the FSM. On
+            # 26c5ebc3 (2026-09-25) «на зберіганні» reached only
+            # `fsm_filled_fields`, so the three-working-day guard in
+            # get_fitting_slots never ran and the caller was booked for the
+            # next morning, before their tyres could leave the warehouse.
+            if (
+                self._session.fsm_filled_fields.get("storage_choice") == "contract"
+                and self._session.fitting_storage_choice is None
+            ):
+                self._session.fitting_storage_choice = "contract"
+                if len(self._session.storage_contracts_found) == 1:
+                    self._session.fitting_storage_contract = (
+                        self._session.storage_contracts_found[0]
+                    )
+                logger.info(
+                    "Storage choice 'contract' taken from the FSM for call=%s "
+                    "(contracts known: %s)",
+                    self._session.channel_uuid,
+                    self._session.storage_contracts_found,
+                )
 
             # Wave 4B (2026-09-03) — Color auto-detect. session.fitting_plate
             # (semantically now = color per 2026-08-18 refactor) stays None
