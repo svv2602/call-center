@@ -2902,10 +2902,13 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             # under attention dilution (call 646dd90b 2026-08-14: bot
             # started «У Дніпрі є п'ять точок: провулок Добровольців,
             # один де;…» — 15s TTS, call dropped).
+            # A landmark that matched nothing leaves the same list a bare city
+            # lookup gives, and it is read out the same way unless hidden:
+            # 26c5ebc3 (2026-09-25) spent 20 s on «ось усі точки…» with
+            # addresses after «університет» found none.
             multi_no_query = (
                 effective_city
-                and not effective_query
-                and not query_returned_empty
+                and (not effective_query or query_returned_empty)
                 and len(stations_out) >= 2
             )
             # For a price consultation, chain prices are identical across
@@ -2965,7 +2968,37 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                         "query=[район]."
                     ),
                 }
+                if query_returned_empty:
+                    response["no_query_match"] = True
+                    response["requested_query"] = effective_query
+                    response["hint"] = (
+                        f"За орієнтиром «{effective_query}» точки не знайшла. "
+                        + response["hint"]
+                    )
                 return response
+
+            if query_returned_empty and not effective_city:
+                # No city and a landmark that matched nothing: what is left is
+                # the whole network, and 26c5ebc3 read Kyiv's addresses to a
+                # caller who had never named a city. The city comes first.
+                logger.info(
+                    "get_fitting_stations: query=%r matched nothing and no city — "
+                    "asking for the city instead of listing %d stations",
+                    effective_query,
+                    len(stations_out),
+                )
+                return {
+                    "total": 0,
+                    "stations": [],
+                    "action_required": "ask_city",
+                    "no_query_match": True,
+                    "requested_query": effective_query,
+                    "hint": (
+                        f"За орієнтиром «{effective_query}» точки не знайшла, а місто "
+                        "клієнт не називав. НЕ перелічуй точки — спитай: «У якому "
+                        "місті вам зручніше?» і потім виклич get_fitting_stations(city=…)."
+                    ),
+                }
 
             response = {
                 "total": len(filtered),

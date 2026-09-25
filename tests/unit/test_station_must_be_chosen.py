@@ -150,3 +150,56 @@ class TestSlotsNeedAShownStation:
             AsyncMock(spec=StoreClient),
         )
         assert result.get("reason") != "slots_station_not_chosen"
+
+
+KYIV_TWO = {
+    "data": [
+        {
+            "StationID": "000000015",
+            "StationCity": "Київ",
+            "StationAddress": "Харьківске шосе, 165",
+            "StationName": "Лівий берег",
+        },
+        {
+            "StationID": "000000006",
+            "StationCity": "Київ",
+            "StationAddress": "вул. Маршала Тимошенка, 7",
+            "StationName": "Оболонь",
+        },
+        {
+            "StationID": "000000028",
+            "StationCity": "Харків",
+            "StationAddress": "вул. Холодногірська, 11",
+            "StationName": "Холодна Гора",
+        },
+    ]
+}
+
+
+class TestAnUnmatchedLandmark:
+    """26c5ebc3: «університет» matched nothing and every address was read out."""
+
+    @pytest.mark.asyncio
+    async def test_without_a_city_the_city_is_asked(self) -> None:
+        result = await _run(
+            CallSession(uuid.uuid4()),
+            "get_fitting_stations",
+            {"query": "університет"},
+            _onec_mock(stations=KYIV_TWO),
+            AsyncMock(spec=StoreClient),
+        )
+        assert result.get("action_required") == "ask_city"
+        assert result["stations"] == []
+
+    @pytest.mark.asyncio
+    async def test_with_a_city_only_districts_are_given(self) -> None:
+        result = await _run(
+            CallSession(uuid.uuid4()),
+            "get_fitting_stations",
+            {"city": "Київ", "query": "університет"},
+            _onec_mock(stations=KYIV_TWO),
+            AsyncMock(spec=StoreClient),
+        )
+        assert result.get("action_required") == "ask_district"
+        assert result.get("no_query_match") is True
+        assert "stations" not in result
