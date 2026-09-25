@@ -46,6 +46,9 @@ class _Schedule:
 
 def _session(*, fsm_date: str | None, inferred: bool = False) -> CallSession:
     session = CallSession(uuid.uuid4())
+    # The station was chosen earlier in the call; without it the station guard
+    # (2026-09-25) refuses first and the date guard under test never runs.
+    session.fitting_station_ids.add(STATION)
     for turn in GARBLED_TURNS:
         session.add_user_turn(turn)
     if fsm_date is not None:

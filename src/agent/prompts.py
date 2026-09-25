@@ -1935,14 +1935,19 @@ FITTING_STEPS: tuple[tuple[str, str], ...] = (
 def fitting_steps_collected(p: dict[str, Any]) -> dict[str, bool]:
     """Which checklist rows already hold an answer, keyed as in `FITTING_STEPS`.
 
-    The city row is true on either half: a station address pins the city even
-    when the caller never named it. Storage tests against None rather than
-    truthiness because "" is not one of its two values and an empty string
-    there means the field was never set.
+    The city row needs the station, not just the city. It used to be true on
+    the city alone, and while a price lookup pinned a station that was
+    harmless; once c910136 removed the pin, a caller who asked the price in
+    Харків and said «так» saw ✅ Місто/точка, was never asked where, and the
+    LLM looked up slots for a station id nobody had given it (b72ec368,
+    2026-09-25). A known city with no station is a lookup, not a question — see
+    `next_fitting_question`.
+    Storage tests against None rather than truthiness because "" is not one of
+    its two values and an empty string there means the field was never set.
     """
     return {
         "name": bool(p.get("customer_name")),
-        "city": bool(p.get("city") or p.get("station_address")),
+        "city": bool(p.get("station_address")),
         "storage": p.get("storage_choice") is not None,
         "date": bool(p.get("date")),
         "time": bool(p.get("time")),
@@ -1962,6 +1967,12 @@ def next_fitting_question(p: dict[str, Any]) -> str:
     collected = fitting_steps_collected(p)
     for field_key, question in FITTING_STEPS:
         if not collected[field_key]:
+            if field_key == "city" and p.get("city"):
+                # City known, station not: what to say depends on a lookup the
+                # bot has not made yet. A city with one point (Харків, Черкаси,
+                # Запоріжжя) needs no question at all — `get_fitting_stations`
+                # pins it — so there is no sentence that is right for both.
+                return ""
             return question
     return ""
 
@@ -2037,7 +2048,11 @@ def _render_fitting_progress(p: dict[str, Any]) -> str:
             parts_addr.append(city)
         if station_addr:
             parts_addr.append(station_addr)
-        checklist.append(("Місто/точка", collected["city"], ", ".join(parts_addr)))
+        if collected["city"]:
+            row_desc = ", ".join(parts_addr)
+        else:
+            row_desc = f"{city}, точку НЕ обрано — ⛔ НЕ вигадуй station_id"
+        checklist.append(("Місто/точка", collected["city"], row_desc))
     else:
         checklist.append(("Місто/точка", collected["city"], "не обрано"))
     storage_desc = "не з'ясовано"
@@ -2220,6 +2235,16 @@ def _render_fitting_progress(p: dict[str, Any]) -> str:
             "\"customer_request\", summary=\"клієнт бажає говорити з "
             "оператором\")` → клієнт почув «оператори недоступні». Правильно: "
             "передай vehicle_info=«Mitsubishi Pajero» дослівно з ✅ рядка."
+        )
+    elif next_step_idx == 1 and city:
+        # City known, station not (b72ec368): a lookup first, and only then a
+        # question — and none at all when the city has a single point.
+        lines.append(
+            f"\n🛑 **ЄДИНА ДОЗВОЛЕНА ДІЯ ЗАРАЗ: виклич "
+            f"`get_fitting_stations(city=\"{city}\")` БЕЗ query.** "
+            "Одна точка → назви її адресу і спитай «Записуємо туди?» — район НЕ питай. "
+            "Кілька точок → спитай район (district_options). "
+            "⛔ НЕ вигадуй station_id і НЕ викликай get_fitting_slots до вибору точки."
         )
     else:
         next_label = step_labels[next_step_idx]

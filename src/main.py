@@ -2798,7 +2798,13 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             # 2026-08-17: bot re-listed 4 districts at Krok 6 after date was
             # already given because `last_fitting_station_id` was never set
             # from a bare `get_fitting_stations` call).
-            if effective_query and len(stations_out) == 1:
+            #
+            # A city with a single point pins it too, query or not (Харків,
+            # Черкаси, Запоріжжя): there is nothing to choose, and the
+            # «exactly one station seen» fallback in the pipeline fails as soon
+            # as an earlier lookup in the call listed other cities (b72ec368
+            # saw nine before asking for Харків).
+            if (effective_query or city) and len(stations_out) == 1:
                 only_id = stations_out[0].get("id")
                 if only_id:
                     session.last_fitting_station_id = only_id
@@ -2949,6 +2955,43 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
             date_to,
             kwargs,
         )
+
+        # The station must be one this call has actually been shown. b72ec368
+        # (2026-09-25) looked up slots at 000000008, an id no tool had returned,
+        # read the times to the caller, and was only stopped at book_fitting —
+        # after colour and brand had been collected for a station that was never
+        # chosen. Same membership rule as book_fitting's, refused earlier.
+        if str(station_id) not in session.fitting_station_ids:
+            known_ids = sorted(session.fitting_station_ids)
+            if len(known_ids) == 1:
+                logger.warning(
+                    "get_fitting_slots: auto-correcting station_id=%s → %s for call %s",
+                    station_id,
+                    known_ids[0],
+                    session.channel_uuid,
+                )
+                station_id = known_ids[0]
+                kwargs["station_id"] = station_id
+            else:
+                logger.warning(
+                    "get_fitting_slots: station_id=%s was never returned in call %s "
+                    "(known: %s) — refusing",
+                    station_id,
+                    session.channel_uuid,
+                    known_ids,
+                )
+                return {
+                    "error": True,
+                    "action_required": "call_get_fitting_stations",
+                    "reason": "slots_station_not_chosen",
+                    "message": (
+                        f"⛔ Слоти для station_id='{station_id}' не шукаю: цю точку "
+                        "клієнту в цьому дзвінку не показували. Спершу виклич "
+                        "get_fitting_stations (місто клієнта; район — якщо назвав), "
+                        "узгодь точку з клієнтом і візьми її 'id' з результату."
+                        + (f" Відомі точки: {', '.join(known_ids)}." if known_ids else "")
+                    ),
+                }
 
         # Wave 14 (2026-09-07) — the date must come from the client, not from
         # the model. Call add8354b: the LLM jumped straight to

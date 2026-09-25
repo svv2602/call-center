@@ -184,6 +184,9 @@ class TestTheChecklistHelpersAgree:
         p = {
             "customer_name": "Олена",
             "city": "Дніпро",
+            # A station was chosen on 60ae3fdd; since 2026-09-25 the city row
+            # needs one, so a fixture without it would stop at Krok 1.
+            "station_address": "пров. Добровольців, 1д",
             "storage_choice": "own",
             "date": None,
             "date_no_slots": CLOSED,
