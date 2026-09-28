@@ -18,6 +18,7 @@ from sqlalchemy import text
 from src.api.auth import require_permission
 from src.api.database import get_engine as _get_engine
 from src.config import get_settings
+from src.knowledge.categories import CATEGORY_VALUES
 from src.llm import get_router
 
 if TYPE_CHECKING:
@@ -538,21 +539,10 @@ async def trigger_source_run(config_id: UUID, _: dict[str, Any] = _perm_x) -> di
 #  Watched pages
 # ═══════════════════════════════════════════════════════════
 
-_VALID_CATEGORIES = {
-    "brands",
-    "guides",
-    "faq",
-    "comparisons",
-    "general",
-    "policies",
-    "procedures",
-    "returns",
-    "warranty",
-    "delivery",
-    "promotions",
-    "news",
-}
+_VALID_CATEGORIES = frozenset(CATEGORY_VALUES)
 
+# Pydantic needs a static Literal; it must list exactly CATEGORY_VALUES
+# (enforced by tests/unit/test_kb_categories_sync.py).
 KnowledgeCategory = Literal[
     "brands",
     "guides",
@@ -566,6 +556,8 @@ KnowledgeCategory = Literal[
     "delivery",
     "promotions",
     "news",
+    "wheels",
+    "fitting",
 ]
 
 

@@ -14,6 +14,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from src.knowledge.categories import CATEGORY_VALUES
 from src.llm.helpers import llm_complete
 from src.llm.models import LLMTask
 
@@ -43,7 +44,7 @@ Respond ONLY with valid JSON (no markdown fences):
   "is_useful": true/false,
   "skip_reason": "reason if not useful, null otherwise",
   "title": "cleaned article title in Ukrainian",
-  "category": "one of: brands, guides, faq, comparisons, policies, procedures, returns, warranty, delivery, promotions, news, general",
+  "category": "one of: <CATEGORIES>",
   "content": "cleaned article content in Ukrainian markdown"
 }"""
 
@@ -84,9 +85,15 @@ Respond ONLY with valid JSON (no markdown fences):
   "is_useful": true,
   "skip_reason": null,
   "title": "cleaned article title in Ukrainian",
-  "category": "one of: brands, guides, faq, comparisons, policies, procedures, returns, warranty, delivery, promotions, news, general",
+  "category": "one of: <CATEGORIES>",
   "content": "cleaned article content in Ukrainian markdown"
 }"""
+
+# The category list in the prompts comes from the single source of truth, so a
+# category added there is offered to the LLM (and accepted below) without a copy.
+_CATEGORY_CHOICES = ", ".join(CATEGORY_VALUES)
+_SYSTEM_PROMPT = _SYSTEM_PROMPT.replace("<CATEGORIES>", _CATEGORY_CHOICES)
+_SHOP_INFO_SYSTEM_PROMPT = _SHOP_INFO_SYSTEM_PROMPT.replace("<CATEGORIES>", _CATEGORY_CHOICES)
 
 _TRANSLATION_ADDENDUM = """
 6. The source article is in {language_name}. Translate ALL content to Ukrainian (українською мовою). Preserve technical tire terminology (sizes, specifications). Keep brand names in their original form."""
@@ -198,20 +205,7 @@ Content:
         raise
 
 
-_VALID_CATEGORIES = {
-    "brands",
-    "guides",
-    "faq",
-    "comparisons",
-    "policies",
-    "procedures",
-    "returns",
-    "warranty",
-    "delivery",
-    "general",
-    "promotions",
-    "news",
-}
+_VALID_CATEGORIES = frozenset(CATEGORY_VALUES)
 
 
 def _validate_category(category: str | None) -> str:

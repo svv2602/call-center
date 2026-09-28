@@ -12,20 +12,18 @@ import sys
 
 from sqlalchemy.exc import IntegrityError
 
-CATEGORY_PATTERNS = [
-    "faq",
-    "guides",
-    "comparisons",
-    "brands",
-    "procedures",
-    "delivery",
-    "warranty",
-    "returns",
-    "policies",
-    "general",
-    "fitting",
-    "promotions",
-]
+from src.knowledge.categories import CATEGORY_VALUES
+
+CATEGORY_PATTERNS = CATEGORY_VALUES
+
+# Service files in knowledge_seed/ that are not KB articles (tenant manifest).
+SKIP_FILES = frozenset({"TENANTS.md"})
+
+
+def list_seed_files(root: str = "knowledge_seed") -> list[str]:
+    """All seed articles under *root*, service files excluded."""
+    files = glob.glob(os.path.join(root, "**", "*.md"), recursive=True)
+    return sorted(f for f in files if os.path.basename(f) not in SKIP_FILES)
 
 
 def detect_category(filepath: str) -> str:
@@ -72,7 +70,7 @@ async def main() -> None:
 
     engine = create_async_engine(database_url)
 
-    files = sorted(glob.glob("knowledge_seed/**/*.md", recursive=True))
+    files = list_seed_files()
     print(f"Found {len(files)} seed files")
 
     ok = 0

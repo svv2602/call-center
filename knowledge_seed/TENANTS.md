@@ -1,7 +1,7 @@
 # Манифест привязки статей к тенантам (сетям)
 
 > Служебный файл, **не статья базы знаний**. Не импортировать.
-> `scripts/seed_knowledge.py` берёт `knowledge_seed/**/*.md` и затянет этот файл как статью `general` — при seed-скрипте его исключить (или удалить созданную статью «Манифест привязки статей к тенантам (сетям)»).
+> `scripts/seed_knowledge.py` его пропускает (`SKIP_FILES`). Если файл попал в БД раньше — удалить статью «Манифест привязки статей к тенантам (сетям)».
 
 Статьи с `tenant_id IS NULL` (shared) видны обеим сетям. Сетевые статьи должны иметь `tenant_id` своей сети — поиск фильтрует `tenant_id IS NULL OR tenant_id = :tenant` (`src/knowledge/search.py`).
 
@@ -9,7 +9,9 @@
 
 ## Привязка
 
-Область: `delivery/`, `warranty/`, `returns/`, `policies/`. Остальные папки не размечены (см. «Вне манифеста»).
+Область: `delivery/`, `warranty/`, `returns/`, `policies/`, `fitting/`. Остальные папки не размечены (см. «Вне манифеста»).
+
+`fitting/` целиком — `tvoya-shina`: шиномонтаж и сезонное хранение оказывает только Твоя Шина, Про Колесо эти услуги не предоставляет (решение владельца 2026-09-28). Shared-статья о монтаже или хранении была бы видна и Про Колесо — поэтому все 7 файлов сетевые.
 
 | Файл | Тенант |
 |---|---|
@@ -41,8 +43,15 @@
 | `policies/07_policies_aktsii_loyalnist.md` | shared |
 | `policies/08_policies_tvoya_shina.md` | `tvoya-shina` |
 | `policies/09_policies_prokoleso.md` | `prokoleso` |
+| `fitting/01_fitting_poslugy_shynomontazhu.md` | `tvoya-shina` |
+| `fitting/02_fitting_tsiny_ta_terminy.md` | `tvoya-shina` |
+| `fitting/03_fitting_zapys_online.md` | `tvoya-shina` |
+| `fitting/04_fitting_sezonne_zberigannya.md` | `tvoya-shina` |
+| `fitting/05_fitting_kompleksnyy_shynomontazh.md` | `tvoya-shina` |
+| `fitting/06_fitting_grafik_roboty.md` | `tvoya-shina` |
+| `fitting/07_fitting_pidgotovka_do_vizitu.md` | `tvoya-shina` |
 
-Итого: 22 shared, 3 `tvoya-shina`, 3 `prokoleso`.
+Итого: 22 shared, 10 `tvoya-shina` (3 + 7 `fitting/`), 3 `prokoleso`.
 
 ## Как привязать `tenant_id` при импорте
 
@@ -52,10 +61,10 @@
    ```sql
    SELECT id, slug, name FROM tenants WHERE slug IN ('tvoya-shina', 'prokoleso');
    ```
-2. **Сетевые статьи (6 файлов)** — создавать сразу с `tenant_id`, чтобы ни на минуту не оказаться shared:
+2. **Сетевые статьи (13 файлов: 6 + 7 `fitting/`)** — создавать сразу с `tenant_id`, чтобы ни на минуту не оказаться shared:
    ```
    POST /knowledge/articles
-   {"title": "<H1 файла>", "category": "<delivery|warranty|policies>", "content": "<тело файла без H1>", "tenant_id": "<uuid сети>"}
+   {"title": "<H1 файла>", "category": "<delivery|warranty|policies|fitting>", "content": "<тело файла без H1>", "tenant_id": "<uuid сети>"}
    ```
    Если всё же импортированы через `/knowledge/articles/import` — сразу после импорта:
    ```
@@ -72,11 +81,12 @@
    ```sql
    SELECT a.title, a.category, t.slug
    FROM knowledge_articles a LEFT JOIN tenants t ON t.id = a.tenant_id
-   WHERE a.category IN ('delivery', 'warranty', 'returns', 'policies')
+   WHERE a.category IN ('delivery', 'warranty', 'returns', 'policies', 'fitting')
    ORDER BY a.category, a.title;
    ```
-   Ожидается: 6 строк с slug (по 3 на сеть), остальные — NULL.
+   Ожидается: 13 строк с slug (10 `tvoya-shina`, 3 `prokoleso`), остальные — NULL.
+   Статьи `fitting/`, импортированные раньше, могли получить категорию `general` (категории `fitting` до волны H не было) — `PATCH` им и `category: "fitting"`.
 
 ## Вне манифеста
 
-Папки `fitting/`, `procedures/`, `general/`, `faq/`, `guides/`, `brands/`, `comparisons/` не размечены. В `fitting/` (монтаж, хранение) — услуги только Твоя Шина, а статьи shared; в `procedures/03_procedures_perevirka_nayavnosti.md` — «зарезервувати шини на 24 години», что противоречит решению владельца (резерва нет). Требует отдельного чеклиста.
+Папки `procedures/`, `general/`, `faq/`, `guides/`, `brands/`, `comparisons/`, `wheels/` не размечены — shared, без сетевых условий. `procedures/03_procedures_perevirka_nayavnosti.md` больше не обещает резерв на 24 часа (волна H).
