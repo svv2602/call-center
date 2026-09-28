@@ -15,12 +15,27 @@ def _compact(obj: Any) -> str:
     return json.dumps(obj, ensure_ascii=False, separators=(",", ":"), default=str)
 
 
-def _compress_vehicle_sizes(result: dict[str, Any]) -> str:
-    """Keep found, brand, model, stock_sizes, acceptable_sizes; trim years."""
+def _compress_vehicle_sizes(result: dict[str, Any], *, sales_enabled: bool = False) -> str:
+    """Keep found, brand, model, stock_sizes, acceptable_sizes; trim years.
+
+    ``sales_enabled`` (the network's ``NetworkPolicy``): the factory front/rear
+    pairs (``staggered_pairs``) stay — without them the LLM cannot pass
+    ``rear_*`` to ``search_tires`` — and the non-factory sizes are replaced by
+    ``acceptable_sizes_policy``: a specialist picks them, the bot never offers
+    one (owner decision 2026-09-28). A list the model cannot see is a size it
+    cannot offer; a prompt rule alone regresses. Off — byte-identical.
+    """
     out: dict[str, Any] = {}
-    for key in ("found", "brand", "model", "stock_sizes", "acceptable_sizes"):
+    keys: tuple[str, ...] = ("found", "brand", "model", "stock_sizes", "acceptable_sizes")
+    if sales_enabled:
+        keys = ("found", "brand", "model", "stock_sizes", "staggered_pairs")
+    for key in keys:
         if key in result:
             out[key] = result[key]
+    if sales_enabled and (result.get("acceptable_sizes") or result.get("acceptable_sizes_policy")):
+        out["acceptable_sizes_policy"] = (
+            "нештатні розміри підбирає спеціаліст — не пропонуй їх клієнту"
+        )
     # Keep years only if <= 5 elements
     years = result.get("years")
     if years is not None and len(years) <= 5:
@@ -109,16 +124,76 @@ def _compress_knowledge(result: dict[str, Any]) -> str:
     return _compact(out)
 
 
-def _compress_search_tires(result: dict[str, Any]) -> str:
+#: ``caveat_key`` of ``search_tires`` (``StoreClient._search_tires_ladder``) →
+#: the sentence the caller hears before the variants. Spoken by the streaming
+#: loop itself (`tire_caveat_phrase`), not left to the LLM.
+_CAVEAT_NO_STUDDED = "no_studded_offer_friction"
+_CAVEAT_BRAND_UNAVAILABLE = "brand_unavailable_alternatives"
+_NO_STUDDED_PHRASE = (
+    "Шипованих у цьому розмірі зараз немає — можу запропонувати фрикційні (липучку)."
+)
+
+
+def tire_caveat_phrase(result: Any, args: dict[str, Any] | None = None) -> str | None:
+    """The caveat for a relaxed ``search_tires`` answer, or ``None``.
+
+    Only a result that carries both ``caveat_key`` and items has one: the
+    ladder marks a result only when it found something after dropping a
+    filter. An unknown key → ``None`` (nothing is invented for it).
+    """
+    if not isinstance(result, dict) or not result.get("items"):
+        return None
+    key = result.get("caveat_key")
+    relaxed = result.get("relaxed") or []
+    brand = str((args or {}).get("brand") or "").strip()
+    brand_missing = (
+        f"{brand} зараз немає в наявності" if brand else "Цього бренду зараз немає в наявності"
+    )
+    if key == _CAVEAT_NO_STUDDED:
+        if "brand" in relaxed:
+            return f"{brand_missing}. {_NO_STUDDED_PHRASE}"
+        return _NO_STUDDED_PHRASE
+    if key == _CAVEAT_BRAND_UNAVAILABLE:
+        return f"{brand_missing}, ось альтернативи."
+    return None
+
+
+def _compress_search_tires(
+    result: dict[str, Any],
+    *,
+    sales_enabled: bool = False,
+    args: dict[str, Any] | None = None,
+) -> str:
     """Limit to top 3 results, keep only essential fields.
 
     Drops id (SKU), season (already known from query context).
+
+    ``sales_enabled``: the relaxation marks (``relaxed``, ``caveat_key``), the
+    rear axle of a staggered pair (``rear_size``/``rear_price``, never
+    ``rear_id``) and the caveat the loop has already spoken stay, so the model
+    neither repeats the caveat nor presents a friction tyre as the studded one
+    asked for. Off — byte-identical.
     """
     items = result.get("items", [])
-    essential_keys = ("brand", "model", "size", "price", "in_stock")
+    essential_keys: tuple[str, ...] = ("brand", "model", "size", "price", "in_stock")
+    if sales_enabled:
+        essential_keys = (*essential_keys, "rear_size", "rear_price")
     compressed = [{k: v for k, v in item.items() if k in essential_keys} for item in items[:3]]
     out: dict[str, Any] = {"total": result.get("total", len(items))}
     out["items"] = compressed
+    if sales_enabled:
+        out["price_per"] = "1 шина"
+        if result.get("staggered"):
+            out["staggered"] = True
+        if result.get("relaxed"):
+            out["relaxed"] = list(result["relaxed"])
+        if result.get("caveat_key"):
+            out["caveat_key"] = result["caveat_key"]
+        phrase = tire_caveat_phrase(result, args)
+        if phrase:
+            out["caveat_already_said"] = (
+                f"«{phrase}» — вже сказано клієнту, не повторюй; одразу назви варіанти"
+            )
     return _compact(out)
 
 
@@ -170,14 +245,30 @@ _COMPRESSORS: dict[str, Any] = {
 }
 
 
-def compress_tool_result(tool_name: str, result: Any) -> str:
+def compress_tool_result(
+    tool_name: str,
+    result: Any,
+    *,
+    sales_enabled: bool = False,
+    args: dict[str, Any] | None = None,
+) -> str:
     """Compress a tool result for LLM history.
 
     If the tool has a registered compressor and the result is a dict,
     applies field stripping.  Otherwise falls back to ``str(result)``.
+
+    ``sales_enabled`` (``NetworkPolicy.sales_enabled``) keeps what the tyre
+    consultation needs from ``search_tires`` / ``get_vehicle_tire_sizes``;
+    ``args`` are the tool call's arguments (the brand of a caveat). Off —
+    byte-identical to the fitting-only output.
     """
     if not isinstance(result, dict):
         return str(result)
+
+    if sales_enabled and tool_name == "search_tires":
+        return _compress_search_tires(result, sales_enabled=True, args=args)
+    if sales_enabled and tool_name == "get_vehicle_tire_sizes":
+        return _compress_vehicle_sizes(result, sales_enabled=True)
 
     compressor = _COMPRESSORS.get(tool_name)
     if compressor is not None:

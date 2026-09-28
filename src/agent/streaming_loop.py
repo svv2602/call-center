@@ -56,7 +56,7 @@ from src.agent.time_detect import (
     lists_alternative_times,
     reslices_the_pinned_hour,
 )
-from src.agent.tool_result_compressor import compress_tool_result
+from src.agent.tool_result_compressor import compress_tool_result, tire_caveat_phrase
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
 from src.core.audio_sender import send_audio_stream
 from src.core.sentence_buffer import BufferEvent, SentenceReady, buffer_sentences
@@ -1473,6 +1473,7 @@ class StreamingAgentLoop:
         offered_slots: list[dict[str, str]] | None = None,
         fitting_progress: dict[str, Any] | None = None,
         booking_gate_mode: str | None = None,
+        tire_progress: dict[str, Any] | None = None,
     ) -> TurnResult:
         """Run a full conversation turn with streaming audio output.
 
@@ -1544,6 +1545,7 @@ class StreamingAgentLoop:
             fitting_progress=fitting_progress,
             enabled_tools={t["name"] for t in (self._tools or [])},
             network_policy=self._network_policy,
+            **({"tire_progress": tire_progress} if tire_progress else {}),
         )
 
         # Record prompt and history metrics
@@ -1797,12 +1799,17 @@ class StreamingAgentLoop:
                 unique_tool_calls.append(tc)
 
             suppressed_ids: set[str] = set()
+            # Caveats of relaxed `search_tires` answers (sales scope, wave 5-M),
+            # spoken by the loop once the round's tools are back.
+            caveats: list[str] = []
 
             # Execute tool calls in parallel (with per-tool timeout).
             # If LLM produced no text before the tool call, speak a contextual
             # wait-phrase in parallel so the caller doesn't hear silence.
             async def _execute_one_tool(
-                tc: Any, _suppressed: set[str] = suppressed_ids
+                tc: Any,
+                _suppressed: set[str] = suppressed_ids,
+                _caveats: list[str] = caveats,
             ) -> dict[str, Any]:
                 try:
                     args = json.loads(tc.arguments_json) if tc.arguments_json else {}
@@ -1866,7 +1873,13 @@ class StreamingAgentLoop:
                     refused_this_turn[refusal_key] = str(
                         raw.get("reason") or raw.get("action_required") or "unspecified"
                     )
-                content = compress_tool_result(tc.name, raw)
+                if self._sales_enabled and tc.name == "search_tires":
+                    phrase = tire_caveat_phrase(raw, args)
+                    if phrase and phrase not in _caveats:
+                        _caveats.append(phrase)
+                content = compress_tool_result(
+                    tc.name, raw, sales_enabled=self._sales_enabled, args=args
+                )
                 if self._pii_vault is not None:
                     content = self._pii_vault.mask(content)
                 return {"type": "tool_result", "tool_use_id": tc.id, "content": content}
@@ -1919,6 +1932,24 @@ class StreamingAgentLoop:
                     await asyncio.gather(*[_execute_one_tool(tc) for tc in unique_tool_calls])
                 )
             tool_calls_made += len(tool_results)
+
+            # The caveat of a relaxed tyre search is the first thing the caller
+            # hears about the results — said by the code, not left to the LLM
+            # (a prompt rule regresses under attention dilution). The tool
+            # result tells the model it has been said (`caveat_already_said`).
+            for phrase in caveats:
+                if interrupted or disconnected or self._conn.is_closed:
+                    break
+                if self._barge_in is not None and self._barge_in.is_set():
+                    break
+                try:
+                    audio = await self._tts.synthesize(phrase)
+                    if self._echo_canceller is not None:
+                        self._echo_canceller.record_far_end(audio)
+                    await self._conn.send_audio(audio, cancel_event=self._barge_in)
+                    spoken_parts.append(phrase)
+                except Exception:
+                    logger.warning("Tyre caveat speak failed: %r", phrase, exc_info=True)
 
             conversation_history.append({"role": "user", "content": tool_results})
 

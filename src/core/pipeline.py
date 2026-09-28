@@ -768,6 +768,172 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
+# ═══════════════════════════════════════════════════════════
+#  Tyre consultation (sales scope, wave 5-M)
+# ═══════════════════════════════════════════════════════════
+#
+# Pure, synchronous, no I/O — the same contract as the FSM's deterministic
+# step, but a separate call: the FSM is fitting-only and its step must stay
+# zero-I/O and untouched. Everything here runs only while
+# `NetworkPolicy.sales_enabled`; off, nothing is parsed, nothing is stored and
+# the prompt has no «Підбір шин» block.
+
+#: Season words, UA + RU, stems cover the oblique cases («зимову», «летние»).
+#: All-season first: «всесезонні» must not also read as a season word.
+_TIRE_SEASON_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
+    (
+        "all_season",
+        re.compile(r"всесезон\w*|цілорічн\w*|круглорічн\w*|круглогодичн\w*|всепогодн\w*"),
+    ),
+    ("winter", re.compile(r"\bзим\w*")),
+    ("summer", re.compile(r"\bлітн\w*|\bліто\b|\bлетн\w*|\bлето\b")),
+)
+
+#: «Без різниці» — an answer only to a season question (see `parse_tire_season`).
+_TIRE_SEASON_ANY_RE = re.compile(
+    r"без\s+різниці|без\s+разниц\w*|все\s*одно|неважливо|не\s+важливо"
+    r"|не\s+важно|неважно|будь[\s-]*як\w*|любой|любые|які\s+завгодно|какие\s+угодно"
+)
+
+#: The bot's last utterance asked about the season / the size. A bare diameter
+#: or «все одно» counts only as an answer to that question (finding F: the tail
+#: of a phone number read as R16).
+_BOT_ASKED_SEASON_RE = re.compile(r"сезон|літні|зимові|летние|зимние", re.IGNORECASE)
+_BOT_ASKED_SIZE_RE = re.compile(
+    r"розмір\w*|діаметр\w*|радіус\w*|размер\w*|диаметр\w*|радиус\w*", re.IGNORECASE
+)
+
+#: A fitting request is not a tyre consultation, even when it names tyres
+#: («зимову резину поміняти»). Collection starts on a sales word without these.
+_FITTING_REQUEST_RE = re.compile(
+    r"монтаж|переобу|перевзу|запис|балансуван|балансиров|зберіган|хранени"
+)
+
+
+def parse_tire_season(text: str, *, bot_asked_season: bool = False) -> str | None:
+    """``summer`` / ``winter`` / ``all_season`` / ``any`` — or ``None``.
+
+    Two seasons in one utterance («літні чи зимові?») is a question → ``None``.
+    ``any`` («без різниці», «все одно») only answers a season question.
+    """
+    low = text.lower()
+    found: list[str] = []
+    for season, pattern in _TIRE_SEASON_PATTERNS:
+        spans = [m.span() for m in pattern.finditer(low)]
+        if spans:
+            found.append(season)
+            for start, end in spans:
+                low = low[:start] + " " * (end - start) + low[end:]
+    if len(found) == 1:
+        return found[0]
+    if found:
+        return None
+    if bot_asked_season and _TIRE_SEASON_ANY_RE.search(low):
+        return "any"
+    return None
+
+
+def _format_tire_size(size: Any) -> str:
+    return f"{size.width}/{size.aspect} R{size.diameter}{size.suffix or ''}"
+
+
+def merge_tire_query(
+    state: dict[str, Any],
+    text: str,
+    *,
+    last_bot_text: str = "",
+    consult_started: bool = False,
+) -> dict[str, Any]:
+    """``state`` updated with what ``text`` says about the tyres wanted.
+
+    Pure: returns a new dict. Collection starts on a full size, a nail type,
+    a tyre brand, or a sales word (``sales_intents``) in an utterance that is
+    not a fitting request; once started (``state`` non-empty or
+    ``consult_started``) every later utterance is read. A newer value
+    overwrites an older one — the caller corrected themselves. Empty values
+    are never stored (an empty list passes the progress-block filter).
+    """
+    from src.agent.intent_classifier import sales_intents
+    from src.agent.parsers.tire_query import (
+        extract_tire_brands,
+        parse_budget,
+        parse_nail_type,
+        parse_quantity,
+        parse_tech_requirements,
+        parse_tire_size,
+    )
+
+    sizes = parse_tire_size(text) or []
+    full = [s for s in sizes if s.is_full]
+    nail = parse_nail_type(text)
+    brands = extract_tire_brands(text)
+    started = bool(state) or consult_started
+    if not started:
+        started = bool(full or nail or brands) or bool(
+            sales_intents(text) and not _FITTING_REQUEST_RE.search(text.lower())
+        )
+    if not started:
+        return dict(state)
+
+    out = dict(state)
+    if full:
+        front = [s for s in full if s.axle != "rear"]
+        rear = [s for s in full if s.axle == "rear"]
+        out["sizes"] = [_format_tire_size(s) for s in front] or None
+        out["rear_size"] = _format_tire_size(rear[0]) if rear else None
+        out.pop("diameter", None)
+    elif sizes and _BOT_ASKED_SIZE_RE.search(last_bot_text or ""):
+        out["diameter"] = sizes[0].diameter
+
+    season = parse_tire_season(
+        text, bot_asked_season=bool(_BOT_ASKED_SEASON_RE.search(last_bot_text or ""))
+    )
+    if season is None and nail is not None and not out.get("season"):
+        # Studs, «під шип», «липучка» exist only on winter tyres.
+        season = "winter"
+    if season is not None:
+        out["season"] = season
+    if nail is not None:
+        out["nail"] = nail
+    quantity = parse_quantity(text)
+    if quantity is not None and quantity.count is not None:
+        out["quantity"] = quantity.count
+    budget = parse_budget(text)
+    if budget is not None:
+        out["budget"] = {"amount": budget.amount, "scope": budget.scope, "is_cap": budget.is_cap}
+    if brands:
+        out["brands"] = list(brands)
+    tech = parse_tech_requirements(text)
+    if tech:
+        out["tech"] = list(tech)
+    return {k: v for k, v in out.items() if v not in (None, "", [], {})}
+
+
+def tire_season_refusal(state: dict[str, Any], *, guard_fired: bool) -> dict[str, Any] | None:
+    """The season guard of ``search_tires`` (sales scope), or ``None`` to allow.
+
+    Default-deny: the season must come from the caller (``state["season"]``,
+    written by `merge_tire_query`) — a season the LLM put into the arguments by
+    itself is not evidence, and an empty one is not a season. «Без різниці» is
+    a season (``any``). Loop-breaker: once per call. After the refusal the bot
+    asks and the caller answers; a second search on an answer the parser did
+    not read is the continuation of that exchange, not a repeat to refuse.
+    """
+    if str(state.get("season") or "").strip():
+        return None
+    if guard_fired:
+        return None
+    return {
+        "error": True,
+        "reason": "season_unknown",
+        "action_required": "ask_season",
+        "message": (
+            "Сезон шин клієнт ще не назвав. Спершу коротко запитай: «Вам літні, "
+            "зимові чи всесезонні?» — і лише після відповіді виклич search_tires."
+        ),
+    }
+
+
 class CallPipeline:
     """Orchestrates the STT → LLM → TTS pipeline for a single call.
 
@@ -1011,6 +1177,43 @@ class CallPipeline:
         if selected is None and len(self._session.fitting_stations_seen) == 1:
             selected = self._session.fitting_stations_seen[0]
         return selected
+
+    def _sales_enabled(self) -> bool:
+        """``NetworkPolicy.sales_enabled`` of this call's LLM loop (off without one)."""
+        holder = self._streaming_loop if self._streaming_loop is not None else self._agent
+        policy = getattr(holder, "_network_policy", None)
+        return bool(policy is not None and getattr(policy, "sales_enabled", False) is True)
+
+    def _last_bot_text(self) -> str:
+        for turn in reversed(self._session.dialog_history):
+            if turn.speaker == "assistant" and turn.content:
+                return str(turn.content)
+        return ""
+
+    def _run_tire_query_step(self, transcript: Transcript) -> None:
+        """Parse the caller's tyre request into ``session.tire_query`` (wave 5-M).
+
+        Sales scope only (the caller checks). Synchronous, no I/O, and not part
+        of `_run_fsm_deterministic_step`: that step is the fitting machine's and
+        its zero-I/O contract is what keeps shadow mode safe.
+        """
+        tools_called = self._session.tools_called or set()
+        self._session.tire_query = merge_tire_query(
+            self._session.tire_query,
+            transcript.text,
+            last_bot_text=self._last_bot_text(),
+            consult_started=bool({"search_tires", "get_vehicle_tire_sizes"} & set(tools_called)),
+        )
+
+    def _build_tire_progress(self) -> dict[str, Any] | None:
+        """The «Підбір шин: прогрес» block's input, or ``None``.
+
+        ``None`` while sales are off or nothing was collected — the prompt is
+        then byte-identical to the fitting-only one.
+        """
+        if not self._sales_enabled() or not self._session.tire_query:
+            return None
+        return dict(self._session.tire_query)
 
     def _build_fitting_progress(
         self,
@@ -3273,6 +3476,12 @@ class CallPipeline:
                 continue
             # -----------------------------------------------------------------
 
+            # --- Wave 5-M: tyre consultation parser (sales scope only) -------
+            # Beside the FSM steps, never inside: the FSM is the fitting
+            # machine. Off → one boolean check, nothing parsed or stored.
+            if self._sales_enabled():
+                self._run_tire_query_step(transcript)
+
             # Auto-detect scenario from customer text (every turn).
             # First detection sets session.scenario; subsequent detections
             # accumulate in active_scenarios so modules are only added, never removed.
@@ -3710,6 +3919,7 @@ class CallPipeline:
             )
             # Consume the flag: reset after passing to guard (one-shot signal).
             self._session.krok8_confabulation_pending = False
+            tire_progress = self._build_tire_progress()
 
             if self._streaming_loop is not None:
                 # STREAMING PATH — add user turn to session (streaming loop uses separate _llm_history)
@@ -3749,6 +3959,7 @@ class CallPipeline:
                             offered_slots=offered_slots,
                             fitting_progress=fitting_progress,
                             booking_gate_mode=self._booking_gate_mode(),
+                            **({"tire_progress": tire_progress} if tire_progress else {}),
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )

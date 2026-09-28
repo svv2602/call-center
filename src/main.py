@@ -1653,6 +1653,21 @@ def _build_tool_router(
     router.register("get_vehicle_tire_sizes", client.get_vehicle_tire_sizes)
 
     async def _search_tires(**params: Any) -> dict[str, Any]:
+        if network_policy is not None and network_policy.sales_enabled:
+            # Season before the search (wave 5-M): the caller's season, not one
+            # the LLM filled into the required argument. Once per call.
+            from src.core.pipeline import tire_season_refusal
+
+            refusal = tire_season_refusal(
+                session.tire_query, guard_fired=session.tire_season_guard_fired
+            )
+            if refusal is not None:
+                session.tire_season_guard_fired = True
+                logger.info(
+                    "search_tires: season guard for call %s — season not named by the caller",
+                    session.channel_uuid,
+                )
+                return refusal
         network = session.network_id or "ProKoleso"
         # Ranking comes from the network policy, never from the LLM's args.
         params.pop("brand_priority", None)

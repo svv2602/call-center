@@ -362,9 +362,10 @@ def render_sales_scope(policy: NetworkPolicy) -> str:
         "гарантію — це твоя зона. ⛔ НЕ переводь такого клієнта на оператора — веди "
         "розмову сам: підбір → заявка на замовлення.",
         "",
-        "**Диски:** консультуй тільки за статтями бази знань (search_knowledge_base). "
-        "Підбір дисків робить менеджер — запропонуй з'єднати з менеджером або залишити "
-        "заявку на дзвінок.",
+        "**Диски:** підбирай через search_disks (діаметр, розболтовка, виліт, центральний "
+        "отвір; якщо відомо авто — передай марку, модель і рік). Сумісність з авто визначає "
+        "система: озвучуй її вердикт як є, «підходить» — тільки коли так сказано у "
+        "результаті. Питання про диски без підбору — search_knowledge_base (категорія wheels).",
     ]
     if missing:
         phrases = [_SERVICE_NOT_PROVIDED_PHRASE.get(s, SERVICE_LABELS[s]) for s in missing]
@@ -478,6 +479,40 @@ _MOD_TIRE_SEARCH = """\
 ## Сценарій: швидкий пошук за артикулом (SKU)
 - Клієнт назвав артикул/код товару → одразу check_availability(product_id=артикул). Розмір/сезон/бренд НЕ потрібні. Не знайдено → запитай розмір і переходь до стандартного підбору.
 - Клієнт каже «я на сайті», «бачу шини на сайті» → запитай артикул зі сторінки товару — це найшвидший шлях.\
+"""
+
+#: `_MOD_TIRE_SEARCH` under sales (wave 5-M). The fitting-only prompt keeps
+#: the original byte for byte; `_filter_modules_for_policy` swaps the variant
+#: in. A non-stock size is the specialist's, never «повтори пошук з
+#: допустимим розміром»; the caveat of a relaxed search is spoken by the code.
+_MOD_TIRE_SEARCH_SALES = """\
+
+## Сценарій: підбір шин
+
+⚠️ Порівняння моделей чи брендів («Blizzak 6 чи Alpin 7?») — це КОНСУЛЬТАЦІЯ: search_knowledge_base, розмір не питай.
+
+### Що зібрати (по одному питанню; що вже ✅ у блоці «Підбір шин: прогрес» — не перепитуй)
+1. **Розмір:** «На який автомобіль підбираєте шини? Або знаєте розмір з боковини?»
+   - Авто → get_vehicle_tire_sizes; кілька розмірів → «Який розмір зараз стоїть?»
+   - Різноширока вісь (staggered_pairs) → search_tires з width/profile/diameter передньої осі та rear_* задньої.
+2. **Сезон:** «Вам літні, зимові чи всесезонні?» — ДО search_tires, без сезону пошук не виконається. Зимові → «Шиповані чи без шипів?»
+3. **Бренд або бюджет** — тільки якщо клієнт сам не сказав: «Є побажання по бренду чи бюджету?»
+
+⚡ Розмір + сезон відомі → search_tires.
+
+⛔ НІКОЛИ НЕ ВИГАДУЙ БРЕНД/МОДЕЛЬ З МОВИ КЛІЄНТА: схоже на бренд слово — часто спотворення розпізнавання. Бренд існує лише тоді, коли він є в результаті search_tires; інакше перепитай.
+
+### Після пошуку
+- Назви 2–3 варіанти з результату, ціну — за 1 шину: «Є [бренд] [модель] за [ціна] гривень за шину і [бренд] за [ціна]. Яка вас зацікавила?» Не перелічуй усе.
+- У результаті є caveat_already_said — застереження клієнт уже почув, не повторюй його, одразу варіанти.
+- **Нештатний розмір** (не заводський для авто, «а можна поставити ширші/інший діаметр?») — не пропонуй і не підтверджуй: «Нештатний розмір підбирає спеціаліст — можу передати ваш запит менеджеру.» Сам не шукай нештатний розмір.
+- search_tires повернув items=[] → «На жаль, у цьому розмірі зараз нічого немає в наявності.» Інший розмір не пропонуй.
+- Різні характеристики (91T і 94H, XL) → «Є звичайна і посилена, різниця [ціна] гривень. Яка підходить?»
+- Питання про бренд чи характеристики («Що таке XL?») → search_knowledge_base з category="brands" або "faq", не оператор.
+- Після вибору → check_availability → «Оформити заявку?»
+
+## Сценарій: швидкий пошук за артикулом (SKU)
+- Клієнт назвав артикул → одразу check_availability(product_id=артикул). Не знайдено → запитай розмір і переходь до підбору.\
 """
 
 _MOD_ORDER_FLOW = """\
@@ -1081,6 +1116,18 @@ _MOD_CONSULTATION = """\
 - Якщо питання занадто складне або вузькоспеціальне — переключи на менеджера\
 """
 
+#: `_MOD_CONSULTATION` under sales (wave 5-M): the knowledge base also has
+#: `wheels` and `fitting` categories (`src/knowledge/categories.py`). Appended,
+#: so the module itself stays whole.
+_MOD_CONSULTATION_SALES = (
+    _MOD_CONSULTATION
+    + """
+
+### Ще категорії бази знань
+- Диски (литі чи штамповані, розболтовка, виліт, підбір дисків) → category="wheels"
+- Шиномонтаж, балансування, сезонна заміна, тиск у шинах → category="fitting\""""
+)
+
 _MOD_COMBINED_FLOW = """\
 
 ## Комплексний сценарій: підбір → замовлення → монтаж
@@ -1108,6 +1155,16 @@ _MOD_OBJECTIONS = """\
 запропонуй: «{ім'я}, до речі, бажаєте одразу записатися на шиномонтаж?»
 - Якщо book_fitting НЕМАЄ серед інструментів — НЕ пропонуй монтаж, одразу прощайся\
 """
+
+#: `_MOD_OBJECTIONS` under sales (wave 5-M): «order + fitting in one call» is
+#: postponed by the owner (2026-09-28), so the farewell no longer offers a
+#: fitting booking after an order.
+_MOD_OBJECTIONS_SALES = _MOD_OBJECTIONS.replace(
+    "\n- Якщо клієнт замовив шини, але не записався на монтаж І серед твоїх інструментів є "
+    "book_fitting — запропонуй: «{ім'я}, до речі, бажаєте одразу записатися на шиномонтаж?»"
+    "\n- Якщо book_fitting НЕМАЄ серед інструментів — НЕ пропонуй монтаж, одразу прощайся",
+    "\n- Після заявки на замовлення монтаж НЕ пропонуй — одразу прощайся",
+)
 
 # ---------------------------------------------------------------------------
 # Stage-aware injection (only for modular prompts, not DB/A-B prompts)
@@ -1479,6 +1536,15 @@ _SERVICE_MODULES: dict[str, tuple[str, ...]] = {
 #: (owner decision 2026-09-28).
 _SALES_EXCLUDED_MODULES: tuple[str, ...] = (_MOD_COMBINED_FLOW,)
 
+#: Module → its sales variant (wave 5-M), keyed by identity like the sets
+#: above. Applied in `_filter_modules_for_policy`, the one path every sales
+#: prompt (scenario, fallback, mid-call expansion) goes through.
+_SALES_MODULE_VARIANTS: dict[int, str] = {
+    id(_MOD_TIRE_SEARCH): _MOD_TIRE_SEARCH_SALES,
+    id(_MOD_CONSULTATION): _MOD_CONSULTATION_SALES,
+    id(_MOD_OBJECTIONS): _MOD_OBJECTIONS_SALES,
+}
+
 
 def _filter_modules_for_policy(
     modules: list[str], network_policy: NetworkPolicy | None
@@ -1494,7 +1560,14 @@ def _filter_modules_for_policy(
     for service in SERVICE_LABELS:
         if service not in network_policy.services:
             banned.update(id(m) for m in _SERVICE_MODULES.get(service, ()))
-    return [m for m in modules if id(m) not in banned]
+    out: list[str] = []
+    for m in modules:
+        if id(m) in banned:
+            continue
+        variant = _SALES_MODULE_VARIANTS.get(id(m), m)
+        if variant not in out:
+            out.append(variant)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1875,6 +1948,7 @@ def build_system_prompt_with_context(
     fitting_progress: dict[str, Any] | None = None,
     enabled_tools: set[str] | None = None,
     network_policy: NetworkPolicy | None = None,
+    tire_progress: dict[str, Any] | None = None,
 ) -> str:
     """Build the final system prompt with all dynamic context injected.
 
@@ -2165,6 +2239,12 @@ def build_system_prompt_with_context(
         if progress_text:
             parts.append(progress_text)
 
+    # --- Tyre consultation progress (sales scope, wave 5-M) ---
+    # `pipeline._build_tire_progress` returns None while sales are off, so the
+    # fitting-only prompt never gets this block.
+    if tire_progress and any(tire_progress.values()):
+        parts.append(_render_tire_progress(tire_progress))
+
     return "\n".join(parts)
 
 
@@ -2261,6 +2341,90 @@ def fitting_confirmation_sentence(p: dict[str, Any]) -> str:
         f"{p['customer_name']}, перевіримо: {date_words} о {p['time']}, "
         f"{place}, {p['plate']} {p['brand']}. Підтверджуєте?"
     )
+
+
+_TIRE_SEASON_LABELS: dict[str, str] = {
+    "summer": "літні",
+    "winter": "зимові",
+    "all_season": "всесезонні",
+    "any": "клієнту без різниці — підбирай за наявністю",
+}
+_TIRE_NAIL_LABELS: dict[str, str] = {
+    "studded": "шиповані",
+    "studless": "без шипів (липучка)",
+    "studdable": "під шип",
+}
+_TIRE_TECH_LABELS: dict[str, str] = {
+    "runflat": "RunFlat",
+    "xl": "XL (посилене навантаження)",
+    "reinforced": "посилені",
+    "commercial": "C (комерційні, для буса)",
+}
+
+
+def _render_tire_progress(p: dict[str, Any]) -> str:
+    """«Підбір шин: прогрес» — what the caller already said about the tyres.
+
+    Built from ``session.tire_query`` (`pipeline._build_tire_progress`). Every
+    key the parser writes has a row here: a field in the session and not in
+    this block is a field the LLM asks again. Size and season are always
+    shown — ⏳ tells the model what to ask before ``search_tires``.
+    """
+    lines = ["", "## 🛞 Підбір шин: прогрес (зі слів клієнта — ✅ НЕ перепитуй)"]
+
+    sizes = p.get("sizes") or []
+    rear = p.get("rear_size")
+    diameter = p.get("diameter")
+    if sizes:
+        size_text = " або ".join(str(x) for x in sizes)
+        if rear:
+            size_text += f" (передня вісь), задня вісь {rear}"
+        lines.append(f"- Розмір: ✅ {size_text}")
+    elif diameter:
+        lines.append(
+            f"- Розмір: ✅ діаметр R{diameter}; ⏳ ширину й профіль ще не названо — "
+            "запитай авто або повний розмір"
+        )
+    else:
+        lines.append("- Розмір: ⏳ не названо — запитай авто або розмір з боковини шини")
+
+    season = p.get("season")
+    if season:
+        lines.append(f"- Сезон: ✅ {_TIRE_SEASON_LABELS.get(str(season), str(season))}")
+    else:
+        lines.append(
+            "- Сезон: ⏳ не названо — запитай ДО search_tires (літні, зимові чи всесезонні)"
+        )
+
+    nail = p.get("nail")
+    if nail:
+        lines.append(f"- Шипи: ✅ {_TIRE_NAIL_LABELS.get(str(nail), str(nail))}")
+    quantity = p.get("quantity")
+    if quantity:
+        lines.append(f"- Кількість: ✅ {quantity} шт.")
+    budget = p.get("budget")
+    if isinstance(budget, dict) and budget.get("amount"):
+        text = f"{'до ' if budget.get('is_cap') else 'близько '}{budget['amount']} грн"
+        scope = budget.get("scope")
+        if scope == "per_tire":
+            text += " за шину"
+        elif scope == "per_set":
+            text += " за комплект"
+        lines.append(f"- Бюджет: ✅ {text}")
+    brands = p.get("brands") or []
+    if brands:
+        names = ", ".join(str(b).replace("-", " ").title() for b in brands)
+        lines.append(f"- Бренд: ✅ {names}")
+    tech = p.get("tech") or []
+    if tech:
+        names = ", ".join(_TIRE_TECH_LABELS.get(str(t), str(t)) for t in tech)
+        lines.append(f"- Особливості: ✅ {names}")
+
+    lines.append(
+        "- Після search_tires: 2–3 варіанти, ціна за 1 шину; нештатний розмір не пропонуй "
+        "— його підбирає спеціаліст."
+    )
+    return "\n".join(lines)
 
 
 def _render_fitting_progress(p: dict[str, Any]) -> str:

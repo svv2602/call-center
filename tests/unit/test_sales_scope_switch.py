@@ -299,7 +299,12 @@ class TestSalesFrame:
     @pytest.mark.parametrize("pol", [TSH_ON, PK_ON])
     def test_sales_modules_loaded(self, pol: NetworkPolicy) -> None:
         prompt = prompts.assemble_prompt(scenario="sales", network_policy=pol)
-        for mod in (prompts._MOD_TIRE_SEARCH, prompts._MOD_ORDER_FLOW, prompts._MOD_CONSULTATION):
+        # Wave 5-M: the tyre module is its sales variant under sales.
+        for mod in (
+            prompts._MOD_TIRE_SEARCH_SALES,
+            prompts._MOD_ORDER_FLOW,
+            prompts._MOD_CONSULTATION,
+        ):
             assert mod in prompt
         # «заказ + монтаж в одном звонке» — позже (owner decision)
         assert prompts._MOD_COMBINED_FLOW not in prompt
@@ -578,7 +583,7 @@ class TestMainWiring:
         system = kwargs["system_prompt"]
         assert prompts.render_sales_scope(TSH_ON) in system
         assert prompts._MOD_SCOPE_FITTING_ONLY not in system
-        assert prompts._MOD_ORDER_FLOW in system and prompts._MOD_TIRE_SEARCH in system
+        assert prompts._MOD_ORDER_FLOW in system and prompts._MOD_TIRE_SEARCH_SALES in system
         names = {t["name"] for t in kwargs["tools"]}
         assert {"search_tires", "create_order_draft", "confirm_order", "book_fitting"} <= names
         assert "find_storage" in names

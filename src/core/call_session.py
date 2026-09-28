@@ -244,6 +244,17 @@ class CallSession:
         # Authoritative source for required_context checks and for building the
         # book_fitting payload once the migration path (§2.7) completes.
         self.fsm_filled_fields: dict[str, Any] = {}
+        # --- Tyre consultation (sales scope, wave 5-M) ---
+        # What the caller said about the tyres they want, parsed by
+        # `src.agent.parsers.tire_query` in `pipeline._run_tire_query_step`
+        # (only while `NetworkPolicy.sales_enabled`). Keys: sizes, rear_size,
+        # diameter, season, nail, quantity, budget, brands, tech. Rendered as
+        # «Підбір шин: прогрес» — a key written here and not rendered there is
+        # a key the LLM asks again.
+        self.tire_query: dict[str, Any] = {}
+        # Loop-breaker of the season guard on `search_tires`: it refuses once
+        # per call, never a second time.
+        self.tire_season_guard_fired: bool = False
         # Main-flow state frozen while a side-state (PRICE_INTERRUPT /
         # CANCEL_INTERRUPT) is active. Wave 4-B resumes into it.
         self.fsm_prev_state: str | None = None
@@ -519,6 +530,8 @@ class CallSession:
             "working_hours": self.working_hours,
             "fsm_state": self.fsm_state,
             "fsm_filled_fields": dict(self.fsm_filled_fields),
+            "tire_query": dict(self.tire_query),
+            "tire_season_guard_fired": self.tire_season_guard_fired,
             "fsm_prev_state": self.fsm_prev_state,
             "fsm_history": list(self.fsm_history[-FSM_HISTORY_LIMIT:]),
             "fsm_parser_null_counts": dict(self.fsm_parser_null_counts),
@@ -620,6 +633,16 @@ class CallSession:
                 data.get("channel_uuid"),
                 type(filled).__name__,
             )
+        tire_query = data.get("tire_query") or {}
+        if isinstance(tire_query, dict):
+            session.tire_query = dict(tire_query)
+        else:
+            logger.warning(
+                "Call %s: tire_query has unexpected type %s — ignoring",
+                data.get("channel_uuid"),
+                type(tire_query).__name__,
+            )
+        session.tire_season_guard_fired = data.get("tire_season_guard_fired") is True
         history = data.get("fsm_history") or []
         if isinstance(history, list):
             session.fsm_history = [h for h in history if isinstance(h, dict)][-FSM_HISTORY_LIMIT:]

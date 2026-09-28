@@ -21,7 +21,7 @@ from src.agent.prompts import (
     SYSTEM_PROMPT,
     build_system_prompt_with_context,
 )
-from src.agent.tool_result_compressor import compress_tool_result
+from src.agent.tool_result_compressor import compress_tool_result, tire_caveat_phrase
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
 from src.llm.router import llm_call_id_var
 from src.monitoring.metrics import (
@@ -345,6 +345,8 @@ class LLMAgent:
         )
 
         response_text = ""
+        sales_enabled = bool(self._network_policy is not None and self._network_policy.sales_enabled)
+        caveats: list[str] = []
         tool_call_count = 0
         stop_reason = "end_turn"
         self.last_input_tokens = 0
@@ -504,7 +506,13 @@ class LLMAgent:
                     logger.error("Tool %s timed out after %ds", tu["name"], _TOOL_TIMEOUT_SEC)
                     tool_call_errors_total.labels(tool_name=tu["name"], error_type="timeout").inc()
                     raw = {"error": "Сервіс тимчасово не відповідає, спробуйте ще раз"}
-                content = compress_tool_result(tu["name"], raw)
+                if sales_enabled and tu["name"] == "search_tires":
+                    phrase = tire_caveat_phrase(raw, args)
+                    if phrase and phrase not in caveats:
+                        caveats.append(phrase)
+                content = compress_tool_result(
+                    tu["name"], raw, sales_enabled=sales_enabled, args=args
+                )
                 if self._pii_vault is not None:
                     content = self._pii_vault.mask(content)
                 return {"type": "tool_result", "tool_use_id": tu["id"], "content": content}
@@ -532,6 +540,11 @@ class LLMAgent:
             response_text = await self._request_summary_fallback(
                 system, conversation_history
             )
+
+        # A relaxed tyre search's caveat comes first, said by the code — the
+        # text-mode twin of the spoken caveat in StreamingAgentLoop.
+        if caveats:
+            response_text = " ".join([*caveats, response_text]).strip()
 
         return response_text, conversation_history
 
