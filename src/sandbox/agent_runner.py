@@ -19,7 +19,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from src.agent.agent import LLMAgent
-from src.agent.network_policy import NetworkPolicy
+from src.agent.network_policy import NetworkPolicy, unoffered_service_tools
 from src.agent.parsers.date_parser import resolve_tool_date
 from src.agent.prompt_manager import (
     PromptManager,
@@ -485,8 +485,23 @@ async def create_sandbox_agent(
         )
 
     # Modular prompt assembly for sandbox: skip pronunciation (text mode, no TTS)
+    policy = NetworkPolicy.from_tenant_config((tenant or {}).get("config"))
     if system_prompt is None:
-        system_prompt = assemble_prompt(scenario=None, include_pronunciation=False)
+        if policy.sales_enabled:
+            # As a live call with sales on (main.handle_call): the `sales`
+            # scenario frame, and no tools of services the network lacks.
+            tenant_tools = set((tenant or {}).get("enabled_tools") or []) or None
+            system_prompt = assemble_prompt(
+                scenario="sales",
+                include_pronunciation=False,
+                enabled_tools=tenant_tools,
+                network_policy=policy,
+            )
+        else:
+            system_prompt = assemble_prompt(scenario=None, include_pronunciation=False)
+    if policy.sales_enabled:
+        dropped = unoffered_service_tools(policy)
+        tools = [t for t in tools if t["name"] not in dropped]
 
     # Load few-shot examples and safety rules
     few_shot_context = None

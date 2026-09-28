@@ -48,6 +48,25 @@ BANK_LABELS: dict[str, str] = {
 
 ORDER_FINISH_MODES: tuple[str, ...] = ("request_manager_callback",)
 
+#: Tools that serve each network service. Under sales the tools of every
+#: service a network does not offer are dropped — keyed over the whole
+#: ``SERVICE_LABELS`` enum. One map for the live router, the sandbox and the
+#: admin validation.
+SERVICE_TOOLS: dict[str, frozenset[str]] = {
+    "fitting": frozenset(
+        {
+            "get_fitting_stations",
+            "get_fitting_slots",
+            "reserve_fitting_slot",
+            "book_fitting",
+            "cancel_fitting",
+            "get_fitting_price",
+            "get_customer_bookings",
+        }
+    ),
+    "storage": frozenset({"find_storage"}),
+}
+
 RECOMMEND_COUNT_MIN = 2
 RECOMMEND_COUNT_MAX = 3
 
@@ -265,3 +284,12 @@ def render_network_block(policy: NetworkPolicy | None) -> str | None:
         lines.append(f"- Підбір: пропонуй не більше {policy.recommend_count} варіантів.")
 
     return "\n".join(lines)
+
+
+def unoffered_service_tools(policy: NetworkPolicy) -> frozenset[str]:
+    """Names of the tools of every service ``policy`` does not offer."""
+    names: set[str] = set()
+    for service, tools in SERVICE_TOOLS.items():
+        if service not in policy.services:
+            names |= tools
+    return frozenset(names)

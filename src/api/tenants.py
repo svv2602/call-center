@@ -25,6 +25,7 @@ from src.agent.network_policy import (
     RECOMMEND_COUNT_MAX,
     RECOMMEND_COUNT_MIN,
     SERVICE_LABELS,
+    SERVICE_TOOLS,
 )
 from src.agent.tools import ALL_TOOLS
 from src.api.auth import require_permission
@@ -171,22 +172,8 @@ _POLICY_KEYS: frozenset[str] = frozenset(
     }
 )
 
-#: Tools that serve each network service — the same map `src.main` uses to cut
-#: the tools of services a network does not offer (pinned equal by a test).
-_SERVICE_TOOLS: dict[str, frozenset[str]] = {
-    "fitting": frozenset(
-        {
-            "get_fitting_stations",
-            "get_fitting_slots",
-            "reserve_fitting_slot",
-            "book_fitting",
-            "cancel_fitting",
-            "get_fitting_price",
-            "get_customer_bookings",
-        }
-    ),
-    "storage": frozenset({"find_storage"}),
-}
+#: Tools that serve each network service — single source in ``network_policy``.
+_SERVICE_TOOLS = SERVICE_TOOLS
 
 
 def _list_errors(raw: dict[str, Any], key: str, *, allowed: dict[str, str] | None) -> list[str]:

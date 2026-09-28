@@ -504,6 +504,12 @@ class TestSandboxAgentFactory:
 
         asyncio.run(factory("tvoya-shina", c))
         assert seen["tenant"]["config"]["sales_enabled"] is True
+        from scripts.configure_tenants import PROKOLESO_CONFIG_PATCH, TVOYA_SHINA_CONFIG_PATCH
+
+        assert (
+            seen["tenant"]["config"]["network_policy"]
+            == (TVOYA_SHINA_CONFIG_PATCH["network_policy"])
+        )
         assert seen["tenant_id"] == "t1"
         assert seen["provider_override"] == "openai-gpt41-mini"
         assert seen["tool_mode"] == "mock"
@@ -513,6 +519,9 @@ class TestSandboxAgentFactory:
         assert asyncio.run(handler(width=205)) == {"items": []}
 
         asyncio.run(factory("prokoleso", c))
+        assert (
+            seen["tenant"]["config"]["network_policy"] == PROKOLESO_CONFIG_PATCH["network_policy"]
+        )
         assert seen["tenant_id"] == "t2"
         assert seen["provider_override"] is None
 

@@ -59,7 +59,7 @@ python -m scripts.run_goldset --include-pending --yes --json-out /tmp/goldset.js
 
 ## Флаг продаж
 
-`sales_enabled` из кейса харнесс кладёт в `tenant["config"]` перед сборкой агента. Сборка промпта его пока не читает (волны 1-A / 3-G) — поэтому все `sales_enabled: true` кейсы помечены `pending` на волну, после которой ожидание станет достижимым. Кейсы `scope_today.yaml` (`sales_enabled: false`) гоняются уже сейчас — это базлайн инкумбента.
+`sales_enabled` из кейса харнесс кладёт в `tenant["config"]`, а `network_policy` — из констант `scripts/configure_tenants.py` (условия владельца, а не то, что сейчас лежит в БД). Песочница при `sales_enabled` собирает сценарий `sales` и убирает инструменты услуг, которых нет у сети, — как живой звонок. `pending` остаются только у кейсов, которые проверяются одним голосовым путём (парсер реплики и гард сезона в pipeline); `scope_today.yaml` (`sales_enabled: false`) — базлайн инкумбента.
 
 ## Добавить кейс
 

@@ -28,7 +28,7 @@ from src.agent.agent import LLMAgent, ToolRouter
 from src.agent.booking_result import is_booking_confirmed
 from src.agent.color_translit import latin_prefix_to_color
 from src.agent.confirm_detect import booking_was_confirmed
-from src.agent.network_policy import NetworkPolicy
+from src.agent.network_policy import SERVICE_TOOLS, NetworkPolicy
 from src.agent.parsers.date_parser import resolve_tool_date
 from src.agent.prompt_manager import (
     PromptManager,
@@ -508,23 +508,8 @@ _SCENARIO_TOOLS: dict[str, set[str]] = {
     "sales": {t["name"] for t in ALL_TOOLS},
 }
 
-#: Tools that serve a network service; under sales they go when the network's
-#: ``NetworkPolicy.services`` lacks it. Keyed over the whole ``SERVICE_LABELS``
-#: enum (pinned by a test).
-_SERVICE_TOOLS: dict[str, frozenset[str]] = {
-    "fitting": frozenset(
-        {
-            "get_fitting_stations",
-            "get_fitting_slots",
-            "reserve_fitting_slot",
-            "book_fitting",
-            "cancel_fitting",
-            "get_fitting_price",
-            "get_customer_bookings",
-        }
-    ),
-    "storage": frozenset({"find_storage"}),
-}
+#: Tools that serve a network service — single source in ``network_policy``.
+_SERVICE_TOOLS = SERVICE_TOOLS
 
 
 def _default_scenario(network_policy: NetworkPolicy) -> str:

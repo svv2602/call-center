@@ -586,6 +586,12 @@ class SandboxAgentFactory:
 
         tenant = copy.deepcopy(self._tenants[network])
         tenant.setdefault("config", {})
+        # The owner's network terms, as configure_tenants.py writes them — not
+        # whatever the DB row holds today, so a run grades the intended policy.
+        from scripts.configure_tenants import PROKOLESO_CONFIG_PATCH, TVOYA_SHINA_CONFIG_PATCH
+
+        terms = {"tvoya-shina": TVOYA_SHINA_CONFIG_PATCH, "prokoleso": PROKOLESO_CONFIG_PATCH}
+        tenant["config"]["network_policy"] = copy.deepcopy(terms[network]["network_policy"])
         tenant["config"]["sales_enabled"] = case.sales_enabled
         provider = self.provider_for(network)
         agent = await create_sandbox_agent(
