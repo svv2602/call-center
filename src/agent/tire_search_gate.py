@@ -218,11 +218,17 @@ class ForcedTireSearch:
             return None
         if not turn_names_the_tyres(user_text, last_assistant_text(history)):
             return None
+        from src.agent.network_facts import is_non_stock_size_question
+
+        if is_non_stock_size_question(user_text):
+            # «225/45 R17 замість 205/55 R16?» names a size the specialist
+            # picks — the code must not search it by itself.
+            return None
         if already_searched(args, history):
             return None
         self._fired = True
-        logger.warning(
-            "forced_tire_search args=%s last_customer_text=%r",
+        logger.info(
+            "Forced tyre search args=%s last_customer_text=%r",
             json.dumps(args, ensure_ascii=False, sort_keys=True),
             user_text[:120],
         )

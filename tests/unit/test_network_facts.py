@@ -88,6 +88,10 @@ MICHELIN = promo_overrides(
 
 #: One utterance per topic — every member of the enum (goldset wording where it has one).
 TOPIC_UTTERANCES: dict[str, list[str]] = {
+    nf.NON_STOCK_SIZE: [
+        "можна поставити 225/45 R17 замість 205/55 R16?",
+        "можно поставить шины шире на Октавию?",
+    ],
     nf.DELIVERY_COST: [
         "скільки коштує доставка до Львова?",
         "сколько стоит доставка во Львов?",
@@ -540,3 +544,41 @@ class TestPolicyTexts:
         block = render_network_block(TS) or ""
         assert f"- Відстеження посилки: {TS.tracking_text}." in block
         assert "Відстеження" not in (render_network_block(_ts(tracking_text=_DROP)) or "")
+
+
+class TestNonStockSize:
+    """Goldset `non_stock_size_not_offered` [ТШ] red in 2 of 3 runs: the model
+    offered to check the size itself. Owner: «нештатний розмір підбирає
+    спеціаліст»."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "можна поставити 225/45 R17 замість 205/55 R16?",
+            "можна двісті двадцять п'ять сорок п'ять сімнадцять замість двісті п'ять "
+            "п'ятдесят п'ять шістнадцять?",
+            "можно 215 вместо 205?",
+            "а можна поставити більший радіус?",
+            "а можна інший діаметр поставити, сімнадцятий?",
+            "шини ширші за заводські можна?",
+        ],
+    )
+    def test_size_change_questions(self, text: str) -> None:
+        assert nf.is_non_stock_size_question(text)
+        assert nf.turn_facts(text, TS)[0] == nf.NON_STOCK_SIZE_PHRASE
+        assert nf.turn_facts(text, PK)[0] == nf.NON_STOCK_SIZE_PHRASE
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "потрібні шини 205/55 R16 літні",
+            "є шини 205/55 R16 замість тих, що були?",
+            "чи можна замість Мішлен взяти Бріджстоун?",
+            "можна замість двох шин взяти чотири?",
+            "чи можна доставку замість самовивозу?",
+            "225/45 R17 замість 205/55 R16",  # no question
+        ],
+    )
+    def test_not_a_size_change(self, text: str) -> None:
+        assert not nf.is_non_stock_size_question(text)
+        assert nf.NON_STOCK_SIZE not in nf.fact_topics(text)

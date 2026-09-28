@@ -471,6 +471,16 @@ class TestForcedTireSearch:
             ForcedTireSearch(sales_enabled=True, tools=no_tool).plan(self._Q, BUDGET, hist) is None
         )
 
+    def test_a_non_stock_size_question_is_not_searched(self) -> None:
+        # «225/45 R17 замість 205/55 R16?» — the specialist picks it
+        query = {"sizes": ["225/45 R17"], "season": "summer"}
+        swap = "літні, можна поставити 225/45 R17 замість 205/55 R16?"
+        plain = "літні 225/45 R17"
+        gate = ForcedTireSearch(sales_enabled=True, tools=_TOOLS)
+        assert gate.plan(query, swap, [{"role": "user", "content": swap}]) is None
+        control = ForcedTireSearch(sales_enabled=True, tools=_TOOLS)
+        assert control.plan(query, plain, [{"role": "user", "content": plain}]) is not None
+
 
 # ── The caveat and the goldset mock ─────────────────────────────────
 

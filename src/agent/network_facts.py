@@ -46,6 +46,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: A size other than the car's own («225/45 R17 замість 205/55 R16?»): the
+#: owner's rule is «нештатний розмір підбирає спеціаліст». Network-agnostic,
+#: said by the code like the network's terms — the prompt rule held in only
+#: one TШ goldset run of three.
+NON_STOCK_SIZE = "non_stock_size"
+NON_STOCK_SIZE_PHRASE = "Нештатний розмір підбирає спеціаліст — можу передати ваш запит менеджеру."
 DELIVERY_COST = "delivery_cost"
 DELIVERY_ETA = "delivery_eta"
 TRACKING = "tracking"
@@ -59,6 +65,7 @@ RETURNS = "returns"
 
 #: The whole enum, in the order phrases are said (and cut at the cap).
 TOPICS: tuple[str, ...] = (
+    NON_STOCK_SIZE,
     DELIVERY_COST,
     DELIVERY_ETA,
     TRACKING,
@@ -139,6 +146,40 @@ _ASK = re.compile(
 )
 
 
+#: Words that ask for another size on their own: «ширші», «інший діаметр»,
+#: «нештатний», «більший радіус».
+_SIZE_CHANGE = re.compile(
+    _B + r"(?:нештатн\w*|нестандартн\w*|ширш\w*|шире|вужч\w*"
+    r"|інш\w*\s+(?:розмір\w*|діаметр\w*|радіус\w*|профіл\w*)"
+    r"|друг\w*\s+(?:размер\w*|диаметр\w*|радиус\w*|профил\w*)"
+    r"|(?:більш\w*|больш\w*|менш\w*|збільш\w*|увелич\w*|зменш\w*|уменьш\w*)\s+"
+    r"(?:\w+\s+){0,1}(?:розмір\w*|размер\w*|діаметр\w*|диаметр\w*|радіус\w*|радиус\w*))"
+)
+#: «замість / вместо» — a size change only between two different sizes
+#: («225/45 R17 замість 205/55 R16», «215 вместо 205»), not «шини замість
+#: старих» or «доставку замість самовивозу».
+_INSTEAD = re.compile(_B + r"(?:замість|замiсть|вместо)(?![\w'])")
+#: A tyre width said as a number.
+_WIDTH_NUMBER = re.compile(r"(?<!\d)(?:1[3-9]\d|2\d\d|3[0-5]\d)(?!\d)")
+
+
+def is_non_stock_size_question(text: str | None) -> bool:
+    """Does the caller ask about fitting a size other than the car's own?"""
+    if not text:
+        return False
+    low = _normalize(text)
+    if not _ASK.search(low):
+        return False
+    if _SIZE_CHANGE.search(low):
+        return True
+    if not _INSTEAD.search(low):
+        return False
+    from src.agent.parsers.tire_query import parse_tire_size
+
+    sizes = {(s.width, s.aspect, s.diameter) for s in parse_tire_size(text) or [] if s.width}
+    return len(sizes) >= 2 or len(set(_WIDTH_NUMBER.findall(low))) >= 2
+
+
 def _normalize(text: str) -> str:
     return text.lower().replace("ё", "е").replace("’", "'").replace("ʼ", "'")
 
@@ -150,6 +191,8 @@ def fact_topics(text: str | None) -> list[str]:
     low = _normalize(text)
     asks = _ASK.search(low) is not None
     found: set[str] = set()
+    if is_non_stock_size_question(text):
+        found.add(NON_STOCK_SIZE)
 
     if _DELIVERY.search(low):
         eta = _ETA.search(low) is not None
@@ -224,6 +267,8 @@ def _phrase(
 ) -> str | None:
     """The phrase of one topic, from the policy (or a live promotion), or ``None``."""
     carriers = ", ".join(policy.delivery_carriers)
+    if topic == NON_STOCK_SIZE:
+        return NON_STOCK_SIZE_PHRASE
     if topic == DELIVERY_COST:
         promo = _promo_text(GRANT_FREE_DELIVERY, promos, text, tire_query)
         if promo:
