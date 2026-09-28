@@ -259,7 +259,7 @@
   source: owner:disks-both-networks
   network: both
   sales_enabled: true
-  notes: knowledge_seed/wheels/07 (spacers/adapters) is an open owner question; the tool contract (fit_policy no_spacers_no_redrilling) already forbids the offer
+  notes: knowledge_seed/wheels/07 (spacers/adapters) was removed by the owner (2026-09-28); the tool contract (fit_policy no_spacers_no_redrilling) already forbids the offer
   turns:
     - user: мені сподобались диски з іншою розболтовкою, можна поставити їх на Октавію через проставки?
       expect:

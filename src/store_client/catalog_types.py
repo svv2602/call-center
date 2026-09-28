@@ -16,5 +16,6 @@ PASSENGER_TIRE = "000000001"
 TRUCK_TIRE = "000000002"
 WHEEL = "566"
 
-#: Types the tyre search and availability lookups may return.
+#: Types the tyre search and availability lookups may return. Truck tyres stay
+#: out by the owner's decision (2026-09-28): the bot does not offer them.
 TIRE_SEARCH_TYPES: frozenset[str] = frozenset({PASSENGER_TIRE})
