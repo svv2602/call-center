@@ -120,7 +120,11 @@ class TestCompressorSalesOff:
 
 class TestCompressorSalesOn:
     def test_relaxation_marks_reach_the_llm(self) -> None:
-        out = json.loads(compress_tool_result("search_tires", RELAXED_STUDDED, sales_enabled=True))
+        out = json.loads(
+            compress_tool_result(
+                "search_tires", RELAXED_STUDDED, sales_enabled=True, args={"studded": True}
+            )
+        )
         assert out["relaxed"] == ["studded"]
         assert out["caveat_key"] == "no_studded_offer_friction"
         assert NO_STUDDED_PHRASE in out["caveat_already_said"]

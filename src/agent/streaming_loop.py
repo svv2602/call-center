@@ -63,6 +63,12 @@ from src.agent.time_detect import (
     lists_alternative_times,
     reslices_the_pinned_hour,
 )
+from src.agent.tire_search_gate import (
+    SEARCH_TOOL,
+    ForcedTireSearch,
+    forced_search_messages,
+    run_forced_search,
+)
 from src.agent.tool_result_compressor import compress_tool_result, tire_caveat_phrase
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
 from src.core.audio_sender import send_audio_stream
@@ -1625,6 +1631,20 @@ class StreamingAgentLoop:
 
         return _fallback_text
 
+    async def _speak_code_phrase(self, phrase: str) -> bool:
+        """Say a sentence the code composed (not the LLM); True when it was sent."""
+        if self._conn.is_closed or (self._barge_in is not None and self._barge_in.is_set()):
+            return False
+        try:
+            audio = await self._tts.synthesize(phrase)
+            if self._echo_canceller is not None:
+                self._echo_canceller.record_far_end(audio)
+            await self._conn.send_audio(audio, cancel_event=self._barge_in)
+        except Exception:
+            logger.warning("Code phrase speak failed: %r", phrase, exc_info=True)
+            return False
+        return True
+
     def _next_thinking_filler(self) -> str:
         """Pick this round's thinking filler and advance the rotation.
 
@@ -1799,6 +1819,31 @@ class StreamingAgentLoop:
         # Fit verdicts of this turn's `search_disks` results (sales scope):
         # every one `cannot_confirm` → the model's «підходять» is dropped.
         disk_fit_state = DiskFitClaimState()
+
+        # The caller's tyre request is complete and was not searched yet: the
+        # code searches before the first round (`tire_search_gate`), so the
+        # caller never hears a question and then the results. Once per turn.
+        forced_args = ForcedTireSearch(sales_enabled=self._sales_enabled, tools=tools).plan(
+            tire_progress, user_text, conversation_history
+        )
+        if forced_args is not None:
+            forced_raw = await run_forced_search(
+                forced_args, self._tool_router.execute, timeout=_TOOL_TIMEOUT_SEC
+            )
+            if isinstance(forced_raw, dict) and forced_raw.get("error") is True:
+                refused_this_turn[SEARCH_TOOL + ":" + json.dumps(forced_args, sort_keys=True)] = str(
+                    forced_raw.get("reason") or forced_raw.get("action_required") or "unspecified"
+                )
+            forced_content = compress_tool_result(
+                SEARCH_TOOL, forced_raw, sales_enabled=self._sales_enabled, args=forced_args
+            )
+            if self._pii_vault is not None:
+                forced_content = self._pii_vault.mask(forced_content)
+            conversation_history.extend(forced_search_messages(forced_args, forced_content))
+            tool_calls_made += 1
+            forced_phrase = tire_caveat_phrase(forced_raw, forced_args)
+            if forced_phrase and await self._speak_code_phrase(forced_phrase):
+                spoken_parts.append(forced_phrase)
 
         tool_round = 0
         while tool_round < self._max_tool_rounds:

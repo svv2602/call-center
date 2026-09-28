@@ -51,12 +51,22 @@
   sales_enabled: true
   mocks:
     search_tires:
+      # A search without studs finds the friction tyres as they are; only a
+      # studded search is relaxed (wave-3-G: a constant «relaxed: [studded]»
+      # answered the studless search of turn 1 with «шипованих немає»).
       total: 2
-      relaxed: [studded]
-      caveat_key: no_studded_offer_friction
       items:
         - {id: w1, brand: Bridgestone, model: Blizzak 6, size: 235/55 R19, season: winter, price: 6900, in_stock: true}
         - {id: w2, brand: Firestone, model: Winterhawk 4, size: 235/55 R19, season: winter, price: 5200, in_stock: true}
+      when_args:
+        - args: {studded: '^true$'}
+          result:
+            total: 2
+            relaxed: [studded]
+            caveat_key: no_studded_offer_friction
+            items:
+              - {id: w1, brand: Bridgestone, model: Blizzak 6, size: 235/55 R19, season: winter, price: 6900, in_stock: true}
+              - {id: w2, brand: Firestone, model: Winterhawk 4, size: 235/55 R19, season: winter, price: 5200, in_stock: true}
   notes: two turns (goldset O, group C) — the sales script asks «шиповані чи без шипів?» and brand or budget before search_tires; the second line answers both, so the search and the caveat land on it
   turns:
     - user: потрібні зимові шини 235/55 R19

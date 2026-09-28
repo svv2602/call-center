@@ -164,6 +164,10 @@ def _caveat_phrase(result: dict[str, Any], args: dict[str, Any] | None) -> str |
         f"{brand} зараз немає в наявності" if brand else "Цього бренду зараз немає в наявності"
     )
     if key == _CAVEAT_NO_STUDDED:
+        # «Шипованих немає» answers only a studded request: said after a
+        # search without ``studded``, it denies what the caller never asked.
+        if (args or {}).get("studded") is not True:
+            return None
         if "brand" in relaxed:
             return f"{brand_missing}. {_NO_STUDDED_PHRASE}"
         return _NO_STUDDED_PHRASE

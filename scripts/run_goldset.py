@@ -276,6 +276,8 @@ def parse_case(raw: Any) -> Case:
     mocks = raw.get("mocks") or {}
     if not isinstance(mocks, dict):
         raise CaseError(f"{cid}: mocks must be a mapping tool -> result")
+    for tool, result in mocks.items():
+        _check_when_args(f"{cid} mock {tool}", result)
 
     promotions = _parse_promotions(cid, raw.get("promotions"))
 
@@ -669,6 +671,48 @@ def _const_handler(result: Any) -> Callable[..., Awaitable[Any]]:
     return _handler
 
 
+#: A mock whose answer depends on the call: ``when_args`` is a list of
+#: ``{args: {name: regex}, result: …}`` (matched as ``tool_called`` args, first
+#: match wins); the other keys of the mapping are the answer to any other call.
+#: A constant mock answers every call alike, so it writes into the fixture the
+#: very value a fix is about (a «шипованих немає» result to a search that never
+#: asked for studs).
+WHEN_ARGS = "when_args"
+
+
+def _check_when_args(where: str, result: Any) -> None:
+    if not isinstance(result, dict) or WHEN_ARGS not in result:
+        return
+    rules = result[WHEN_ARGS]
+    if not isinstance(rules, list) or not rules:
+        raise CaseError(f"{where}: {WHEN_ARGS} must be a non-empty list")
+    for rule in rules:
+        if (
+            not isinstance(rule, dict)
+            or set(rule) != {"args", "result"}
+            or not isinstance(rule["args"], dict)
+            or not rule["args"]
+        ):
+            raise CaseError(f"{where}: {WHEN_ARGS} item must be {{args: {{name: regex}}, result}}")
+
+
+def mock_handler(result: Any) -> Callable[..., Awaitable[Any]]:
+    """The tool handler of a case mock: constant, or chosen by ``when_args``."""
+    if not isinstance(result, dict) or WHEN_ARGS not in result:
+        return _const_handler(result)
+    default = {k: v for k, v in result.items() if k != WHEN_ARGS}
+    rules = result[WHEN_ARGS]
+
+    async def _handler(**kwargs: Any) -> Any:
+        call = ToolCall("mock", dict(kwargs))
+        for rule in rules:
+            if _call_matches(call, {"name": "mock", "args": rule["args"]}):
+                return copy.deepcopy(rule["result"])
+        return copy.deepcopy(default)
+
+    return _handler
+
+
 class SandboxAgentFactory:
     """Builds the sandbox agent for a network from its real tenant row.
 
@@ -715,7 +759,7 @@ class SandboxAgentFactory:
             promotions_override=case_promotions(case),
         )
         for tool, result in case.mocks.items():
-            agent.tool_router.register(tool, _const_handler(result))
+            agent.tool_router.register(tool, mock_handler(result))
         return agent
 
 

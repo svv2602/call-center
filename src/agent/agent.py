@@ -30,6 +30,13 @@ from src.agent.prompts import (
     build_system_prompt_with_context,
     detect_scenario_from_text,
 )
+from src.agent.tire_search_gate import (
+    SEARCH_TOOL,
+    ForcedTireSearch,
+    accumulate_query,
+    forced_search_messages,
+    run_forced_search,
+)
 from src.agent.tool_result_compressor import compress_tool_result, tire_caveat_phrase
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
 from src.llm.router import llm_call_id_var
@@ -234,6 +241,9 @@ class LLMAgent:
         # goldset) still gets the on-demand fitting module. One agent per call.
         self._call_scenarios: set[str] = set()
         self._call_tools: set[str] = set()
+        # The caller's tyre request, as the live pipeline keeps it in
+        # ``session.tire_query`` (`merge_tire_query`, sales scope only).
+        self._tire_query: dict[str, Any] = {}
         # Accumulated usage from last process_message call (all LLM rounds)
         self.last_input_tokens: int = 0
         self.last_output_tokens: int = 0
@@ -299,6 +309,9 @@ class LLMAgent:
             # A live sales call always has a scenario (`main._default_scenario`);
             # `assemble_prompt` maps None to the same `sales` bundle.
             scenario = scenario or "sales"
+            self._tire_query = accumulate_query(
+                self._tire_query, user_text, conversation_history, tools_called
+            )
 
         # Mask PII before sending to LLM
         if self._pii_vault is not None:
@@ -396,6 +409,26 @@ class LLMAgent:
         # Fit verdicts of this turn's `search_disks` results (sales scope).
         disk_fit_state = DiskFitClaimState()
         tool_call_count = 0
+        # Text-path twin of the streamed forced search (`tire_search_gate`):
+        # the request is complete, so the code searches before the first round.
+        forced_args = ForcedTireSearch(sales_enabled=sales_enabled, tools=tools).plan(
+            self._tire_query, user_text, conversation_history
+        )
+        if forced_args is not None:
+            forced_raw = await run_forced_search(
+                forced_args, self._tool_router.execute, timeout=_TOOL_TIMEOUT_SEC
+            )
+            self._call_tools.add(SEARCH_TOOL)
+            forced_phrase = tire_caveat_phrase(forced_raw, forced_args)
+            if forced_phrase:
+                caveats.append(forced_phrase)
+            forced_content = compress_tool_result(
+                SEARCH_TOOL, forced_raw, sales_enabled=sales_enabled, args=forced_args
+            )
+            if self._pii_vault is not None:
+                forced_content = self._pii_vault.mask(forced_content)
+            conversation_history.extend(forced_search_messages(forced_args, forced_content))
+            tool_call_count += 1
         stop_reason = "end_turn"
         self.last_input_tokens = 0
         self.last_output_tokens = 0
