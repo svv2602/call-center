@@ -366,7 +366,24 @@ def render_sales_scope(policy: NetworkPolicy) -> str:
         "отвір; якщо відомо авто — передай марку, модель і рік). Сумісність з авто визначає "
         "система: озвучуй її вердикт як є, «підходить» — тільки коли так сказано у "
         "результаті. Питання про диски без підбору — search_knowledge_base (категорія wheels).",
+        "",
+        "**Вибір інструмента:**",
+        "- Клієнт хоче диски (литі чи штамповані, «диски на [авто]») → одразу search_disks, "
+        "навіть якщо авто відоме: марку, модель і рік передай у search_disks, розмір шин не "
+        "питай. "
+        "get_vehicle_tire_sizes і search_tires — тільки для шин, для дисків їх не викликай.",
     ]
+    if policy.pickup_available:
+        pickup = (
+            "- Клієнт хоче забрати шини сам (самовивіз) → get_pickup_points з його містом; "
+            "адреси пунктів видачі називай тільки з результату."
+        )
+        if "fitting" in policy.services:
+            pickup += (
+                " Станції шиномонтажу (get_fitting_stations) — тільки для запису на "
+                "шиномонтаж, не для самовивозу."
+            )
+        lines.append(pickup)
     if missing:
         phrases = [_SERVICE_NOT_PROVIDED_PHRASE.get(s, SERVICE_LABELS[s]) for s in missing]
         lines += [
@@ -566,6 +583,27 @@ _MOD_ORDER_FLOW = """\
 - Не видавай інформацію про замовлення, якщо телефон клієнта не збігається з CallerID
 - Якщо клієнт хоче замовити більше 20 шин — переключи на оператора\
 """
+
+#: `_MOD_ORDER_FLOW` under sales (wave 1-B, goldset O): «оплату частинами
+#: оформить менеджер — так і скажи» outvoted the «Умови мережі» block — the bot
+#: said «комісію уточнить менеджер» and named no banks. Under sales the methods,
+#: the cash-on-delivery fee and the instalment banks are read from the block;
+#: only arranging the instalment is the manager's. The fitting-only prompt
+#: keeps `_MOD_ORDER_FLOW` byte for byte (test G).
+_MOD_ORDER_FLOW_SALES = _replace_once(
+    _MOD_ORDER_FLOW,
+    "- Способи оплати називай тільки з блоку «Умови мережі». Блоку немає або способу там "
+    "немає → «Спосіб оплати уточнить менеджер».\n"
+    "- Оплату частинами чи передоплату оформить менеджер, коли зателефонує, — так і скажи "
+    "клієнту.",
+    "- Способи оплати, комісію за оплату при отриманні і банки для оплати частинами "
+    "називай з блоку «Умови мережі» — так, як там написано. Це й відповідь на питання "
+    "клієнта про оплату поза оформленням замовлення: комісію і банки з блоку називай сам, "
+    "не відсилай до менеджера.\n"
+    "- Блоку немає або способу там немає → «Спосіб оплати уточнить менеджер».\n"
+    "- Менеджер, коли зателефонує, лише оформить оплату частинами — спосіб і банки ти вже "
+    "назвав.",
+)
 
 _MOD_FITTING = """\
 
@@ -1541,6 +1579,7 @@ _SALES_EXCLUDED_MODULES: tuple[str, ...] = (_MOD_COMBINED_FLOW,)
 #: prompt (scenario, fallback, mid-call expansion) goes through.
 _SALES_MODULE_VARIANTS: dict[int, str] = {
     id(_MOD_TIRE_SEARCH): _MOD_TIRE_SEARCH_SALES,
+    id(_MOD_ORDER_FLOW): _MOD_ORDER_FLOW_SALES,
     id(_MOD_CONSULTATION): _MOD_CONSULTATION_SALES,
     id(_MOD_OBJECTIONS): _MOD_OBJECTIONS_SALES,
 }

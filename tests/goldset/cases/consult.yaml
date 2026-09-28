@@ -25,7 +25,7 @@
   source: owner:brand-priority
   network: both
   sales_enabled: true
-  notes: the store ranks and cuts to recommend_count; the mock is that ranked answer — the case checks the model keeps it
+  notes: the store ranks and cuts to recommend_count; the mock is that ranked answer — the case checks the model keeps it. Two turns (goldset O, group C) — the sales script asks the season, then brand or budget, before search_tires; the second line answers both, so the search lands on it
   mocks:
     search_tires:
       total: 3
@@ -34,7 +34,10 @@
         - {id: t4, brand: Firestone, model: Roadhawk 2, size: 205/55 R16, season: summer, price: 3100, in_stock: true}
         - {id: t5, brand: Laufenn, model: S Fit EQ+, size: 205/55 R16, season: summer, price: 2400, in_stock: true}
   turns:
-    - user: потрібні літні шини 205/55 R16
+    - user: потрібні шини 205/55 R16
+      expect:
+        tool_not_called: [transfer_to_operator]
+    - user: літні, без побажань по бренду чи бюджету
       expect:
         tool_called: [search_tires]
         must_contain: ['Bridgestone', 'за (одну |1 )?шину|за штуку|за шт|за одиницю']
@@ -54,8 +57,12 @@
       items:
         - {id: w1, brand: Bridgestone, model: Blizzak 6, size: 235/55 R19, season: winter, price: 6900, in_stock: true}
         - {id: w2, brand: Firestone, model: Winterhawk 4, size: 235/55 R19, season: winter, price: 5200, in_stock: true}
+  notes: two turns (goldset O, group C) — the sales script asks «шиповані чи без шипів?» and brand or budget before search_tires; the second line answers both, so the search and the caveat land on it
   turns:
-    - user: потрібні шиповані 235/55 R19
+    - user: потрібні зимові шини 235/55 R19
+      expect:
+        tool_not_called: [transfer_to_operator]
+    - user: шиповані, бренд будь-який, без побажань
       expect:
         tool_called: [{name: search_tires, args: {studded: '^true$'}}]
         must_contain: ['^\W*Шипованих у цьому розмірі зараз немає', 'липучк|фрикційн']

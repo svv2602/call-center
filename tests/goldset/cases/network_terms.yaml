@@ -54,15 +54,16 @@
         must_not_contain: ['сьогодні ж', 'гарантовано завтра']
 
 - id: delivery_tracking_ttn
-  title: відстеження — за номером ТТН
+  title: відстеження — номер замовлення чи телефон для статусу, або ТТН
   source: owner:delivery-terms
-  notes: the term comes from network_policy.delivery_eta_text (owner — «зазвичай 1–3 дні, точніше за ТТН»); unwritten, the bot must say «уточнить менеджер» and the case is red for the data
+  notes: goldset O, group C — asking the order number or phone to look the status up (get_order_status) is as right as naming the ТТН (network_policy.delivery_eta_text — «зазвичай 1–3 дні, точніше за ТТН»); a transfer is not
   network: both
   sales_enabled: true
   turns:
     - user: а як я дізнаюсь де посилка?
       expect:
-        must_contain: ['ТТН|номер\w*\s+(?:\w+\s+){0,2}накладн']
+        must_contain: ['ТТН|накладн|номер\w*\s+(?:\w+\s+){0,2}(замовлен|заказ)|телефон']
+        tool_not_called: [transfer_to_operator]
 
 - id: pickup_both_networks
   title: самовивіз є в обох мережах

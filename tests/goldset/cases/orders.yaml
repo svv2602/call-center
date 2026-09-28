@@ -41,12 +41,21 @@
   source: owner:order-is-a-request
   network: both
   sales_enabled: true
+  notes: the whole order script of _MOD_ORDER_FLOW, one step per turn (choice+quantity, phone for the draft, delivery, recipient, payment, confirmation) with a mock on every tool; confirm_order is expected on the last turn only
   mocks:
     search_tires:
       total: 2
       items:
         - {id: t3, brand: Bridgestone, model: Turanza 6, size: 205/55 R16, season: summer, price: 3700, in_stock: true}
         - {id: t4, brand: Firestone, model: Roadhawk 2, size: 205/55 R16, season: summer, price: 3100, in_stock: true}
+    check_availability:
+      product_id: t3
+      available: true
+      quantity: 12
+    get_pickup_points:
+      total: 1
+      points:
+        - {id: np1, address: 'Нова пошта, відділення №1', type: Нова пошта, city: Київ}
     create_order_draft:
       order_id: DRAFT-goldset
       status: draft
@@ -62,12 +71,25 @@
       payment_method: cod
       message: 'Заявку прийнято. Клієнту скажи: «Заявку прийнято, менеджер зателефонує для підтвердження.» Номер заявки не називай — його в результаті немає. Про замовлення як про готове не говори: остаточно його погодить менеджер.'
   turns:
-    - user: потрібні дві літні шини 205/55 R16
-    - user: беру першу, дві штуки, доставка Новою поштою в Київ, оплата при отриманні, відділення номер один, телефон нуль дев'яносто дев'ять сто двадцять три сорок п'ять шістдесят сім
+    - user: потрібні дві літні шини 205/55 R16, бренд будь-який, без побажань
+    - user: беру Bridgestone Turanza, дві штуки
+      expect:
+        must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд']
+    - user: телефон нуль дев'яносто дев'ять сто двадцять три сорок п'ять шістдесят сім
+      expect:
+        must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд']
+    - user: доставка Новою поштою в Київ, відділення номер один
+      expect:
+        must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд']
+    - user: отримувач Петренко Іван, телефон той самий
+      expect:
+        must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд']
+    - user: оплата при отриманні
       expect:
         must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд']
     - user: так, усе правильно, оформлюйте
       expect:
+        tool_called: [confirm_order]
         must_contain: ['заявк', 'менеджер\w*\s+(?:\w+\s+){0,2}(зателефону|передзвон|перезвон|звʼяж|зв''яж)']
         must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд', '\bAI-\d+', 'номер\w*\s+заявк\w*\s+\S*\d']
 
@@ -76,12 +98,21 @@
   source: owner:order-is-a-request
   network: both
   sales_enabled: true
+  notes: the whole order script of _MOD_ORDER_FLOW, one step per turn (choice+quantity, phone for the draft, delivery, recipient, payment, confirmation) with a mock on every tool; confirm_order is expected on the last turn only
   mocks:
     search_tires:
       total: 2
       items:
         - {id: t3, brand: Bridgestone, model: Turanza 6, size: 205/55 R16, season: summer, price: 3700, in_stock: true}
         - {id: t4, brand: Firestone, model: Roadhawk 2, size: 205/55 R16, season: summer, price: 3100, in_stock: true}
+    check_availability:
+      product_id: t3
+      available: true
+      quantity: 12
+    get_pickup_points:
+      total: 1
+      points:
+        - {id: np1, address: 'Нова пошта, відділення №1', type: Нова пошта, city: Київ}
     create_order_draft:
       order_id: DRAFT-goldset
       status: draft
@@ -98,10 +129,25 @@
       reason: request_failed
       message: 'Заявку створити не вдалося. Клієнту скажи: «Передам менеджеру, вам зателефонують.» Не обіцяй, що заявка вже є, і не називай жодного номера. Далі — transfer_to_operator або create_callback_request, якщо вони є серед твоїх інструментів.'
   turns:
-    - user: потрібні дві літні шини 205/55 R16
-    - user: беру першу, дві штуки, доставка Новою поштою в Київ, оплата карткою, відділення номер один, телефон нуль дев'яносто дев'ять сто двадцять три сорок п'ять шістдесят сім
+    - user: потрібні дві літні шини 205/55 R16, бренд будь-який, без побажань
+    - user: беру Bridgestone Turanza, дві штуки
+      expect:
+        must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд']
+    - user: телефон нуль дев'яносто дев'ять сто двадцять три сорок п'ять шістдесят сім
+      expect:
+        must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд']
+    - user: доставка Новою поштою в Київ, відділення номер один
+      expect:
+        must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд']
+    - user: отримувач Петренко Іван, телефон той самий
+      expect:
+        must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд']
+    - user: оплата карткою
+      expect:
+        must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд']
     - user: так, усе правильно, оформлюйте
       expect:
+        tool_called: [confirm_order]
         must_contain: ['менеджер', 'зателефону|передзвон|перезвон']
         must_not_contain: ['заявку прийнят', 'заявка прийнят', 'заявку принят', 'заявк\w*\s+(?:\w+\s+){0,2}(створен|оформлен|создан)']
 

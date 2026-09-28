@@ -31,7 +31,7 @@
       expect:
         tool_not_called: [get_fitting_price, get_fitting_stations]
         must_not_contain: ['шиномонтаж\w*\s+(?:\w+\s+){0,3}коштує', 'вартість\s+(?:\w+\s+){0,2}монтаж']
-    - user: літні
+    - user: літні, без побажань по бренду
       expect:
         tool_called: [{name: search_tires, args: {width: '^155$', profile: '^70$', diameter: '^13$'}}]
         tool_not_called: [get_fitting_price]
