@@ -40,10 +40,14 @@ Promotions (``PromoOverrides``, sales on only) beat the standard conditions,
 each one only as far as it reaches — an exemption can clear a rule, never add
 one, and ``promos=None`` behaves exactly as without promotions:
 
-- ``free_delivery``: a live free-delivery promotion clears the rule;
+- ``free_delivery``: a live free-delivery promotion clears the rule for its
+  own brands only (``mention_brands``; none = every brand): the sentence must
+  name a brand of some scope, in Latin or Cyrillic. A sentence naming no
+  brand, while every live scope is a brand list, stays refused (default-deny);
 - ``extended_warranty``: brands of a live warranty promotion join the policy's,
   matched in Latin or Cyrillic («Мішлен» → michelin) — Matador's promotion
-  does not cover a Michelin promise;
+  does not cover a Michelin promise. The policy's own brands are matched the
+  same way («гарантія на Бріджстоун»), with or without promotions;
 - ``service_offer``: a partner promotion's service clears the rule only in a
   sentence that names the partner network («шиномонтаж у Твоя Шина») — a bare
   «записую вас на шиномонтаж» in Про Колесо is still the network's own false
@@ -215,6 +219,27 @@ def _partner_covered(key: str, text: str, promos: PromoOverrides | None) -> bool
     return False
 
 
+def _names_brand(text: str, brands: frozenset[str] | set[str]) -> bool:
+    """``text`` names one of ``brands`` (lower-case): as a slug through the
+    tyre-brand parser («Бріджстоун» → bridgestone) or spelled as written."""
+    if not brands:
+        return False
+    low = text.lower()
+    named = set(extract_tire_brands(text) or ())
+    return any(b in named or b in low for b in brands)
+
+
+def _free_delivery_covered(text: str, promos: PromoOverrides | None) -> bool:
+    """A live free-delivery promotion reaches this sentence: one scope covers
+    every brand, or the sentence names a brand of some scope."""
+    if promos is None:
+        return False
+    scopes = promos.free_delivery_brand_scopes
+    if any(not scope for scope in scopes):
+        return True
+    return any(_names_brand(text, scope) for scope in scopes)
+
+
 def _brand_label(name: str) -> str:
     return name[:1].upper() + name[1:]
 
@@ -287,19 +312,19 @@ def check_sentence(
         return _pass(exempt)
 
     if policy.delivery_mode != "free" and _affirmed(_FREE_DELIVERY, text):
-        if promos is None or promos.free_delivery is not True:
+        if not _free_delivery_covered(text, promos):
             return _verdict(RULE_FREE_DELIVERY, policy, [])
         exempt.append(RULE_FREE_DELIVERY)
 
+    policy_brands = {b.lower() for b in policy.extended_warranty_brands}
     promo_brands = {b.lower() for b in promos.extended_warranty_brands} if promos else set()
     for clause in _affirmed(_EXTENDED_WARRANTY, text):
-        low = clause.lower()
-        if any(b.lower() in low for b in policy.extended_warranty_brands):
+        # The bot says brands in Cyrillic («на Бріджстоун», «на Мішлен»): both
+        # the policy's and the promotions' brands are matched by slug through
+        # the tyre-brand parser, Latin spelling too.
+        if _names_brand(clause, policy_brands):
             continue
-        # The bot says brands in Cyrillic («на Мішлен»): promotion brands are
-        # matched by slug through the tyre-brand parser, Latin spelling too.
-        named = set(extract_tire_brands(clause) or ())
-        if not (named & promo_brands or any(b in low for b in promo_brands)):
+        if not _names_brand(clause, promo_brands):
             return _verdict(RULE_EXTENDED_WARRANTY, policy, [])
         if RULE_EXTENDED_WARRANTY not in exempt:
             exempt.append(RULE_EXTENDED_WARRANTY)

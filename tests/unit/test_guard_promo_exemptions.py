@@ -346,12 +346,15 @@ def _live_overrides(rows: list[dict[str, Any]], tenant: str) -> PromoOverrides:
 
 _PK_FREE = _PK_SPECS[0].title_prefix
 _TS_FREE = _TS_SPECS[0].title_prefix
+# Про Колесо's free delivery covers Doublestar and Rydanz only (wave H): a
+# brandless promise stays refused, so these tests name a covered brand.
+_PK_FREE_CLAIM = "Доставка шин Doublestar безкоштовна."
 
 
 class TestOnlyLivePromotions:
     def test_live_promotion_clears(self) -> None:
         promos = _live_overrides([_row(_PK_FREE, tenant=_PK_TENANT)], _PK_TENANT)
-        assert _rule("Доставка безкоштовна.", PK_ON, promos) is None
+        assert _rule(_PK_FREE_CLAIM, PK_ON, promos) is None
 
     def test_expired_promotion_does_not_clear(self) -> None:
         expired = _row(
@@ -361,12 +364,12 @@ class TestOnlyLivePromotions:
             end=_TODAY - timedelta(days=1),
         )
         promos = _live_overrides([expired], _PK_TENANT)
-        assert _rule("Доставка безкоштовна.", PK_ON, promos) == RULE_FREE_DELIVERY
+        assert _rule(_PK_FREE_CLAIM, PK_ON, promos) == RULE_FREE_DELIVERY
 
     def test_not_started_promotion_does_not_clear(self) -> None:
         future = _row(_PK_FREE, tenant=_PK_TENANT, start=_TODAY + timedelta(days=1))
         promos = _live_overrides([future], _PK_TENANT)
-        assert _rule("Доставка безкоштовна.", PK_ON, promos) == RULE_FREE_DELIVERY
+        assert _rule(_PK_FREE_CLAIM, PK_ON, promos) == RULE_FREE_DELIVERY
 
     def test_tvoya_shina_promotion_does_not_clear_in_prokoleso(self) -> None:
         promos = _live_overrides([_row(_TS_FREE, tenant=_TS_TENANT)], _PK_TENANT)

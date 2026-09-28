@@ -56,9 +56,15 @@ class PromoOverrides:
     """Which standard network conditions today's promotions beat.
 
     For the network-claim guard: a claim covered here is not a false one.
+
+    ``free_delivery_brand_scopes`` holds one scope per live free-delivery
+    promotion: its ``mention_brands`` as lower-case names, an empty set
+    meaning every brand. The guard reads only the scopes; ``free_delivery``
+    (true when there is at least one scope) is kept for compatibility.
     """
 
     free_delivery: bool = False
+    free_delivery_brand_scopes: tuple[frozenset[str], ...] = ()
     discount: bool = False
     extended_warranty_brands: frozenset[str] = frozenset()
     partner_services: tuple[dict[str, str], ...] = ()
@@ -192,13 +198,16 @@ def format_promotions_block(promos: list[ActivePromotion]) -> str | None:
 
 def promo_overrides(promos: list[ActivePromotion]) -> PromoOverrides:
     """Union of what today's promotions override — default-deny per key."""
-    free_delivery = False
+    scopes: list[frozenset[str]] = []
     discount = False
     brands: set[str] = set()
     services: list[dict[str, str]] = []
     for p in promos:
         o = p.overrides
-        free_delivery = free_delivery or o.get("free_delivery") is True
+        if o.get("free_delivery") is True:
+            # A brand promotion covers its own brands only; no brands = all.
+            brands_of = (b.strip().lower() for b in p.mention_brands if isinstance(b, str))
+            scopes.append(frozenset(b for b in brands_of if b))
         discount = discount or o.get("discount") is True
         raw_brands = o.get("extended_warranty_brands")
         if isinstance(raw_brands, list):
@@ -213,7 +222,8 @@ def promo_overrides(promos: list[ActivePromotion]) -> PromoOverrides:
                     entry["network_label"] = label.strip()
                 services.append(entry)
     return PromoOverrides(
-        free_delivery=free_delivery,
+        free_delivery=bool(scopes),
+        free_delivery_brand_scopes=tuple(scopes),
         discount=discount,
         extended_warranty_brands=frozenset(brands),
         partner_services=tuple(services),
