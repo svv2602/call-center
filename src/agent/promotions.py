@@ -327,6 +327,27 @@ def _named_brands(text: str | None, tire_query: dict[str, Any] | None) -> set[st
     return named
 
 
+def turn_network_overrides(
+    promos: list[ActivePromotion] | None,
+    text: str | None,
+    tire_query: dict[str, Any] | None = None,
+    fallback: PromoOverrides | None = None,
+) -> PromoOverrides | None:
+    """Overrides for this turn's «Умови мережі» block: relevant promotions only.
+
+    Goldset №4/№5 `promo_pk_free_delivery_brand_out_of_scope`: «скільки коштує
+    доставка шин Michelin?» at Про Колесо — the promotions block was filtered
+    out, yet the network block said «за акцією безкоштовна на шини
+    Doublestar, Rydanz» on every turn and the model offered free delivery.
+    The block now gets what ``relevant_promotions`` lets through; the claim
+    guard keeps the call's full overrides. ``promos`` None (no live list) →
+    ``fallback``.
+    """
+    if promos is None:
+        return fallback
+    return promo_overrides(relevant_promotions(promos, text, tire_query))
+
+
 def relevant_promotions(
     promos: list[ActivePromotion] | None,
     text: str | None,

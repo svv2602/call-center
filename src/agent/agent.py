@@ -22,7 +22,7 @@ from src.agent.disk_intent import DiskToolRedirect, run_disk_substitution_raw
 from src.agent.history_compressor import summarize_old_messages
 from src.agent.network_claim_guard import guard_text
 from src.agent.network_policy import NetworkPolicy, render_network_block
-from src.agent.promotions import turn_promotions_block
+from src.agent.promotions import turn_network_overrides, turn_promotions_block
 from src.agent.prompts import (
     ERROR_TEXT,
     PROMPT_VERSION,
@@ -358,7 +358,8 @@ class LLMAgent:
                 else self._promotions_context
             ),
             network_policy_context=render_network_block(
-                self._network_policy, self._promo_overrides
+                self._network_policy,
+                turn_network_overrides(self._promotions, user_text, None, self._promo_overrides),
             ),
             caller_phone=masked_phone,
             order_id=order_id,

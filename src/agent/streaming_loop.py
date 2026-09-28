@@ -34,7 +34,7 @@ from src.agent.history_compressor import summarize_old_messages
 from src.agent.intent_classifier import _triggered_intents, sales_intents
 from src.agent.network_claim_guard import guard_network_claims, guard_text
 from src.agent.network_policy import NetworkPolicy, render_network_block
-from src.agent.promotions import turn_promotions_block
+from src.agent.promotions import turn_network_overrides, turn_promotions_block
 from src.agent.prompts import (
     SYSTEM_PROMPT,
     WAIT_AVAILABILITY_POOL,
@@ -1730,7 +1730,10 @@ class StreamingAgentLoop:
                 else self._promotions_context
             ),
             network_policy_context=render_network_block(
-                self._network_policy, self._promo_overrides
+                self._network_policy,
+                turn_network_overrides(
+                    self._promotions, user_text, tire_progress, self._promo_overrides
+                ),
             ),
             caller_phone=masked_phone,
             order_id=order_id,
