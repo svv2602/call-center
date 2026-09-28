@@ -523,8 +523,13 @@ async def create_sandbox_agent(
 
     # Modular prompt assembly for sandbox: skip pronunciation (text mode, no TTS)
     policy = NetworkPolicy.from_tenant_config((tenant or {}).get("config"))
+    # Sales on: the prompt is module-assembled, as on a live call, so the
+    # agent may add the fitting module on demand (wave 2-D). Sales off keeps
+    # the sandbox's incumbent, non-expanding prompt.
+    sales_modular = False
     if system_prompt is None:
         if policy.sales_enabled:
+            sales_modular = True
             # As a live call with sales on (main.handle_call): the `sales`
             # scenario frame, and no tools of services the network lacks.
             tenant_tools = set((tenant or {}).get("enabled_tools") or []) or None
@@ -637,6 +642,7 @@ async def create_sandbox_agent(
         promotions_context=promotions_context,
         promo_overrides=claim_overrides,
         promotions=live_promos,
+        is_modular=sales_modular,
         # Kept literal: `test_network_policy` pins this call site by AST.
         network_policy=NetworkPolicy.from_tenant_config((tenant or {}).get("config")),
     )

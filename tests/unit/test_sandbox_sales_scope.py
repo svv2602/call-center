@@ -69,6 +69,16 @@ async def test_sales_off_is_the_fitting_only_sandbox() -> None:
     assert "book_fitting" in _tool_names(agent)
 
 
+@pytest.mark.asyncio
+async def test_sales_prompt_is_modular_so_fitting_loads_on_demand() -> None:
+    # Wave 2-D: the fitting module is added per turn only to a modular prompt;
+    # without the flag the goldset would never see it under sales.
+    on = await _agent({**TVOYA_SHINA_CONFIG_PATCH, "sales_enabled": True})
+    off = await _agent(dict(TVOYA_SHINA_CONFIG_PATCH))
+    assert on._is_modular is True
+    assert off._is_modular is False
+
+
 # Prod tenants carry explicit enabled_tools lists that predate the sales tools
 # (2026-09-28: neither network listed search_disks; Про Колесо had no pickup).
 _PK_PROD_TOOLS = [

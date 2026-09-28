@@ -1625,18 +1625,78 @@ SCENARIO_MODULES: dict[str | None, list[str]] = {
         _MOD_OBJECTIONS,
     ],
     # Sales scope (tenants.config.sales_enabled): the default scenario of a
-    # network with sales on. The superset — `_modules_for_scenario` drops the
-    # modules of services the network does not offer (NetworkPolicy.services).
+    # network with sales on. `_modules_for_scenario` drops the modules of
+    # services the network does not offer (NetworkPolicy.services).
+    # Fitting and storage are not here (wave 2-D): `_MOD_FITTING` alone was
+    # 71 % of the ТШ sales prompt and drowned «Умови мережі». They load on
+    # demand — see `_SALES_ON_DEMAND_MODULES` / `sales_fitting_requested`.
     "sales": [
         _MOD_TIRE_SEARCH,
         _MOD_ORDER_FLOW,
         _MOD_ORDER_STATUS,
         _MOD_CONSULTATION,
         _MOD_OBJECTIONS,
-        _MOD_FITTING,
-        _MOD_STORAGE,
     ],
 }
+
+
+#: Sales scope, wave 2-D: modules the `sales` bundle does not carry. They join
+#: the prompt only once `sales_fitting_requested` says the call is about
+#: fitting/storage, and only from that one step in
+#: `build_system_prompt_with_context` — topic expansion and tool expansion
+#: skip them under sales, so a «підкажіть» (consultation bundle, which lists
+#: `_MOD_FITTING`) cannot pull the module in by the back door.
+_SALES_ON_DEMAND_MODULES: tuple[str, ...] = (_MOD_FITTING, _MOD_STORAGE)
+
+#: Tools whose use means the call is about fitting/storage. Derived from
+#: `_TOOL_MODULE_MAP`, so a new fitting tool mapped to the module triggers it.
+_SALES_ON_DEMAND_TOOLS: frozenset[str] = frozenset(
+    name
+    for name, mods in _TOOL_MODULE_MAP.items()
+    if any(m is od for m in mods for od in _SALES_ON_DEMAND_MODULES)
+)
+
+#: `fitting_progress` keys that do NOT mean a fitting booking is under way —
+#: everything else does (default-deny: a new key triggers the module).
+#: `caller_phone` is CallerID, `customer_name` comes from the profile, `brand`
+#: from the pre-parser and `requested_weekday` from a weekday word — all three
+#: run on every turn of every call («шини на Тойоту», «доставка до п'ятниці»).
+_FITTING_PROGRESS_NEUTRAL_KEYS: frozenset[str] = frozenset(
+    {"caller_phone", "customer_name", "brand", "requested_weekday"}
+)
+
+
+def _progress_value_set(value: Any) -> bool:
+    if value is None or value is False or value == "":
+        return False
+    if isinstance(value, (list, tuple, set, frozenset, dict)):
+        return bool(value)
+    return True
+
+
+def sales_fitting_requested(
+    active_scenarios: set[str] | None,
+    tools_called: set[str] | None,
+    fitting_progress: dict[str, Any] | None,
+) -> bool:
+    """Is this sales call about fitting/storage (wave 2-D on-demand trigger)?
+
+    Any one of: the fitting scenario was detected in a caller turn (the live
+    pipeline and ``LLMAgent`` both detect before the prompt is built, so the
+    turn that first says «записатися на шиномонтаж» already has the module);
+    a fitting/storage tool was called; the fitting progress carries a
+    fitting field (the FSM or the tools are already collecting a booking).
+    """
+    if active_scenarios and "fitting" in active_scenarios:
+        return True
+    if tools_called and not _SALES_ON_DEMAND_TOOLS.isdisjoint(tools_called):
+        return True
+    if fitting_progress:
+        for key, value in fitting_progress.items():
+            if key not in _FITTING_PROGRESS_NEUTRAL_KEYS and _progress_value_set(value):
+                return True
+    return False
+
 
 #: Modules that only make sense when the network offers the service. Keyed
 #: over the whole ``SERVICE_LABELS`` enum (pinned by a test).
@@ -2120,6 +2180,10 @@ def build_system_prompt_with_context(
     # Sales scope: expansion runs, but only ever adds modules the network
     # offers (`_modules_for_scenario` filters by NetworkPolicy.services) — a
     # network without fitting never gets a fitting module from «монтаж».
+    # Sales (wave 2-D): fitting/storage modules reach the prompt only through
+    # the on-demand step below — both expansions skip them.
+    sales = network_policy is not None and network_policy.sales_enabled
+    on_demand_ids: set[int] = {id(m) for m in _SALES_ON_DEMAND_MODULES} if sales else set()
     if is_modular and active_scenarios and scenario and scenario != "fitting":
         primary_mods = (
             _modules_for_scenario(scenario, enabled_tools, network_policy)
@@ -2127,7 +2191,7 @@ def build_system_prompt_with_context(
         )
         base_modules = set(primary_mods)
         extra: list[str] = []
-        seen: set[int] = {id(m) for m in base_modules}
+        seen: set[int] = {id(m) for m in base_modules} | on_demand_ids
         for sc in active_scenarios:
             if sc == scenario:
                 continue
@@ -2148,6 +2212,8 @@ def build_system_prompt_with_context(
     # not in the current scenario, append them to the base prompt.
     if is_modular and tools_called:
         extra_modules = infer_expanded_modules(scenario, tools_called, network_policy)
+        if extra_modules and sales:
+            extra_modules = [m for m in extra_modules if id(m) not in on_demand_ids]
         if extra_modules:
             base_prompt = base_prompt + "\n" + "\n".join(extra_modules)
             logger.info(
@@ -2156,6 +2222,35 @@ def build_system_prompt_with_context(
                 len(extra_modules),
                 tools_called,
             )
+
+    # Sales on-demand fitting/storage (wave 2-D). The one path by which these
+    # modules join a sales prompt whose scenario does not carry them; the
+    # fitting progress block below renders only when the module is in.
+    fitting_module_in = True
+    if is_modular and sales:
+        primary_ids = {
+            id(m)
+            for m in (
+                _modules_for_scenario(scenario or "sales", enabled_tools, network_policy)
+                or _ALL_SCENARIO_MODULES
+            )
+        }
+        fitting_module_in = id(_MOD_FITTING) in primary_ids
+        if sales_fitting_requested(active_scenarios, tools_called, fitting_progress):
+            on_demand = [
+                m
+                for m in _modules_for_scenario("fitting", enabled_tools, network_policy) or []
+                if id(m) not in primary_ids
+            ]
+            if on_demand:
+                base_prompt = base_prompt + "\n" + "\n".join(on_demand)
+                fitting_module_in = fitting_module_in or any(m is _MOD_FITTING for m in on_demand)
+                logger.info(
+                    "Sales on-demand modules: added %d (scenarios=%s, tools=%s)",
+                    len(on_demand),
+                    active_scenarios,
+                    tools_called,
+                )
 
     # ---------------------------------------------------------------
     # Section ordering for implicit cache (Gemini 2.5 Flash, etc.):
@@ -2349,7 +2444,9 @@ def build_system_prompt_with_context(
     # --- Fitting progress block ---
     # Surfaces already-collected data so LLM won't loop back to Krok 2/3/4
     # after passing through them. See _build_fitting_progress in this file.
-    if fitting_progress and any(fitting_progress.values()):
+    # Sales: only alongside the fitting module — without it the block's
+    # «ЄДИНА ДОЗВОЛЕНА ДІЯ: Крок 0» steers a tyre call into a booking.
+    if fitting_module_in and fitting_progress and any(fitting_progress.values()):
         progress_text = _render_fitting_progress(fitting_progress)
         if progress_text:
             parts.append(progress_text)

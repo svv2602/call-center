@@ -310,9 +310,19 @@ class TestSalesFrame:
         assert prompts._MOD_COMBINED_FLOW not in prompt
 
     def test_tvoya_shina_gets_fitting_and_storage(self) -> None:
+        # Wave 2-D: not in the bundle — on demand, once the call is about fitting.
         prompt = prompts.assemble_prompt(scenario="sales", network_policy=TSH_ON)
-        assert prompts._MOD_FITTING in prompt
-        assert prompts._MOD_STORAGE in prompt
+        assert prompts._MOD_FITTING not in prompt
+        assert prompts._MOD_STORAGE not in prompt
+        full = prompts.build_system_prompt_with_context(
+            prompt,
+            is_modular=True,
+            scenario="sales",
+            active_scenarios={"sales", "fitting"},
+            network_policy=TSH_ON,
+        )
+        assert prompts._MOD_FITTING in full
+        assert prompts._MOD_STORAGE in full
         frame = prompts.render_sales_scope(TSH_ON)
         assert "Не надаємо" not in frame
         assert "**Шиномонтаж**" in frame and "**Зберігання шин**" in frame
@@ -344,7 +354,14 @@ class TestSalesFrame:
         assert "**Шиномонтаж**" not in frame
         assert "Не надаємо: послуги шиномонтажу." in frame
         prompt = prompts.assemble_prompt(scenario="sales", network_policy=only_storage)
-        assert prompts._MOD_STORAGE in prompt and prompts._MOD_FITTING not in prompt
+        full = prompts.build_system_prompt_with_context(
+            prompt,
+            is_modular=True,
+            scenario="sales",
+            tools_called={"find_storage"},
+            network_policy=only_storage,
+        )
+        assert prompts._MOD_STORAGE in full and prompts._MOD_FITTING not in full
 
     def test_every_service_has_phrases_modules_and_tools(self) -> None:
         from src.main import _SERVICE_TOOLS

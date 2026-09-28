@@ -28,6 +28,7 @@ from src.agent.prompts import (
     PROMPT_VERSION,
     SYSTEM_PROMPT,
     build_system_prompt_with_context,
+    detect_scenario_from_text,
 )
 from src.agent.tool_result_compressor import compress_tool_result, tire_caveat_phrase
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
@@ -227,6 +228,12 @@ class LLMAgent:
         self._promo_overrides = promo_overrides
         self._is_modular = is_modular
         self._agent_name = agent_name
+        # Sales on (wave 2-D): what this call has touched so far, as the live
+        # pipeline keeps it in the session — scenarios detected in caller
+        # turns and tools called. A caller that passes nothing (the sandbox,
+        # goldset) still gets the on-demand fitting module. One agent per call.
+        self._call_scenarios: set[str] = set()
+        self._call_tools: set[str] = set()
         # Accumulated usage from last process_message call (all LLM rounds)
         self.last_input_tokens: int = 0
         self.last_output_tokens: int = 0
@@ -279,6 +286,20 @@ class LLMAgent:
         Returns:
             Tuple of (response_text, updated_conversation_history).
         """
+        sales_on = bool(self._network_policy is not None and self._network_policy.sales_enabled)
+        if sales_on:
+            # As the live pipeline: detect on this turn's text BEFORE the
+            # prompt is built, so «записатися на шиномонтаж» gets the fitting
+            # module on the turn it is first said.
+            detected = detect_scenario_from_text(user_text)
+            if detected:
+                self._call_scenarios.add(detected)
+            active_scenarios = set(active_scenarios or ()) | self._call_scenarios
+            tools_called = set(tools_called or ()) | self._call_tools
+            # A live sales call always has a scenario (`main._default_scenario`);
+            # `assemble_prompt` maps None to the same `sales` bundle.
+            scenario = scenario or "sales"
+
         # Mask PII before sending to LLM
         if self._pii_vault is not None:
             user_text = self._pii_vault.mask(user_text)
@@ -537,6 +558,8 @@ class LLMAgent:
                     if self._pii_vault is not None:
                         disk_content = self._pii_vault.mask(disk_content)
                     return {"type": "tool_result", "tool_use_id": tu["id"], "content": disk_content}
+                if sales_enabled:
+                    self._call_tools.add(tu["name"])
                 try:
                     raw = await asyncio.wait_for(
                         self._tool_router.execute(tu["name"], args),
