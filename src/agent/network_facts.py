@@ -239,7 +239,11 @@ def _phrase(
     if topic == TRACKING:
         return _sentence(policy.tracking_text) if policy.tracking_text else None
     if topic == PICKUP:
-        return "Самовивіз є." if policy.pickup_available else None
+        # Pickup offered: the model answers with `get_pickup_points` (the
+        # addresses) — «Самовивіз є.» said first made it ask for a district
+        # instead of calling the tool (goldset №7 pickup_both_networks, both
+        # networks). Only the absence of pickup is the code's to say.
+        return None if policy.pickup_available else "Самовивозу немає, лише доставка."
     if topic == INSTALLMENTS:
         if "installments" not in policy.payment_methods:
             return None

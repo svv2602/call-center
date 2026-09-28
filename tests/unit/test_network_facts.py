@@ -189,9 +189,15 @@ class TestPhrases:
         assert PK.tracking_text and PK.tracking_text[1:] in phrase
         assert "ТТН" in phrase
 
-    def test_pickup(self) -> None:
+    def test_pickup_offered_is_left_to_get_pickup_points(self) -> None:
+        # goldset №7: «Самовивіз є.» first → the model asked for a district
+        # instead of calling get_pickup_points
         assert PK.pickup_available
-        assert nf.turn_facts("а можна забрати шини самому в Дніпрі?", PK) == ["Самовивіз є."]
+        assert nf.turn_facts("а можна забрати шини самому в Дніпрі?", PK) == []
+
+    def test_no_pickup_is_said(self) -> None:
+        phrases = nf.turn_facts("а можна забрати шини самому?", _ts(pickup_available=False))
+        assert phrases == ["Самовивозу немає, лише доставка."]
 
     @pytest.mark.parametrize("pol", [TS, PK], ids=["ts", "pk"])
     def test_installments_banks(self, pol: NetworkPolicy) -> None:
@@ -239,7 +245,6 @@ class TestPhrases:
             (nf.DELIVERY_COST, "delivery_mode", _DROP),
             (nf.DELIVERY_ETA, "delivery_eta_text", _DROP),
             (nf.TRACKING, "tracking_text", _DROP),
-            (nf.PICKUP, "pickup_available", False),
             (nf.INSTALLMENTS, "payment_methods", ["cod", "card"]),
             (nf.COD, "payment_methods", ["card", "installments"]),
             (nf.PAYMENT, "payment_methods", []),
@@ -259,7 +264,14 @@ class TestPhrases:
     @pytest.mark.parametrize("topic", nf.TOPICS)
     def test_sales_off_says_nothing(self, topic: str) -> None:
         text = TOPIC_UTTERANCES[topic][0]
-        assert nf.turn_facts(text, _ts()) or nf.turn_facts(text, _pk())
+        # pickup is spoken only when the network has none
+        no_pickup = _ts(pickup_available=False)
+        assert (
+            nf.turn_facts(text, _ts())
+            or nf.turn_facts(text, _pk())
+            or (nf.turn_facts(text, no_pickup))
+        )
+        assert nf.turn_facts(text, _ts(sales=False, pickup_available=False)) == []
         assert nf.turn_facts(text, _ts(sales=False)) == []
         assert nf.turn_facts(text, _pk(sales=False)) == []
         assert nf.turn_facts(text, None) == []
