@@ -117,7 +117,19 @@ from src.monitoring.metrics import (
     tenant_resolution_fallback_total,
 )
 from src.onec_client.client import OneCClient, from_1c_date, from_1c_time
-from src.store_client.client import StoreClient
+from src.store_client.client import (
+    BUDGET_SOURCE_CALLER,
+    BUDGET_SOURCE_CORRIDOR,
+    PRICE_CORRIDOR_STEPS,
+    PRICE_FILTER_KEYS,
+    PRICE_MODE_CHEAPER,
+    PRICE_MODE_SIMILAR,
+    TIRE_OFFER_KEYS,
+    StoreClient,
+    price_filter,
+    shown_tire_offer,
+    within_price_filter,
+)
 from src.stt.base import STTConfig
 from src.stt.google_stt import GoogleSTTEngine
 from src.tts.base import TTSConfig
@@ -1695,13 +1707,100 @@ def _build_tool_router(
         # Ranking comes from the network policy, never from the LLM's args.
         params.pop("brand_priority", None)
         params.pop("recommend_count", None)
+        # Price bounds come from the last offer, never from the LLM's args.
+        price_mode = params.pop("price_mode", None)
+        for key in PRICE_FILTER_KEYS:
+            params.pop(key, None)
         if network_policy is not None:
             params["brand_priority"] = network_policy.brand_priority
             params["recommend_count"] = network_policy.recommend_count
-        result = await client.search_tires(network=network, **params)
-        if network_policy is not None and network_policy.sales_enabled:
-            await _mark_runflat_required(result, params)
+        if network_policy is None or not network_policy.sales_enabled:
+            return await client.search_tires(network=network, **params)
+
+        result, applied_mode = await _search_by_price_mode(network, params, price_mode)
+        await _mark_runflat_required(result, params)
+        if isinstance(result, dict):
+            if session.tire_query.get("budget"):
+                result["budget_source"] = BUDGET_SOURCE_CALLER
+            elif applied_mode:
+                result["budget_source"] = BUDGET_SOURCE_CORRIDOR
+            _remember_tire_offer(result, params)
         return result
+
+    async def _search_by_price_mode(
+        network: str, params: dict[str, Any], price_mode: Any
+    ) -> tuple[Any, str | None]:
+        """«А дешевше?» / «схожі за ціною»: a search bounded by the last offer.
+
+        Size, season and needs the model left out come from the last offer —
+        the caller is not asked them again. No last offer (or an unknown mode)
+        → an ordinary search. ``similar`` widens the corridor once when empty.
+        Every returned item obeys the bounds (default-deny, whatever engine
+        answered).
+        """
+        offer = session.last_tire_offer or {}
+        prices = offer.get("prices") or []
+        if price_mode not in (PRICE_MODE_CHEAPER, PRICE_MODE_SIMILAR) or not prices:
+            if price_mode:
+                logger.info(
+                    "search_tires: price_mode=%s without a shown offer for call %s — plain search",
+                    price_mode,
+                    session.channel_uuid,
+                )
+            return await client.search_tires(network=network, **params), None
+        for key, value in (offer.get("params") or {}).items():
+            current = params.get(key)
+            if current is None or current == "" or (type(current) is int and current == 0):
+                params[key] = value
+
+        shown_ids = set(offer.get("ids") or ())
+        steps = PRICE_CORRIDOR_STEPS if price_mode == PRICE_MODE_SIMILAR else (0.0,)
+        result: Any = None
+        for n, step in enumerate(steps):
+            bounds = price_filter(price_mode, prices, step)
+            extra: dict[str, Any] = dict(bounds)
+            if price_mode == PRICE_MODE_SIMILAR and shown_ids:
+                extra["exclude_ids"] = sorted(shown_ids)
+            result = await client.search_tires(network=network, **params, **extra)
+            if not isinstance(result, dict):
+                return result, None
+            items = [
+                i
+                for i in result.get("items") or []
+                if within_price_filter(i, bounds)
+                and not (price_mode == PRICE_MODE_SIMILAR and str(i.get("id")) in shown_ids)
+            ]
+            result["items"] = items
+            result["total"] = len(items)
+            result["price_mode"] = price_mode
+            if n:
+                result["price_corridor_widened"] = True
+            if items:
+                break
+        if isinstance(result, dict) and not result.get("items"):
+            result["message"] = (
+                "Дешевших за показані варіанти зараз немає."
+                if price_mode == PRICE_MODE_CHEAPER
+                else "Схожих за ціною варіантів зараз немає."
+            )
+        logger.info(
+            "search_tires: price_mode=%s for call %s → %d items",
+            price_mode,
+            session.channel_uuid,
+            len(result.get("items") or []) if isinstance(result, dict) else 0,
+        )
+        return result, price_mode
+
+    def _remember_tire_offer(result: dict[str, Any], params: dict[str, Any]) -> None:
+        """``session.last_tire_offer`` ← the offer the caller heard (items only)."""
+        if not result.get("items"):
+            return
+        prices, ids = shown_tire_offer(result)
+        session.last_tire_offer = {
+            "prices": prices or None,
+            "ids": ids or None,
+            "params": {k: params[k] for k in TIRE_OFFER_KEYS if params.get(k) not in (None, "")},
+        }
 
     # The car of the call, read out of the caller's own lines (the session keeps
     # no car for sales): user-turn index → resolved car, so a line is looked up once.

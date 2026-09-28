@@ -132,6 +132,10 @@ _CAVEAT_BRAND_UNAVAILABLE = "brand_unavailable_alternatives"
 _CAVEAT_XL_NONE = "xl_none_offer_regular"
 _CAVEAT_RUNFLAT_NONE = "runflat_none"
 _WARNING_RUNFLAT_REQUIRED = "runflat_required"
+#: ``budget_source`` (``StoreClient.BUDGET_SOURCE_CALLER``): only a budget the
+#: caller named is «ваш бюджет»; a price corridor of the last offer is not.
+_BUDGET_SOURCE_CALLER = "caller"
+_NO_CALLER_BUDGET_NOTE = "клієнт бюджет не називав — не кажи «в межах вашого бюджету»"
 _NO_STUDDED_PHRASE = (
     "Шипованих у цьому розмірі зараз немає — можу запропонувати фрикційні (липучку)."
 )
@@ -223,6 +227,16 @@ def _compress_search_tires(
             out["caveat_key"] = result["caveat_key"]
         if result.get("warning"):
             out["warning"] = result["warning"]
+        if result.get("price_mode"):
+            out["price_mode"] = result["price_mode"]
+            if result.get("price_corridor_widened"):
+                out["price_corridor_widened"] = True
+            if result.get("message"):
+                out["message"] = result["message"]
+        if result.get("budget_source"):
+            out["budget_source"] = result["budget_source"]
+        if result.get("price_mode") and result.get("budget_source") != _BUDGET_SOURCE_CALLER:
+            out["budget_note"] = _NO_CALLER_BUDGET_NOTE
         phrase = tire_caveat_phrase(result, args)
         if phrase:
             out["caveat_already_said"] = (

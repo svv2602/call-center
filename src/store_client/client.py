@@ -60,6 +60,102 @@ CAVEAT_RUNFLAT_NONE = "runflat_none"
 #: the factory on RunFlat (set by the ``search_tires`` wrapper in ``main``).
 WARNING_RUNFLAT_REQUIRED = "runflat_required"
 
+#: ``search_tires(price_mode=…)`` under sales (tshina ``cc06d65ac``/``f7f5418b8``):
+#: «а дешевше?» — cheaper than the cheapest tyre shown; «схожі за ціною» — a
+#: corridor round the median of the shown prices, widened once when empty.
+PRICE_MODE_CHEAPER = "cheaper"
+PRICE_MODE_SIMILAR = "similar"
+PRICE_CORRIDOR_STEPS = (0.10, 0.20)
+#: How many offered tyres the caller hears (the compressor keeps ``items[:3]``).
+SHOWN_TIRES = 3
+#: Search params that carry price bounds (never the rear axle's).
+PRICE_FILTER_KEYS = frozenset({"price_below", "price_from", "price_to", "exclude_ids"})
+#: What a «дешевше/схожі» search keeps from the last offer when the model
+#: leaves it out: the size (both axles), the season and the caller's needs —
+#: never the brand (a preference the model passes itself).
+TIRE_OFFER_KEYS = (
+    "width",
+    "profile",
+    "diameter",
+    "rear_width",
+    "rear_profile",
+    "rear_diameter",
+    "season",
+    "studded",
+    "runflat",
+    "xl",
+    "commercial",
+)
+#: ``budget_source`` of a sales ``search_tires`` result: the caller named a
+#: budget (only then «в межах вашого бюджету»), or the bounds are the corridor
+#: of the last offer.
+BUDGET_SOURCE_CALLER = "caller"
+BUDGET_SOURCE_CORRIDOR = "price_corridor"
+
+
+def _positive_price(value: Any) -> float | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        price = float(value)
+    except (TypeError, ValueError):
+        return None
+    return price if price > 0 else None
+
+
+def shown_tire_offer(result: Any) -> tuple[list[float], list[str]]:
+    """Per-tyre prices and ids of the tyres the caller heard (``items[:3]``)."""
+    if not isinstance(result, dict):
+        return [], []
+    prices: list[float] = []
+    ids: list[str] = []
+    for item in (result.get("items") or [])[:SHOWN_TIRES]:
+        if not isinstance(item, dict):
+            continue
+        price = _positive_price(item.get("price"))
+        if price is not None:
+            prices.append(price)
+        if item.get("id"):
+            ids.append(str(item["id"]))
+    return prices, ids
+
+
+def price_filter(
+    mode: str, prices: list[float], step: float = PRICE_CORRIDOR_STEPS[0]
+) -> dict[str, float]:
+    """Search bounds for ``price_mode`` over the shown per-tyre ``prices``.
+
+    ``cheaper`` → ``price_below`` = the cheapest shown (strictly below);
+    ``similar`` → ``price_from``/``price_to`` = median ± ``step``. No prices or
+    an unknown mode → ``{}`` (an ordinary search).
+    """
+    valid = sorted(p for p in (_positive_price(x) for x in prices) if p is not None)
+    if not valid:
+        return {}
+    if mode == PRICE_MODE_CHEAPER:
+        return {"price_below": valid[0]}
+    if mode == PRICE_MODE_SIMILAR:
+        mid = len(valid) // 2
+        median = valid[mid] if len(valid) % 2 else (valid[mid - 1] + valid[mid]) / 2
+        return {
+            "price_from": round(median * (1 - step), 2),
+            "price_to": round(median * (1 + step), 2),
+        }
+    return {}
+
+
+def within_price_filter(item: Any, bounds: dict[str, Any]) -> bool:
+    """An offered item obeys ``price_filter`` bounds (default-deny on no price)."""
+    if not bounds:
+        return True
+    price = _positive_price(item.get("price")) if isinstance(item, dict) else None
+    if price is None:
+        return False
+    if "price_below" in bounds and not price < bounds["price_below"]:
+        return False
+    return "price_from" not in bounds or bounds["price_from"] <= price <= bounds["price_to"]
+
+
 #: Cars that leave the factory on RunFlat (tshina_new ``2232038ce``): the
 #: brand of ``vehicle_brands.name`` (lower-case) → the model families, or
 #: ``None`` for every model. A family is the first segment of the model name
@@ -1429,6 +1525,22 @@ class StoreClient:
             conditions.append("p.commercial IS TRUE")
         elif commercial is False:
             conditions.append("p.commercial IS NOT TRUE")
+        # «А дешевше?» / «схожі за ціною» (sales): bounds computed by the
+        # search_tires wrapper from the last offer the caller heard.
+        if params.get("price_below") is not None:
+            conditions.append("s.price > 0 AND s.price < :price_below")
+            bind_params["price_below"] = float(params["price_below"])
+        if params.get("price_from") is not None and params.get("price_to") is not None:
+            conditions.append("s.price BETWEEN :price_from AND :price_to")
+            bind_params["price_from"] = float(params["price_from"])
+            bind_params["price_to"] = float(params["price_to"])
+        exclude_ids = [str(i) for i in params.get("exclude_ids") or () if i]
+        if exclude_ids:
+            names = []
+            for i, sku in enumerate(exclude_ids):
+                bind_params[f"exclude_{i}"] = sku
+                names.append(f":exclude_{i}")
+            conditions.append(f"p.sku NOT IN ({', '.join(names)})")
 
         where_clause = " AND ".join(conditions)
         limit = int(params.get("_limit") or 50)
@@ -1593,7 +1705,9 @@ class StoreClient:
         recommend_count = params.pop("recommend_count", None)
         params = {**params, "_limit": _RANKING_WINDOW}
         front_rows = await self._query_tire_rows(network, params, brand_priority)
-        rear_rows = await self._query_tire_rows(network, {**params, **rear}, brand_priority)
+        # Price bounds are about the front tyre the caller heard, not the rear.
+        rear_params = {k: v for k, v in params.items() if k not in PRICE_FILTER_KEYS}
+        rear_rows = await self._query_tire_rows(network, {**rear_params, **rear}, brand_priority)
 
         def key(r: Any) -> tuple[str, str]:
             return (str(r["brand"]).strip().lower(), str(r["model"]).strip().lower())

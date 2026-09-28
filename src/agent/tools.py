@@ -110,6 +110,15 @@ MVP_TOOLS: list[dict] = [  # type: ignore[type-arg]
                     "type": "integer",
                     "description": "Тільки для різноширокої осі: діаметр задньої шини.",
                 },
+                "price_mode": {
+                    "type": "string",
+                    "enum": ["cheaper", "similar"],
+                    "description": (
+                        "Тільки після показаних варіантів: cheaper — клієнт просить дешевше, "
+                        "similar — схожі за ціною. Розмір і сезон беруться з попереднього "
+                        "пошуку — не перепитуй. Не передавай для звичайного пошуку."
+                    ),
+                },
             },
             "required": ["width", "profile", "diameter", "season"],
         },

@@ -255,6 +255,12 @@ class CallSession:
         # Loop-breaker of the season guard on `search_tires`: it refuses once
         # per call, never a second time.
         self.tire_season_guard_fired: bool = False
+        # The last tyre offer the caller heard (sales, written by the
+        # `search_tires` wrapper after a search with items): per-tyre prices
+        # and ids of the shown items, and the size/season/needs it was for.
+        # «А дешевше?» / «схожі за ціною» search from it — `price_mode` —
+        # without asking the size again. Keys: prices, ids, params.
+        self.last_tire_offer: dict[str, Any] | None = None
         # Main-flow state frozen while a side-state (PRICE_INTERRUPT /
         # CANCEL_INTERRUPT) is active. Wave 4-B resumes into it.
         self.fsm_prev_state: str | None = None
@@ -532,6 +538,7 @@ class CallSession:
             "fsm_filled_fields": dict(self.fsm_filled_fields),
             "tire_query": dict(self.tire_query),
             "tire_season_guard_fired": self.tire_season_guard_fired,
+            "last_tire_offer": dict(self.last_tire_offer) if self.last_tire_offer else None,
             "fsm_prev_state": self.fsm_prev_state,
             "fsm_history": list(self.fsm_history[-FSM_HISTORY_LIMIT:]),
             "fsm_parser_null_counts": dict(self.fsm_parser_null_counts),
@@ -643,6 +650,13 @@ class CallSession:
                 type(tire_query).__name__,
             )
         session.tire_season_guard_fired = data.get("tire_season_guard_fired") is True
+        offer = data.get("last_tire_offer")
+        if isinstance(offer, dict) and offer:
+            session.last_tire_offer = {
+                "prices": list(offer.get("prices") or []) or None,
+                "ids": list(offer.get("ids") or []) or None,
+                "params": dict(offer.get("params") or {}),
+            }
         history = data.get("fsm_history") or []
         if isinstance(history, list):
             session.fsm_history = [h for h in history if isinstance(h, dict)][-FSM_HISTORY_LIMIT:]
