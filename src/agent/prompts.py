@@ -1648,6 +1648,35 @@ SCENARIO_MODULES: dict[str | None, list[str]] = {
 #: `_MOD_FITTING`) cannot pull the module in by the back door.
 _SALES_ON_DEMAND_MODULES: tuple[str, ...] = (_MOD_FITTING, _MOD_STORAGE)
 
+#: The fitting module as a sales call hears it. Krok 2's two fitting-only
+#: lines («Ми НЕ продаємо шини через цей бот», «цей бот не продає шини») are
+#: false once the network sells: goldset №5 `prod_buying_new_mid_fitting`
+#: answered «Шини купувати через мене не можна» mid-booking. The booking
+#: itself keeps its two variants; new tyres go through the sales flow.
+_FITTING_SALES_LINES: tuple[tuple[str, str], ...] = (
+    (
+        "⚠️ Ми НЕ продаємо шини через цей бот; тільки два варіанти:",
+        "⚠️ Для запису на монтаж — тільки два варіанти (нові шини клієнт може "
+        "замовити окремо: підбір `search_tires` → заявка `submit_order_request`, "
+        "менеджер передзвонить; для запису це варіант (a)):",
+    ),
+    (
+        "- ❌ «купити нові» / «замовити комплект» — цей бот не продає шини\n",
+        "- ❌ «купити нові» як третій варіант Кроку 2 — а якщо клієнт сам хоче нові "
+        "шини, НЕ кажи, що купити не можна: запропонуй підібрати й оформити заявку\n",
+    ),
+)
+
+
+def _fitting_for_sales(module: str) -> str:
+    """``_MOD_FITTING`` with the fitting-only selling lines swapped (sales only)."""
+    if module is not _MOD_FITTING:
+        return module
+    for old, new in _FITTING_SALES_LINES:
+        module = module.replace(old, new)
+    return module
+
+
 #: Tools whose use means the call is about fitting/storage. Derived from
 #: `_TOOL_MODULE_MAP`, so a new fitting tool mapped to the module triggers it.
 _SALES_ON_DEMAND_TOOLS: frozenset[str] = frozenset(
@@ -2243,7 +2272,9 @@ def build_system_prompt_with_context(
                 if id(m) not in primary_ids
             ]
             if on_demand:
-                base_prompt = base_prompt + "\n" + "\n".join(on_demand)
+                base_prompt = base_prompt + "\n" + "\n".join(
+                    _fitting_for_sales(m) for m in on_demand
+                )
                 fitting_module_in = fitting_module_in or any(m is _MOD_FITTING for m in on_demand)
                 logger.info(
                     "Sales on-demand modules: added %d (scenarios=%s, tools=%s)",

@@ -321,7 +321,7 @@ class TestSalesFrame:
             active_scenarios={"sales", "fitting"},
             network_policy=TSH_ON,
         )
-        assert prompts._MOD_FITTING in full
+        assert prompts._fitting_for_sales(prompts._MOD_FITTING) in full
         assert prompts._MOD_STORAGE in full
         frame = prompts.render_sales_scope(TSH_ON)
         assert "Не надаємо" not in frame

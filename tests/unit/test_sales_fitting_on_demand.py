@@ -74,7 +74,11 @@ def _build(policy: NetworkPolicy, tools: set[str] | None = None, **kw: Any) -> s
 
 
 def _has_fitting(system: str) -> bool:
-    return prompts._MOD_FITTING in system
+    # Under sales the module joins as its sales variant (`_fitting_for_sales`).
+    return (
+        prompts._MOD_FITTING in system
+        or prompts._fitting_for_sales(prompts._MOD_FITTING) in system
+    )
 
 
 def _block(progress: dict[str, Any]) -> str:
@@ -202,7 +206,7 @@ class TestBuilder:
     )
     def test_trigger_adds_both_modules_once(self, kw: dict[str, Any]) -> None:
         system = _build(TSH_ON, **kw)
-        assert system.count(prompts._MOD_FITTING) == 1
+        assert system.count(prompts._fitting_for_sales(prompts._MOD_FITTING)) == 1
         assert system.count(prompts._MOD_STORAGE) == 1
 
     def test_consultation_does_not_pull_fitting_in(self) -> None:
@@ -474,3 +478,26 @@ class TestTextPath:
             network_policy=TSH_OFF,
         )
         assert _systems(router)[0] == expected
+
+
+class TestFittingSalesVariant:
+    """Goldset №5 `prod_buying_new_mid_fitting`: «Шини купувати через мене не
+    можна» mid-booking — Krok 2's fitting-only lines, false under sales."""
+
+    def test_every_swapped_line_exists_once_in_the_module(self) -> None:
+        # a reworded module would silently stop being swapped
+        for old, _ in prompts._FITTING_SALES_LINES:
+            assert prompts._MOD_FITTING.count(old) == 1, old
+
+    def test_sales_fitting_prompt_does_not_forbid_buying(self) -> None:
+        system = _build(TSH_ON, active_scenarios={"fitting"})
+        assert _has_fitting(system)
+        assert "не продає шини" not in system
+        assert "НЕ продаємо шини" not in system
+        assert "submit_order_request" in system
+
+    def test_sales_off_fitting_module_is_untouched(self) -> None:
+        text = prompts.assemble_prompt(
+            scenario="fitting", include_pronunciation=False, network_policy=TSH_OFF
+        )
+        assert "цей бот не продає шини" in text
