@@ -209,6 +209,26 @@ class TestNetworkSettingsMerge:
         assert policy.brand_priority == ("premiorri", "kormoran")
         assert policy.recommend_count == 3
 
+    def test_network_fact_texts_are_accepted_and_saved(self, client: TestClient) -> None:
+        # configure_tenants writes them; the form sends them back untouched
+        # (`_netState.policy`) — a 422 here would make the form unsaveable.
+        table = _tenant({})
+        texts = {
+            "warranty_text": "гарантія виробника",
+            "returns_text": "повернення — уточнить менеджер",
+            "tracking_text": "ТТН надійде в SMS",
+        }
+
+        resp = _put(
+            client, table, {"sales_enabled": False, "network_policy": {**_FULL_POLICY, **texts}}
+        )
+
+        assert resp.status_code == 200, resp.text
+        policy = NetworkPolicy.from_tenant_config(_saved_config(table))
+        assert policy.warranty_text == texts["warranty_text"]
+        assert policy.returns_text == texts["returns_text"]
+        assert policy.tracking_text == texts["tracking_text"]
+
     def test_missing_tenant_is_404(self, client: TestClient) -> None:
         table = _TenantTable(None)
 

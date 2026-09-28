@@ -417,7 +417,7 @@ const _netLabel = 'block text-xs font-medium text-neutral-600 dark:text-neutral-
 const _netHint = 'text-xs text-neutral-500 dark:text-neutral-400 mt-0.5';
 const _netSection = 'border-t border-neutral-200 dark:border-neutral-700 pt-3 space-y-2';
 
-let _netState = { id: null, wasSalesEnabled: false, enabledTools: [], orderFinish: null };
+let _netState = { id: null, wasSalesEnabled: false, enabledTools: [], orderFinish: null, policy: {} };
 
 function _netCheckboxes(name, values, labelPrefix) {
     return values.map(v => `
@@ -557,6 +557,9 @@ function _fillNetworkForm(tn) {
         wasSalesEnabled: sales,
         enabledTools: tn.enabled_tools || [],
         orderFinish: typeof p.order_finish === 'string' ? p.order_finish : null,
+        // Keys the form does not edit (warranty/returns/tracking texts, …):
+        // sent back untouched, so saving the form never drops them.
+        policy: { ...p },
     };
 
     document.getElementById('tnNetTitle').textContent = t('tenants.net.title', { name: tn.name || tn.slug || '' });
@@ -579,6 +582,7 @@ function _fillNetworkForm(tn) {
 
 function _readNetworkForm() {
     const policy = {
+        ...(_netState.policy || {}),
         services: _getChecked('service'),
         delivery_mode: document.getElementById('tnNetDeliveryMode').value,
         delivery_carriers: _splitList(document.getElementById('tnNetCarriers').value),

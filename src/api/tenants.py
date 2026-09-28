@@ -159,7 +159,15 @@ _POLICY_NAME_LISTS: tuple[str, ...] = (
     "extended_warranty_brands",
     "brand_priority",
 )
-_POLICY_TEXTS: tuple[str, ...] = ("delivery_eta_text", "cod_fee_text")
+_POLICY_TEXTS: tuple[str, ...] = (
+    "delivery_eta_text",
+    "cod_fee_text",
+    # Said by the code for a warranty / returns / tracking question
+    # (`network_facts`); written by configure_tenants, not the admin form.
+    "warranty_text",
+    "returns_text",
+    "tracking_text",
+)
 _POLICY_KEYS: frozenset[str] = frozenset(
     {
         *_POLICY_ENUM_LISTS,
