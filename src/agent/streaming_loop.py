@@ -31,7 +31,7 @@ from src.agent.disk_fit_claim_guard import (
 )
 from src.agent.disk_intent import DiskToolRedirect, run_disk_substitution_raw
 from src.agent.history_compressor import summarize_old_messages
-from src.agent.intent_classifier import sales_intents
+from src.agent.intent_classifier import _triggered_intents, sales_intents
 from src.agent.network_claim_guard import guard_network_claims, guard_text
 from src.agent.network_policy import NetworkPolicy, render_network_block
 from src.agent.promotions import turn_promotions_block
@@ -86,6 +86,7 @@ from src.monitoring.metrics import (
     settled_question_redirect_skipped_total,
     settled_question_redirected_total,
     system_prompt_chars,
+    tool_audit_write_failures_total,
     tool_call_errors_total,
     tool_rounds_exhausted_total,
     tool_rounds_per_turn,
@@ -275,6 +276,76 @@ _GUARD_MARKER = "⛔ HALLUCINATION_GUARD"
 # resolved by a human than by an endless bot.
 _MAX_BLOCKS_PER_CALL = 2
 
+# Fitting-only scope (sales off): a call whose caller talks about fitting and
+# never about anything else is held past `_MAX_BLOCKS_PER_CALL`. Measured
+# 2026-09-28: after Wave 16 six fitting callers («хочу записаться на монтаж»,
+# «записатися на шиномонтаж» ×2, a reschedule half done) still reached an
+# operator — the model changed `reason` on every refusal and walked out through
+# the two-block exit. The hold has its own hard ceiling, counted in CUSTOMER
+# turns that drew a block, not in model attempts: the model retrying inside one
+# turn is a repeat (bounded by the turn's tool rounds), a new caller turn is the
+# conversation moving on. After this many blocked caller turns the transfer
+# goes through whatever the words say.
+_MAX_FITTING_BLOCKED_TURNS = 4
+
+# Intents of `_triggered_intents` that mean «this caller is here for fitting».
+_FITTING_INTENTS = frozenset({"BOOK", "PRICE", "CANCEL", "RESCHEDULE"})
+
+#: Marker of a rejection produced while the fitting hold is in force — lets a
+#: test (and a log reader) tell the hold's refusal from the plain guard's.
+_FITTING_HOLD_MARKER = "FITTING_HOLD"
+
+
+def _has_fitting_evidence(text: str) -> bool:
+    """The caller's words carry a fitting stem (STT mutations included)."""
+    return bool(_triggered_intents(text) & _FITTING_INTENTS)
+
+
+def _has_any(text: str, keywords: tuple[str, ...]) -> bool:
+    low = text.lower()
+    return any(kw in low for kw in keywords)
+
+
+def _fitting_hold_applies(user_turns: list[str]) -> bool:
+    """Fitting evidence somewhere in the call, and nothing that justifies a human.
+
+    «Nothing» is over the WHOLE call, not the last turns: one off-topic stem,
+    complaint or request for a person anywhere and the hold is off — the old
+    two-block exit decides. A name, a city or «так» carry no fitting stem and
+    that is fine: they are how a booking continues, not a new topic.
+    """
+    if not any(_has_fitting_evidence(t) for t in user_turns):
+        return False
+    joined = " ".join(user_turns)
+    return not (
+        _has_any(joined, _OUT_OF_SCOPE_KEYWORDS)
+        or _has_any(joined, _ESCALATION_KEYWORDS)
+        # A request for a person: the TRANSFER stems cover every
+        # `_OPERATOR_KEYWORDS` entry and add «з'єднайте», «соедините», «перекл».
+        or "TRANSFER" in _triggered_intents(joined)
+    )
+
+
+def _count_blocked_customer_turns(history: list[dict[str, Any]]) -> int:
+    """Customer text turns after which the guard refused at least once.
+
+    Several refusals inside one caller turn count once: that is the model
+    retrying (a repeat), not the conversation moving on (a continuation).
+    """
+    blocked: set[int] = set()
+    turn_index = -1
+    for msg in history:
+        content = msg.get("content")
+        if msg.get("role") == "user" and isinstance(content, str) and content.strip():
+            turn_index += 1
+            continue
+        if not isinstance(content, list):
+            continue
+        for block in content:
+            if isinstance(block, dict) and _GUARD_MARKER in str(block.get("content", "")):
+                blocked.add(turn_index)
+    return len(blocked)
+
 
 def _count_prior_blocks(history: list[dict[str, Any]]) -> int:
     """Count guard rejections already present in this call's history."""
@@ -352,24 +423,77 @@ def _should_block_false_transfer(
     topics are the bot's own, so they stop counting as out-of-scope evidence
     (`_OUT_OF_SCOPE_KEYWORDS_SALES`) and a blocked transfer is sent back to
     the sale, not to the fitting checklist. Off — exactly as before.
+
+    Sales off only (2026-09-28): a fitting stem in the last caller turn
+    outweighs an off-topic stem next to it, and the two-block exit does not
+    open for a call that is about fitting and nothing else — up to
+    `_MAX_FITTING_BLOCKED_TURNS` blocked caller turns.
     """
     reason = str(tool_args.get("reason", "")).strip().lower()
-
-    if _count_prior_blocks(history) >= _MAX_BLOCKS_PER_CALL:
-        logger.warning(
-            "Transfer guard exhausted (%d prior blocks) — letting reason=%s through",
-            _MAX_BLOCKS_PER_CALL,
-            reason,
-        )
-        return None
-
     user_turns = _extract_user_text_turns(history)
+
+    hold_note = ""
+    if _count_prior_blocks(history) >= _MAX_BLOCKS_PER_CALL:
+        # Fitting-only scope: a fitting caller who has given no other reason is
+        # held past the two-block exit, up to a ceiling in caller turns. The
+        # hold covers every reason — the model walks the enum when refused.
+        if sales_enabled or not _fitting_hold_applies(user_turns):
+            logger.warning(
+                "Transfer guard exhausted (%d prior blocks) — letting reason=%s through",
+                _MAX_BLOCKS_PER_CALL,
+                reason,
+            )
+            return None
+        blocked_turns = _count_blocked_customer_turns(history)
+        if blocked_turns >= _MAX_FITTING_BLOCKED_TURNS:
+            logger.warning(
+                "Transfer guard fitting hold exhausted (%d blocked caller turns) — "
+                "letting reason=%s through",
+                blocked_turns,
+                reason,
+            )
+            return None
+        hold_note = (
+            f" [{_FITTING_HOLD_MARKER} {blocked_turns}/{_MAX_FITTING_BLOCKED_TURNS}] "
+            "Клієнт говорить лише про шиномонтаж — інша причина переведення "
+            "не допоможе. Не викликай transfer_to_operator знову в цьому ході: "
+            "скажи клієнту, що робиш, і продовжуй запис."
+        )
+
     joined = " ".join(user_turns).lower()
     recent_3 = " ".join(user_turns[-3:]).lower()
+    block_msg = _false_transfer_verdict(reason, user_turns, joined, recent_3, sales_enabled)
+    if block_msg is None:
+        return None
+    return block_msg + hold_note
 
+
+def _false_transfer_verdict(
+    reason: str,
+    user_turns: list[str],
+    joined: str,
+    recent_3: str,
+    sales_enabled: bool,
+) -> str | None:
+    """The per-reason evidence test of `_should_block_false_transfer`."""
     if reason not in ("customer_request", "cannot_help", "negative_emotion"):
         out_of_scope = _OUT_OF_SCOPE_KEYWORDS_SALES if sales_enabled else _OUT_OF_SCOPE_KEYWORDS
-        if any(kw in recent_3 for kw in out_of_scope):
+        last_turn = user_turns[-1] if user_turns else ""
+        # Fitting-only scope: a booking stem in the caller's last turn outweighs
+        # an off-topic stem in the same breath — «знать товар и шиномонтажу на
+        # два колеса» (700721ea), «на шиномонтаж место в кредит» (75184393) are
+        # STT-garbled booking requests. A complaint or a request for a person
+        # still lets the transfer through. BOOK only: the PRICE stems
+        # («скільки», «коштує»), CANCEL («отмен») and RESCHEDULE («перенес»)
+        # open «скільки коштує доставка», «отменить заказ» just as well.
+        fitting_veto = (
+            not sales_enabled
+            and "BOOK" in _triggered_intents(last_turn)
+            # A complaint needs no clause here: the escalation check below
+            # releases whether or not the veto fired.
+            and not any(kw in recent_3 for kw in _OPERATOR_KEYWORDS)
+        )
+        if not fitting_veto and any(kw in recent_3 for kw in out_of_scope):
             return None
         if any(kw in recent_3 for kw in _ESCALATION_KEYWORDS):
             return None
@@ -430,6 +554,54 @@ def _should_block_false_transfer(
         "НЕ є escalation'ом. Продовжи чекліст, перепитай коротко якщо "
         "щось не зрозумів."
     )
+
+
+def blocked_transfer_audit_result(tool_args: dict[str, Any], block_msg: str) -> dict[str, Any]:
+    """The `call_tool_calls.tool_result` of a refused `transfer_to_operator`.
+
+    `success` on that row means only «did not raise», so the refusal is marked
+    positively: `blocked: true` plus the reason the model asked with.
+    """
+    return {
+        "blocked": True,
+        "guard": "false_transfer",
+        "reason": str(tool_args.get("reason", "unknown")),
+        "fitting_hold": _FITTING_HOLD_MARKER in block_msg,
+        "message": block_msg,
+    }
+
+
+async def audit_blocked_transfer(
+    tool_router: Any, tool_args: dict[str, Any], block_msg: str
+) -> None:
+    """Write the refused transfer to `call_tool_calls` through the router's hook.
+
+    The guard answers before `ToolRouter.execute`, so until 2026-09-28 a blocked
+    transfer left no row — only a Prometheus counter, and the measurement of the
+    guard on past calls had nothing to replay. It goes through the same hook as
+    every executed tool (and every guard refusal made inside a handler), with
+    `success=True` like those: the handler did not raise.
+
+    A failed write is reported the way `ToolRouter` reports its own (metric +
+    ERROR log) and does not break the call.
+    """
+    hook = getattr(tool_router, "_on_execute", None)
+    if hook is None:
+        return
+    result = blocked_transfer_audit_result(tool_args, block_msg)
+    try:
+        await asyncio.shield(hook("transfer_to_operator", tool_args, result, 0, True))
+    except asyncio.CancelledError:
+        raise
+    except Exception:
+        tool_audit_write_failures_total.labels(
+            tool_name="transfer_to_operator", path="blocked"
+        ).inc()
+        logger.exception(
+            "Tool audit write FAILED (path=blocked): tool=transfer_to_operator "
+            "call_id=%s — call_tool_calls row is lost, this call's audit is incomplete",
+            _current_call_id(),
+        )
 
 
 #: The apostrophe glyphs that reach us in «з'єдную» — the LLM is not consistent
@@ -1877,6 +2049,7 @@ class StreamingAgentLoop:
                             len(_extract_user_text_turns(conversation_history)),
                             args.get("summary", "")[:120],
                         )
+                        await audit_blocked_transfer(self._tool_router, args, block_msg)
                         return {
                             "type": "tool_result",
                             "tool_use_id": tc.id,
