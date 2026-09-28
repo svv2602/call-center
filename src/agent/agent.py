@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 import anthropic
 
 from src.agent.history_compressor import summarize_old_messages
+from src.agent.network_claim_guard import guard_text
 from src.agent.network_policy import NetworkPolicy, render_network_block
 from src.agent.prompts import (
     ERROR_TEXT,
@@ -36,6 +37,7 @@ from src.monitoring.metrics import (
 )
 
 if TYPE_CHECKING:
+    from src.agent.promotions import PromoOverrides
     from src.llm.router import LLMRouter
     from src.logging.pii_vault import PIIVault
 
@@ -193,6 +195,7 @@ class LLMAgent:
         safety_context: str | None = None,
         promotions_context: str | None = None,
         network_policy: NetworkPolicy | None = None,
+        promo_overrides: PromoOverrides | None = None,
         is_modular: bool = False,
         agent_name: str | None = None,
     ) -> None:
@@ -209,6 +212,7 @@ class LLMAgent:
         self._safety_context = safety_context
         self._promotions_context = promotions_context
         self._network_policy = network_policy
+        self._promo_overrides = promo_overrides
         self._is_modular = is_modular
         self._agent_name = agent_name
         # Accumulated usage from last process_message call (all LLM rounds)
@@ -539,6 +543,19 @@ class LLMAgent:
             tool_rounds_exhausted_total.inc()
             response_text = await self._request_summary_fallback(
                 system, conversation_history
+            )
+
+        # The text-mode twin of the streamed claim guard: sales networks only.
+        # With sales off the text path stays as it was — the live streamed
+        # path already guards every network, and promotions exist only with
+        # sales on. The caveat below is the code's own text, not judged.
+        if sales_enabled:
+            response_text = guard_text(
+                response_text,
+                self._network_policy,
+                llm_call_id_var.get(None) or "unknown",
+                site="text_path",
+                promos=self._promo_overrides,
             )
 
         # A relaxed tyre search's caveat comes first, said by the code — the

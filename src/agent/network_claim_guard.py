@@ -36,6 +36,22 @@ retries the LLM on an empty response and then falls back to «Перепрошу
 почула», which is worse than a correct refusal. The filter drops only a second
 copy of a replacement it already spoke this round.
 
+Promotions (``PromoOverrides``, sales on only) beat the standard conditions,
+each one only as far as it reaches — an exemption can clear a rule, never add
+one, and ``promos=None`` behaves exactly as without promotions:
+
+- ``free_delivery``: a live free-delivery promotion clears the rule;
+- ``extended_warranty``: brands of a live warranty promotion join the policy's,
+  matched in Latin or Cyrillic («Мішлен» → michelin) — Matador's promotion
+  does not cover a Michelin promise;
+- ``service_offer``: a partner promotion's service clears the rule only in a
+  sentence that names the partner network («шиномонтаж у Твоя Шина») — a bare
+  «записую вас на шиномонтаж» in Про Колесо is still the network's own false
+  offer;
+- ``order_confirmed``: no promotion covers it.
+
+A cleared rule is reported as ``Verdict.promo_exempt`` (logged by the filters).
+
 Switch: env ``NETWORK_CLAIM_GUARD_ENABLED`` (default on; ``0/false/no/off``
 disables), read at call time — rollback is removing an env var.
 """
@@ -49,12 +65,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from src.agent.network_policy import SERVICE_LABELS, NetworkPolicy
+from src.agent.parsers.tire_query import extract_tire_brands
 from src.core.sentence_buffer import SentenceReady
 from src.monitoring.metrics import network_claim_blocked_total
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from src.agent.promotions import PromoOverrides
     from src.core.sentence_buffer import BufferEvent
 
 logger = logging.getLogger(__name__)
@@ -83,6 +101,8 @@ class Verdict:
     action: str  # PASS | DROP | REPLACE
     rule: str | None = None
     replacement: str | None = None
+    #: Rules a live promotion cleared on the way to this verdict.
+    promo_exempt: tuple[str, ...] = ()
 
 
 _PASS = Verdict(PASS)
@@ -173,6 +193,28 @@ def _affirmed(pattern: re.Pattern[str], text: str) -> list[str]:
     return [c for c in _clauses(text) if pattern.search(c) and not _NEGATION.search(c)]
 
 
+def _partner_pattern(label: str) -> re.Pattern[str] | None:
+    """The partner network's name in any case form: «Твоя Шина» → «Твоїй Шині»."""
+    words = _normalize(label).split()
+    if not words:
+        return None
+    stems = [re.escape(w[: max(3, len(w) - 2)]) + r"\w*" for w in words]
+    return re.compile(r"(?<!\w)" + r"\s+".join(stems), re.IGNORECASE)
+
+
+def _partner_covered(key: str, text: str, promos: PromoOverrides | None) -> bool:
+    """A partner promotion offers ``key`` and the sentence names that partner."""
+    if promos is None:
+        return False
+    for entry in promos.partner_services:
+        if entry.get("service") != key:
+            continue
+        pattern = _partner_pattern(entry.get("network_label") or "")
+        if pattern is not None and pattern.search(text):
+            return True
+    return False
+
+
 def _brand_label(name: str) -> str:
     return name[:1].upper() + name[1:]
 
@@ -201,12 +243,21 @@ def _replacement(rule: str, policy: NetworkPolicy, services: list[str]) -> str |
 # ── The predicate ───────────────────────────────────────────────────────
 
 
-def check_sentence(sentence: str, policy: NetworkPolicy | None) -> Verdict:
-    """Judge one sentence against the network's policy. Pure; never raises."""
+def check_sentence(
+    sentence: str,
+    policy: NetworkPolicy | None,
+    promos: PromoOverrides | None = None,
+) -> Verdict:
+    """Judge one sentence against the network's policy and live promotions.
+
+    Pure; never raises. ``promos`` only ever clears a rule; ``None`` is the
+    behaviour without promotions.
+    """
     if not sentence or not sentence.strip():
         return _PASS
     policy = policy or NetworkPolicy()
     text = _normalize(sentence)
+    exempt: list[str] = []
 
     if policy.order_finish == "request_manager_callback" and any(
         not _ORDER_PENDING.search(c) for c in _affirmed(_ORDER_CONFIRMED, text)
@@ -225,21 +276,39 @@ def check_sentence(sentence: str, policy: NetworkPolicy | None) -> Verdict:
         ]
         if missing and _SERVICE_REFUSAL.search(text):
             missing = []
+        partner = [key for key in missing if _partner_covered(key, text, promos)]
+        if partner:
+            exempt.append(RULE_SERVICE_OFFER)
+            missing = [key for key in missing if key not in partner]
         if missing:
             return _verdict(RULE_SERVICE_OFFER, policy, missing)
 
     if not policy.sales_enabled:
-        return _PASS
+        return _pass(exempt)
 
     if policy.delivery_mode != "free" and _affirmed(_FREE_DELIVERY, text):
-        return _verdict(RULE_FREE_DELIVERY, policy, [])
+        if promos is None or promos.free_delivery is not True:
+            return _verdict(RULE_FREE_DELIVERY, policy, [])
+        exempt.append(RULE_FREE_DELIVERY)
 
+    promo_brands = {b.lower() for b in promos.extended_warranty_brands} if promos else set()
     for clause in _affirmed(_EXTENDED_WARRANTY, text):
         low = clause.lower()
-        if not any(b.lower() in low for b in policy.extended_warranty_brands):
+        if any(b.lower() in low for b in policy.extended_warranty_brands):
+            continue
+        # The bot says brands in Cyrillic («на Мішлен»): promotion brands are
+        # matched by slug through the tyre-brand parser, Latin spelling too.
+        named = set(extract_tire_brands(clause) or ())
+        if not (named & promo_brands or any(b in low for b in promo_brands)):
             return _verdict(RULE_EXTENDED_WARRANTY, policy, [])
+        if RULE_EXTENDED_WARRANTY not in exempt:
+            exempt.append(RULE_EXTENDED_WARRANTY)
 
-    return _PASS
+    return _pass(exempt)
+
+
+def _pass(exempt: list[str]) -> Verdict:
+    return Verdict(PASS, promo_exempt=tuple(exempt)) if exempt else _PASS
 
 
 def _verdict(rule: str, policy: NetworkPolicy, services: list[str]) -> Verdict:
@@ -252,13 +321,26 @@ def _verdict(rule: str, policy: NetworkPolicy, services: list[str]) -> Verdict:
 _SENTENCE_SPLIT = re.compile(r"(?<=[.!?])\s+")
 
 
-def blocked_rules(text: str, policy: NetworkPolicy | None) -> list[str]:
+def blocked_rules(
+    text: str, policy: NetworkPolicy | None, promos: PromoOverrides | None = None
+) -> list[str]:
     """Rules a whole reply breaks, sentence by sentence (for offline harnesses)."""
     return [
         v.rule
         for s in _SENTENCE_SPLIT.split(text or "")
-        if (v := check_sentence(s, policy)).action != PASS and v.rule
+        if (v := check_sentence(s, policy, promos)).action != PASS and v.rule
     ]
+
+
+def _log_promo_exempt(verdict: Verdict, call_id: str, site: str, text: str) -> None:
+    for rule in verdict.promo_exempt:
+        logger.info(
+            "network_claim_promo_exempt: call=%s, site=%s, rule=%s, text=%r",
+            call_id,
+            site,
+            rule,
+            text[:200],
+        )
 
 
 def guard_text(
@@ -266,6 +348,7 @@ def guard_text(
     policy: NetworkPolicy | None,
     call_id: str = "unknown",
     site: str = "summary_fallback",
+    promos: PromoOverrides | None = None,
 ) -> str:
     """The same verdicts on a whole reply that has no sentence buffer.
 
@@ -280,8 +363,9 @@ def guard_text(
     spoken_replacements: set[str] = set()
     changed = False
     for sentence in _SENTENCE_SPLIT.split(text.strip()):
-        verdict = check_sentence(sentence, policy)
+        verdict = check_sentence(sentence, policy, promos)
         if verdict.action == PASS:
+            _log_promo_exempt(verdict, call_id, site, sentence)
             out.append(sentence)
             continue
         changed = True
@@ -307,6 +391,7 @@ async def guard_network_claims(
     stream: AsyncIterator[BufferEvent],
     policy: NetworkPolicy | None,
     call_id: str = "unknown",
+    promos: PromoOverrides | None = None,
 ) -> AsyncIterator[BufferEvent]:
     """Replace sentences the network cannot promise before they reach TTS.
 
@@ -330,8 +415,9 @@ async def guard_network_claims(
         if not queued:
             return []
         text = " ".join(e.text for e in queued).strip()
-        verdict = check_sentence(text, policy)
+        verdict = check_sentence(text, policy, promos)
         if verdict.action == PASS:
+            _log_promo_exempt(verdict, call_id, "stream", text)
             return queued
         network_claim_blocked_total.labels(rule=verdict.rule).inc()
         logger.warning(

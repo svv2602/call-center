@@ -115,6 +115,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from src.agent.agent import ToolRouter
+    from src.agent.promotions import PromoOverrides
     from src.core.audio_socket import AudioSocketConnection
     from src.core.echo_canceller import EchoCanceller
     from src.llm.router import LLMRouter
@@ -1303,6 +1304,7 @@ class StreamingAgentLoop:
         safety_context: str | None = None,
         promotions_context: str | None = None,
         network_policy: NetworkPolicy | None = None,
+        promo_overrides: PromoOverrides | None = None,
         is_modular: bool = False,
         agent_name: str | None = None,
         echo_canceller: EchoCanceller | None = None,
@@ -1321,6 +1323,10 @@ class StreamingAgentLoop:
         self._safety_context = safety_context
         self._promotions_context = promotions_context
         self._network_policy = network_policy
+        # What today's network promotions beat — the claim guard's exemptions.
+        # Built in main.py from the promotions already loaded for the prompt
+        # (sales on only); None keeps the guard as it was without promotions.
+        self._promo_overrides = promo_overrides
         # Sales scope switch — the one flag the transfer guard reads.
         self._sales_enabled = bool(network_policy is not None and network_policy.sales_enabled)
         self._is_modular = is_modular
@@ -1417,7 +1423,13 @@ class StreamingAgentLoop:
                 # line, not silence. `or _fallback_text` is belt and braces:
                 # a replacement is never dropped first, so it cannot empty.
                 summary = (
-                    guard_text(summary, self._network_policy, _current_call_id()) or _fallback_text
+                    guard_text(
+                        summary,
+                        self._network_policy,
+                        _current_call_id(),
+                        promos=self._promo_overrides,
+                    )
+                    or _fallback_text
                 )
                 logger.info("Streaming summary fallback produced text")
                 return summary
@@ -1647,6 +1659,7 @@ class StreamingAgentLoop:
                         ),
                         self._network_policy,
                         _current_call_id(),
+                        promos=self._promo_overrides,
                     )
                 )
                 tts_stream = synthesize_stream(buffered, self._tts)

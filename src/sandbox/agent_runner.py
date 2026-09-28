@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, Any
 from src.agent.agent import LLMAgent
 from src.agent.network_policy import NetworkPolicy, unoffered_service_tools
 from src.agent.parsers.date_parser import resolve_tool_date
-from src.agent.promotions import format_promotions_block, load_active_promotions
+from src.agent.promotions import format_promotions_block, load_active_promotions, promo_overrides
 from src.agent.prompt_manager import (
     PromptManager,
     fetch_tenant_promotions,
@@ -520,12 +520,14 @@ async def create_sandbox_agent(
 
     # Load tenant promotions into prompt context
     promotions_context = None
+    claim_overrides = None
     if tenant_id:
-        # Same source choice as a live call: sales on → `promotions` table.
+        # Same source choice as a live call: sales on → `promotions` table,
+        # and the same live list gives the claim guard its exemptions.
         if policy.sales_enabled:
-            promotions_context = format_promotions_block(
-                await load_active_promotions(engine, tenant_id, redis=redis)
-            )
+            live_promos = await load_active_promotions(engine, tenant_id, redis=redis)
+            promotions_context = format_promotions_block(live_promos)
+            claim_overrides = promo_overrides(live_promos)
         else:
             promos = await fetch_tenant_promotions(engine, tenant_id, redis=redis)
             promotions_context = format_promotions_context(promos)
@@ -585,6 +587,7 @@ async def create_sandbox_agent(
         few_shot_context=few_shot_context,
         safety_context=safety_context,
         promotions_context=promotions_context,
+        promo_overrides=claim_overrides,
         # Kept literal: `test_network_policy` pins this call site by AST.
         network_policy=NetworkPolicy.from_tenant_config((tenant or {}).get("config")),
     )

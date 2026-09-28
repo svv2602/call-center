@@ -30,7 +30,7 @@ from src.agent.color_translit import latin_prefix_to_color
 from src.agent.confirm_detect import booking_was_confirmed
 from src.agent.network_policy import SERVICE_TOOLS, NetworkPolicy
 from src.agent.parsers.date_parser import resolve_tool_date
-from src.agent.promotions import format_promotions_block, load_active_promotions
+from src.agent.promotions import format_promotions_block, load_active_promotions, promo_overrides
 from src.agent.prompt_manager import (
     PromptManager,
     fetch_tenant_promotions,
@@ -1118,6 +1118,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             if network_policy.sales_enabled
             else format_promotions_context(promos)
         )
+        # What the same live promotions let the claim guard pass — no second
+        # query; with sales off `promos` are old KB articles and exempt nothing.
+        claim_overrides = promo_overrides(promos) if network_policy.sales_enabled else None
         caller_history_text = format_caller_history(caller_history_raw)
         storage_context_text = format_storage_context(storage_raw)
         # Known to the guards, not only to the prompt. Not written as the
@@ -1313,6 +1316,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             safety_context=safety_context,
             promotions_context=promotions_context,
             network_policy=network_policy,
+            promo_overrides=claim_overrides,
             is_modular=is_modular,
             agent_name=tenant_agent_name,
         )
@@ -1367,6 +1371,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 safety_context=safety_context,
                 promotions_context=promotions_context,
                 network_policy=network_policy,
+                promo_overrides=claim_overrides,
                 is_modular=is_modular,
                 agent_name=tenant_agent_name,
                 echo_canceller=echo_canceller,
