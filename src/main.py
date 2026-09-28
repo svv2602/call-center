@@ -15,6 +15,7 @@ from datetime import UTC, datetime, timedelta
 from datetime import date as date_type
 from pathlib import Path
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import aiohttp
 import uvicorn
@@ -60,6 +61,7 @@ from src.agent.tools import (
     sales_tenant_allowlist,
     swap_order_chain_for_submit,
 )
+from src.agent.ua_datetime import date_to_words
 from src.api.admin_users import router as admin_users_router
 from src.api.analytics import router as analytics_router
 from src.api.auth import router as auth_router
@@ -248,6 +250,8 @@ _SENTINEL = object()  # sentinel for optional pre-fetched values
 _background_tasks: set[asyncio.Task[Any]] = set()
 
 
+_KYIV = ZoneInfo("Europe/Kyiv")
+
 #: More free times than this are spoken as a range, not listed.
 _SLOTS_READ_OUT_MAX = 4
 
@@ -274,6 +278,39 @@ def _record_storage_contracts(session: CallSession, data: Any) -> None:
             num = item.get("Number") or item.get("NumberContract") or item.get("number")
             if num and str(num) not in session.storage_contracts_found:
                 session.storage_contracts_found.append(str(num))
+            date_end = _storage_date_end(item)
+            if num and date_end and date_end < datetime.now(_KYIV).date():
+                session.storage_contracts_expired[str(num)] = date_end.isoformat()
+
+
+def _storage_date_end(item: dict[str, Any]) -> date_type | None:
+    """The contract's end date from a 1C `findStorage` row, if it parses."""
+    raw = item.get("DateEnd")
+    if not isinstance(raw, str) or len(raw) < 10:
+        return None
+    try:
+        return date_type.fromisoformat(raw[:10])
+    except ValueError:
+        return None
+
+
+def _expired_storage_note(session: CallSession, contract: str) -> str:
+    """The sentence about billed extra storage days, or "" when not due.
+
+    1C still returns a contract after its DateEnd, and the tyres are still on
+    its stock (0957044150, contract 00000110596, ended 2026-08-23). Booking by
+    it is allowed; the caller should hear before arriving that the days past
+    the term are charged at the centre.
+    """
+    date_end = session.storage_contracts_expired.get(contract)
+    if not date_end:
+        return ""
+    spoken = date_to_words(date_end) or date_end
+    return (
+        f"Зверніть увагу: термін зберігання за договором закінчився — це було "
+        f"{spoken}. За зберігання понад цей термін доплату розрахують у шинному "
+        "центрі під час обслуговування."
+    )
 
 
 def _brand_has_a_source(session: CallSession, known_before: str | None) -> bool:
@@ -2761,13 +2798,21 @@ def _build_tool_router(
                     # NOTE: booking_id is deliberately NOT in the LLM-visible
                     # response. Bot has repeatedly leaked UUIDs to callers
                     # despite prompt anti-patterns (calls 07-31 12:59, 13:xx).
+                    storage_note = _expired_storage_note(
+                        session, str(kwargs.get("storage_contract") or "")
+                    )
+                    confirmed_line = (
+                        "«Готово, записала на [дата] о [час] на [адреса]. "
+                        "Приїжджайте за десять хвилин до початку."
+                        + (f" {storage_note}" if storage_note else "")
+                        + "»"
+                    )
                     return {
                         "status": "confirmed",
                         "message": (
-                            "Запис створено. Клієнту скажи: «Готово, записала "
-                            "на [дата] о [час] на [адреса]. Приїжджайте за десять "
-                            "хвилин до початку.» БЕЗ згадки «номер броні», «код "
-                            "запису», «bookingid» — цих полів у результаті немає."
+                            f"Запис створено. Клієнту скажи: {confirmed_line} "
+                            "БЕЗ згадки «номер броні», «код запису», «bookingid» "
+                            "— цих полів у результаті немає."
                         ),
                     }
                 # 1C said success but returned no GUID — treat as error.

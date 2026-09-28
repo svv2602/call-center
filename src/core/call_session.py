@@ -165,6 +165,9 @@ class CallSession:
         # Used to guard book_fitting: if find_storage matched a contract but LLM
         # omits storage_contract=, we reject once and force a retry (call 07-30 16:25).
         self.storage_contracts_found: list[str] = []
+        # Contract Number → ISO end date, only for contracts already past it.
+        # The tyres still sit in storage; the centre bills the extra days.
+        self.storage_contracts_expired: dict[str, str] = {}
         self.storage_contract_guard_triggered: bool = False
         # --- Fitting progress fields (used by _build_fitting_progress) ---
         # These surface state to the LLM as a "## 📋 Прогрес запису" block so
@@ -513,6 +516,7 @@ class CallSession:
             "fsm_slots_fetched": sorted(self.fsm_slots_fetched),
             "last_fitting_station_id": self.last_fitting_station_id,
             "storage_contracts_found": list(self.storage_contracts_found),
+            "storage_contracts_expired": dict(self.storage_contracts_expired),
             "storage_contract_guard_triggered": self.storage_contract_guard_triggered,
             "fitting_customer_name": self.fitting_customer_name,
             "name_from_profile": self.name_from_profile,
@@ -602,6 +606,7 @@ class CallSession:
         session.fsm_slots_fetched = set(data.get("fsm_slots_fetched", []))
         session.last_fitting_station_id = data.get("last_fitting_station_id")
         session.storage_contracts_found = list(data.get("storage_contracts_found", []))
+        session.storage_contracts_expired = dict(data.get("storage_contracts_expired", {}))
         session.storage_contract_guard_triggered = data.get(
             "storage_contract_guard_triggered", False
         )
