@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import anthropic
 
-from src.agent.disk_intent import DiskToolRedirect
+from src.agent.disk_intent import DiskToolRedirect, run_disk_substitution
 from src.agent.history_compressor import summarize_old_messages
 from src.agent.network_claim_guard import guard_text
 from src.agent.network_policy import NetworkPolicy, render_network_block
@@ -507,9 +507,17 @@ class LLMAgent:
                 args = tu["input"]
                 if self._pii_vault is not None:
                     args = self._pii_vault.restore_in_args(args)
-                disk_msg = disk_redirect.check(tu["name"], conversation_history)
-                if disk_msg is not None:
-                    return {"type": "tool_result", "tool_use_id": tu["id"], "content": disk_msg}
+                disk_sub = disk_redirect.check(tu["name"], args, conversation_history)
+                if disk_sub is not None:
+                    disk_content = await run_disk_substitution(
+                        disk_sub,
+                        self._tool_router.execute,
+                        timeout=_TOOL_TIMEOUT_SEC,
+                        sales_enabled=sales_enabled,
+                    )
+                    if self._pii_vault is not None:
+                        disk_content = self._pii_vault.mask(disk_content)
+                    return {"type": "tool_result", "tool_use_id": tu["id"], "content": disk_content}
                 try:
                     raw = await asyncio.wait_for(
                         self._tool_router.execute(tu["name"], args),

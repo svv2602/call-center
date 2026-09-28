@@ -24,7 +24,7 @@ from src.agent.booking_consent import (
     GATE_OFFER,
     is_booking_offer,
 )
-from src.agent.disk_intent import DiskToolRedirect
+from src.agent.disk_intent import DiskToolRedirect, run_disk_substitution
 from src.agent.history_compressor import summarize_old_messages
 from src.agent.intent_classifier import sales_intents
 from src.agent.network_claim_guard import guard_network_claims, guard_text
@@ -1857,9 +1857,17 @@ class StreamingAgentLoop:
                             "tool_use_id": tc.id,
                             "content": block_msg,
                         }
-                disk_msg = disk_redirect.check(tc.name, conversation_history)
-                if disk_msg is not None:
-                    return {"type": "tool_result", "tool_use_id": tc.id, "content": disk_msg}
+                disk_sub = disk_redirect.check(tc.name, args, conversation_history)
+                if disk_sub is not None:
+                    disk_content = await run_disk_substitution(
+                        disk_sub,
+                        self._tool_router.execute,
+                        timeout=_TOOL_TIMEOUT_SEC,
+                        sales_enabled=self._sales_enabled,
+                    )
+                    if self._pii_vault is not None:
+                        disk_content = self._pii_vault.mask(disk_content)
+                    return {"type": "tool_result", "tool_use_id": tc.id, "content": disk_content}
                 refusal_key = tc.name + ":" + json.dumps(args, sort_keys=True)
                 already_refused = refused_this_turn.get(refusal_key)
                 if already_refused is not None:

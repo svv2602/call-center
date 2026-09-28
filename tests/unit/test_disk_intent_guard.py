@@ -1,10 +1,12 @@
-"""Wheels asked for, tyre tool called → the call is redirected to `search_disks`.
+"""Wheels asked for, tyre tool called → `search_disks` runs in its place.
 
 Goldset №2 (2026-09-28): «литі диски R16 на Шкоду Октавію» and «диски R13 на
 Таврію» went to `get_vehicle_tire_sizes` / `search_tires` /
-`search_knowledge_base` in all four runs. The redirect is code, in both loops
-(streamed calls and the text path the sandbox and goldset use), under the
-sales scope only, and at most once per turn.
+`search_knowledge_base` in all four runs. Goldset №3: a refusal hint was not
+enough — the model went to the knowledge base instead. The substitution is
+code, in both loops (streamed calls and the text path the sandbox and goldset
+use), under the sales scope only, and at most once per turn. The arguments of
+the substituted call are pinned in `test_disk_call_substitute.py`.
 """
 
 from __future__ import annotations
@@ -18,7 +20,7 @@ import pytest
 
 from scripts.configure_tenants import TVOYA_SHINA_CONFIG_PATCH
 from src.agent.agent import LLMAgent, ToolRouter
-from src.agent.disk_intent import DISK_TOOL_HINT, has_disk_intent
+from src.agent.disk_intent import DISK_ASK_DIAMETER, DiskSubstitution, has_disk_intent
 from src.agent.network_policy import NetworkPolicy
 from src.agent.streaming_loop import StreamingAgentLoop
 from src.llm.models import (
@@ -38,6 +40,7 @@ from tests.unit.mocks.mock_tts import MockTTSEngine
 
 OCTAVIA = "потрібні литі диски шістнадцятий радіус на Шкоду Октавію 2018"
 TAVRIA = "диски тринадцятий радіус на Таврію є?"
+MARK = "виконано search_disks"
 
 _TOOLS = [
     {"name": name, "description": "", "input_schema": {"type": "object"}}
@@ -50,11 +53,23 @@ def _policy(sales: bool) -> NetworkPolicy:
     return NetworkPolicy.from_tenant_config({**TVOYA_SHINA_CONFIG_PATCH, "sales_enabled": sales})
 
 
-def _handlers(router: ToolRouter) -> dict[str, AsyncMock]:
-    handlers = {t["name"]: AsyncMock(return_value={"items": []}) for t in _TOOLS}
-    for name, handler in handlers.items():
-        router.register(name, handler)
-    return handlers
+class _Calls:
+    """What the tool router actually ran — real handlers, no mocks."""
+
+    def __init__(self, router: ToolRouter) -> None:
+        self.log: list[tuple[str, dict[str, Any]]] = []
+        for tool in _TOOLS:
+            router.register(tool["name"], self._handler(tool["name"]))
+
+    def _handler(self, name: str) -> Any:
+        async def _run(**kwargs: Any) -> dict[str, Any]:
+            self.log.append((name, kwargs))
+            return {"items": []}
+
+        return _run
+
+    def count(self, name: str) -> int:
+        return sum(1 for n, _ in self.log if n == name)
 
 
 def _tool_results(history: list[dict[str, Any]]) -> list[str]:
@@ -64,6 +79,10 @@ def _tool_results(history: list[dict[str, Any]]) -> list[str]:
         if msg.get("role") == "user" and isinstance(content, list):
             out.extend(str(p.get("content", "")) for p in content if p.get("type") == "tool_result")
     return out
+
+
+def _marked(history: list[dict[str, Any]]) -> list[str]:
+    return [r for r in _tool_results(history) if MARK in r]
 
 
 # ── Predicate ────────────────────────────────────────────────────────
@@ -109,9 +128,10 @@ class TestHasDiskIntent:
     def test_not_wheels(self, text: str) -> None:
         assert not has_disk_intent(text)
 
-    def test_hint_carries_no_literal_numbers(self) -> None:
-        assert not any(ch.isdigit() for ch in DISK_TOOL_HINT)
-        assert "search_disks" in DISK_TOOL_HINT
+    def test_model_facing_texts_carry_no_literal_numbers(self) -> None:
+        # A number in a hint becomes an argument of the next tool call.
+        for text in (DISK_ASK_DIAMETER, DiskSubstitution("search_tires", None).note):
+            assert not any(ch.isdigit() for ch in text)
 
 
 # ── Streaming loop (live calls) ──────────────────────────────────────
@@ -142,9 +162,9 @@ def _stream_turn(
     sales: bool = True,
     tools: list[dict[str, Any]] = _TOOLS,
     user_text: str = OCTAVIA,
-) -> tuple[dict[str, AsyncMock], list[dict[str, Any]]]:
+) -> tuple[_Calls, list[dict[str, Any]]]:
     router = ToolRouter()
-    handlers = _handlers(router)
+    calls = _Calls(router)
     loop = StreamingAgentLoop(
         llm_router=MockLLMRouter(rounds),
         tool_router=router,
@@ -157,89 +177,92 @@ def _stream_turn(
     )
     history: list[dict[str, Any]] = []
     asyncio.run(loop.run_turn(user_text, history))
-    return handlers, history
+    return calls, history
 
 
 class TestStreamingLoop:
     @pytest.mark.parametrize(
         "tool", ["get_vehicle_tire_sizes", "search_tires", "search_knowledge_base"]
     )
-    def test_tyre_tool_is_not_run_and_gets_the_hint(self, tool: str) -> None:
-        handlers, history = _stream_turn([_round(("t1", tool)), _text("Добре.")])
-        assert handlers[tool].await_count == 0
-        assert _tool_results(history) == [DISK_TOOL_HINT]
+    def test_tyre_tool_is_replaced_by_search_disks(self, tool: str) -> None:
+        calls, history = _stream_turn([_round(("t1", tool)), _text("Добре.")])
+        assert calls.count(tool) == 0
+        assert calls.count("search_disks") == 1
+        [result] = _tool_results(history)
+        assert f"замість {tool} {MARK}" in result
 
-    def test_goldset_shape_redirected_then_search_disks_runs(self) -> None:
-        handlers, history = _stream_turn(
+    def test_goldset_shape_model_may_still_call_search_disks(self) -> None:
+        calls, history = _stream_turn(
             [_round(("t1", "get_vehicle_tire_sizes")), _round(("t2", "search_disks")), _text("Є.")],
             user_text=TAVRIA,
         )
-        assert handlers["get_vehicle_tire_sizes"].await_count == 0
-        assert handlers["search_disks"].await_count == 1
-        assert _tool_results(history)[0] == DISK_TOOL_HINT
+        assert calls.count("get_vehicle_tire_sizes") == 0
+        assert calls.count("search_disks") == 2
+        assert MARK in _tool_results(history)[0]
 
     def test_second_tyre_call_in_the_turn_runs(self) -> None:
-        # Loop-breaker: a refusal repeated each round leaves the turn silent.
-        handlers, history = _stream_turn(
+        # Loop-breaker: a substitution repeated each round leaves no way out.
+        calls, history = _stream_turn(
             [_round(("t1", "search_tires")), _round(("t2", "search_tires")), _text("Ось.")]
         )
-        assert handlers["search_tires"].await_count == 1
-        assert _tool_results(history).count(DISK_TOOL_HINT) == 1
+        assert calls.count("search_tires") == 1
+        assert calls.count("search_disks") == 1
+        assert len(_marked(history)) == 1
 
-    def test_only_one_refusal_in_a_parallel_round(self) -> None:
-        handlers, history = _stream_turn(
+    def test_only_one_substitution_in_a_parallel_round(self) -> None:
+        calls, history = _stream_turn(
             [
                 _round(("t1", "get_vehicle_tire_sizes"), ("t2", "search_knowledge_base")),
                 _text("Ок."),
             ]
         )
-        assert _tool_results(history).count(DISK_TOOL_HINT) == 1
-        ran = (
-            handlers["get_vehicle_tire_sizes"].await_count
-            + handlers["search_knowledge_base"].await_count
-        )
+        assert len(_marked(history)) == 1
+        assert calls.count("search_disks") == 1
+        ran = calls.count("get_vehicle_tire_sizes") + calls.count("search_knowledge_base")
         assert ran == 1
 
     def test_tyre_tool_alongside_search_disks_runs(self) -> None:
-        handlers, history = _stream_turn(
+        calls, history = _stream_turn(
             [_round(("t1", "search_disks"), ("t2", "get_vehicle_tire_sizes")), _text("Ок.")]
         )
-        assert handlers["get_vehicle_tire_sizes"].await_count == 1
-        assert DISK_TOOL_HINT not in _tool_results(history)
+        assert calls.count("get_vehicle_tire_sizes") == 1
+        assert calls.count("search_disks") == 1
+        assert _marked(history) == []
 
     def test_after_search_disks_tyre_tool_runs(self) -> None:
-        handlers, history = _stream_turn(
+        calls, history = _stream_turn(
             [_round(("t1", "search_disks")), _round(("t2", "search_tires")), _text("Ок.")]
         )
-        assert handlers["search_tires"].await_count == 1
-        assert DISK_TOOL_HINT not in _tool_results(history)
+        assert calls.count("search_tires") == 1
+        assert _marked(history) == []
 
     def test_sales_off_nothing_changes(self) -> None:
-        handlers, history = _stream_turn(
-            [_round(("t1", "search_tires")), _text("Ок.")], sales=False
-        )
-        assert handlers["search_tires"].await_count == 1
-        assert DISK_TOOL_HINT not in _tool_results(history)
+        calls, history = _stream_turn([_round(("t1", "search_tires")), _text("Ок.")], sales=False)
+        assert calls.count("search_tires") == 1
+        assert calls.count("search_disks") == 0
+        assert _marked(history) == []
 
     def test_without_search_disks_in_tools_nothing_changes(self) -> None:
-        handlers, history = _stream_turn(
+        calls, _ = _stream_turn(
             [_round(("t1", "search_tires")), _text("Ок.")], tools=_NO_DISKS_TOOL
         )
-        assert handlers["search_tires"].await_count == 1
-        assert DISK_TOOL_HINT not in _tool_results(history)
+        assert calls.count("search_tires") == 1
+        assert calls.count("search_disks") == 0
 
     def test_tyre_question_is_not_redirected(self) -> None:
-        handlers, _ = _stream_turn(
+        calls, _ = _stream_turn(
             [_round(("t1", "search_tires")), _text("Ок.")], user_text="шини 205/55 R16"
         )
-        assert handlers["search_tires"].await_count == 1
+        assert calls.count("search_tires") == 1
+        assert calls.count("search_disks") == 0
 
     def test_brake_disc_is_not_redirected(self) -> None:
-        handlers, _ = _stream_turn(
+        calls, _ = _stream_turn(
             [_round(("t1", "search_knowledge_base")), _text("Ок.")],
             user_text="тормозные диски меняете?",
         )
-        assert handlers["search_knowledge_base"].await_count == 1
+        assert calls.count("search_knowledge_base") == 1
+        assert calls.count("search_disks") == 0
 
 
 # ── Text path (sandbox, goldset) ─────────────────────────────────────
@@ -260,11 +283,11 @@ def _resp(*names: str, text: str = "") -> LLMResponse:
 
 def _text_turn(
     responses: list[LLMResponse], *, sales: bool = True, user_text: str = OCTAVIA
-) -> tuple[dict[str, AsyncMock], list[dict[str, Any]]]:
+) -> tuple[_Calls, list[dict[str, Any]]]:
     llm_router = create_autospec(LLMRouter, instance=True)
     llm_router.complete = AsyncMock(side_effect=responses)
     router = ToolRouter()
-    handlers = _handlers(router)
+    calls = _Calls(router)
     agent = LLMAgent(
         api_key="test-key",
         system_prompt="base",
@@ -274,31 +297,33 @@ def _text_turn(
         network_policy=_policy(sales),
     )
     _, history = asyncio.run(agent.process_message(user_text, []))
-    return handlers, history
+    return calls, history
 
 
 class TestTextPath:
-    def test_goldset_shape_redirected_then_search_disks_runs(self) -> None:
-        handlers, history = _text_turn(
-            [_resp("get_vehicle_tire_sizes"), _resp("search_disks"), _resp(text="Є диски.")],
-            user_text=TAVRIA,
+    def test_goldset_shape_tyre_tool_replaced_by_search_disks(self) -> None:
+        calls, history = _text_turn(
+            [_resp("get_vehicle_tire_sizes"), _resp(text="Є диски.")], user_text=TAVRIA
         )
-        assert handlers["get_vehicle_tire_sizes"].await_count == 0
-        assert handlers["search_disks"].await_count == 1
-        assert _tool_results(history)[0] == DISK_TOOL_HINT
+        assert calls.count("get_vehicle_tire_sizes") == 0
+        assert calls.count("search_disks") == 1
+        assert f"замість get_vehicle_tire_sizes {MARK}" in _tool_results(history)[0]
 
     def test_second_tyre_call_in_the_turn_runs(self) -> None:
-        handlers, history = _text_turn(
+        calls, history = _text_turn(
             [_resp("search_knowledge_base"), _resp("search_knowledge_base"), _resp(text="Ось.")]
         )
-        assert handlers["search_knowledge_base"].await_count == 1
-        assert _tool_results(history).count(DISK_TOOL_HINT) == 1
+        assert calls.count("search_knowledge_base") == 1
+        assert calls.count("search_disks") == 1
+        assert len(_marked(history)) == 1
 
     def test_tyre_tool_alongside_search_disks_runs(self) -> None:
-        handlers, _ = _text_turn([_resp("search_disks", "search_tires"), _resp(text="Ок.")])
-        assert handlers["search_tires"].await_count == 1
+        calls, _ = _text_turn([_resp("search_disks", "search_tires"), _resp(text="Ок.")])
+        assert calls.count("search_tires") == 1
+        assert calls.count("search_disks") == 1
 
     def test_sales_off_nothing_changes(self) -> None:
-        handlers, history = _text_turn([_resp("search_tires"), _resp(text="Ок.")], sales=False)
-        assert handlers["search_tires"].await_count == 1
-        assert DISK_TOOL_HINT not in _tool_results(history)
+        calls, history = _text_turn([_resp("search_tires"), _resp(text="Ок.")], sales=False)
+        assert calls.count("search_tires") == 1
+        assert calls.count("search_disks") == 0
+        assert _marked(history) == []

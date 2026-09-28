@@ -16,25 +16,40 @@ check, so «гальмівні диски і литі диски» still counts.
 (`StreamingAgentLoop._execute_one_tool` and `LLMAgent._execute_one`): under
 `sales_enabled`, while the customer's last utterance asks for wheels and
 `search_disks` is offered but not yet called this turn, a tyre-side tool call is
-answered with `DISK_TOOL_HINT` instead of being run — once per turn; the second
-such call runs (a refusal repeated every round would leave the turn silent).
+not run — `search_disks` runs in its place (the same `ToolRouter.execute`, so
+the same audit row and metrics), with the diameter from the utterance or the
+tyre call and the car from `get_vehicle_tire_sizes` arguments, and the model
+gets its result marked «замість <tool> виконано search_disks». No diameter →
+the result asks for it instead of calling `search_disks` with none. Once per
+turn; the second such call runs (a substitution repeated every round would
+leave the model no way out).
+
+Goldset №3 (2026-09-28) is why it is a substitution and not a refusal: after
+the refusal hint (`fff0ad8`) the model went to the knowledge base and answered
+«потрібні розболтовка, виліт…» without ever calling `search_disks`.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from src.agent.disk_fitment import to_int
+from src.agent.parsers.tire_query import parse_tire_size
+
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Awaitable, Callable, Iterable
 
 logger = logging.getLogger(__name__)
 
-DISK_TOOL_HINT = (
-    "Клієнт питає про диски — виклич search_disks (діаметр; якщо відоме авто — "
-    "марку, модель і рік). get_vehicle_tire_sizes/search_tires — тільки для шин."
-)
+DISK_ASK_DIAMETER = "Уточни в клієнта діаметр дисків (радіус)."
+
+# A wheel's seat diameter in inches; anything outside is not a wheel size.
+_DIAMETER_MIN = 10
+_DIAMETER_MAX = 30
 
 # Tools the model reaches for instead of `search_disks` (goldset №2).
 DISK_REDIRECTED_TOOLS = frozenset(
@@ -95,28 +110,125 @@ def last_customer_text(history: list[dict[str, Any]]) -> str:
     return ""
 
 
+def _plausible_diameter(value: Any) -> int | None:
+    d = to_int(value)
+    if d is None or not _DIAMETER_MIN <= d <= _DIAMETER_MAX:
+        return None
+    return d
+
+
+def disk_diameter(text: str, tool_args: dict[str, Any]) -> int | None:
+    """The wheel diameter: the caller's words first, then the tyre call's ``diameter``."""
+    sizes = parse_tire_size(text) if text else None
+    if sizes:
+        d = _plausible_diameter(sizes[0].diameter)
+        if d is not None:
+            return d
+    return _plausible_diameter(tool_args.get("diameter"))
+
+
+def disk_vehicle(tool_name: str, tool_args: dict[str, Any]) -> dict[str, Any] | None:
+    """The car of a `get_vehicle_tire_sizes` call, or None — never guessed."""
+    if tool_name != "get_vehicle_tire_sizes":
+        return None
+    vehicle: dict[str, Any] = {}
+    for key in ("brand", "model"):
+        value = tool_args.get(key)
+        if isinstance(value, str) and value.strip():
+            vehicle[key] = value.strip()
+    if not vehicle:
+        return None
+    year = to_int(tool_args.get("year"))
+    if year is not None and year > 0:
+        vehicle["year"] = year
+    return vehicle
+
+
+@dataclass(frozen=True)
+class DiskSubstitution:
+    """A tyre-side call replaced by `search_disks` (``args`` None → ask the diameter)."""
+
+    replaced_tool: str
+    args: dict[str, Any] | None
+
+    @property
+    def note(self) -> str:
+        if self.args is None:
+            return (
+                f"({self.replaced_tool} не виконано — клієнт питає про диски.) {DISK_ASK_DIAMETER}"
+            )
+        return f"(замість {self.replaced_tool} виконано search_disks — клієнт питає про диски)"
+
+
+async def run_disk_substitution(
+    sub: DiskSubstitution,
+    execute: Callable[[str, dict[str, Any]], Awaitable[Any]],
+    *,
+    timeout: float,
+    sales_enabled: bool,
+) -> str:
+    """The tool_result text of a substitution: `search_disks` run, or the diameter question.
+
+    ``execute`` is the loop's own ``ToolRouter.execute`` — the substituted call
+    gets the same `call_tool_calls` row and metrics as one the model made.
+    """
+    from src.agent.tool_result_compressor import compress_tool_result
+    from src.monitoring.metrics import tool_call_errors_total
+
+    if sub.args is None:
+        return sub.note
+    try:
+        raw = await asyncio.wait_for(execute("search_disks", sub.args), timeout=timeout)
+    except TimeoutError:
+        logger.error("Tool search_disks (substituted) timed out after %ss", timeout)
+        tool_call_errors_total.labels(tool_name="search_disks", error_type="timeout").inc()
+        raw = {"error": "Сервіс тимчасово не відповідає, спробуйте ще раз"}
+    content = compress_tool_result("search_disks", raw, sales_enabled=sales_enabled, args=sub.args)
+    return f"{sub.note}\n{content}"
+
+
 class DiskToolRedirect:
-    """Per-turn redirect of tyre-side tools to `search_disks`."""
+    """Per-turn substitution of tyre-side tools by `search_disks`."""
 
     def __init__(self, *, sales_enabled: bool, tools: Iterable[dict[str, Any]]) -> None:
         self._armed = sales_enabled and any(t.get("name") == "search_disks" for t in tools)
         self._disks_called = False
-        self._refused = False
+        self._substituted = False
 
     def note_round(self, tool_names: Iterable[str]) -> None:
         """Record the tools the model asked for in this round, before they run."""
         if "search_disks" in tool_names:
             self._disks_called = True
 
-    def check(self, tool_name: str, history: list[dict[str, Any]]) -> str | None:
-        """The refusal text if this call must not run, else None."""
-        if not self._armed or self._disks_called or self._refused:
+    def check(
+        self, tool_name: str, tool_args: dict[str, Any], history: list[dict[str, Any]]
+    ) -> DiskSubstitution | None:
+        """The substitution if this call must not run as asked, else None."""
+        if not self._armed or self._disks_called or self._substituted:
             return None
         if tool_name not in DISK_REDIRECTED_TOOLS:
             return None
         last = last_customer_text(history)
         if not has_disk_intent(last):
             return None
-        self._refused = True
-        logger.warning("disk_tool_redirect tool=%s last_customer_text=%r", tool_name, last[:120])
-        return DISK_TOOL_HINT
+        self._substituted = True
+        args = tool_args if isinstance(tool_args, dict) else {}
+        diameter = disk_diameter(last, args)
+        if diameter is None:
+            logger.warning(
+                "disk_tool_substitute tool=%s no_diameter last_customer_text=%r",
+                tool_name,
+                last[:120],
+            )
+            return DiskSubstitution(tool_name, None)
+        disk_args: dict[str, Any] = {"diameter": diameter}
+        vehicle = disk_vehicle(tool_name, args)
+        if vehicle is not None:
+            disk_args["vehicle"] = vehicle
+        logger.warning(
+            "disk_tool_substitute tool=%s args=%r last_customer_text=%r",
+            tool_name,
+            disk_args,
+            last[:120],
+        )
+        return DiskSubstitution(tool_name, disk_args)
