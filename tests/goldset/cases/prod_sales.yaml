@@ -1,0 +1,53 @@
+# Real sales wording from Tvoya Shina calls, 2026-08-29..2026-09-28 — only 8
+# calls in 30 days carried it (see PROGRESS phase-01). Expectations are the
+# sales_enabled=true behaviour; the sales_enabled=false twin of the first
+# lines lives in scope_today.yaml.
+
+- id: prod_buy_tyres_asks_size
+  title: «купити треба резину» — підбір, не переведення (ee8d68a6)
+  source: prod:ee8d68a6
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-G-sales-scope-switch: until the switch a tyre purchase is transferred'
+  turns:
+    - user: там мені купити треба резину
+      expect:
+        tool_not_called: [transfer_to_operator, get_fitting_stations]
+        must_contain: ['розмір|діаметр|авто|машин|марк']
+
+- id: prod_tyre_price_by_size_searches
+  title: «вартість шин 155 на 70 на 13» — пошук шин, не ціна монтажу R13 (fdb4a7d4)
+  source: prod:fdb4a7d4
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-G-sales-scope-switch: until the switch a tyre price question is read as fitting price'
+  turns:
+    - user: дізнатися вартість шин 155 на 70 на 13
+      expect:
+        tool_called: [{name: search_tires, args: {width: '^155$', profile: '^70$', diameter: '^13$'}}]
+        tool_not_called: [get_fitting_price]
+
+- id: prod_buying_new_mid_fitting
+  title: «буду купувати нові» посеред запису — не «через мене не можна» (37dbaba3)
+  source: prod:37dbaba3
+  network: [tvoya-shina]
+  sales_enabled: true
+  pending: 'wave-3-G-sales-scope-switch: the fitting flow still refuses tyre sales'
+  turns:
+    - user: записатися на шиномонтаж
+    - user: Дніпро, Донецьке шосе
+    - user: буду купувати нові
+      expect:
+        must_not_contain: ['купувати через мене не можна', 'не можна купити', 'нельзя купить']
+
+- id: prod_order_status_asks_order
+  title: «я замовляв... повинні відправити» — статус замовлення, не шиномонтаж (94d4b94b)
+  source: prod:94d4b94b
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-G-sales-scope-switch: get_order_status is outside the fitting-only scope'
+  turns:
+    - user: алло так добрий день а там я замовляв ціни в понеділок повинні відправити
+      expect:
+        must_not_contain: ['шиномонтаж', 'якому місті']
+        tool_not_called: [get_fitting_stations]

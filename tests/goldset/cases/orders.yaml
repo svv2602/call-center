@@ -1,0 +1,93 @@
+# Order and payment (owner decisions 2026-09-28): both networks take orders;
+# an order is a REQUEST in 1C, a manager calls back to confirm. Payment terms
+# are the same in both networks.
+
+- id: order_two_tyres_price_per_piece
+  title: 1–2 шини можна, ціна — за штуку
+  source: tshina:quantity_two_ru
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-G-sales-scope-switch: until the switch the bot transfers every tyre order'
+  turns:
+    - user: потрібно дві літні шини 205/55 R16
+      expect:
+        tool_called: [{name: search_tires, args: {width: '^205$', diameter: '^16$'}}]
+        must_contain: ['за (одну )?шину|за штуку|за одиницю|за шт']
+        must_not_contain: ['(лише|тільки|только) комплект', 'мінімум (чотири|4)', 'минимум (четыре|4)']
+        tool_not_called: [transfer_to_operator]
+
+- id: order_finish_is_a_request
+  title: оформлення — «заявку прийнято, менеджер зателефонує», не «підтверджено»
+  source: owner:order-is-a-request
+  network: both
+  sales_enabled: true
+  pending: 'wave-2-D-order-finish-is-a-request: the order flow still says the order is confirmed'
+  turns:
+    - user: потрібні дві літні шини 205/55 R16
+    - user: беру першу, оформлюйте, доставка Новою поштою, оплата при отриманні
+      expect:
+        must_contain: ['заявк', 'менеджер\w*\s+(?:\w+\s+){0,2}(зателефону|передзвон|перезвон|звʼяж|зв''яж)']
+        must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд']
+
+- id: order_1c_failure_hands_to_manager
+  title: 1С не прийняла — «передам менеджеру, вам зателефонують», без «заявку прийнято»
+  source: owner:order-is-a-request
+  network: both
+  sales_enabled: true
+  pending: 'wave-2-D-order-finish-is-a-request: no 1C-failure branch in the order flow yet'
+  mocks:
+    create_order_draft: {error: '1C unavailable', success: false}
+  turns:
+    - user: оформіть дві шини 205/55 R16, першу модель, оплата карткою
+      expect:
+        must_contain: ['менеджер', 'зателефону|передзвон|перезвон']
+        must_not_contain: ['заявку прийнят', 'заявка прийнят', 'заявку принят']
+
+- id: order_think_no_reserve
+  title: «я подумаю» — резерву немає
+  source: owner:no-reserve
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-G-sales-scope-switch: _MOD_OBJECTIONS still offers a reserve'
+  turns:
+    - user: потрібні дві літні шини 205/55 R16
+    - user: я ще подумаю, відкладіть їх для мене поки
+      expect:
+        must_not_contain: ['зарезерв', 'відклад\w*\s+(?:\w+\s+){0,2}для вас', 'забронюва', 'відкладу']
+
+- id: payment_cod_commission
+  title: накладений платіж — 2 % + 20 грн
+  source: owner:payment-terms
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-G-sales-scope-switch: payment terms reach the prompt only with sales_enabled (NetworkPolicy from 1-A)'
+  turns:
+    - user: а можна оплатити при отриманні?
+      expect:
+        must_contain: ['наклад|при отриманн|післяплат', '2\s*%|два відсот', '20\s*(грн|гривень)|двадцять грив']
+        max_sentences: 4
+
+- id: payment_installments_ua
+  title: оплата частинами — monobank і Приват
+  source: tshina:installments_ua
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-G-sales-scope-switch: payment terms reach the prompt only with sales_enabled (NetworkPolicy from 1-A)'
+  turns:
+    - user: чи можна купити шини в розстрочку?
+      expect:
+        must_contain: ['частинами|розстрочк', 'моно|monobank', 'приват']
+        must_not_contain: ['миттєв', 'кредитн\w* догов']
+
+- id: payment_card_and_prepay
+  title: картка і передоплата — є в обох мережах
+  source: owner:payment-terms
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-G-sales-scope-switch: payment terms reach the prompt only with sales_enabled (NetworkPolicy from 1-A)'
+  turns:
+    - user: а карткою можна заплатити одразу?
+      expect:
+        must_contain: ['карт']
+        must_not_contain: ['(лише|тільки) (готівк|при отриманн)']
+        tool_not_called: [transfer_to_operator]

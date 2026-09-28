@@ -1,0 +1,139 @@
+# Terms that differ by network (owner decisions 2026-09-28). Every case is
+# `network: both` with separate expectations — the networks share one prompt,
+# so one network's term leaking into the other is the defect these catch.
+# `network_leak` runs on every turn by default on top of these.
+
+- id: delivery_cost_ua
+  title: доставка — ТШ безкоштовно; ПК за тарифами перевізника, суму не називати
+  source: tshina:delivery_cost_lviv_ua
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-G-sales-scope-switch: delivery terms reach the prompt only with sales_enabled (NetworkPolicy from 1-A)'
+  turns:
+    - user: скільки коштує доставка до Львова?
+      expect:
+        must_not_contain: ['якому місті', 'яке місто']
+      expect_by_network:
+        tvoya-shina:
+          must_contain: ['безкоштовн']
+        prokoleso:
+          must_contain: ['тариф\w*\s+перевізник']
+          must_not_contain: ['\d+\s*(грн|гривень|гривні)', 'безкоштовн']
+
+- id: delivery_cost_ru
+  title: доставка по-русски — те же условия сети
+  source: tshina:delivery_cost_lviv_ru
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-G-sales-scope-switch: delivery terms reach the prompt only with sales_enabled (NetworkPolicy from 1-A)'
+  turns:
+    - user: сколько стоит доставка во Львов?
+      expect_by_network:
+        tvoya-shina:
+          must_contain: ['безкоштовн']
+        prokoleso:
+          must_contain: ['тариф\w*\s+перевізник']
+          must_not_contain: ['\d+\s*(грн|гривень|гривні)', 'безкоштовн']
+
+- id: delivery_eta
+  title: строк доставки — зазвичай 1–3 дні, точніше за ТТН
+  source: tshina:delivery_eta_kyiv_ua
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-G-sales-scope-switch: delivery terms reach the prompt only with sales_enabled (NetworkPolicy from 1-A)'
+  turns:
+    - user: як швидко доставите шини у Київ?
+      expect:
+        must_contain: ['(1|один|одного)\s*(-|–|—|до)\s*(3|три|трьох)|від одного до трьох']
+        must_not_contain: ['сьогодні ж', 'гарантовано завтра']
+
+- id: delivery_tracking_ttn
+  title: відстеження — за номером ТТН
+  source: owner:delivery-terms
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-G-sales-scope-switch: delivery terms reach the prompt only with sales_enabled (NetworkPolicy from 1-A)'
+  turns:
+    - user: а як я дізнаюсь де посилка?
+      expect:
+        must_contain: ['ТТН|номер\w*\s+(?:\w+\s+){0,2}накладн']
+
+- id: pickup_both_networks
+  title: самовивіз є в обох мережах
+  source: owner:pickup
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-G-sales-scope-switch: get_pickup_points is outside the fitting-only scope'
+  turns:
+    - user: а можна забрати шини самому в Дніпрі?
+      expect:
+        tool_called: [get_pickup_points]
+        must_not_contain: ['самовивозу немає', 'тільки доставк']
+
+- id: extended_warranty_bridgestone
+  title: розширена гарантія — тільки Bridgestone і тільки ТШ
+  source: tshina:extended_warranty_only_bridgestone_ru
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-G-sales-scope-switch: warranty terms reach the prompt only with sales_enabled (NetworkPolicy from 1-A)'
+  turns:
+    - user: чи є розширена гарантія на шини Michelin?
+      expect_by_network:
+        tvoya-shina:
+          must_contain: ['Bridgestone']
+          must_not_contain: ['(є|діє)\s+(?:\w+\s+){0,2}розширен\w*\s+гаранті\w*\s+(?:\w+\s+){0,2}Michelin']
+        prokoleso:
+          must_not_contain: ['Bridgestone']
+
+- id: warranty_return_same_terms
+  title: гарантія і повернення — однакові в обох мережах
+  source: tshina:warranty_return_ua
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-G-sales-scope-switch: warranty terms reach the prompt only with sales_enabled (articles from 1-B)'
+  turns:
+    - user: яка гарантія на шини і чи можна їх повернути?
+      expect:
+        must_contain: ['14\s*дн|чотирнадцят']
+        tool_not_called: [transfer_to_operator]
+
+- id: pk_storage_not_provided
+  title: ПК — зберігання «не надаємо», без згадки інших мереж
+  source: owner:storage-and-fitting-tvoya-shina-only
+  network: [prokoleso]
+  sales_enabled: true
+  pending: 'wave-1-A-network-policy-config: Pro Koleso services are not in the prompt yet'
+  turns:
+    - user: у вас можна залишити шини на зберігання?
+      expect:
+        must_contain: ['не надаєм|не надаем|не пропонуєм']
+        must_not_contain: ['інш\w*\s+мереж', 'партнер', 'друг\w*\s+сет']
+        tool_not_called: [find_storage]
+
+- id: pk_fitting_price_not_provided
+  title: ПК — ціна монтажу — «не надаємо», без get_fitting_price
+  source: owner:storage-and-fitting-tvoya-shina-only
+  network: [prokoleso]
+  sales_enabled: true
+  pending: 'wave-1-A-network-policy-config: Pro Koleso services are not in the prompt yet'
+  turns:
+    - user: скільки коштує шиномонтаж на шістнадцятий радіус?
+      expect:
+        must_contain: ['не надаєм|не надаем|не пропонуєм']
+        tool_not_called: [get_fitting_price, get_fitting_stations]
+        must_not_contain: ['інш\w*\s+мереж', 'партнер']
+
+- id: services_asked_in_both
+  title: «а шиномонтаж у вас є?» — ТШ пропонує запис, ПК — «не надаємо»
+  source: tshina:install_booking_ru
+  network: both
+  sales_enabled: true
+  pending: 'wave-1-A-network-policy-config: Pro Koleso services are not in the prompt yet'
+  turns:
+    - user: а шиномонтаж у вас є?
+      expect_by_network:
+        tvoya-shina:
+          must_not_contain: ['не надаєм', 'не надаем']
+        prokoleso:
+          must_contain: ['не надаєм|не надаем|не пропонуєм']
+          tool_not_called: [get_fitting_stations]

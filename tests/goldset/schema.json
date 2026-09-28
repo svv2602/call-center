@@ -1,0 +1,85 @@
+{
+    "$schema": "http://json-schema.org/draft-07/schema#",
+    "title": "Voice bot goldset case",
+    "description": "One item of a tests/goldset/cases/*.yaml list. Enforced by scripts/run_goldset.py:parse_case (the local venv has no jsonschema); tests/unit/test_goldset_assertions.py pins that the key sets here and in the code are the same.",
+    "type": "object",
+    "additionalProperties": false,
+    "required": ["id", "sales_enabled", "turns"],
+    "properties": {
+        "id": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+        "title": {"type": "string"},
+        "network": {
+            "description": "'both' (default) plays the case once per network; a list plays it only there.",
+            "oneOf": [
+                {"const": "both"},
+                {"type": "array", "minItems": 1, "items": {"enum": ["tvoya-shina", "prokoleso"]}}
+            ]
+        },
+        "sales_enabled": {
+            "description": "Value of tenants.config.sales_enabled the case is written for. false = today's fitting-only scope.",
+            "type": "boolean"
+        },
+        "pending": {
+            "description": "'<wave checklist>: <reason>' — the case needs a wave that has not landed; it is skipped with this reason in the report.",
+            "type": "string",
+            "pattern": "^wave-\\d+-[A-Z]-[a-z0-9-]+: \\S"
+        },
+        "source": {"description": "tshina:<case id> | prod:<call id prefix> | owner:<decision>", "type": "string"},
+        "notes": {"type": "string"},
+        "mocks": {
+            "description": "tool name -> result returned instead of the default sandbox mock.",
+            "type": "object"
+        },
+        "turns": {
+            "type": "array",
+            "minItems": 1,
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["user"],
+                "properties": {
+                    "user": {"type": "string", "minLength": 1},
+                    "expect": {"$ref": "#/definitions/expect"},
+                    "expect_by_network": {
+                        "description": "Per-network expectations merged over expect: lists add up, scalars override.",
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                            "tvoya-shina": {"$ref": "#/definitions/expect"},
+                            "prokoleso": {"$ref": "#/definitions/expect"}
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "toolSpec": {
+            "oneOf": [
+                {"type": "string"},
+                {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": ["name"],
+                    "properties": {
+                        "name": {"type": "string"},
+                        "args": {"description": "argument -> regex over its string value", "type": "object"}
+                    }
+                }
+            ]
+        },
+        "expect": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+                "must_contain": {"description": "every regex must match the reply (case-insensitive)", "type": "array", "items": {"type": "string"}},
+                "must_not_contain": {"description": "no regex may match the reply", "type": "array", "items": {"type": "string"}},
+                "tool_called": {"description": "each spec must be met by a call on this turn", "type": "array", "items": {"$ref": "#/definitions/toolSpec"}},
+                "tool_not_called": {"type": "array", "items": {"type": "string"}},
+                "transfer_reason": {"description": "transfer_to_operator called with exactly this reason", "type": "string"},
+                "max_sentences": {"type": "integer", "minimum": 1},
+                "network_leak": {"description": "default true: no phrase of another network in the reply", "type": "boolean"}
+            }
+        }
+    }
+}
