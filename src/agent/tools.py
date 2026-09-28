@@ -79,6 +79,22 @@ MVP_TOOLS: list[dict] = [  # type: ignore[type-arg]
                         "Не передавай, якщо клієнт не казав про RunFlat."
                     ),
                 },
+                "xl": {
+                    "type": "boolean",
+                    "description": (
+                        "true — клієнту потрібні посилені шини (XL, Extra Load), "
+                        "false — клієнт не хоче посилених. "
+                        "Не передавай, якщо клієнт не казав про посилені."
+                    ),
+                },
+                "commercial": {
+                    "type": "boolean",
+                    "description": (
+                        "true — клієнту потрібні вантажні (C, «на бус», мікроавтобус), "
+                        "false — легкові, не вантажні. "
+                        "Не передавай, якщо клієнт не казав про бус чи вантажні."
+                    ),
+                },
                 "rear_width": {
                     "type": "integer",
                     "description": (

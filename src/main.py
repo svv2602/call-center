@@ -1694,7 +1694,44 @@ def _build_tool_router(
         if network_policy is not None:
             params["brand_priority"] = network_policy.brand_priority
             params["recommend_count"] = network_policy.recommend_count
-        return await client.search_tires(network=network, **params)
+        result = await client.search_tires(network=network, **params)
+        if network_policy is not None and network_policy.sales_enabled:
+            await _mark_runflat_required(result, params)
+        return result
+
+    # The car of the call, read out of the caller's own lines (the session keeps
+    # no car for sales): user-turn index → resolved car, so a line is looked up once.
+    vehicle_by_turn: dict[int, dict[str, Any] | None] = {}
+
+    async def _mark_runflat_required(result: Any, params: dict[str, Any]) -> None:
+        """``warning: runflat_required`` — a RunFlat car offered non-RunFlat tyres."""
+        from src.store_client.client import runflat_warning
+
+        if not isinstance(result, dict) or not result.get("items"):
+            return
+        vehicle: dict[str, Any] | None = None
+        for idx in range(len(session.dialog_history) - 1, -1, -1):
+            turn = session.dialog_history[idx]
+            if turn.speaker != "user" or not (turn.content or "").strip():
+                continue
+            if idx not in vehicle_by_turn:
+                try:
+                    vehicle_by_turn[idx] = await client.resolve_vehicle_text(turn.content)
+                except Exception:
+                    logger.warning("search_tires: car lookup failed", exc_info=True)
+                    vehicle_by_turn[idx] = None
+            if vehicle_by_turn[idx]:
+                vehicle = vehicle_by_turn[idx]
+                break
+        warning = runflat_warning(result, vehicle, params)
+        if warning:
+            result["warning"] = warning
+            logger.info(
+                "search_tires: %s for call %s car=%s",
+                warning,
+                session.channel_uuid,
+                vehicle,
+            )
 
     async def _check_availability(
         product_id: str = "", query: str = "", **kw: Any

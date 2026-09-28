@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import re
 import uuid
 from typing import Any
 
@@ -36,7 +37,15 @@ _STUDDED_SQL = (
 )
 # RunFlat: 1034 of 60578 passenger SKU, markers RunFlat / Run Flat / ZP /
 # SSR / ROF / RFT in ``description``.
-_RUNFLAT_SQL = r"COALESCE(p.description, '') ~* 'run\s?flat|(^|[^a-z])(rft|zp|ssr|rof)([^a-z]|$)'"
+_RUNFLAT_RE = r"run\s?flat|(^|[^a-z])(rft|zp|ssr|rof)([^a-z]|$)"
+_RUNFLAT_SQL = f"COALESCE(p.description, '') ~* '{_RUNFLAT_RE}'"
+#: Per-row RunFlat fact of the offer (``runflat: true`` on the item); not the
+#: filter expression, so the filter stays absent from an unfiltered query.
+_RUNFLAT_COLUMN_SQL = f"(p.description ~* '{_RUNFLAT_RE}') IS TRUE"
+# XL (reinforced): ``load_rating`` holds only the index (no «XL» on any of
+# 68814 rows, prod 2026-09-28); 1C writes the fact into ``description`` —
+# «… Pilot Alpin 5 XL NF0 [103V]» (3876 rows). ``commercial`` is a column.
+_XL_SQL = r"COALESCE(p.description, '') ~* '(^|[^a-z])xl([^a-z]|$)|extra\s*load|reinforced'"
 
 #: Rows the offer ranking chooses from (in-stock passenger SKU of one size
 #: and season: at most ~110 on prod 2026-09-28).
@@ -45,6 +54,58 @@ _RANKING_WINDOW = 300
 #: Result markers of the relaxation ladder (voiced by the prompt layer).
 CAVEAT_NO_STUDDED = "no_studded_offer_friction"
 CAVEAT_BRAND_UNAVAILABLE = "brand_unavailable_alternatives"
+CAVEAT_XL_NONE = "xl_none_offer_regular"
+CAVEAT_RUNFLAT_NONE = "runflat_none"
+#: ``warning`` of a result offering non-RunFlat tyres for a car that leaves
+#: the factory on RunFlat (set by the ``search_tires`` wrapper in ``main``).
+WARNING_RUNFLAT_REQUIRED = "runflat_required"
+
+#: Cars that leave the factory on RunFlat (tshina_new ``2232038ce``): the
+#: brand of ``vehicle_brands.name`` (lower-case) → the model families, or
+#: ``None`` for every model. A family is the first segment of the model name
+#: («GLE-Class (W166)», «GLE AMG» → ``gle``; «G-Class (W463)» → ``g``;
+#: «GL-Class» / «GLA-Class» stay out).
+RUNFLAT_REQUIRED_VEHICLES: dict[str, frozenset[str] | None] = {
+    "bmw": None,
+    "mercedes": frozenset({"gle", "gls", "g"}),
+}
+
+
+def runflat_required(vehicle: dict[str, Any] | None) -> bool:
+    """The car (``{brand, model?}``) is on `RUNFLAT_REQUIRED_VEHICLES` — default-deny:
+    an unknown brand, or a listed brand whose model is unknown when the list
+    names families, is not."""
+    if not isinstance(vehicle, dict):
+        return False
+    brand = str(vehicle.get("brand") or "").strip().lower()
+    if brand not in RUNFLAT_REQUIRED_VEHICLES:
+        return False
+    families = RUNFLAT_REQUIRED_VEHICLES[brand]
+    if families is None:
+        return True
+    model = str(vehicle.get("model") or "").strip().lower()
+    family = re.split(r"[\s(\-]", model, maxsplit=1)[0] if model else ""
+    return family in families
+
+
+def runflat_warning(
+    result: Any, vehicle: dict[str, Any] | None, params: dict[str, Any]
+) -> str | None:
+    """`WARNING_RUNFLAT_REQUIRED` when a RunFlat car is offered a non-RunFlat tyre.
+
+    Silent when the caller refused RunFlat (``runflat=False``), when the
+    ladder already said RunFlat is missing (``relaxed`` has ``runflat``), or
+    when every offered item is RunFlat.
+    """
+    if not isinstance(result, dict) or not result.get("items"):
+        return None
+    if params.get("runflat") is False or "runflat" in (result.get("relaxed") or []):
+        return None
+    if not runflat_required(vehicle):
+        return None
+    if all(isinstance(i, dict) and i.get("runflat") is True for i in result["items"]):
+        return None
+    return WARNING_RUNFLAT_REQUIRED
 
 
 def _tire_types_sql(bind_params: dict[str, Any]) -> str:
@@ -1358,6 +1419,16 @@ class StoreClient:
             conditions.append(_RUNFLAT_SQL)
         elif runflat is False:
             conditions.append(f"NOT ({_RUNFLAT_SQL})")
+        xl = params.get("xl")
+        if xl is True:
+            conditions.append(_XL_SQL)
+        elif xl is False:
+            conditions.append(f"NOT ({_XL_SQL})")
+        commercial = params.get("commercial")
+        if commercial is True:
+            conditions.append("p.commercial IS TRUE")
+        elif commercial is False:
+            conditions.append("p.commercial IS NOT TRUE")
 
         where_clause = " AND ".join(conditions)
         limit = int(params.get("_limit") or 50)
@@ -1377,7 +1448,8 @@ class StoreClient:
             SELECT p.sku AS id, m.manufacturer AS brand, m.name AS model,
                    p.size, m.seasonality AS season,
                    COALESCE(s.price, 0) AS price,
-                   COALESCE(s.stock_quantity, 0) AS stock_quantity
+                   COALESCE(s.stock_quantity, 0) AS stock_quantity,
+                   {_RUNFLAT_COLUMN_SQL} AS runflat
             FROM tire_products p
             JOIN tire_models m ON p.model_id = m.id
             LEFT JOIN tire_stock s ON p.sku = s.sku AND s.trading_network = :network
@@ -1393,7 +1465,7 @@ class StoreClient:
 
     @staticmethod
     def _tire_item(row: Any) -> dict[str, Any]:
-        return {
+        item = {
             "id": row["id"],
             "brand": row["brand"],
             "model": row["model"],
@@ -1402,6 +1474,9 @@ class StoreClient:
             "price": row["price"],
             "in_stock": row["stock_quantity"] > 0,
         }
+        if row.get("runflat") is True:
+            item["runflat"] = True
+        return item
 
     async def _search_tires_db(self, network: str = "", **params: Any) -> dict[str, Any]:
         """Search tires in PostgreSQL catalog (synced from 1C).
@@ -1454,7 +1529,13 @@ class StoreClient:
         - brand + studded: studded of other brands (``relaxed: ["brand"]``),
           then the brand without studs, then anything;
         - studded: friction tyres, ``caveat_key = no_studded_offer_friction``;
-        - brand: other brands, ``caveat_key = brand_unavailable_alternatives``.
+        - brand: other brands, ``caveat_key = brand_unavailable_alternatives``;
+        - xl: regular tyres of the size, ``caveat_key = xl_none_offer_regular``;
+        - runflat: regular tyres of the size, ``caveat_key = runflat_none``.
+
+        XL / RunFlat are dropped first (alone, then both), keeping brand and
+        studs; ``commercial`` is never dropped (a passenger tyre on a van is
+        not an alternative).
 
         A rear size (``rear_width/rear_profile/rear_diameter``) → staggered
         search: one model in both sizes.
@@ -1477,7 +1558,10 @@ class StoreClient:
 
         studded = params.get("studded") is True
         brand = bool(params.get("brand"))
-        steps: list[list[str]] = []
+        tech = [k for k in ("xl", "runflat") if params.get(k) is True]
+        steps: list[list[str]] = [[k] for k in tech]
+        if len(tech) > 1:
+            steps.append(list(tech))
         if studded and brand:
             steps.append(["brand"])
         if studded:
@@ -1490,9 +1574,14 @@ class StoreClient:
             relaxed = await run(relaxed_params)
             if relaxed.get("items"):
                 relaxed["relaxed"] = drop
-                relaxed["caveat_key"] = (
-                    CAVEAT_NO_STUDDED if "studded" in drop else CAVEAT_BRAND_UNAVAILABLE
-                )
+                if "runflat" in drop:
+                    relaxed["caveat_key"] = CAVEAT_RUNFLAT_NONE
+                elif "xl" in drop:
+                    relaxed["caveat_key"] = CAVEAT_XL_NONE
+                elif "studded" in drop:
+                    relaxed["caveat_key"] = CAVEAT_NO_STUDDED
+                else:
+                    relaxed["caveat_key"] = CAVEAT_BRAND_UNAVAILABLE
                 return relaxed
         return result
 

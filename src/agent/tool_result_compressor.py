@@ -129,6 +129,9 @@ def _compress_knowledge(result: dict[str, Any]) -> str:
 #: loop itself (`tire_caveat_phrase`), not left to the LLM.
 _CAVEAT_NO_STUDDED = "no_studded_offer_friction"
 _CAVEAT_BRAND_UNAVAILABLE = "brand_unavailable_alternatives"
+_CAVEAT_XL_NONE = "xl_none_offer_regular"
+_CAVEAT_RUNFLAT_NONE = "runflat_none"
+_WARNING_RUNFLAT_REQUIRED = "runflat_required"
 _NO_STUDDED_PHRASE = (
     "Шипованих у цьому розмірі зараз немає — можу запропонувати фрикційні (липучку)."
 )
@@ -139,10 +142,17 @@ def tire_caveat_phrase(result: Any, args: dict[str, Any] | None = None) -> str |
 
     Only a result that carries both ``caveat_key`` and items has one: the
     ladder marks a result only when it found something after dropping a
-    filter. An unknown key → ``None`` (nothing is invented for it).
+    filter. An unknown key → ``None`` (nothing is invented for it). A
+    ``warning: runflat_required`` adds its sentence after the caveat.
     """
     if not isinstance(result, dict) or not result.get("items"):
         return None
+    parts = [p for p in (_caveat_phrase(result, args), _runflat_warning_phrase(result)) if p]
+    return " ".join(parts) or None
+
+
+def _caveat_phrase(result: dict[str, Any], args: dict[str, Any] | None) -> str | None:
+    """The sentence of ``caveat_key`` (the ladder's relaxation), or ``None``."""
     key = result.get("caveat_key")
     relaxed = result.get("relaxed") or []
     brand = str((args or {}).get("brand") or "").strip()
@@ -155,7 +165,29 @@ def tire_caveat_phrase(result: Any, args: dict[str, Any] | None = None) -> str |
         return _NO_STUDDED_PHRASE
     if key == _CAVEAT_BRAND_UNAVAILABLE:
         return f"{brand_missing}, ось альтернативи."
+    size = _result_size(result)
+    in_size = f"у розмірі {size}" if size else "у цьому розмірі"
+    if key == _CAVEAT_XL_NONE:
+        return f"Посилених шин (XL) {in_size} зараз немає — ось звичайні шини цього розміру."
+    if key == _CAVEAT_RUNFLAT_NONE:
+        return f"RunFlat {in_size} зараз немає в наявності — ось звичайні шини цього розміру."
     return None
+
+
+def _result_size(result: dict[str, Any]) -> str:
+    """The size of the first offered item (the caller's size), or ``""``."""
+    first = result["items"][0]
+    return str(first.get("size") or "").strip() if isinstance(first, dict) else ""
+
+
+def _runflat_warning_phrase(result: dict[str, Any]) -> str | None:
+    """The sentence for ``warning: runflat_required`` (``StoreClient.runflat_warning``)."""
+    if result.get("warning") != _WARNING_RUNFLAT_REQUIRED:
+        return None
+    items = result.get("items") or []
+    some_runflat = any(isinstance(i, dict) and i.get("runflat") is True for i in items)
+    tail = "не всі ці варіанти — RunFlat" if some_runflat else "ці варіанти — не RunFlat"
+    return f"Зверніть увагу: на ваш автомобіль з заводу ставлять шини RunFlat, а {tail}."
 
 
 def _compress_search_tires(
@@ -177,7 +209,7 @@ def _compress_search_tires(
     items = result.get("items", [])
     essential_keys: tuple[str, ...] = ("brand", "model", "size", "price", "in_stock")
     if sales_enabled:
-        essential_keys = (*essential_keys, "rear_size", "rear_price")
+        essential_keys = (*essential_keys, "rear_size", "rear_price", "runflat")
     compressed = [{k: v for k, v in item.items() if k in essential_keys} for item in items[:3]]
     out: dict[str, Any] = {"total": result.get("total", len(items))}
     out["items"] = compressed
@@ -189,6 +221,8 @@ def _compress_search_tires(
             out["relaxed"] = list(result["relaxed"])
         if result.get("caveat_key"):
             out["caveat_key"] = result["caveat_key"]
+        if result.get("warning"):
+            out["warning"] = result["warning"]
         phrase = tire_caveat_phrase(result, args)
         if phrase:
             out["caveat_already_said"] = (
