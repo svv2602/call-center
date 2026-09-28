@@ -297,11 +297,29 @@ async def run_disk_substitution(
     ``execute`` is the loop's own ``ToolRouter.execute`` — the substituted call
     gets the same `call_tool_calls` row and metrics as one the model made.
     """
+    content, _ = await run_disk_substitution_raw(
+        sub, execute, timeout=timeout, sales_enabled=sales_enabled
+    )
+    return content
+
+
+async def run_disk_substitution_raw(
+    sub: DiskSubstitution,
+    execute: Callable[[str, dict[str, Any]], Awaitable[Any]],
+    *,
+    timeout: float,
+    sales_enabled: bool,
+) -> tuple[str, Any]:
+    """`run_disk_substitution` plus the raw `search_disks` result (``None`` — not run).
+
+    The loops need the raw result for what the code says itself: the fit
+    verdict (`disk_caveat_phrase`) and the claim guard's state.
+    """
     from src.agent.tool_result_compressor import compress_tool_result
     from src.monitoring.metrics import tool_call_errors_total
 
     if sub.args is None:
-        return sub.note
+        return sub.note, None
     try:
         raw = await asyncio.wait_for(execute("search_disks", sub.args), timeout=timeout)
     except TimeoutError:
@@ -309,7 +327,7 @@ async def run_disk_substitution(
         tool_call_errors_total.labels(tool_name="search_disks", error_type="timeout").inc()
         raw = {"error": "Сервіс тимчасово не відповідає, спробуйте ще раз"}
     content = compress_tool_result("search_disks", raw, sales_enabled=sales_enabled, args=sub.args)
-    return f"{sub.note}\n{content}"
+    return f"{sub.note}\n{content}", raw
 
 
 class DiskToolRedirect:

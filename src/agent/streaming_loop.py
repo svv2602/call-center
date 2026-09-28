@@ -24,7 +24,12 @@ from src.agent.booking_consent import (
     GATE_OFFER,
     is_booking_offer,
 )
-from src.agent.disk_intent import DiskToolRedirect, run_disk_substitution
+from src.agent.disk_fit_claim_guard import (
+    DiskFitClaimState,
+    collect_disk_verdict,
+    drop_fit_claims,
+)
+from src.agent.disk_intent import DiskToolRedirect, run_disk_substitution_raw
 from src.agent.history_compressor import summarize_old_messages
 from src.agent.intent_classifier import sales_intents
 from src.agent.network_claim_guard import guard_network_claims, guard_text
@@ -1616,6 +1621,9 @@ class StreamingAgentLoop:
         # Wheels asked for, tyre tool called: redirect to `search_disks` once
         # per turn (sales scope only; see `disk_intent`).
         disk_redirect = DiskToolRedirect(sales_enabled=self._sales_enabled, tools=tools)
+        # Fit verdicts of this turn's `search_disks` results (sales scope):
+        # every one `cannot_confirm` → the model's «підходять» is dropped.
+        disk_fit_state = DiskFitClaimState()
 
         tool_round = 0
         while tool_round < self._max_tool_rounds:
@@ -1654,26 +1662,32 @@ class StreamingAgentLoop:
                 # final wording, neighbours' substitutions included, and
                 # `drop_repeated_sentences` then collapses a replacement the
                 # guard had to speak twice across fragments of one reply.
+                # `drop_fit_claims` (sales only) sits just inside
+                # `guard_network_claims`: a «підходять» about wheels the code
+                # could not confirm goes before any network judgement.
+                judged = hold_unconfirmed_transfer_promise(
+                    offer_booking_before_checklist(
+                        redirect_settled_question(
+                            confirm_settled_time(
+                                drop_control_plane_prose(
+                                    buffer_sentences(stream), _current_call_id()
+                                ),
+                                offered_slots,
+                                conversation_history,
+                            ),
+                            fitting_progress,
+                            conversation_history,
+                        ),
+                        booking_offer_gate,
+                    ),
+                    conversation_history,
+                    sales_enabled=self._sales_enabled,
+                )
+                if self._sales_enabled:
+                    judged = drop_fit_claims(judged, disk_fit_state, _current_call_id())
                 buffered = drop_repeated_sentences(
                     guard_network_claims(
-                        hold_unconfirmed_transfer_promise(
-                            offer_booking_before_checklist(
-                                redirect_settled_question(
-                                    confirm_settled_time(
-                                        drop_control_plane_prose(
-                                            buffer_sentences(stream), _current_call_id()
-                                        ),
-                                        offered_slots,
-                                        conversation_history,
-                                    ),
-                                    fitting_progress,
-                                    conversation_history,
-                                ),
-                                booking_offer_gate,
-                            ),
-                            conversation_history,
-                            sales_enabled=self._sales_enabled,
-                        ),
+                        judged,
                         self._network_policy,
                         _current_call_id(),
                         promos=self._promo_overrides,
@@ -1870,12 +1884,14 @@ class StreamingAgentLoop:
                         }
                 disk_sub = disk_redirect.check(tc.name, args, conversation_history)
                 if disk_sub is not None:
-                    disk_content = await run_disk_substitution(
+                    disk_content, disk_raw = await run_disk_substitution_raw(
                         disk_sub,
                         self._tool_router.execute,
                         timeout=_TOOL_TIMEOUT_SEC,
                         sales_enabled=self._sales_enabled,
                     )
+                    if self._sales_enabled and disk_raw is not None:
+                        collect_disk_verdict(disk_raw, disk_fit_state, _caveats)
                     if self._pii_vault is not None:
                         disk_content = self._pii_vault.mask(disk_content)
                     return {"type": "tool_result", "tool_use_id": tc.id, "content": disk_content}
@@ -1919,6 +1935,8 @@ class StreamingAgentLoop:
                     phrase = tire_caveat_phrase(raw, args)
                     if phrase and phrase not in _caveats:
                         _caveats.append(phrase)
+                if self._sales_enabled and tc.name == "search_disks":
+                    collect_disk_verdict(raw, disk_fit_state, _caveats)
                 content = compress_tool_result(
                     tc.name, raw, sales_enabled=self._sales_enabled, args=args
                 )

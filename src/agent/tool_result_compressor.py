@@ -245,6 +245,65 @@ def _compress_search_tires(
     return _compact(out)
 
 
+#: The sentence for a car the catalogue has no wheel data on (every offered
+#: wheel ``cannot_confirm``, or ``vehicle.found`` false).
+DISK_NO_CAR_DATA_PHRASE = (
+    "По цьому авто в мене немає даних, тож сумісність дисків не можу підтвердити."
+)
+
+
+def _disk_fit(item: Any) -> dict[str, Any] | None:
+    fit = item.get("fit") if isinstance(item, dict) else None
+    return fit if isinstance(fit, dict) else None
+
+
+def disk_caveat_phrase(result: Any) -> str | None:
+    """The compatibility verdict of a ``search_disks`` answer, or ``None``.
+
+    Spoken by the loop, as ``tire_caveat_phrase`` is: the verdict of each
+    offered wheel is ``fit.text`` from the result (``disk_fitment``), never
+    composed here. No car in the call (no ``vehicle``) or no wheel with a
+    ``fit`` → ``None``; ``ambiguous_car`` → its question once; a car the
+    catalogue has no data on → «не можу підтвердити».
+    """
+    from src.agent.disk_fitment import AMBIGUOUS_CAR, CANNOT_CONFIRM, VERDICT_TEXT_UK
+
+    if not isinstance(result, dict) or not isinstance(result.get("vehicle"), dict):
+        return None
+    vehicle = result["vehicle"]
+    if vehicle.get("status") == AMBIGUOUS_CAR:
+        text = VERDICT_TEXT_UK[AMBIGUOUS_CAR]
+        return f"{text[:1].upper()}{text[1:]}."
+    items = [i for i in (result.get("items") or []) if _disk_fit(i) is not None]
+    if not items:
+        return None
+    if vehicle.get("found") is False or all(
+        _disk_fit(i).get("status") == CANNOT_CONFIRM  # type: ignore[union-attr]
+        for i in items
+    ):
+        return DISK_NO_CAR_DATA_PHRASE
+    parts: list[str] = []
+    for item in items:
+        text = str(_disk_fit(item).get("text") or "").strip()  # type: ignore[union-attr]
+        name = " ".join(str(item.get(k) or "").strip() for k in ("brand", "model") if item.get(k))
+        if text and name:
+            parts.append(f"{name} — {text}")
+    if not parts:
+        return None
+    return "Щодо сумісності з вашим авто: " + "; ".join(parts) + "."
+
+
+def _compress_search_disks(result: dict[str, Any]) -> str:
+    """Sales only: the result as is, plus the verdict the loop has already spoken."""
+    out = dict(result)
+    phrase = disk_caveat_phrase(result)
+    if phrase:
+        out["caveat_already_said"] = (
+            f"«{phrase}» — вже сказано клієнту, не повторюй і не кажи від себе, що диски підходять"
+        )
+    return _compact(out)
+
+
 def _compress_check_availability(result: dict[str, Any]) -> str:
     """Keep availability essentials, trim warehouses to first 3."""
     essential_keys = ("available", "price", "stock_quantity")
@@ -317,6 +376,8 @@ def compress_tool_result(
         return _compress_search_tires(result, sales_enabled=True, args=args)
     if sales_enabled and tool_name == "get_vehicle_tire_sizes":
         return _compress_vehicle_sizes(result, sales_enabled=True)
+    if sales_enabled and tool_name == "search_disks":
+        return _compress_search_disks(result)
 
     compressor = _COMPRESSORS.get(tool_name)
     if compressor is not None:

@@ -13,7 +13,12 @@ from typing import TYPE_CHECKING, Any
 
 import anthropic
 
-from src.agent.disk_intent import DiskToolRedirect, run_disk_substitution
+from src.agent.disk_fit_claim_guard import (
+    DiskFitClaimState,
+    collect_disk_verdict,
+    drop_fit_claims_text,
+)
+from src.agent.disk_intent import DiskToolRedirect, run_disk_substitution_raw
 from src.agent.history_compressor import summarize_old_messages
 from src.agent.network_claim_guard import guard_text
 from src.agent.network_policy import NetworkPolicy, render_network_block
@@ -366,6 +371,8 @@ class LLMAgent:
         caveats: list[str] = []
         # Text-path twin of the streamed `search_disks` redirect (`disk_intent`).
         disk_redirect = DiskToolRedirect(sales_enabled=sales_enabled, tools=tools)
+        # Fit verdicts of this turn's `search_disks` results (sales scope).
+        disk_fit_state = DiskFitClaimState()
         tool_call_count = 0
         stop_reason = "end_turn"
         self.last_input_tokens = 0
@@ -519,12 +526,14 @@ class LLMAgent:
                     args = self._pii_vault.restore_in_args(args)
                 disk_sub = disk_redirect.check(tu["name"], args, conversation_history)
                 if disk_sub is not None:
-                    disk_content = await run_disk_substitution(
+                    disk_content, disk_raw = await run_disk_substitution_raw(
                         disk_sub,
                         self._tool_router.execute,
                         timeout=_TOOL_TIMEOUT_SEC,
                         sales_enabled=sales_enabled,
                     )
+                    if sales_enabled and disk_raw is not None:
+                        collect_disk_verdict(disk_raw, disk_fit_state, caveats)
                     if self._pii_vault is not None:
                         disk_content = self._pii_vault.mask(disk_content)
                     return {"type": "tool_result", "tool_use_id": tu["id"], "content": disk_content}
@@ -541,6 +550,8 @@ class LLMAgent:
                     phrase = tire_caveat_phrase(raw, args)
                     if phrase and phrase not in caveats:
                         caveats.append(phrase)
+                if sales_enabled and tu["name"] == "search_disks":
+                    collect_disk_verdict(raw, disk_fit_state, caveats)
                 content = compress_tool_result(
                     tu["name"], raw, sales_enabled=sales_enabled, args=args
                 )
@@ -583,6 +594,11 @@ class LLMAgent:
                 llm_call_id_var.get(None) or "unknown",
                 site="text_path",
                 promos=self._promo_overrides,
+            )
+            # Every offered wheel `cannot_confirm` → the model's «підходять»
+            # goes; the verdict below is the code's own, not judged.
+            response_text = drop_fit_claims_text(
+                response_text, disk_fit_state, llm_call_id_var.get(None) or "unknown"
             )
 
         # A relaxed tyre search's caveat comes first, said by the code — the
