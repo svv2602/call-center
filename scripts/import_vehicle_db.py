@@ -625,7 +625,9 @@ async def _record_import_history(
                 :m_add, :m_upd, :m_skip, :m_miss,
                 :k_add, :k_del, :t_add, :t_del,
                 :aliases, :err, CAST(:diff AS JSONB),
-                CASE WHEN :status = 'running' THEN NULL ELSE now() END
+                -- asyncpg deduces :status as varchar (the column) and as text
+                -- (the comparison) and refuses; one explicit type for both
+                CASE WHEN CAST(:status AS VARCHAR) = 'running' THEN NULL ELSE now() END
             )
             RETURNING id
         """),
