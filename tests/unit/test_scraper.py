@@ -51,10 +51,10 @@ class TestExtractCategory:
             == "guides"
         )
 
-    def test_vse_o_diskah_maps_to_guides(self, scraper: ProKolesoScraper) -> None:
+    def test_vse_o_diskah_maps_to_wheels(self, scraper: ProKolesoScraper) -> None:
         assert (
             scraper._extract_category("https://prokoleso.ua/ua/info/vse-o-diskah/pcd-explained/")
-            == "guides"
+            == "wheels"
         )
 
     def test_pokupatelu_maps_to_faq(self, scraper: ProKolesoScraper) -> None:

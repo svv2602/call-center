@@ -20,7 +20,7 @@ import aiohttp
 from aiobreaker import CircuitBreaker, CircuitBreakerError
 
 from src.agent.network_policy import RECOMMEND_COUNT_MAX, RECOMMEND_COUNT_MIN
-from src.store_client.catalog_types import TIRE_SEARCH_TYPES
+from src.store_client.catalog_types import TIRE_SEARCH_TYPES, WHEEL
 
 logger = logging.getLogger(__name__)
 
@@ -257,6 +257,245 @@ class StoreClient:
             "price": data.get("price"),
             "delivery_days": data.get("delivery_days"),
         }
+
+    # --- Wheels (disks) ---
+
+    async def search_disks(
+        self,
+        diameter: Any = None,
+        pcd: Any = None,
+        et: Any = None,
+        dia: Any = None,
+        width: Any = None,
+        vehicle: Any = None,
+        network: str = "",
+        recommend_count: int = RECOMMEND_COUNT_MAX,
+        **_: Any,
+    ) -> dict[str, Any]:
+        """In-stock wheels of the network (``disk_products`` + ``tire_stock``).
+
+        ``vehicle`` (``{brand, model, year}``) named → every offered wheel
+        carries a ``check_disk_fit`` verdict; wheels that do not fit or are not
+        recommended stay out of the offer; a car with several PCD / hub bores
+        gets no offer but ``ambiguous_car`` (ask the year / modification).
+        At most ``recommend_count`` (the network policy) variants, one per model.
+        """
+        from sqlalchemy import text
+
+        from src.agent import disk_fitment as fit
+
+        if self._db_engine is None:
+            return {"total": 0, "items": [], "message": "Каталог дисків тимчасово недоступний"}
+
+        diameter_i = fit.to_int(diameter)
+        if diameter_i is None or diameter_i <= 0:
+            return {"total": 0, "items": [], "error": "diameter_required"}
+        wanted_pcd = None
+        if pcd not in (None, ""):
+            wanted_pcd = fit.parse_pcd(pcd)
+            if wanted_pcd is None:
+                return {"total": 0, "items": [], "error": "pcd_format"}
+        network = network or "ProKoleso"
+        count = _clamp_recommend_count(recommend_count)
+
+        async with self._db_engine.connect() as conn:
+            car = None
+            vehicle_info: dict[str, Any] | None = None
+            if isinstance(vehicle, dict) and (vehicle.get("brand") or vehicle.get("model")):
+                car, vehicle_info = await self._disk_car_data(conn, vehicle)
+
+            if car is not None and vehicle_info is not None:
+                verdict = fit.check_disk_fit(fit.DiskSpec(), car)
+                if verdict.status == fit.AMBIGUOUS_CAR:
+                    vehicle_info["status"] = fit.AMBIGUOUS_CAR
+                    vehicle_info["variants"] = verdict.reasons[0].car
+                    return {
+                        "total": 0,
+                        "items": [],
+                        "vehicle": vehicle_info,
+                        "need": "vehicle_year_or_modification",
+                    }
+
+            # The car's own pattern narrows the query when the caller named none.
+            if wanted_pcd is None and car is not None and car.pcds:
+                wanted_pcd = car.pcds[0]
+
+            conditions = [
+                "m.type_id = :wheel_type",
+                "d.parse_ok",
+                "d.diameter = :diameter",
+                "s.stock_quantity > 0",
+            ]
+            bind: dict[str, Any] = {
+                "wheel_type": WHEEL,
+                "diameter": diameter_i,
+                "network": network,
+                "result_limit": _RANKING_WINDOW,
+            }
+            if wanted_pcd is not None:
+                # Coarse filter (own or doubled bolt count, either PCD); the
+                # exact pattern match is ``disk_bolt_patterns`` below.
+                conditions.append(
+                    "d.bolt_count IN (:bolts, :bolts_double) AND (d.pcd = :pcd OR d.pcd_alt = :pcd)"
+                )
+                bind["bolts"] = wanted_pcd[0]
+                bind["bolts_double"] = wanted_pcd[0] * 2
+                bind["pcd"] = wanted_pcd[1]
+            width_d = fit.to_decimal(width)
+            if width_d is not None and width_d > 0:
+                conditions.append("d.width_j = :width")
+                bind["width"] = width_d
+            et_d = fit.to_decimal(et)
+            if et_d is not None:
+                conditions.append("ABS(d.et - :et) <= :et_tolerance")
+                bind["et"] = et_d
+                bind["et_tolerance"] = fit.ET_FITS_MAX
+            dia_d = fit.to_decimal(dia)
+            if dia_d is not None and dia_d > 0:
+                # The hub bore: a smaller wheel bore never mounts.
+                conditions.append("d.dia > :dia_min")
+                bind["dia_min"] = dia_d - fit.DIA_TOLERANCE
+
+            where = " AND ".join(conditions)
+            query = text(f"""
+                SELECT p.sku AS id, m.manufacturer AS brand, m.name AS model, p.size,
+                       d.diameter, d.width_j, d.bolt_count, d.pcd, d.pcd_alt, d.et, d.dia,
+                       d.color,
+                       COALESCE(s.price, 0) AS price,
+                       COALESCE(s.stock_quantity, 0) AS stock_quantity
+                FROM disk_products d
+                JOIN tire_products p ON p.sku = d.sku
+                JOIN tire_models m ON m.id = p.model_id
+                JOIN tire_stock s ON s.sku = d.sku AND s.trading_network = :network
+                WHERE {where}
+                ORDER BY s.price ASC NULLS LAST
+                LIMIT :result_limit
+            """)
+            rows = list((await conn.execute(query, bind)).mappings().all())
+
+        tiers: dict[int, list[dict[str, Any]]] = {}
+        excluded = 0
+        for row in rows:
+            spec = fit.DiskSpec.from_row(row)
+            patterns = fit.disk_bolt_patterns(spec)
+            if wanted_pcd is not None and wanted_pcd not in patterns:
+                continue
+            item: dict[str, Any] = {
+                "id": row["id"],
+                "brand": row["brand"],
+                "model": row["model"],
+                "size": row["size"],
+                "color": row["color"],
+                "diameter": spec.diameter,
+                "width": fit.num_str(spec.width),
+                "pcd": "/".join(fit.pcd_str(p) for p in patterns),
+                "et": fit.num_str(spec.et),
+                "dia": fit.num_str(spec.dia),
+                "price": row["price"],
+                "stock_quantity": row["stock_quantity"],
+                "in_stock": row["stock_quantity"] > 0,
+            }
+            severity = 0
+            if car is not None:
+                verdict = fit.check_disk_fit(spec, car)
+                if verdict.status not in fit.OFFERABLE:
+                    excluded += 1
+                    continue
+                item["fit"] = verdict.as_dict()
+                severity = fit.SEVERITY[verdict.status]
+            elif vehicle_info is not None:
+                # Car named but not in the catalogue: never "fits".
+                item["fit"] = fit.FitVerdict(fit.CANNOT_CONFIRM).as_dict()
+            tiers.setdefault(severity, []).append(item)
+
+        # Best verdict first; within a verdict — one model each, price spread.
+        picked: list[dict[str, Any]] = []
+        for severity in sorted(tiers):
+            left = count - len(picked)
+            if left <= 0:
+                break
+            picked.extend(self._rank_tires(tiers[severity], (), count)[:left])
+
+        items = [{k: v for k, v in i.items() if k != "stock_quantity"} for i in picked]
+        result: dict[str, Any] = {"total": len(items), "items": items}
+        if vehicle_info is not None:
+            result["vehicle"] = vehicle_info
+        if excluded:
+            result["excluded_not_fitting"] = excluded
+        if car is not None:
+            # tshina owner rule: spacers and re-drilling are never offered.
+            result["fit_policy"] = "no_spacers_no_redrilling"
+        return result
+
+    async def _disk_car_data(
+        self, conn: Any, vehicle: dict[str, Any]
+    ) -> tuple[Any, dict[str, Any]]:
+        """``CarFitData`` of a named car (``None`` — car not in the catalogue)
+        and what to tell the LLM about the lookup."""
+        from sqlalchemy import text
+
+        from src.agent.disk_fitment import CarFitData, to_int
+
+        brand = str(vehicle.get("brand") or "")
+        model = str(vehicle.get("model") or "")
+        info: dict[str, Any] = {"found": False, "brand": brand, "model": model}
+        brand_row = await self._find_vehicle_brand(conn, brand) if brand else None
+        if brand_row is None:
+            return None, info
+        info["brand"] = brand_row["name"]
+        model_row = await self._find_vehicle_model(conn, brand_row["id"], model) if model else None
+        if model_row is None:
+            return None, info
+        info["model"] = model_row["name"]
+
+        kit_filter = "k.model_id = :mid"
+        bind: dict[str, Any] = {"mid": model_row["id"]}
+        year = to_int(vehicle.get("year"))
+        if year:
+            probe = await conn.execute(
+                text(
+                    "SELECT k.id FROM vehicle_kits k WHERE k.model_id = :mid AND k.year = :year LIMIT 1"
+                ),
+                {"mid": model_row["id"], "year": year},
+            )
+            if probe.mappings().first() is not None:
+                kit_filter += " AND k.year = :year"
+                bind["year"] = year
+                info["year"] = year
+            else:
+                # Year not in the catalogue: the union over all years decides
+                # (several PCD → ambiguous_car, never a guess).
+                info["year_not_found"] = year
+
+        kits = (
+            (
+                await conn.execute(
+                    text(
+                        f"SELECT k.bolt_count, k.pcd, k.dia FROM vehicle_kits k WHERE {kit_filter}"
+                    ),
+                    bind,
+                )
+            )
+            .mappings()
+            .all()
+        )
+        sizes = (
+            (
+                await conn.execute(
+                    text(f"""
+                        SELECT DISTINCT ds.width, ds.diameter, ds.et
+                        FROM vehicle_disk_sizes ds
+                        JOIN vehicle_kits k ON k.id = ds.kit_id
+                        WHERE {kit_filter}
+                    """),
+                    bind,
+                )
+            )
+            .mappings()
+            .all()
+        )
+        info["found"] = True
+        return CarFitData.from_rows(kits, sizes), info
 
     async def get_tire(self, tire_id: str) -> dict[str, Any]:
         """Get tire details.

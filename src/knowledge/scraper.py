@@ -24,7 +24,7 @@ _SLUG_CATEGORY_MAP: dict[str, str] = {
     "novosti": "general",
     "testy-i-obzory-shin": "comparisons",
     "vse-o-shinah": "guides",
-    "vse-o-diskah": "guides",
+    "vse-o-diskah": "wheels",
     "shinnye-kalkulyatory": "guides",
     "pokupателю": "faq",
     "pokupatelu": "faq",

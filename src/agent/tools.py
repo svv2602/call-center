@@ -691,8 +691,63 @@ PROFILE_TOOLS: list[dict] = [  # type: ignore[type-arg]
     },
 ]
 
-# All tools for the agent (MVP + Orders + Fitting/Knowledge + Profile + Callback)
-ALL_TOOLS = MVP_TOOLS + ORDER_TOOLS + FITTING_TOOLS + PROFILE_TOOLS + CALLBACK_TOOLS
+# Wheels (disks): search + fitment verdict computed in code (src/agent/disk_fitment.py).
+# No literal sizes in the descriptions — an example value becomes an argument.
+DISK_TOOLS: list[dict] = [  # type: ignore[type-arg]
+    {
+        "name": "search_disks",
+        "description": (
+            "Пошук дисків у наявності в каталозі мережі. "
+            "Спершу з'ясуй у клієнта діаметр диска, а якщо підбір під авто — марку, "
+            "модель і рік авто. Якщо авто відоме — передай його у vehicle: сумісність "
+            "(PCD, центральний отвір, виліт ET, розмір) порахує система, у кожного "
+            "варіанта буде поле fit.status і fit.text — озвуч fit.text, сам сумісність "
+            "не оцінюй. vehicle.status=ambiguous_car — перепитай рік або модифікацію авто. "
+            "Проставки й розсвердлювання не пропонуй."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "diameter": {
+                    "type": "integer",
+                    "description": "Посадковий діаметр диска в дюймах",
+                },
+                "pcd": {
+                    "type": "string",
+                    "description": (
+                        "Розболтовка: кількість болтів × діаметр кола болтів у мм, "
+                        "як назвав клієнт. Не передавай, якщо клієнт не назвав."
+                    ),
+                },
+                "et": {
+                    "type": "number",
+                    "description": "Виліт ET у мм. Тільки якщо клієнт назвав.",
+                },
+                "dia": {
+                    "type": "number",
+                    "description": "Центральний отвір (DIA) у мм. Тільки якщо клієнт назвав.",
+                },
+                "width": {
+                    "type": "number",
+                    "description": "Ширина обода в дюймах (J). Тільки якщо клієнт назвав.",
+                },
+                "vehicle": {
+                    "type": "object",
+                    "description": "Авто клієнта, якщо диски підбираються під нього.",
+                    "properties": {
+                        "brand": {"type": "string", "description": "Марка авто"},
+                        "model": {"type": "string", "description": "Модель авто"},
+                        "year": {"type": "integer", "description": "Рік випуску"},
+                    },
+                },
+            },
+            "required": ["diameter"],
+        },
+    },
+]
+
+# All tools for the agent (MVP + Orders + Fitting/Knowledge + Profile + Callback + Disks)
+ALL_TOOLS = MVP_TOOLS + ORDER_TOOLS + FITTING_TOOLS + PROFILE_TOOLS + CALLBACK_TOOLS + DISK_TOOLS
 
 
 def filter_tools_by_state(

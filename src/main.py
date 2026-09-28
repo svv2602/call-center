@@ -1683,7 +1683,17 @@ def _build_tool_router(
         network = session.network_id or "ProKoleso"
         return await client.check_availability(product_id, query, network=network, **kw)
 
+    async def _search_disks(**params: Any) -> dict[str, Any]:
+        network = session.network_id or "ProKoleso"
+        # The offer size comes from the network policy, never from the LLM.
+        params.pop("recommend_count", None)
+        params.pop("network", None)
+        if network_policy is not None:
+            params["recommend_count"] = network_policy.recommend_count
+        return await client.search_disks(network=network, **params)
+
     router.register("search_tires", _search_tires)
+    router.register("search_disks", _search_disks)
     router.register("check_availability", _check_availability)
     router.register("get_order_status", client.search_orders)
 

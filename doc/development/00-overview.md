@@ -155,6 +155,7 @@ call_center/
 |------|------|----------|--------------------|
 | `get_vehicle_tire_sizes` | 1 (MVP) | Заводские размеры шин для автомобиля по марке/модели/году | 1C API |
 | `search_tires` | 1 (MVP) | Поиск шин по параметрам (авто, размер, бренд, сезон) | `GET /tires/search` |
+| `search_disks` | продажи | Поиск дисков в наличии сети (`disk_products` + `tire_stock`); авто названо — вердикт совместимости кодом (`src/agent/disk_fitment.py`, правила tshina: PCD точно, DIA/кольца, ET ≤5/6–10/>10 мм); только при `sales_enabled` | PostgreSQL (каталог 1C) |
 | `check_availability` | 1 (MVP) | Проверка наличия конкретного товара | `GET /tires/{id}/availability` |
 | `transfer_to_operator` | 1 (MVP) | Переключение на живого оператора | Asterisk ARI |
 | `create_callback_request` | 1 (MVP) | Заявка на обратный звонок, когда перевод невозможен (`transfer_to_operator` вернул `after_hours`/`error`/`unavailable`) | PostgreSQL `callback_requests` + Telegram |

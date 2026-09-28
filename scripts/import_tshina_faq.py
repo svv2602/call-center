@@ -75,6 +75,16 @@ TOPICS: dict[str, tuple[str, str, str]] = {
         "guides/24_guides_premium_seredniy_ekonom.md",
         "",
     ),
+    "disk-replica": (
+        "disk_knowledge_topics.json",
+        "wheels/08_wheels_replika_ta_oryhinalni_dysky.md",
+        "",
+    ),
+    "wheel-fasteners-tpms": (
+        "disk_knowledge_topics.json",
+        "wheels/09_wheels_kriplennya_ta_datchyky_tysku.md",
+        "",
+    ),
 }
 
 SAFETY_ARTICLE_PATH = "faq/41_faq_zasterezhennya_pry_vybori_shyn.md"
