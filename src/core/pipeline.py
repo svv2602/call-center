@@ -799,6 +799,23 @@ _TIRE_SEASON_ANY_RE = re.compile(
 #: or «все одно» counts only as an answer to that question (finding F: the tail
 #: of a phone number read as R16).
 _BOT_ASKED_SEASON_RE = re.compile(r"сезон|літні|зимові|летние|зимние", re.IGNORECASE)
+#: A sentence of the bot's reply: text up to «?», «.», «!» or a line break.
+_BOT_SENTENCE_RE = re.compile(r"[^?.!\n]+[?.!]?")
+
+
+def _bot_asked_season(last_bot_text: str | None) -> bool:
+    """Did the bot's last reply ASK about the season?
+
+    A season word in a question sentence only. A reply that lists offers
+    («… зимові Bridgestone Blizzak …») or states the season is not a question:
+    reading it as one made «бренд будь-який» the season «any» and overwrote
+    «зимові» (wave 3-G finding, 2026-09-28) — and since 3-G the code searches
+    on that season by itself.
+    """
+    return any(
+        sentence.rstrip().endswith("?") and _BOT_ASKED_SEASON_RE.search(sentence)
+        for sentence in _BOT_SENTENCE_RE.findall(last_bot_text or "")
+    )
 _BOT_ASKED_SIZE_RE = re.compile(
     r"розмір\w*|діаметр\w*|радіус\w*|размер\w*|диаметр\w*|радиус\w*", re.IGNORECASE
 )
@@ -887,7 +904,7 @@ def merge_tire_query(
         out["diameter"] = sizes[0].diameter
 
     season = parse_tire_season(
-        text, bot_asked_season=bool(_BOT_ASKED_SEASON_RE.search(last_bot_text or ""))
+        text, bot_asked_season=_bot_asked_season(last_bot_text)
     )
     if season is None and nail is not None and not out.get("season"):
         # Studs, «під шип», «липучка» exist only on winter tyres.
