@@ -1541,7 +1541,9 @@ class StreamingAgentLoop:
             safety_context=self._safety_context,
             few_shot_context=self._few_shot_context,
             promotions_context=self._promotions_context,
-            network_policy_context=render_network_block(self._network_policy),
+            network_policy_context=render_network_block(
+                self._network_policy, self._promo_overrides
+            ),
             caller_phone=masked_phone,
             order_id=order_id,
             pattern_context=pattern_context,

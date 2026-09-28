@@ -21,7 +21,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from src.agent.promotions import PromoOverrides
 
 logger = logging.getLogger(__name__)
 
@@ -209,12 +212,64 @@ def _brand_label(name: str) -> str:
     return name[:1].upper() + name[1:]
 
 
-def render_network_block(policy: NetworkPolicy | None) -> str | None:
+#: Where a promotion's own terms are — the promotions block of the prompt.
+PROMO_TERMS_REF = "умови — у «Актуальні акції мережі»"
+
+
+def _promo_brands(names: frozenset[str] | set[str], exclude: set[str]) -> list[str]:
+    """Lower-case promotion brands not already in ``exclude``, sorted."""
+    out = {n.strip().lower() for n in names if isinstance(n, str) and n.strip()}
+    return sorted(out - exclude)
+
+
+def _promo_delivery_suffix(promos: PromoOverrides | None) -> str:
+    """«; за акцією безкоштовна …» for a live free-delivery promotion, or ``""``."""
+    if promos is None or not promos.free_delivery_brand_scopes:
+        return ""
+    scopes = promos.free_delivery_brand_scopes
+    if any(not scope for scope in scopes):
+        return f"; за акцією безкоштовна ({PROMO_TERMS_REF})"
+    brands = sorted({b for scope in scopes for b in scope})
+    return (
+        f"; за акцією безкоштовна на шини {', '.join(_brand_label(b) for b in brands)} "
+        f"({PROMO_TERMS_REF})"
+    )
+
+
+def _promo_partner_suffix(policy: NetworkPolicy, promos: PromoOverrides | None) -> str:
+    """«; за акцією — шиномонтаж у «Партнер» (…)» for services the network lacks."""
+    if promos is None:
+        return ""
+    parts: list[str] = []
+    for entry in promos.partner_services:
+        service = entry.get("service")
+        label = (entry.get("network_label") or "").strip()
+        # Only a service the network does not offer, named by the partner:
+        # the guard clears a partner offer only where the partner is named.
+        if service not in SERVICE_LABELS or service in policy.services or not label:
+            continue
+        part = f"{SERVICE_LABELS[service]} у «{label}»"
+        if part not in parts:
+            parts.append(part)
+    if not parts:
+        return ""
+    return f"; за акцією — {', '.join(parts)} ({PROMO_TERMS_REF})"
+
+
+def render_network_block(
+    policy: NetworkPolicy | None, promos: PromoOverrides | None = None
+) -> str | None:
     """Render the «Умови мережі» prompt section, or ``None`` when sales are off.
 
     Every value comes from the policy; nothing here is an example number that
     could leak into an answer. One line per item, no empty lines for empty
     fields.
+
+    ``promos`` (today's live promotions of this network) only extends the
+    warranty, delivery and "not provided" lines with what a promotion covers,
+    pointing at the promotions block for its terms — so the standard line
+    («тільки на шини Bridgestone») does not contradict a live promotion.
+    ``None`` or empty overrides render the block exactly as without them.
     """
     if policy is None or not policy.sales_enabled:
         return None
@@ -236,7 +291,8 @@ def render_network_block(policy: NetworkPolicy | None) -> str | None:
         lines.append(f"- Доставка: безкоштовна{carriers}.")
     elif policy.delivery_mode == "carrier_tariff":
         lines.append(
-            f"- Доставка: за тарифами перевізника{carriers}. Вартість доставки не називай."
+            f"- Доставка: за тарифами перевізника{carriers}{_promo_delivery_suffix(promos)}. "
+            "Вартість доставки не називай."
         )
     else:
         lines.append("- Доставка: умови й вартість не називай — це уточнить менеджер.")
@@ -265,12 +321,27 @@ def render_network_block(policy: NetworkPolicy | None) -> str | None:
         lines.append(f"- Послуги мережі: {', '.join(offered)}.")
     if missing:
         lines.append(
-            f"- Не надаємо: {', '.join(missing)}. Інші мережі не згадуй і туди не направляй."
+            f"- Не надаємо: {', '.join(missing)}{_promo_partner_suffix(policy, promos)}. "
+            "Інші мережі не згадуй і туди не направляй."
         )
 
-    if policy.extended_warranty_brands:
+    own = {b.lower() for b in policy.extended_warranty_brands}
+    promo_brands = _promo_brands(promos.extended_warranty_brands, own) if promos else []
+    promo_labels = ", ".join(_brand_label(b) for b in promo_brands)
+    if policy.extended_warranty_brands and promo_brands:
+        brands = ", ".join(_brand_label(b) for b in sorted(policy.extended_warranty_brands))
+        lines.append(
+            f"- Розширена гарантія на шини {brands}; за акцією — на {promo_labels} "
+            f"({PROMO_TERMS_REF})."
+        )
+    elif policy.extended_warranty_brands:
         brands = ", ".join(_brand_label(b) for b in sorted(policy.extended_warranty_brands))
         lines.append(f"- Розширена гарантія: тільки на шини {brands}.")
+    elif promo_brands:
+        lines.append(
+            f"- Розширеної гарантії мережа не надає, крім акцій: {promo_labels} "
+            f"({PROMO_TERMS_REF})."
+        )
     else:
         lines.append("- Розширеної гарантії мережа не надає.")
 
