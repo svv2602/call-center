@@ -247,6 +247,11 @@ def _brand_label(name: str) -> str:
 # ── Replacements (built from the policy; each passes `check_sentence`) ──
 
 
+#: Spoken instead of an uncovered free-delivery promise while a brand-bound
+#: free-delivery promotion of the network runs.
+PROMO_DELIVERY_NEUTRAL = "Умови доставки для цих шин уточнить менеджер."
+
+
 def _replacement(rule: str, policy: NetworkPolicy, services: list[str]) -> str | None:
     if rule == RULE_ORDER_CONFIRMED:
         return "Я оформлю заявку, а менеджер передзвонить вам і все узгодить."
@@ -313,6 +318,15 @@ def check_sentence(
 
     if policy.delivery_mode != "free" and _affirmed(_FREE_DELIVERY, text):
         if not _free_delivery_covered(text, promos):
+            if (
+                promos is not None
+                and promos.free_delivery_brand_scopes
+                and not extract_tire_brands(text)
+            ):
+                # A brand-bound free-delivery promotion runs and the sentence names
+                # no brand: it may be about a promotion brand, so the carrier-tariff
+                # line could contradict the truth. Promise nothing either way.
+                return Verdict(REPLACE, RULE_FREE_DELIVERY, PROMO_DELIVERY_NEUTRAL)
             return _verdict(RULE_FREE_DELIVERY, policy, [])
         exempt.append(RULE_FREE_DELIVERY)
 

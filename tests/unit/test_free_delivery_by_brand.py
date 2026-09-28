@@ -279,3 +279,37 @@ class TestPolicyWarrantyBrands:
         )
         if old_pass:
             assert _rule(sentence, TS_ON, None) is None
+
+
+class TestUncoveredPromiseUnderABrandPromotion:
+    """While a brand-bound free-delivery promotion runs, a promise naming no
+    brand is replaced by a neutral line, not by «за тарифами перевізника»:
+    the sentence may be about the promotion's brand without naming it. A
+    promise for a brand outside the promotion keeps the policy line."""
+
+    def test_neutral_replacement_not_the_carrier_tariff(self) -> None:
+        from src.agent.network_claim_guard import (
+            PROMO_DELIVERY_NEUTRAL,
+            REPLACE,
+            RULE_FREE_DELIVERY,
+            check_sentence,
+        )
+        from src.agent.promotions import PromoOverrides
+
+        policy = NetworkPolicy.from_tenant_config({**PROKOLESO_CONFIG_PATCH, "sales_enabled": True})
+        promos = PromoOverrides(
+            free_delivery=True, free_delivery_brand_scopes=(frozenset({"doublestar"}),)
+        )
+        verdict = check_sentence("Доставка цих шин безкоштовна.", policy, promos)
+        assert verdict.action == REPLACE and verdict.rule == RULE_FREE_DELIVERY
+        assert verdict.replacement == PROMO_DELIVERY_NEUTRAL
+        assert "перевізник" not in verdict.replacement
+        # The neutral line itself promises nothing the guard would cut.
+        assert check_sentence(PROMO_DELIVERY_NEUTRAL, policy, promos).action == "pass"
+
+    def test_without_promotion_the_policy_line_stays(self) -> None:
+        from src.agent.network_claim_guard import check_sentence
+
+        policy = NetworkPolicy.from_tenant_config({**PROKOLESO_CONFIG_PATCH, "sales_enabled": True})
+        verdict = check_sentence("Доставка цих шин безкоштовна.", policy, None)
+        assert verdict.replacement == "Доставка — за тарифами перевізника."
