@@ -170,6 +170,14 @@ control_plane_prose_dropped_total = Counter(
     ["form", "site"],  # form: call_syntax/json_args/…; site: stream/summary_fallback
 )
 
+network_claim_blocked_total = Counter(
+    "callcenter_network_claim_blocked_total",
+    "Sentences replaced before TTS because they promised what the call's network "
+    "does not offer (free delivery, extended warranty, a service) or claimed an "
+    "order was confirmed when it is a request a manager calls back about",
+    ["rule"],  # free_delivery / extended_warranty / service_offer / order_confirmed
+)
+
 krok8_confabulation_total = Counter(
     "callcenter_krok8_confabulation_total",
     "Bot produced «Перевіримо: …, Підтверджуєте?» while a checklist "

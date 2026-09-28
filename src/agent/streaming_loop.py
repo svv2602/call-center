@@ -25,6 +25,7 @@ from src.agent.booking_consent import (
     is_booking_offer,
 )
 from src.agent.history_compressor import summarize_old_messages
+from src.agent.network_claim_guard import guard_network_claims
 from src.agent.network_policy import NetworkPolicy, render_network_block
 from src.agent.prompts import (
     SYSTEM_PROMPT,
@@ -1541,23 +1542,31 @@ class StreamingAgentLoop:
                 # `offer_booking_before_checklist` sits outside the checklist
                 # redirect: a question the redirect substituted is still a
                 # booking question, and still not the caller's to answer yet.
+                # `guard_network_claims` sits outermost but one: it judges the
+                # final wording, neighbours' substitutions included, and
+                # `drop_repeated_sentences` then collapses a replacement the
+                # guard had to speak twice across fragments of one reply.
                 buffered = drop_repeated_sentences(
-                    hold_unconfirmed_transfer_promise(
-                        offer_booking_before_checklist(
-                            redirect_settled_question(
-                                confirm_settled_time(
-                                    drop_control_plane_prose(
-                                        buffer_sentences(stream), _current_call_id()
+                    guard_network_claims(
+                        hold_unconfirmed_transfer_promise(
+                            offer_booking_before_checklist(
+                                redirect_settled_question(
+                                    confirm_settled_time(
+                                        drop_control_plane_prose(
+                                            buffer_sentences(stream), _current_call_id()
+                                        ),
+                                        offered_slots,
+                                        conversation_history,
                                     ),
-                                    offered_slots,
+                                    fitting_progress,
                                     conversation_history,
                                 ),
-                                fitting_progress,
-                                conversation_history,
+                                booking_offer_gate,
                             ),
-                            booking_offer_gate,
+                            conversation_history,
                         ),
-                        conversation_history,
+                        self._network_policy,
+                        _current_call_id(),
                     )
                 )
                 tts_stream = synthesize_stream(buffered, self._tts)
