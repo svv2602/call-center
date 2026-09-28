@@ -1625,6 +1625,7 @@ def build_system_prompt_with_context(
     safety_context: str | None = None,
     few_shot_context: str | None = None,
     promotions_context: str | None = None,
+    network_policy_context: str | None = None,
     caller_phone: str | None = None,
     order_id: str | None = None,
     pattern_context: str | None = None,
@@ -1654,6 +1655,8 @@ def build_system_prompt_with_context(
         safety_context: Training safety rules section.
         few_shot_context: Few-shot dialogue examples section.
         promotions_context: Active promotions section.
+        network_policy_context: «Умови мережі» section from
+            ``render_network_block`` (None while ``sales_enabled`` is off).
         caller_phone: CallerID phone number (masked if PII vault active).
         order_id: Current order draft ID.
         pattern_context: Pattern injection text from conversation patterns.
@@ -1806,6 +1809,8 @@ def build_system_prompt_with_context(
         parts.append(few_shot_context)
     if promotions_context:
         parts.append(promotions_context)
+    if network_policy_context:
+        parts.append(network_policy_context)
 
     # Customer profile, caller history and storage contracts (stable per call)
     if customer_profile:

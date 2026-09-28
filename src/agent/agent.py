@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any
 import anthropic
 
 from src.agent.history_compressor import summarize_old_messages
+from src.agent.network_policy import NetworkPolicy, render_network_block
 from src.agent.prompts import (
     ERROR_TEXT,
     PROMPT_VERSION,
@@ -191,6 +192,7 @@ class LLMAgent:
         few_shot_context: str | None = None,
         safety_context: str | None = None,
         promotions_context: str | None = None,
+        network_policy: NetworkPolicy | None = None,
         is_modular: bool = False,
         agent_name: str | None = None,
     ) -> None:
@@ -206,6 +208,7 @@ class LLMAgent:
         self._few_shot_context = few_shot_context
         self._safety_context = safety_context
         self._promotions_context = promotions_context
+        self._network_policy = network_policy
         self._is_modular = is_modular
         self._agent_name = agent_name
         # Accumulated usage from last process_message call (all LLM rounds)
@@ -313,6 +316,7 @@ class LLMAgent:
             safety_context=self._safety_context,
             few_shot_context=self._few_shot_context,
             promotions_context=self._promotions_context,
+            network_policy_context=render_network_block(self._network_policy),
             caller_phone=masked_phone,
             order_id=order_id,
             pattern_context=pattern_context,

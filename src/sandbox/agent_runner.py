@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from src.agent.agent import LLMAgent
+from src.agent.network_policy import NetworkPolicy
 from src.agent.parsers.date_parser import resolve_tool_date
 from src.agent.prompt_manager import (
     PromptManager,
@@ -541,6 +542,7 @@ async def create_sandbox_agent(
         few_shot_context=few_shot_context,
         safety_context=safety_context,
         promotions_context=promotions_context,
+        network_policy=NetworkPolicy.from_tenant_config((tenant or {}).get("config")),
     )
 
 

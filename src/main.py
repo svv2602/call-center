@@ -28,6 +28,7 @@ from src.agent.agent import LLMAgent, ToolRouter
 from src.agent.booking_result import is_booking_confirmed
 from src.agent.color_translit import latin_prefix_to_color
 from src.agent.confirm_detect import booking_was_confirmed
+from src.agent.network_policy import NetworkPolicy
 from src.agent.parsers.date_parser import resolve_tool_date
 from src.agent.prompt_manager import (
     PromptManager,
@@ -1169,6 +1170,11 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         if tenant and isinstance(tenant.get("config"), dict):
             tenant_config = tenant["config"]
 
+        # Network sales/consultation conditions (delivery, payment, services…)
+        # — structured tenant data, rendered into the prompt only while
+        # config.sales_enabled is true. Built once per call.
+        network_policy = NetworkPolicy.from_tenant_config(tenant_config)
+
         # Mirror excluded_station_ids into session so _get_fitting_stations
         # (defined in _build_tool_router, no closure over tenant_config)
         # can filter them out.
@@ -1250,6 +1256,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             few_shot_context=few_shot_context,
             safety_context=safety_context,
             promotions_context=promotions_context,
+            network_policy=network_policy,
             is_modular=is_modular,
             agent_name=tenant_agent_name,
         )
@@ -1303,6 +1310,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 few_shot_context=few_shot_context,
                 safety_context=safety_context,
                 promotions_context=promotions_context,
+                network_policy=network_policy,
                 is_modular=is_modular,
                 agent_name=tenant_agent_name,
                 echo_canceller=echo_canceller,
