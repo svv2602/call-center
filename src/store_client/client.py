@@ -270,6 +270,7 @@ class StoreClient:
         vehicle: Any = None,
         network: str = "",
         recommend_count: int = RECOMMEND_COUNT_MAX,
+        vehicle_text: str | None = None,
         **_: Any,
     ) -> dict[str, Any]:
         """In-stock wheels of the network (``disk_products`` + ``tire_stock``).
@@ -279,6 +280,10 @@ class StoreClient:
         recommended stay out of the offer; a car with several PCD / hub bores
         gets no offer but ``ambiguous_car`` (ask the year / modification).
         At most ``recommend_count`` (the network policy) variants, one per model.
+
+        ``vehicle_text`` — the caller's utterance, passed by the `disk_intent`
+        substitution (not in the LLM schema): with no ``vehicle`` the car is
+        read out of it (`resolve_vehicle_text`).
         """
         from sqlalchemy import text
 
@@ -301,6 +306,9 @@ class StoreClient:
         async with self._db_engine.connect() as conn:
             car = None
             vehicle_info: dict[str, Any] | None = None
+            named = isinstance(vehicle, dict) and (vehicle.get("brand") or vehicle.get("model"))
+            if not named and isinstance(vehicle_text, str) and vehicle_text.strip():
+                vehicle = await self._vehicle_from_text(conn, vehicle_text)
             if isinstance(vehicle, dict) and (vehicle.get("brand") or vehicle.get("model")):
                 car, vehicle_info = await self._disk_car_data(conn, vehicle)
 
@@ -426,6 +434,104 @@ class StoreClient:
             # tshina owner rule: spacers and re-drilling are never offered.
             result["fit_policy"] = "no_spacers_no_redrilling"
         return result
+
+    async def resolve_vehicle_text(self, text: str) -> dict[str, Any] | None:
+        """The car named in a caller's utterance: ``{brand, model?, year?}`` or None.
+
+        «потрібні литі диски шістнадцятий радіус на Шкоду Октавію 2018» →
+        ``{"brand": "Skoda", "model": "Octavia", "year": 2018}``. The brand must
+        be the only one every car word agrees on; a model not found or not
+        unique leaves the brand alone — never a guess.
+        """
+        if self._db_engine is None or not text:
+            return None
+        async with self._db_engine.connect() as conn:
+            return await self._vehicle_from_text(conn, text)
+
+    @staticmethod
+    async def _car_word_brands(conn: Any, phrase: str) -> dict[int, dict[str, Any]]:
+        """Brands a phrase may name: ``{brand_id: {"name", "models": {id: name}}}``.
+
+        Exact brand name, and ``vehicle_aliases`` of the phrase as heard or put
+        back into the nominative (first form with a hit). Every brand an
+        ambiguous alias spans is kept — the caller intersects them.
+        """
+        from sqlalchemy import text
+
+        from src.agent.disk_intent import word_forms
+        from src.agent.vehicle_alias_lookup import resolve_by_alias
+
+        brands: dict[int, dict[str, Any]] = {}
+
+        def _add(brand_id: Any, name: Any, model_id: Any = None, model_name: Any = None) -> None:
+            entry = brands.setdefault(brand_id, {"name": name, "models": {}})
+            if model_id is not None:
+                entry["models"][model_id] = model_name
+
+        result = await conn.execute(
+            text("SELECT id, name FROM vehicle_brands WHERE LOWER(name) = LOWER(:name)"),
+            {"name": phrase},
+        )
+        for row in result.mappings().all():
+            _add(row["id"], row["name"])
+        for form in word_forms(phrase):
+            res = await resolve_by_alias(conn, form)
+            if res.ambiguous_matches:
+                for m in res.ambiguous_matches:
+                    _add(m["brand_id"], m["brand_name"], m["model_id"], m.get("model_name"))
+                break
+            if res.brand_id is not None:
+                _add(res.brand_id, res.brand_name, res.model_id, res.model_name)
+                break
+        return brands
+
+    @classmethod
+    async def _vehicle_from_text(cls, conn: Any, text: str) -> dict[str, Any] | None:
+        """`resolve_vehicle_text` on an open connection."""
+        from src.agent.disk_intent import vehicle_words, word_forms
+
+        words, year = vehicle_words(text)
+        hits: list[tuple[int, int, dict[int, dict[str, Any]]]] = []
+        for n in (2, 1):
+            for i in range(len(words) - n + 1):
+                brands = await cls._car_word_brands(conn, " ".join(words[i : i + n]))
+                if brands:
+                    hits.append((i, i + n, brands))
+        if not hits:
+            return None
+        agreed = set.intersection(*(set(b) for _, _, b in hits))
+        if len(agreed) != 1:
+            # Two brands named, or a word several brands share: ask, never guess.
+            logger.info(
+                "vehicle_from_text ambiguous brands=%s text=%r",
+                sorted({str(e["name"]) for _, _, b in hits for e in b.values()}),
+                text[:120],
+            )
+            return None
+        [brand_id] = agreed
+        entries = [b[brand_id] for _, _, b in hits]
+        vehicle: dict[str, Any] = {"brand": entries[0]["name"]}
+        models = {mid: name for e in entries for mid, name in e["models"].items()}
+        if len(models) == 1:
+            vehicle["model"] = next(iter(models.values()))
+        else:
+            # The words after the brand name, up to three, longest first.
+            brand_spans = [(s, e) for s, e, b in hits if not b[brand_id]["models"]]
+            used = {i for s, e in brand_spans for i in range(s, e)}
+            start = min(e for _, e in brand_spans) if brand_spans else min(s for s, _, _ in hits)
+            rest = [w for i, w in enumerate(words) if i >= start and i not in used][:3]
+            for size in range(len(rest), 0, -1):
+                for form in word_forms(" ".join(rest[:size])):
+                    row = await cls._find_vehicle_model(conn, brand_id, form)
+                    if row is not None:
+                        vehicle["model"] = row["name"]
+                        break
+                if "model" in vehicle:
+                    break
+        if year is not None:
+            vehicle["year"] = year
+        logger.info("vehicle_from_text vehicle=%r text=%r", vehicle, text[:120])
+        return vehicle
 
     async def _disk_car_data(
         self, conn: Any, vehicle: dict[str, Any]

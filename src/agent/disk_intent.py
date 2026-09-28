@@ -27,11 +27,20 @@ leave the model no way out).
 Goldset №3 (2026-09-28) is why it is a substitution and not a refusal: after
 the refusal hint (`fff0ad8`) the model went to the knowledge base and answered
 «потрібні розболтовка, виліт…» without ever calling `search_disks`.
+
+The car of a substitution not made from `get_vehicle_tire_sizes` is the
+caller's own words: the utterance goes to `search_disks` as ``vehicle_text``
+(internal, not in the LLM schema) and `StoreClient.resolve_vehicle_text` reads
+the brand / model / year out of it with the catalogue. `vehicle_words` and
+`word_forms` are its pure half: the words left once wheel, tyre, size and
+filler words are dropped, and the nominative forms of a word heard in another
+case («Шкоду» → «шкода», «Октавію» → «октавія» / «октавия»).
 """
 
 from __future__ import annotations
 
 import asyncio
+import datetime
 import logging
 import re
 from dataclasses import dataclass
@@ -108,6 +117,122 @@ def last_customer_text(history: list[dict[str, Any]]) -> str:
             if joined:
                 return joined
     return ""
+
+
+# ── The car in the caller's words ────────────────────────────────────────
+
+# Model years the catalogue holds; a 4-digit number outside is a model (ВАЗ 2107).
+_YEAR_MIN = 1980
+_YEAR = re.compile(r"(\d{4})(?:-?(?:го|ого|й|р|г|рік|року|год|года))?")
+# «16», «R16», «р16», «16.5» — a wheel size, never a car.
+_SIZE_TOKEN = re.compile(r"[rр]?(\d{2})(?:[.,]\d)?")
+
+# Words that are never a car (UA + RU): function words, fillers, the request.
+_STOP_WORDS = frozenset(
+    """
+    на для під под до від от із из зі со за по про при над через або или чи ли та
+    але но же ну ось вот ще еще теж тоже так ні нет да це это то той ця эта ці эти
+    мені мне мене меня нам нас ми мы ви вы вам вас мій моя моє мої мою мой моей свою
+    свій своя свое своє свої свои наш наша нашу є есть був була було была было маю
+    имею треба надо можна можно можете будь ласка будь-ласка пожалуйста дякую спасибо
+    добрий добрый день вечір вечер привіт привет здрастуйте здравствуйте алло щось
+    что-то шо що что там тут може может мабуть наверное типу типа які какие який
+    какой яка какая якісь какие-то рік року роки році років год года году лет
+    авто тачка тачку тачки
+    """.split()  # noqa: SIM905 — a word list reads better as text
+)
+_STOP_PATTERN = re.compile(
+    r"(?:потрібн\w*|нужн\w*|машин\w*|автомобіл\w*|автомобил\w*|модел\w*|марк[аиуі]"
+    r"|комплект\w*|штук\w*|наявн\w*|налич\w*|випуск\w*|выпуск\w*|зимн\w*|зимов\w*"
+    r"|літн\w*|летн\w*|всесезон\w*|нов(?:ий|і|а|е|у|их|ый|ые|ая|ое|ую|ых)?|вживан\w*"
+    r"|шин\w*|резин\w*|гум[аиуі]|покришк\w*|покрышк\w*|колес\w*|колiс|колёс|радіус\w*"
+    r"|радиус\w*|дюйм\w*|розмір\w*|размер\w*|діаметр\w*|диаметр\w*|розболтовк\w*"
+    r"|разболтовк\w*|\w*надцят\w*|\w*надцат\w*|двадцят\w*|двадцат\w*|підібр\w*"
+    r"|подобр\w*|підбер\w*|подбер\w*|підкаж\w*|подскаж\w*|цікав\w*|интерес\w*|хоч\w*"
+    r"|хоті\w*|хоте\w*|шука\w*|ищ[уе]\w*|скільк\w*|скольк\w*|кошту\w*|стоит|стоят"
+    r"|цін[аиу]|цен[аыу]|вартіст\w*|стоимост\w*)"
+)
+
+# Case endings back to the nominative (UA + RU); the as-heard word is tried first.
+_DECLENSION = (
+    ("ією", "ія"),
+    ("ией", "ия"),
+    ("ію", "ія"),
+    ("ию", "ия"),
+    ("ії", "ія"),
+    ("ии", "ия"),
+    ("ою", "а"),
+    ("ой", "а"),
+    ("ові", ""),
+    ("ом", ""),
+    ("у", "а"),
+    ("ю", "я"),
+    ("і", "а"),
+    ("и", "а"),
+    ("е", "а"),
+    ("ю", "ь"),
+    ("я", "ь"),
+    ("у", ""),
+    ("а", ""),
+    ("і", ""),
+    ("е", ""),
+)
+_UK_TO_RU = str.maketrans({"і": "и", "ї": "и", "є": "е", "'": ""})
+_CYRILLIC_WORD = re.compile(r"[а-яіїєґ']+")
+
+
+def _is_car_word(word: str) -> bool:
+    if len(word) < 2 or word in _STOP_WORDS:
+        return False
+    if _STOP_PATTERN.fullmatch(word) or _WHEEL_WORDS.fullmatch(word):
+        return False
+    size = _SIZE_TOKEN.fullmatch(word)
+    return not (size and _DIAMETER_MIN <= int(size.group(1)) <= _DIAMETER_MAX)
+
+
+def vehicle_words(text: str | None) -> tuple[list[str], int | None]:
+    """The words of an utterance that may name a car, and the model year.
+
+    Lower-cased, in order; wheel / tyre / size / filler words, wheel diameters
+    and single letters are dropped. The year is the first 4-digit number in
+    1980..this year («2018», «2018-го», «2018р»); other 4-digit numbers stay
+    (ВАЗ 2107 is a model).
+    """
+    if not text:
+        return [], None
+    low = text.lower().replace("ё", "е")
+    low = re.sub(r"[’ʼ`]", "'", low)
+    words: list[str] = []
+    year: int | None = None
+    this_year = datetime.date.today().year
+    for raw in re.findall(r"[\w'\-]+", low):
+        word = raw.strip("'-")
+        match = _YEAR.fullmatch(word)
+        if match and _YEAR_MIN <= int(match.group(1)) <= this_year:
+            if year is None:
+                year = int(match.group(1))
+            continue
+        if _is_car_word(word):
+            words.append(word)
+    return words, year
+
+
+def word_forms(phrase: str) -> list[str]:
+    """``phrase`` as heard, then with its last word put back into the nominative
+    (UA and the RU spelling): «шкоду» → «шкода», «октавію» → «октавія», «октавия»."""
+    head, _, last = phrase.rpartition(" ")
+    prefix = f"{head} " if head else ""
+    lasts = [last]
+    if _CYRILLIC_WORD.fullmatch(last):
+        for suffix, repl in _DECLENSION:
+            if last.endswith(suffix) and len(last) - len(suffix) >= 3:
+                lasts.append(last[: -len(suffix)] + repl)
+    forms: list[str] = []
+    for word in lasts:
+        for form in (prefix + word, (prefix + word).translate(_UK_TO_RU)):
+            if form not in forms:
+                forms.append(form)
+    return forms
 
 
 def _plausible_diameter(value: Any) -> int | None:
@@ -225,6 +350,10 @@ class DiskToolRedirect:
         vehicle = disk_vehicle(tool_name, args)
         if vehicle is not None:
             disk_args["vehicle"] = vehicle
+        else:
+            # No car in the call's arguments: `search_disks` reads it from the
+            # caller's words («диски на Шкоду Октавію 2018»), never a guess.
+            disk_args["vehicle_text"] = last
         logger.warning(
             "disk_tool_substitute tool=%s args=%r last_customer_text=%r",
             tool_name,

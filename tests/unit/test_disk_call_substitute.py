@@ -3,8 +3,9 @@
 Goldset №3 (2026-09-28, `disk_*`): after the refusal hint the model went to the
 knowledge base and answered «потрібні розболтовка, виліт…» without calling
 `search_disks`. Now the tyre-side call is replaced by `search_disks` in both
-loops — diameter from the caller's words or the call, the car only from
-`get_vehicle_tire_sizes` arguments, and no diameter → a question, never a
+loops — diameter from the caller's words or the call, the car from
+`get_vehicle_tire_sizes` arguments or else the caller's words as
+``vehicle_text`` (wave 2-J), and no diameter → a question, never a
 `search_disks` call with none.
 """
 
@@ -166,14 +167,14 @@ def test_car_from_vehicle_sizes_call_and_diameter_from_words(run: Any) -> None:
 @LOOPS
 def test_knowledge_base_call_gets_diameter_from_words_and_no_car(run: Any) -> None:
     rec, history = run(TAVRIA, [[("search_knowledge_base", {"query": "диски на Таврію"})]])
-    assert rec.ran == [("search_disks", {"diameter": 13})]
+    assert rec.ran == [("search_disks", {"diameter": 13, "vehicle_text": TAVRIA})]
     assert DISK_ITEM in _results(history)[0]
 
 
 @LOOPS
 def test_substituted_call_is_audited_as_search_disks(run: Any) -> None:
     rec, _ = run(TAVRIA, [[("search_tires", {"diameter": 13})]])
-    assert rec.audited == [("search_disks", {"diameter": 13})]
+    assert rec.audited == [("search_disks", {"diameter": 13, "vehicle_text": TAVRIA})]
 
 
 @LOOPS
@@ -188,13 +189,13 @@ def test_no_diameter_anywhere_asks_and_runs_nothing(run: Any) -> None:
 @LOOPS
 def test_diameter_from_the_tyre_call_when_words_name_none(run: Any) -> None:
     rec, _ = run(NO_DIAMETER, [[("search_tires", {"diameter": 17, "width": 205})]])
-    assert rec.ran == [("search_disks", {"diameter": 17})]
+    assert rec.ran == [("search_disks", {"diameter": 17, "vehicle_text": NO_DIAMETER})]
 
 
 @LOOPS
 def test_words_win_over_the_call_diameter(run: Any) -> None:
     rec, _ = run(OCTAVIA, [[("search_tires", {"diameter": 15})]])
-    assert rec.ran == [("search_disks", {"diameter": 16})]
+    assert rec.ran == [("search_disks", {"diameter": 16, "vehicle_text": OCTAVIA})]
 
 
 @LOOPS
