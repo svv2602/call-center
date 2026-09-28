@@ -30,6 +30,7 @@ from src.agent.color_translit import latin_prefix_to_color
 from src.agent.confirm_detect import booking_was_confirmed
 from src.agent.network_policy import SERVICE_TOOLS, NetworkPolicy
 from src.agent.parsers.date_parser import resolve_tool_date
+from src.agent.promotions import format_promotions_block, load_active_promotions
 from src.agent.prompt_manager import (
     PromptManager,
     fetch_tenant_promotions,
@@ -1020,6 +1021,12 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             if _db_engine is None or not session.tenant_id:
                 return []
             try:
+                # Sales on: the network's `promotions` table (live by date);
+                # off: the old knowledge_articles path, unchanged.
+                if network_policy.sales_enabled:
+                    return await load_active_promotions(
+                        _db_engine, str(session.tenant_id), redis=_redis
+                    )
                 return await fetch_tenant_promotions(
                     _db_engine, str(session.tenant_id), redis=_redis
                 )
@@ -1106,7 +1113,11 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             few_shot_examples, scenario_type=session.scenario
         )
         safety_context = format_safety_rules_section(safety_rules_extra)
-        promotions_context = format_promotions_context(promos)
+        promotions_context = (
+            format_promotions_block(promos)
+            if network_policy.sales_enabled
+            else format_promotions_context(promos)
+        )
         caller_history_text = format_caller_history(caller_history_raw)
         storage_context_text = format_storage_context(storage_raw)
         # Known to the guards, not only to the prompt. Not written as the

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 from src.agent.agent import LLMAgent
 from src.agent.network_policy import NetworkPolicy, unoffered_service_tools
 from src.agent.parsers.date_parser import resolve_tool_date
+from src.agent.promotions import format_promotions_block, load_active_promotions
 from src.agent.prompt_manager import (
     PromptManager,
     fetch_tenant_promotions,
@@ -520,8 +521,14 @@ async def create_sandbox_agent(
     # Load tenant promotions into prompt context
     promotions_context = None
     if tenant_id:
-        promos = await fetch_tenant_promotions(engine, tenant_id, redis=redis)
-        promotions_context = format_promotions_context(promos)
+        # Same source choice as a live call: sales on → `promotions` table.
+        if policy.sales_enabled:
+            promotions_context = format_promotions_block(
+                await load_active_promotions(engine, tenant_id, redis=redis)
+            )
+        else:
+            promos = await fetch_tenant_promotions(engine, tenant_id, redis=redis)
+            promotions_context = format_promotions_context(promos)
 
     # Apply tenant overrides (same logic as src/main.py)
     if tenant:
