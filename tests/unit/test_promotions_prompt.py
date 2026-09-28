@@ -357,6 +357,7 @@ class TestSandboxSourceChoice:
         engine = _Engine([_promo("Нова")], _ARTICLES)
         kwargs = _run_sandbox(monkeypatch, engine, sales=False)
         assert kwargs["promotions_context"] == format_promotions_context(_ARTICLES)
+        assert kwargs["promotions"] is None
         assert engine.tables_queried() == ["knowledge_articles"]
 
     def test_sales_on_uses_promotions_table(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -364,11 +365,10 @@ class TestSandboxSourceChoice:
             [_promo("Нова"), _promo("Стара", end=_TODAY - timedelta(days=1))], _ARTICLES
         )
         kwargs = _run_sandbox(monkeypatch, engine, sales=True)
-        ctx = kwargs["promotions_context"]
-        assert ctx is not None
-        assert "## Актуальні акції мережі" in ctx
-        assert "Нова" in ctx
-        assert "Стара" not in ctx
+        # Sales on: the live list goes to the agent, which builds the block
+        # per turn from the relevant ones only (wave 3-F); no static text.
+        assert kwargs["promotions_context"] is None
+        assert [p.title for p in kwargs["promotions"]] == ["Нова"]
         assert engine.tables_queried() == ["promotions"]
 
 
@@ -436,7 +436,8 @@ class TestMainWiring:
         value = assigns[0].value
         assert isinstance(value, ast.IfExp)
         assert _is_sales_flag(value.test)
-        assert _called_names(value.body) == {"format_promotions_block"}
+        # Sales on: no static block — the agents build one per turn (wave 3-F).
+        assert isinstance(value.body, ast.Constant) and value.body.value is None
         assert _called_names(value.orelse) == {"format_promotions_context"}
         (arg,) = [c for c in ast.walk(value.orelse) if isinstance(c, ast.Call)]
         assert isinstance(arg.args[0], ast.Name) and arg.args[0].id == "promos"

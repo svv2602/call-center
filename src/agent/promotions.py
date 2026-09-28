@@ -18,6 +18,7 @@ its last day, and is dropped on the same Redis signal as the old path
 from __future__ import annotations
 
 import logging
+import re
 import time
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -228,3 +229,122 @@ def promo_overrides(promos: list[ActivePromotion]) -> PromoOverrides:
         extended_warranty_brands=frozenset(brands),
         partner_services=tuple(services),
     )
+
+
+# ═══════════════════════════════════════════════════════════
+#  Relevance — which promotions reach the prompt on this turn
+# ═══════════════════════════════════════════════════════════
+
+#: The caller asks about promotions as such (ua + ru, any case form):
+#: «які акції?», «є знижки?», «скидка есть?», «програма лояльності»,
+#: «спецпропозиція». Word stems, so «акцію / акциях / знижок / скидочку» match.
+_PROMO_ASK_RE = re.compile(
+    r"(?<![\w'])(?:акці\w*|акци\w*|знижк\w*|знижок|скидк\w*|скидок|скидочк\w*|дисконт\w*"
+    r"|програм\w*|спецпропозиц\w*|спецпредложен\w*|розпродаж\w*|распродаж\w*|бонус\w*)"
+)
+_FREE_RE = re.compile(r"(?<![\w'])(?:безкоштовн|бесплатн|безплатн)\w*")
+_DELIVERY_RE = re.compile(r"(?<![\w'])доставк\w*|(?<![\w'])доставл\w*|(?<![\w'])доставит\w*")
+_WARRANTY_RE = re.compile(r"(?<![\w'])гарант\w*")
+#: «гарантія від пошкоджень», «розширена гарантія», «если порежу шину».
+_DAMAGE_RE = re.compile(
+    r"(?<![\w'])(?:пошкодж\w*|пошкоджен\w*|поврежд\w*|розширен\w*|расширен\w*|продовжен\w*"
+    r"|продлен\w*|прокол\w*|поріз\w*|поріж\w*|пореж\w*|порез\w*|розрив\w*|разрыв\w*)"
+)
+
+
+def asks_about_promotions(text: str | None) -> bool:
+    """The caller's words ask about promotions, free delivery or a damage warranty."""
+    if not text:
+        return False
+    low = text.lower().replace("’", "'").replace("ʼ", "'")
+    if _PROMO_ASK_RE.search(low):
+        return True
+    if _FREE_RE.search(low) and _DELIVERY_RE.search(low):
+        return True
+    return bool(_WARRANTY_RE.search(low) and _DAMAGE_RE.search(low))
+
+
+def _brand_keys(name: str) -> set[str]:
+    """A brand as the slugs it can be compared by («BF Goodrich» → its slug too)."""
+    from src.agent.parsers.tire_query import extract_tire_brands
+
+    low = name.strip().lower()
+    keys = {low} if low else set()
+    keys.update(extract_tire_brands(name) or ())
+    return keys
+
+
+def _named_brands(text: str | None, tire_query: dict[str, Any] | None) -> set[str]:
+    """Brands the caller named now or earlier in the tyre selection (slugs)."""
+    from src.agent.parsers.tire_query import extract_tire_brands
+
+    named = set(extract_tire_brands(text or "") or ())
+    raw = (tire_query or {}).get("brands")
+    if isinstance(raw, (list, tuple, set)):
+        for b in raw:
+            if isinstance(b, str) and b.strip():
+                named |= _brand_keys(b)
+    return named
+
+
+def relevant_promotions(
+    promos: list[ActivePromotion] | None,
+    text: str | None,
+    tire_query: dict[str, Any] | None = None,
+) -> list[ActivePromotion]:
+    """Today's promotions that concern this turn, in the given order.
+
+    Relevant when the caller asks about promotions (discounts, a programme,
+    free delivery, a damage warranty) — every live one is then — or names a
+    brand of the promotion, in this reply or in the session's ``tire_query``.
+    A promotion without ``mention_brands`` is relevant only to the question.
+    Default-deny: nothing matched → nothing reaches the prompt.
+    """
+    if not promos:
+        return []
+    if asks_about_promotions(text):
+        return list(promos)
+    named = _named_brands(text, tire_query)
+    low = (text or "").lower()
+    out: list[ActivePromotion] = []
+    for p in promos:
+        # A partner promotion (fitting at another network) concerns a turn
+        # that asks about that service, not only a question about promotions.
+        if _asks_about_partner_service(p, low):
+            out.append(p)
+            continue
+        for brand in p.mention_brands:
+            keys = _brand_keys(brand)
+            # A brand the parser does not know («Rydanz») still counts when
+            # the caller spells it as the promotion does.
+            spelled = bool(brand.strip()) and re.search(
+                rf"(?<![\w']){re.escape(brand.strip().lower())}(?![\w'])", low
+            )
+            if keys & named or spelled:
+                out.append(p)
+                break
+    return out
+
+
+#: What a caller says when asking about a partner service, per service key.
+_PARTNER_SERVICE_WORDS: dict[str, re.Pattern[str]] = {
+    "fitting": re.compile(r"(?:шино)?монтаж|монту|монти|перевзу|переобу|балансуван|балансировк"),
+    "storage": re.compile(r"зберіганн|зберігат|хранени|хранит"),
+}
+
+
+def _asks_about_partner_service(promo: ActivePromotion, low: str) -> bool:
+    partner = (promo.overrides or {}).get("partner_service")
+    if not isinstance(partner, dict):
+        return False
+    pattern = _PARTNER_SERVICE_WORDS.get(str(partner.get("service") or ""))
+    return bool(pattern and pattern.search(low))
+
+
+def turn_promotions_block(
+    promos: list[ActivePromotion] | None,
+    text: str | None,
+    tire_query: dict[str, Any] | None = None,
+) -> str | None:
+    """The promotions block for one turn: only what is relevant, else ``None``."""
+    return format_promotions_block(relevant_promotions(promos, text, tire_query))

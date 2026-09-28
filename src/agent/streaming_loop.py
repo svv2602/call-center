@@ -29,6 +29,7 @@ from src.agent.history_compressor import summarize_old_messages
 from src.agent.intent_classifier import sales_intents
 from src.agent.network_claim_guard import guard_network_claims, guard_text
 from src.agent.network_policy import NetworkPolicy, render_network_block
+from src.agent.promotions import turn_promotions_block
 from src.agent.prompts import (
     SYSTEM_PROMPT,
     WAIT_AVAILABILITY_POOL,
@@ -116,7 +117,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
     from src.agent.agent import ToolRouter
-    from src.agent.promotions import PromoOverrides
+    from src.agent.promotions import ActivePromotion, PromoOverrides
     from src.core.audio_socket import AudioSocketConnection
     from src.core.echo_canceller import EchoCanceller
     from src.llm.router import LLMRouter
@@ -1309,6 +1310,7 @@ class StreamingAgentLoop:
         is_modular: bool = False,
         agent_name: str | None = None,
         echo_canceller: EchoCanceller | None = None,
+        promotions: list[ActivePromotion] | None = None,
     ) -> None:
         self._llm_router = llm_router
         self._tool_router = tool_router
@@ -1323,6 +1325,11 @@ class StreamingAgentLoop:
         self._few_shot_context = few_shot_context
         self._safety_context = safety_context
         self._promotions_context = promotions_context
+        # Sales on: today's live promotions, filtered per turn by
+        # ``turn_promotions_block`` (the reply + the session's tire_query) —
+        # only a relevant one reaches the prompt. None (sales off) keeps the
+        # static ``promotions_context`` string.
+        self._promotions = promotions
         self._network_policy = network_policy
         # What today's network promotions beat — the claim guard's exemptions.
         # Built in main.py from the promotions already loaded for the prompt
@@ -1540,7 +1547,11 @@ class StreamingAgentLoop:
             order_stage=order_stage,
             safety_context=self._safety_context,
             few_shot_context=self._few_shot_context,
-            promotions_context=self._promotions_context,
+            promotions_context=(
+                turn_promotions_block(self._promotions, user_text, tire_progress)
+                if self._promotions is not None
+                else self._promotions_context
+            ),
             network_policy_context=render_network_block(
                 self._network_policy, self._promo_overrides
             ),

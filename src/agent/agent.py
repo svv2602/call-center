@@ -17,6 +17,7 @@ from src.agent.disk_intent import DiskToolRedirect, run_disk_substitution
 from src.agent.history_compressor import summarize_old_messages
 from src.agent.network_claim_guard import guard_text
 from src.agent.network_policy import NetworkPolicy, render_network_block
+from src.agent.promotions import turn_promotions_block
 from src.agent.prompts import (
     ERROR_TEXT,
     PROMPT_VERSION,
@@ -38,7 +39,7 @@ from src.monitoring.metrics import (
 )
 
 if TYPE_CHECKING:
-    from src.agent.promotions import PromoOverrides
+    from src.agent.promotions import ActivePromotion, PromoOverrides
     from src.llm.router import LLMRouter
     from src.logging.pii_vault import PIIVault
 
@@ -199,6 +200,7 @@ class LLMAgent:
         promo_overrides: PromoOverrides | None = None,
         is_modular: bool = False,
         agent_name: str | None = None,
+        promotions: list[ActivePromotion] | None = None,
     ) -> None:
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._model = model
@@ -212,6 +214,10 @@ class LLMAgent:
         self._few_shot_context = few_shot_context
         self._safety_context = safety_context
         self._promotions_context = promotions_context
+        # Sales on: today's live promotions, filtered per turn by
+        # ``turn_promotions_block`` — only a relevant one reaches the prompt.
+        # None (sales off) keeps the static ``promotions_context`` string.
+        self._promotions = promotions
         self._network_policy = network_policy
         self._promo_overrides = promo_overrides
         self._is_modular = is_modular
@@ -320,7 +326,11 @@ class LLMAgent:
             order_stage=order_stage,
             safety_context=self._safety_context,
             few_shot_context=self._few_shot_context,
-            promotions_context=self._promotions_context,
+            promotions_context=(
+                turn_promotions_block(self._promotions, user_text)
+                if self._promotions is not None
+                else self._promotions_context
+            ),
             network_policy_context=render_network_block(
                 self._network_policy, self._promo_overrides
             ),

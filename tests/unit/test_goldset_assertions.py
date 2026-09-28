@@ -755,8 +755,9 @@ class TestSandboxPromotionsOverride:
     ) -> None:
         kwargs, db_loads = _sandbox_kwargs(monkeypatch, sales=True, override=self._override())
         assert db_loads == []
-        assert "Doublestar та Rydanz" in kwargs["promotions_context"]
-        assert "З БАЗИ" not in kwargs["promotions_context"]
+        # The list reaches the agent; the block is built per turn (wave 3-F).
+        assert kwargs["promotions"] == self._override()
+        assert kwargs["promotions_context"] is None
         scopes = kwargs["promo_overrides"].free_delivery_brand_scopes
         assert scopes == (frozenset({"doublestar", "rydanz"}),)
 
@@ -769,7 +770,7 @@ class TestSandboxPromotionsOverride:
     def test_no_override_reads_the_table(self, monkeypatch: pytest.MonkeyPatch) -> None:
         kwargs, db_loads = _sandbox_kwargs(monkeypatch, sales=True, override=None)
         assert db_loads == ["promotions"]
-        assert "З БАЗИ" in kwargs["promotions_context"]
+        assert [p.title for p in kwargs["promotions"]] == ["З БАЗИ"]
 
     def test_sales_off_keeps_the_old_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
         kwargs, db_loads = _sandbox_kwargs(monkeypatch, sales=False, override=self._override())

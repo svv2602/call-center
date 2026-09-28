@@ -23,7 +23,6 @@ from src.agent.network_policy import NetworkPolicy, unoffered_service_tools
 from src.agent.parsers.date_parser import resolve_tool_date
 from src.agent.promotions import (
     ActivePromotion,
-    format_promotions_block,
     load_active_promotions,
     promo_overrides,
 )
@@ -562,6 +561,9 @@ async def create_sandbox_agent(
     # Load tenant promotions into prompt context
     promotions_context = None
     claim_overrides = None
+    # Sales on: the live list — the agent puts only the promotions relevant
+    # to each turn into the prompt, as in a live call.
+    live_promos: list[ActivePromotion] | None = None
     if tenant_id:
         # Same source choice as a live call: sales on → `promotions` table,
         # and the same live list gives the claim guard its exemptions.
@@ -570,7 +572,6 @@ async def create_sandbox_agent(
                 live_promos = list(promotions_override)
             else:
                 live_promos = await load_active_promotions(engine, tenant_id, redis=redis)
-            promotions_context = format_promotions_block(live_promos)
             claim_overrides = promo_overrides(live_promos)
         else:
             promos = await fetch_tenant_promotions(engine, tenant_id, redis=redis)
@@ -634,6 +635,7 @@ async def create_sandbox_agent(
         safety_context=safety_context,
         promotions_context=promotions_context,
         promo_overrides=claim_overrides,
+        promotions=live_promos,
         # Kept literal: `test_network_policy` pins this call site by AST.
         network_policy=NetworkPolicy.from_tenant_config((tenant or {}).get("config")),
     )
