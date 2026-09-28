@@ -52,6 +52,27 @@ class ActivePromotion:
     mention_brands: tuple[str, ...] = ()
 
 
+#: `PromoGrant.condition` values — the guard's rule names, spelled here so
+#: this module does not import the guard.
+GRANT_FREE_DELIVERY = "free_delivery"
+GRANT_EXTENDED_WARRANTY = "extended_warranty"
+
+
+@dataclass(frozen=True)
+class PromoGrant:
+    """A condition one live promotion grants, with the promotion's own words.
+
+    For the guard's ``promo_denied`` rule: a sentence denying ``condition``
+    for a brand in ``brands`` (lower-case; empty = every brand) is replaced by
+    ``bot_text`` — the promotion's text as written, never a composed one.
+    """
+
+    condition: str  # GRANT_FREE_DELIVERY | GRANT_EXTENDED_WARRANTY
+    brands: frozenset[str]
+    title: str
+    bot_text: str
+
+
 @dataclass(frozen=True)
 class PromoOverrides:
     """Which standard network conditions today's promotions beat.
@@ -62,6 +83,9 @@ class PromoOverrides:
     promotion: its ``mention_brands`` as lower-case names, an empty set
     meaning every brand. The guard reads only the scopes; ``free_delivery``
     (true when there is at least one scope) is kept for compatibility.
+
+    ``grants`` lists the same free-delivery and extended-warranty conditions
+    per promotion, with its title and ``bot_text`` (live-order preserved).
     """
 
     free_delivery: bool = False
@@ -69,6 +93,7 @@ class PromoOverrides:
     discount: bool = False
     extended_warranty_brands: frozenset[str] = frozenset()
     partner_services: tuple[dict[str, str], ...] = ()
+    grants: tuple[PromoGrant, ...] = ()
 
 
 def kyiv_today() -> date:
@@ -203,16 +228,30 @@ def promo_overrides(promos: list[ActivePromotion]) -> PromoOverrides:
     discount = False
     brands: set[str] = set()
     services: list[dict[str, str]] = []
+    grants: list[PromoGrant] = []
     for p in promos:
         o = p.overrides
         if o.get("free_delivery") is True:
             # A brand promotion covers its own brands only; no brands = all.
             brands_of = (b.strip().lower() for b in p.mention_brands if isinstance(b, str))
-            scopes.append(frozenset(b for b in brands_of if b))
+            scope = frozenset(b for b in brands_of if b)
+            scopes.append(scope)
+            grants.append(PromoGrant(GRANT_FREE_DELIVERY, scope, p.title, p.bot_text))
         discount = discount or o.get("discount") is True
         raw_brands = o.get("extended_warranty_brands")
         if isinstance(raw_brands, list):
-            brands.update(b.strip() for b in raw_brands if isinstance(b, str) and b.strip())
+            own = {b.strip() for b in raw_brands if isinstance(b, str) and b.strip()}
+            brands.update(own)
+            # An empty list grants no warranty: no grant (never "every brand").
+            if own:
+                grants.append(
+                    PromoGrant(
+                        GRANT_EXTENDED_WARRANTY,
+                        frozenset(b.lower() for b in own),
+                        p.title,
+                        p.bot_text,
+                    )
+                )
         svc = o.get("partner_service")
         if isinstance(svc, dict):
             service = svc.get("service")
@@ -228,6 +267,7 @@ def promo_overrides(promos: list[ActivePromotion]) -> PromoOverrides:
         discount=discount,
         extended_warranty_brands=frozenset(brands),
         partner_services=tuple(services),
+        grants=tuple(grants),
     )
 
 

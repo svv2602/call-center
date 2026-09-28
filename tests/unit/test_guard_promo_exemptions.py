@@ -35,6 +35,7 @@ from scripts.migrate_promotions import KNOWN_PROMOTIONS
 from src.agent import promotions
 from src.agent.network_claim_guard import (
     PASS,
+    PROMO_RULES,
     RULE_EXTENDED_WARRANTY,
     RULE_FREE_DELIVERY,
     RULE_ORDER_CONFIRMED,
@@ -156,8 +157,11 @@ class TestDefaultDeny:
     def test_promotions_never_add_a_block(
         self, sentence: str, policy: NetworkPolicy | None, promos: PromoOverrides
     ) -> None:
+        # The one rule a promotion adds is ``promo_denied`` (a denial of what
+        # it grants — see test_network_claim_guard_fixes.py); nothing else.
         if check_sentence(sentence, policy).action == PASS:
-            assert check_sentence(sentence, policy, promos).action == PASS
+            verdict = check_sentence(sentence, policy, promos)
+            assert verdict.action == PASS or verdict.rule in PROMO_RULES, verdict
 
     @pytest.mark.parametrize("promos", [PK_PROMOS, TS_PROMOS], ids=["pk", "ts"])
     def test_order_confirmed_is_never_exempt(self, promos: PromoOverrides) -> None:

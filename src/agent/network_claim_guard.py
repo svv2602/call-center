@@ -54,6 +54,15 @@ one, and ``promos=None`` behaves exactly as without promotions:
   offer;
 - ``order_confirmed``: no promotion covers it.
 
+A promotion also adds one rule of its own, ``promo_denied``: a *negated*
+free-delivery or extended-warranty claim («Розширеної гарантії на Michelin
+немає») that names a brand a live promotion grants that condition for is
+replaced by the promotion's ``bot_text`` — its own words, the code composes
+no terms. Without promotions it never fires.
+
+``service_offer`` skips a service named as a circumstance, not offered —
+«без слідів монтажу», «пошкодження під час монтажу» (``_descriptive_pattern``).
+
 A cleared rule is reported as ``Verdict.promo_exempt`` (logged by the filters).
 
 Switch: env ``NETWORK_CLAIM_GUARD_ENABLED`` (default on; ``0/false/no/off``
@@ -76,7 +85,7 @@ from src.monitoring.metrics import network_claim_blocked_total
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
-    from src.agent.promotions import PromoOverrides
+    from src.agent.promotions import PromoGrant, PromoOverrides
     from src.core.sentence_buffer import BufferEvent
 
 logger = logging.getLogger(__name__)
@@ -91,6 +100,7 @@ RULE_FREE_DELIVERY = "free_delivery"
 RULE_EXTENDED_WARRANTY = "extended_warranty"
 RULE_SERVICE_OFFER = "service_offer"
 RULE_ORDER_CONFIRMED = "order_confirmed"
+RULE_PROMO_DENIED = "promo_denied"
 
 RULES: tuple[str, ...] = (
     RULE_ORDER_CONFIRMED,
@@ -98,6 +108,8 @@ RULES: tuple[str, ...] = (
     RULE_FREE_DELIVERY,
     RULE_EXTENDED_WARRANTY,
 )
+#: Rules only a live promotion can fire (never with ``promos=None``).
+PROMO_RULES: tuple[str, ...] = (RULE_PROMO_DENIED,)
 
 
 @dataclass(frozen=True)
@@ -172,6 +184,35 @@ def _service_pattern(key: str) -> re.Pattern[str]:
         stem = SERVICE_LABELS[key].split()[0][:-2]
         forms = rf"\b{re.escape(stem)}\w*"
     return re.compile(forms, re.IGNORECASE)
+
+
+#: A service named as a circumstance, not offered: «без слідів монтажу»,
+#: «пошкодження під час монтажу», «після шиномонтажу». The service word must
+#: follow the lead word directly — at most one genitive adjective between
+#: («під час неправильного монтажу»), or «без X та» for a coordinated pair
+#: («без експлуатації та монтажу»). A verb in between («після покупки запишу
+#: на монтаж», «без черги зробимо монтаж») is not descriptive, and neither is
+#: «до» («запишу вас до шиномонтажу»). «слід» is only the plural noun: the
+#: modal «вам слід записатися на монтаж» is an offer.
+_DESCRIPTIVE_LEAD = (
+    r"(?<!\w)(?:без(?:\s+\w+\s+(?:та|і|й|и|чи|або|или))?"
+    r"|слід(?:и|ів|ами|ах)|след(?:ы|ов|ами|ах)"
+    r"|після|после|під\s+час|во\s+время)"
+)
+#: «нашого / безкоштовного» would turn the circumstance back into a promise.
+_DESCRIPTIVE_ADJ = r"(?:\s+(?!наш|безкошт|безплат|бесплат)\w+(?:ого|ього|ої|ьої|ой|ей))?"
+
+
+def _descriptive_pattern(key: str) -> re.Pattern[str]:
+    return re.compile(
+        rf"{_DESCRIPTIVE_LEAD}{_DESCRIPTIVE_ADJ}\s+(?:{_service_pattern(key).pattern})",
+        re.IGNORECASE,
+    )
+
+
+def _offered(key: str, text: str) -> list[str]:
+    """Affirmed clauses naming ``key`` once its descriptive mentions are cut."""
+    return _affirmed(_service_pattern(key), _descriptive_pattern(key).sub(" ", text))
 
 
 # ── Helpers ─────────────────────────────────────────────────────────────
@@ -300,9 +341,7 @@ def check_sentence(
     # written policy it keeps the old `sales_enabled` gate — unchanged.
     if policy.configured or policy.sales_enabled:
         missing = [
-            key
-            for key in SERVICE_LABELS
-            if key not in policy.services and _affirmed(_service_pattern(key), text)
+            key for key in SERVICE_LABELS if key not in policy.services and _offered(key, text)
         ]
         if missing and _SERVICE_REFUSAL.search(text):
             missing = []
@@ -343,7 +382,56 @@ def check_sentence(
         if RULE_EXTENDED_WARRANTY not in exempt:
             exempt.append(RULE_EXTENDED_WARRANTY)
 
+    denied = _denied_grant(text, promos)
+    if denied is not None:
+        return Verdict(REPLACE, RULE_PROMO_DENIED, denied.bot_text)
+
     return _pass(exempt)
+
+
+_EXCEPT = re.compile(
+    r"(?<!\w)(?:крім|окрім|кроме|за\s+винятком|за\s+исключением)(?!\w)", re.IGNORECASE
+)
+
+#: Claim pattern per `PromoGrant.condition`.
+_GRANT_PATTERNS: dict[str, re.Pattern[str]] = {
+    RULE_FREE_DELIVERY: _FREE_DELIVERY,
+    RULE_EXTENDED_WARRANTY: _EXTENDED_WARRANTY,
+}
+
+
+def _denied_grant(text: str, promos: PromoOverrides | None) -> PromoGrant | None:
+    """The live promotion a negated claim in ``text`` contradicts, if any.
+
+    A clause denies a condition («розширеної гарантії на Michelin немає»,
+    «доставка Doublestar не безкоштовна») and names a brand the promotion
+    grants it for — in the clause, or, when the clause names no tyre brand at
+    all, in the clauses *before* it («На Michelin, на жаль, розширеної
+    гарантії немає»). A brand after the denial is its exception, not its
+    subject: «Розширеної гарантії мережа не надає, крім акцій: Matador» and
+    «…немає, але на Michelin діє програма» are true. A promotion without
+    brands grants every brand. A brand outside every grant keeps its denial:
+    that is the standard condition, and true.
+    """
+    if promos is None or not promos.grants:
+        return None
+    # A brand after «крім» is the exception even without a comma before it.
+    clauses = [_EXCEPT.split(c, maxsplit=1)[0] for c in _clauses(text)]
+    for i, clause in enumerate(clauses):
+        if not _NEGATION.search(clause):
+            continue
+        for grant in promos.grants:
+            pattern = _GRANT_PATTERNS.get(grant.condition)
+            if pattern is None or not pattern.search(clause):
+                continue
+            if not grant.brands:
+                return grant
+            if _names_brand(clause, grant.brands):
+                return grant
+            before = " ".join(clauses[:i])
+            if not extract_tire_brands(clause) and _names_brand(before, grant.brands):
+                return grant
+    return None
 
 
 def _pass(exempt: list[str]) -> Verdict:
