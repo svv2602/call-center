@@ -41,6 +41,7 @@ from src.agent.tools import (
     SUBMIT_ORDER_TOOL,
     check_order_request,
     pickup_point_ids,
+    sales_tenant_allowlist,
     swap_order_chain_for_submit,
 )
 from src.config import get_settings
@@ -582,7 +583,7 @@ async def create_sandbox_agent(
         if tenant.get("enabled_tools"):
             allowed = set(tenant["enabled_tools"])
             if policy.sales_enabled:
-                allowed = swap_order_chain_for_submit(allowed)
+                allowed = sales_tenant_allowlist(allowed)
             if tools:
                 tools = [t for t in tools if t["name"] in allowed]
         if tenant.get("prompt_suffix") and system_prompt:

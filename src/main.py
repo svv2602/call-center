@@ -57,6 +57,7 @@ from src.agent.tools import (
     SUBMIT_ORDER_TOOL,
     check_order_request,
     pickup_point_ids,
+    sales_tenant_allowlist,
     swap_order_chain_for_submit,
 )
 from src.api.admin_users import router as admin_users_router
@@ -1204,10 +1205,10 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 # remember to list it when they enable transfers.
                 if "transfer_to_operator" in allowed:
                     allowed.add("create_callback_request")
-                # Sales: a tenant that lists the order chain orders through
-                # `submit_order_request` (its list predates the tool).
+                # Sales: the tenant's list predates the sales tools (search_disks,
+                # submit_order_request; Про Колесо lacks pickup) — add the core.
                 if network_policy.sales_enabled:
-                    allowed = swap_order_chain_for_submit(allowed)
+                    allowed = sales_tenant_allowlist(allowed)
                 if tools:
                     tools = [t for t in tools if t["name"] in allowed]
             if tenant.get("greeting") and templates:

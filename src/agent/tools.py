@@ -934,6 +934,28 @@ def swap_order_chain_for_submit(names: set[str] | frozenset[str]) -> set[str]:
     return out
 
 
+#: What a sales call needs whatever a tenant's older ``enabled_tools`` list
+#: says: prod lists predate search_disks and, for Про Колесо, lack pickup.
+SALES_CORE_TOOLS: frozenset[str] = frozenset(
+    {
+        "get_vehicle_tire_sizes",
+        "search_tires",
+        "check_availability",
+        "search_disks",
+        "get_pickup_points",
+        SUBMIT_ORDER_TOOL,
+    }
+)
+
+
+def sales_tenant_allowlist(names: set[str] | frozenset[str]) -> set[str]:
+    """Under sales: the tenant's list plus the sales core, order chain swapped.
+
+    Services the network does not offer are cut later by the scenario filter.
+    """
+    return swap_order_chain_for_submit(set(names) | SALES_CORE_TOOLS)
+
+
 def _text(value: Any) -> str:
     return value.strip() if isinstance(value, str) else ""
 
