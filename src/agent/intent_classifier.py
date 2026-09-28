@@ -293,6 +293,56 @@ def _has_transfer_evidence(text: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
+# Интенты продаж (tenants.config.sales_enabled): ORDER / CONSULT
+# ---------------------------------------------------------------------------
+#
+# Отдельный от FSM словарь. ORDER / CONSULT НЕ входят в `_ALLOWED_INTENTS`, НЕ
+# упоминаются в `_SYSTEM_PROMPT` и НЕ возвращаются `classify_intent` — монтажный
+# путь (FSM, `_apply_context_guard`, `verdict_cannot_matter`) их не видит и при
+# любом значении флага работает как раньше. Предикат лексический и дешёвый:
+# им пользуется гард перевода (`streaming_loop._should_block_false_transfer`),
+# чтобы при заблокированном переводе подсказать LLM, куда вести разговор.
+#
+# Сравнение — по началу токена, а не подстрокой: «шин» подстрокой ловит
+# «шиномонтаж», а монтаж — не продажа. Формы UA + RU: словарь на одном языке
+# читает русскоязычного клиента как молчание.
+
+SALES_INTENTS: tuple[str, ...] = ("ORDER", "CONSULT")
+
+_SALES_TOKEN_STEMS: dict[str, tuple[str, ...]] = {
+    "ORDER": _words(
+        "купи купл купу придба покупк замов заказ доставк самовив самовыв "
+        "оплат платіж платеж наложен накладен розстроч рассроч кредит"
+    ),
+    "CONSULT": _words(
+        "шин резин покришк покрышк диск порад посовет порівн сравн різниц разниц "
+        "рекоменд гаранті гаранти наявн наличи товар характеристик шипов шипи шипы липучк"
+    ),
+}
+
+#: Токены, которые начинаются как продажный стем, но относятся к монтажу.
+_SALES_TOKEN_EXCLUDE: tuple[str, ...] = _words("шиномонт шиномонтаж")
+
+
+def sales_intents(text: str) -> tuple[str, ...]:
+    """ORDER / CONSULT, для которых в реплике есть лексическое свидетельство.
+
+    Порядок — как в `SALES_INTENTS` (ORDER первым: заказ конкретнее
+    консультации). Пустой кортеж — свидетельства нет. Никогда не бросает.
+    """
+    tokens = [
+        tok
+        for tok in _tokens(text or "")
+        if not any(tok.startswith(ex) for ex in _SALES_TOKEN_EXCLUDE)
+    ]
+    return tuple(
+        intent
+        for intent in SALES_INTENTS
+        if any(tok.startswith(stem) for tok in tokens for stem in _SALES_TOKEN_STEMS[intent])
+    )
+
+
+# ---------------------------------------------------------------------------
 # Публичный API
 # ---------------------------------------------------------------------------
 
@@ -828,8 +878,10 @@ def _fallback_result() -> IntentResult:
 
 
 __all__ = [
+    "SALES_INTENTS",
     "ExtractedFields",
     "Intent",
     "IntentResult",
     "classify_intent",
+    "sales_intents",
 ]

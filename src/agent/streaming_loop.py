@@ -25,6 +25,7 @@ from src.agent.booking_consent import (
     is_booking_offer,
 )
 from src.agent.history_compressor import summarize_old_messages
+from src.agent.intent_classifier import sales_intents
 from src.agent.network_claim_guard import guard_network_claims
 from src.agent.network_policy import NetworkPolicy, render_network_block
 from src.agent.prompts import (
@@ -237,6 +238,27 @@ _OUT_OF_SCOPE_KEYWORDS = (
     "виписк", "выписк", "товар", "наявн", "наличи",
 )
 
+# Sales scope (tenants.config.sales_enabled): buying, ordering, delivery,
+# payment, warranty and stock are what the bot now serves, so these stems stop
+# being evidence that a transfer is legitimate. Must stay a subset of
+# `_OUT_OF_SCOPE_KEYWORDS` (pinned by a test). Invoices and statements
+# («рахун», «виписк», «сплат») and returns/claims stay out of scope.
+_SALES_SCOPE_KEYWORDS = (
+    "кредит", "розстрочк", "рассрочк",
+    "купити", "купить", "куплю", "придбат",
+    "замовл", "заказ", "доставк",
+    "гаранті", "гаранти",
+    "оплат", "платіж", "платеж",
+    "товар", "наявн", "наличи",
+)
+
+# Out-of-scope evidence while sales are on: the rest of the list, plus disks —
+# disk selection is a manager's job until the disks wave.
+_OUT_OF_SCOPE_KEYWORDS_SALES = (
+    *(kw for kw in _OUT_OF_SCOPE_KEYWORDS if kw not in _SALES_SCOPE_KEYWORDS),
+    "диск",
+)
+
 _GUARD_MARKER = "⛔ HALLUCINATION_GUARD"
 
 # After this many blocks in one call, let the transfer through. Blocking is a
@@ -271,8 +293,33 @@ def _extract_user_text_turns(history: list[dict[str, Any]]) -> list[str]:
     return turns
 
 
+def _sales_block_message(reason: str, last: str, recent_3: str) -> str:
+    """Guard rejection under sales scope: back to the sale, not to fitting."""
+    intents = sales_intents(recent_3)
+    if "ORDER" in intents:
+        hint = "Клієнт хоче купити чи замовити — продовжуй: підбір шин → заявка на замовлення."
+    elif "CONSULT" in intents:
+        hint = (
+            "Клієнт питає про шини чи товар — відповідай через search_tires, "
+            "check_availability або search_knowledge_base."
+        )
+    else:
+        hint = "Продовжуй розмову: коротко перепитай, з чим допомогти."
+    return (
+        f'{_GUARD_MARKER}: transfer_to_operator(reason="{reason}") '
+        "заблокований бекендом. Підбір, наявність, замовлення, доставка, оплата "
+        "й гарантія шин — твоя зона, не привід передавати оператору; у ОСТАННІХ 3 "
+        "репліках клієнта немає ні іншої теми, ні скарги. "
+        f"Остання репліка клієнта: {last!r}. {hint} "
+        "Якщо інструмент повернув помилку — прочитай, чого бракує, і запитай у клієнта."
+    )
+
+
 def _should_block_false_transfer(
-    tool_args: dict[str, Any], history: list[dict[str, Any]]
+    tool_args: dict[str, Any],
+    history: list[dict[str, Any]],
+    *,
+    sales_enabled: bool = False,
 ) -> str | None:
     """If the transfer_to_operator call looks like a hallucination, return
     a synthetic tool_result message telling the LLM to continue. Otherwise
@@ -292,6 +339,11 @@ def _should_block_false_transfer(
       customer turns.
     - anything else (complex_question, invented reasons) — an out-of-scope
       topic or an escalation keyword in the last 3 customer turns.
+
+    ``sales_enabled`` (the network's ``NetworkPolicy``): tyre and order
+    topics are the bot's own, so they stop counting as out-of-scope evidence
+    (`_OUT_OF_SCOPE_KEYWORDS_SALES`) and a blocked transfer is sent back to
+    the sale, not to the fitting checklist. Off — exactly as before.
     """
     reason = str(tool_args.get("reason", "")).strip().lower()
 
@@ -308,11 +360,14 @@ def _should_block_false_transfer(
     recent_3 = " ".join(user_turns[-3:]).lower()
 
     if reason not in ("customer_request", "cannot_help", "negative_emotion"):
-        if any(kw in recent_3 for kw in _OUT_OF_SCOPE_KEYWORDS):
+        out_of_scope = _OUT_OF_SCOPE_KEYWORDS_SALES if sales_enabled else _OUT_OF_SCOPE_KEYWORDS
+        if any(kw in recent_3 for kw in out_of_scope):
             return None
         if any(kw in recent_3 for kw in _ESCALATION_KEYWORDS):
             return None
         last = user_turns[-1] if user_turns else ""
+        if sales_enabled:
+            return _sales_block_message(reason, last, recent_3)
         return (
             f'{_GUARD_MARKER}: transfer_to_operator(reason="{reason}") '
             "заблокований бекендом. У ОСТАННІХ 3 репліках клієнта немає ні "
@@ -328,6 +383,14 @@ def _should_block_false_transfer(
         if any(kw in joined for kw in _OPERATOR_KEYWORDS):
             return None
         last = user_turns[-1] if user_turns else ""
+        if sales_enabled:
+            return (
+                f'{_GUARD_MARKER}: transfer_to_operator(reason="customer_request") '
+                "заблокований бекендом. Клієнт НЕ просив оператора. "
+                f"Останнє повідомлення клієнта: {last!r}. "
+                "Якщо клієнт назвав ім'я — виклич update_customer_profile(name=...) і "
+                "запитай, з чим допомогти. Не виклик transfer_to_operator знову з цією ж причиною."
+            )
         return (
             f"{_GUARD_MARKER}: transfer_to_operator(reason=\"customer_request\") "
             "заблокований бекендом. Клієнт НЕ просив оператора. "
@@ -411,6 +474,8 @@ def is_transfer_promise(text: str) -> bool:
 async def hold_unconfirmed_transfer_promise(
     stream: AsyncIterator[BufferEvent],
     history: list[dict[str, Any]],
+    *,
+    sales_enabled: bool = False,
 ) -> AsyncIterator[BufferEvent]:
     """Withhold «I'm connecting you» until the transfer behind it is allowed.
 
@@ -485,7 +550,9 @@ async def hold_unconfirmed_transfer_promise(
                     args = {}
                 if not isinstance(args, dict):
                     args = {}
-                blocked = _should_block_false_transfer(args, history)
+                blocked = _should_block_false_transfer(
+                    args, history, sales_enabled=sales_enabled
+                )
                 if blocked is not None:
                     reason_label = str(args.get("reason", "unknown"))
                     transfer_promise_suppressed_total.labels(reason=reason_label).inc()
@@ -1254,6 +1321,8 @@ class StreamingAgentLoop:
         self._safety_context = safety_context
         self._promotions_context = promotions_context
         self._network_policy = network_policy
+        # Sales scope switch — the one flag the transfer guard reads.
+        self._sales_enabled = bool(network_policy is not None and network_policy.sales_enabled)
         self._is_modular = is_modular
         self._agent_name = agent_name
         self._echo_canceller = echo_canceller
@@ -1467,6 +1536,7 @@ class StreamingAgentLoop:
             offered_slots=offered_slots,
             fitting_progress=fitting_progress,
             enabled_tools={t["name"] for t in (self._tools or [])},
+            network_policy=self._network_policy,
         )
 
         # Record prompt and history metrics
@@ -1564,6 +1634,7 @@ class StreamingAgentLoop:
                                 booking_offer_gate,
                             ),
                             conversation_history,
+                            sales_enabled=self._sales_enabled,
                         ),
                         self._network_policy,
                         _current_call_id(),
@@ -1734,7 +1805,9 @@ class StreamingAgentLoop:
                     args = self._pii_vault.restore_in_args(args)
                 # Guard against hallucinated transfer_to_operator on early turns
                 if tc.name == "transfer_to_operator":
-                    block_msg = _should_block_false_transfer(args, conversation_history)
+                    block_msg = _should_block_false_transfer(
+                        args, conversation_history, sales_enabled=self._sales_enabled
+                    )
                     if block_msg is not None:
                         reason_label = str(args.get("reason", "unknown"))
                         false_transfer_blocked_total.labels(reason=reason_label).inc()

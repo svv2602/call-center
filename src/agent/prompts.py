@@ -14,6 +14,7 @@ import datetime
 import logging
 from typing import Any
 
+from src.agent.network_policy import SERVICE_LABELS, NetworkPolicy
 from src.agent.ua_datetime import date_to_words, time_to_words
 
 logger = logging.getLogger(__name__)
@@ -25,7 +26,7 @@ PROMPT_VERSION = "v4.0-guided"
 # Prompt modules — each module is a self-contained section of the system prompt.
 # ---------------------------------------------------------------------------
 
-_MOD_CORE = """\
+_MOD_CORE_HEAD = """\
 Ти — голосовий асистент інтернет-магазину шин. Тебе звати Олена.
 Ти — жінка. ЗАВЖДИ говори про себе у жіночому роді: "зрозуміла", "знайшла", \
 "перевірила", "готова", "рада". НІКОЛИ не використовуй чоловічий рід ("зрозумів", "готовий" тощо). \
@@ -33,6 +34,12 @@ _MOD_CORE = """\
 Ти спілкуєшся українською мовою, ввічливо та професійно.
 Ти ЗАВЖДИ відповідаєш українською, навіть якщо клієнт говорить російською.
 
+"""
+
+# Fitting-only scope frame (2026-08-14). Rendered while
+# ``NetworkPolicy.sales_enabled`` is off; replaced by ``render_sales_scope``
+# when it is on. Kept verbatim: ``_MOD_CORE`` must stay byte-identical.
+_MOD_SCOPE_FITTING_ONLY = """\
 ## 🚨🚨🚨 ПОТОЧНА ЗОНА ВІДПОВІДАЛЬНОСТІ БОТА (тимчасово 2026-08-14)
 
 Ти обробляєш **ТІЛЬКИ 4 сценарії**:
@@ -111,6 +118,9 @@ STT-варіанти для «цікавить»/«цікавить ціна»/�
 
 ⚠️ Це **тимчасове обмеження** до стабілізації fitting-сценарію. НЕ виправдовуйся, НЕ пояснюй клієнту, чому обмеження — просто швидко переключай.
 
+"""
+
+_MOD_CORE_TAIL = """\
 ## ⛔⛔⛔ ЛАКОНІЧНІСТЬ — ГОЛОВНЕ ПРАВИЛО
 
 Це телефон, а не чат. Кожна репліка = 1-2 короткі речення. \
@@ -294,6 +304,136 @@ YYYY-MM-DD — це ВНУТРІШНІЙ формат ТІЛЬКИ для пар
 Викликаєш інструмент — виклич мовчки, БЕЗ тексту перед ним
 - ⛔ Задав питання клієнту — ЗУПИНИСЬ і ЧЕКАЙ відповідь. НЕ викликай інструмент одночасно з питанням\
 """
+
+_MOD_CORE = _MOD_CORE_HEAD + _MOD_SCOPE_FITTING_ONLY + _MOD_CORE_TAIL
+
+
+# ---------------------------------------------------------------------------
+# Sales scope (tenants.config.sales_enabled) — the network frame that replaces
+# the fitting-only frame. Everything the network offers comes from
+# ``NetworkPolicy.services``; nothing is keyed on a tenant slug.
+# ---------------------------------------------------------------------------
+
+#: How a missing service is named in «На жаль, ми не надаємо …». Every
+#: ``SERVICE_LABELS`` key must have an entry (pinned by a test); a key that
+#: slips through falls back to the plain label, never to silence.
+_SERVICE_NOT_PROVIDED_PHRASE: dict[str, str] = {
+    "fitting": "послуги шиномонтажу",
+    "storage": "послуги зберігання шин",
+}
+
+#: What the bot does for a service the network offers (one list item each).
+_SERVICE_SCOPE_ITEM: dict[str, str] = {
+    "fitting": (
+        "**Шиномонтаж** — запис на шиномонтаж, скасування і перенесення запису, "
+        "вартість шиномонтажу."
+    ),
+    "storage": "**Зберігання шин** — договір зберігання, шини на зберіганні.",
+}
+
+
+def render_sales_scope(policy: NetworkPolicy) -> str:
+    """The «Зона відповідальності» frame for a network with sales enabled.
+
+    Services are read from the policy over the whole ``SERVICE_LABELS`` enum:
+    an offered one becomes a scope item, a missing one becomes «не надаємо»
+    without a transfer and without naming another network.
+    """
+    items = [
+        "**Підбір шин** — за автомобілем або за розміром, наявність і ціна шин.",
+        "**Замовлення шин** — оформлення заявки (менеджер передзвонить і підтвердить "
+        "її) та статус замовлення.",
+        "**Консультація** — шини й диски: характеристики, порівняння, доставка, оплата, "
+        "гарантія (база знань і блок «Умови мережі»).",
+    ]
+    offered = [s for s in SERVICE_LABELS if s in policy.services]
+    missing = [s for s in SERVICE_LABELS if s not in policy.services]
+    items.extend(_SERVICE_SCOPE_ITEM.get(s, SERVICE_LABELS[s]) for s in offered)
+
+    lines = [
+        "## 🚨🚨🚨 ЗОНА ВІДПОВІДАЛЬНОСТІ БОТА",
+        "",
+        "Ти допомагаєш клієнту з такими питаннями:",
+    ]
+    lines.extend(f"{n}. {item}" for n, item in enumerate(items, start=1))
+    lines += [
+        "",
+        "Питання про шини, їхню ціну, наявність, замовлення, доставку, оплату чи "
+        "гарантію — це твоя зона. ⛔ НЕ переводь такого клієнта на оператора — веди "
+        "розмову сам: підбір → заявка на замовлення.",
+        "",
+        "**Диски:** консультуй тільки за статтями бази знань (search_knowledge_base). "
+        "Підбір дисків робить менеджер — запропонуй з'єднати з менеджером або залишити "
+        "заявку на дзвінок.",
+    ]
+    if missing:
+        phrases = [_SERVICE_NOT_PROVIDED_PHRASE.get(s, SERVICE_LABELS[s]) for s in missing]
+        lines += [
+            "",
+            f"**Не надаємо: {', '.join(phrases)}.** На такий запит скажи «На жаль, ми не "
+            "надаємо …» і назви ту послугу, про яку питав клієнт, — потім запитай, чи "
+            "допомогти з підбором або замовленням шин. ⛔ НЕ переводь на оператора, НЕ "
+            "згадуй інші мережі і НЕ направляй клієнта туди.",
+        ]
+    lines += [
+        "",
+        "**Переводь на оператора** тільки якщо клієнт сам просить людину, скаржиться, "
+        "або питання не про шини й диски (рахунки, виписки, повернення, рекламації).",
+        "",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _replace_once(text: str, old: str, new: str) -> str:
+    """Anchored replacement: the anchor must occur exactly once."""
+    if text.count(old) != 1:
+        raise ValueError(f"prompt anchor not unique: {old[:60]!r}")
+    return text.replace(old, new)
+
+
+def _cut_section(text: str, start: str, end: str) -> str:
+    """Remove ``text[start:end)`` where both anchors occur exactly once."""
+    if text.count(start) != 1 or text.count(end) != 1:
+        raise ValueError(f"prompt section anchors not unique: {start[:40]!r}")
+    i, j = text.index(start), text.index(end)
+    if j <= i:
+        raise ValueError(f"prompt section anchors out of order: {start[:40]!r}")
+    return text[:i] + text[j:]
+
+
+# The core tail under sales: the order number is not dictated (the order is a
+# request a manager calls back about), and «Можливості» — a list that promised
+# fitting and storage to every network — gives way to the scope frame.
+_MOD_CORE_TAIL_SALES = _cut_section(
+    _replace_once(
+        _MOD_CORE_TAIL,
+        "- Номери замовлень диктуй по цифрах повільно",
+        "- Номер заявки клієнту не називай",
+    ),
+    "## Можливості\n",
+    "## ⛔ ЩО НЕ БРОНЮЄМО ЧЕРЕЗ БОТ",
+)
+
+# A network without fitting: the repair-booking section (which looks up a
+# fitting station) goes, and the opening question stops offering fitting.
+_MOD_CORE_TAIL_SALES_NO_FITTING = _replace_once(
+    _cut_section(
+        _MOD_CORE_TAIL_SALES,
+        "## ⛔ ЩО НЕ БРОНЮЄМО ЧЕРЕЗ БОТ",
+        "## ГОЛОВНИЙ ПРИНЦИП: ти ведеш бесіду",
+    ),
+    "підбір та замовлення шин, запис на шиномонтаж, чи є питання",
+    "підбір та замовлення шин чи є питання",
+)
+
+
+def core_for_policy(policy: NetworkPolicy | None) -> str:
+    """``_MOD_CORE`` while sales are off (byte-identical), the network frame on."""
+    if policy is None or not policy.sales_enabled:
+        return _MOD_CORE
+    tail = _MOD_CORE_TAIL_SALES if "fitting" in policy.services else _MOD_CORE_TAIL_SALES_NO_FITTING
+    return _MOD_CORE_HEAD + render_sales_scope(policy) + tail
 
 _MOD_TIRE_SEARCH = """\
 
@@ -1085,6 +1225,31 @@ PRONUNCIATION_RULES = """\
 
 """
 
+#: Under sales the order is a request a manager calls back about: its number
+#: is never spoken. Any line of the rules that teaches dictating it — the
+#: default one, whose example number would otherwise sit in every prompt, or
+#: a custom Redis copy of it — is replaced by this one.
+SALES_ORDER_NUMBER_RULE = "- Номер заявки клієнту не називай"
+_ORDER_NUMBER_DICTATION_MARKERS: tuple[str, ...] = ("AI-1234", "Номер замовлення диктуй")
+
+
+def pronunciation_rules_for_policy(rules: str, policy: NetworkPolicy | None) -> str:
+    """The rules unchanged while sales are off; order-number dictation removed when on."""
+    if policy is None or not policy.sales_enabled:
+        return rules
+    out: list[str] = []
+    replaced = False
+    for line in rules.split("\n"):
+        if any(marker in line for marker in _ORDER_NUMBER_DICTATION_MARKERS):
+            if not replaced:
+                out.append(SALES_ORDER_NUMBER_RULE)
+                replaced = True
+            continue
+        out.append(line)
+    if not replaced:
+        out.append(SALES_ORDER_NUMBER_RULE)
+    return "\n".join(out)
+
 # ---------------------------------------------------------------------------
 # Tool → module mapping (for dynamic module expansion mid-call)
 # ---------------------------------------------------------------------------
@@ -1113,6 +1278,7 @@ _TOOL_MODULE_MAP: dict[str, list[str]] = {
 def infer_expanded_modules(
     scenario: str | None,
     tools_called: set[str] | None,
+    network_policy: NetworkPolicy | None = None,
 ) -> list[str] | None:
     """Infer additional prompt modules needed based on tools already called.
 
@@ -1142,6 +1308,7 @@ def infer_expanded_modules(
                 extra.append(mod)
                 seen.add(mod_id)
 
+    extra = _filter_modules_for_policy(extra, network_policy)
     return extra if extra else None
 
 
@@ -1287,7 +1454,47 @@ SCENARIO_MODULES: dict[str | None, list[str]] = {
         _MOD_COMBINED_FLOW,
         _MOD_OBJECTIONS,
     ],
+    # Sales scope (tenants.config.sales_enabled): the default scenario of a
+    # network with sales on. The superset — `_modules_for_scenario` drops the
+    # modules of services the network does not offer (NetworkPolicy.services).
+    "sales": [
+        _MOD_TIRE_SEARCH,
+        _MOD_ORDER_FLOW,
+        _MOD_ORDER_STATUS,
+        _MOD_CONSULTATION,
+        _MOD_OBJECTIONS,
+        _MOD_FITTING,
+        _MOD_STORAGE,
+    ],
 }
+
+#: Modules that only make sense when the network offers the service. Keyed
+#: over the whole ``SERVICE_LABELS`` enum (pinned by a test).
+_SERVICE_MODULES: dict[str, tuple[str, ...]] = {
+    "fitting": (_MOD_FITTING, _MOD_FITTING_UNAVAILABLE),
+    "storage": (_MOD_STORAGE,),
+}
+
+#: Modules never loaded under sales: «order + fitting in one call» comes later
+#: (owner decision 2026-09-28).
+_SALES_EXCLUDED_MODULES: tuple[str, ...] = (_MOD_COMBINED_FLOW,)
+
+
+def _filter_modules_for_policy(
+    modules: list[str], network_policy: NetworkPolicy | None
+) -> list[str]:
+    """Drop, under sales, the modules of services the network does not offer.
+
+    Default-deny: a service absent from ``NetworkPolicy.services`` loses its
+    modules. While sales are off the list is returned as is.
+    """
+    if network_policy is None or not network_policy.sales_enabled:
+        return modules
+    banned: set[int] = {id(m) for m in _SALES_EXCLUDED_MODULES}
+    for service in SERVICE_LABELS:
+        if service not in network_policy.services:
+            banned.update(id(m) for m in _SERVICE_MODULES.get(service, ()))
+    return [m for m in modules if id(m) not in banned]
 
 
 # ---------------------------------------------------------------------------
@@ -1298,6 +1505,7 @@ SCENARIO_MODULES: dict[str | None, list[str]] = {
 def _modules_for_scenario(
     scenario: str | None,
     enabled_tools: set[str] | None,
+    network_policy: NetworkPolicy | None = None,
 ) -> list[str] | None:
     """Return SCENARIO_MODULES[scenario] with fitting swapped for the
     "unavailable" variant when the tenant lacks the book_fitting tool.
@@ -1309,6 +1517,13 @@ def _modules_for_scenario(
     modules = SCENARIO_MODULES.get(scenario)
     if modules is None:
         return None
+    if network_policy is not None and network_policy.sales_enabled:
+        modules = _filter_modules_for_policy(modules, network_policy)
+        # A network that offers fitting but has no booking tool: the sales
+        # frame promises nothing about fitting, so the module goes too.
+        if enabled_tools is not None and "book_fitting" not in enabled_tools:
+            modules = [m for m in modules if m is not _MOD_FITTING]
+        return modules
     # Only rewrite when the caller explicitly supplied the allow-list.
     # `None` means "unknown" (e.g. tests, sandbox) → keep original behavior.
     if enabled_tools is not None and "book_fitting" not in enabled_tools:
@@ -1323,6 +1538,7 @@ def assemble_prompt(
     pronunciation_rules: str | None = None,
     compact: bool = False,
     enabled_tools: set[str] | None = None,
+    network_policy: NetworkPolicy | None = None,
 ) -> str:
     """Assemble system prompt from modules based on IVR scenario.
 
@@ -1335,14 +1551,24 @@ def assemble_prompt(
         compact: If True and scenario is None, use lightweight router module
                  instead of loading all scenario modules. Saves ~4000 tokens
                  on the first turn before the topic is identified.
+        network_policy: The network's ``NetworkPolicy``. While
+                 ``sales_enabled`` is off (or no policy) the result is
+                 byte-identical to the fitting-only prompt. When on, the
+                 fitting-only frame is replaced by the network frame, a
+                 scenario-less call gets the ``sales`` bundle (the router
+                 lists services the network may not offer), and modules of
+                 services the network does not offer are dropped.
 
     Returns:
         Assembled system prompt string.
     """
+    sales = network_policy is not None and network_policy.sales_enabled
+    if sales and scenario is None:
+        scenario = "sales"
     if compact and scenario is None:
         modules = [_MOD_ROUTER]
     else:
-        modules = _modules_for_scenario(scenario, enabled_tools)
+        modules = _modules_for_scenario(scenario, enabled_tools, network_policy)
         if modules is None:
             # Unknown scenario → fall back to full prompt
             logger.warning("Unknown scenario '%s', using full prompt", scenario)
@@ -1352,13 +1578,14 @@ def assemble_prompt(
                     _MOD_FITTING_UNAVAILABLE if m is _MOD_FITTING else m
                     for m in modules
                 ]
+            modules = _filter_modules_for_policy(modules, network_policy)
 
-    parts = [_MOD_CORE]
+    parts = [core_for_policy(network_policy)]
     parts.extend(modules)
 
     if include_pronunciation:
         rules = pronunciation_rules if pronunciation_rules is not None else PRONUNCIATION_RULES
-        parts.append("\n" + rules)
+        parts.append("\n" + pronunciation_rules_for_policy(rules, network_policy))
 
     return "\n".join(parts)
 
@@ -1647,6 +1874,7 @@ def build_system_prompt_with_context(
     offered_slots: list[dict[str, str]] | None = None,
     fitting_progress: dict[str, Any] | None = None,
     enabled_tools: set[str] | None = None,
+    network_policy: NetworkPolicy | None = None,
 ) -> str:
     """Build the final system prompt with all dynamic context injected.
 
@@ -1669,6 +1897,12 @@ def build_system_prompt_with_context(
         agent_name: Tenant-specific agent name (overrides default "Олена").
         active_scenarios: All scenarios detected during this call (accumulated).
                          Used to add modules when customer switches topics.
+        network_policy: The network's policy. Only ``sales_enabled`` matters
+                         here: when on, a compact→full upgrade assembles the
+                         network frame and module expansion never adds a
+                         module of a service the network does not offer.
+                         Off (or None) — byte-identical to the fitting-only
+                         prompt.
 
     Returns:
         Final system prompt string ready to send to LLM.
@@ -1685,6 +1919,7 @@ def build_system_prompt_with_context(
             scenario=scenario,
             include_pronunciation=False,
             enabled_tools=enabled_tools,
+            network_policy=network_policy,
         )
         logger.info("Compact→full upgrade: scenario=%s", scenario)
 
@@ -1694,15 +1929,21 @@ def build_system_prompt_with_context(
     # — non-fitting mentions are handled by _MOD_CORE's scope rule (transfer
     # to operator), NOT by loading extra modules. This kept ~4k tok on calls
     # where the client said e.g. «шини» after already being in fitting flow.
+    # Sales scope: expansion runs, but only ever adds modules the network
+    # offers (`_modules_for_scenario` filters by NetworkPolicy.services) — a
+    # network without fitting never gets a fitting module from «монтаж».
     if is_modular and active_scenarios and scenario and scenario != "fitting":
-        primary_mods = _modules_for_scenario(scenario, enabled_tools) or _ALL_SCENARIO_MODULES
+        primary_mods = (
+            _modules_for_scenario(scenario, enabled_tools, network_policy)
+            or _ALL_SCENARIO_MODULES
+        )
         base_modules = set(primary_mods)
         extra: list[str] = []
         seen: set[int] = {id(m) for m in base_modules}
         for sc in active_scenarios:
             if sc == scenario:
                 continue
-            for mod in _modules_for_scenario(sc, enabled_tools) or []:
+            for mod in _modules_for_scenario(sc, enabled_tools, network_policy) or []:
                 mod_id = id(mod)
                 if mod_id not in seen:
                     extra.append(mod)
@@ -1718,7 +1959,7 @@ def build_system_prompt_with_context(
     # Dynamic module expansion: if tools were called that require modules
     # not in the current scenario, append them to the base prompt.
     if is_modular and tools_called:
-        extra_modules = infer_expanded_modules(scenario, tools_called)
+        extra_modules = infer_expanded_modules(scenario, tools_called, network_policy)
         if extra_modules:
             base_prompt = base_prompt + "\n" + "\n".join(extra_modules)
             logger.info(

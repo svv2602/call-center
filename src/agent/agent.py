@@ -332,6 +332,7 @@ class LLMAgent:
             offered_slots=offered_slots,
             fitting_progress=fitting_progress,
             enabled_tools={t["name"] for t in self._tools},
+            network_policy=self._network_policy,
         )
 
         # Record prompt and history metrics

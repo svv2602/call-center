@@ -47,8 +47,10 @@ from src.agent.prompts import (
     format_caller_history,
     format_customer_profile,
     format_storage_context,
+    pronunciation_rules_for_policy,
 )
 from src.agent.tool_loader import get_tools_with_overrides
+from src.agent.tools import ALL_TOOLS
 from src.api.admin_users import router as admin_users_router
 from src.api.analytics import router as analytics_router
 from src.api.auth import router as auth_router
@@ -500,7 +502,52 @@ _SCENARIO_TOOLS: dict[str, set[str]] = {
         "search_knowledge_base",
         "transfer_to_operator",
     },
+    # Sales scope (tenants.config.sales_enabled): every tool — the tenant's
+    # `enabled_tools` and `_scenario_tool_names` (services the network does
+    # not offer) cut it down.
+    "sales": {t["name"] for t in ALL_TOOLS},
 }
+
+#: Tools that serve a network service; under sales they go when the network's
+#: ``NetworkPolicy.services`` lacks it. Keyed over the whole ``SERVICE_LABELS``
+#: enum (pinned by a test).
+_SERVICE_TOOLS: dict[str, frozenset[str]] = {
+    "fitting": frozenset(
+        {
+            "get_fitting_stations",
+            "get_fitting_slots",
+            "reserve_fitting_slot",
+            "book_fitting",
+            "cancel_fitting",
+            "get_fitting_price",
+            "get_customer_bookings",
+        }
+    ),
+    "storage": frozenset({"find_storage"}),
+}
+
+
+def _default_scenario(network_policy: NetworkPolicy) -> str:
+    """Scenario of a call with no IVR intent: ``sales`` when the network has
+    sales on, ``fitting`` (fitting-only scope, 2026-08-14) otherwise."""
+    return "sales" if network_policy.sales_enabled else "fitting"
+
+
+def _scenario_tool_names(scenario: str, network_policy: NetworkPolicy) -> set[str] | None:
+    """Tools a scenario allows (None — the scenario does not filter).
+
+    Under ``sales`` the tools of every service the network does not offer are
+    dropped — default-deny over the whole service enum.
+    """
+    allowed = _SCENARIO_TOOLS.get(scenario)
+    if allowed is None:
+        return None
+    if scenario == "sales":
+        allowed = set(allowed)
+        for service, names in _SERVICE_TOOLS.items():
+            if service not in network_policy.services:
+                allowed -= names
+    return allowed
 
 # Scenario-specific focus appended to system prompt (Ukrainian)
 _SCENARIO_EMPHASIS: dict[str, str] = {
@@ -807,6 +854,19 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             tenant["name"],
             conn.channel_uuid,
         )
+
+    # Per-tenant config extracted once — used for the scope switch, the
+    # StoreClient AND the LLM provider override.
+    tenant_config: dict[str, Any] = {}
+    if tenant and isinstance(tenant.get("config"), dict):
+        tenant_config = tenant["config"]
+
+    # Network sales/consultation conditions (delivery, payment, services…)
+    # — structured tenant data. `sales_enabled` is the scope switch: the
+    # default scenario, the prompt frame and the tool set all follow it.
+    # Built once per call.
+    network_policy = NetworkPolicy.from_tenant_config(tenant_config)
+
     if ivr_intent:
         session.scenario = ivr_intent
         session.active_scenarios.add(ivr_intent)
@@ -816,12 +876,14 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         # default to fitting. Every non-fitting intent is transferred to the
         # operator by the _MOD_CORE scope rule anyway. Defaulting keeps prompt
         # cache warm across all turns (compact→full upgrade would flush cache
-        # on turn 2 because the prefix changes).
+        # on turn 2 because the prefix changes). With sales on — `sales`.
         if session.scenario is None:
-            session.scenario = "fitting"
-            session.active_scenarios.add("fitting")
+            default_scenario = _default_scenario(network_policy)
+            session.scenario = default_scenario
+            session.active_scenarios.add(default_scenario)
             logger.info(
-                "No IVR intent — defaulting scenario to 'fitting' for call %s",
+                "No IVR intent — defaulting scenario to '%s' for call %s",
+                default_scenario,
                 conn.channel_uuid,
             )
     if caller_id:
@@ -1092,12 +1154,15 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 # path that survives session-restore edge cases.
                 compact=(session.scenario is None),
                 enabled_tools=tenant_tools_set,
+                network_policy=network_policy,
             )
             is_modular = True
 
         # Inject pronunciation rules into system prompt
         if pron_rules:
-            system_prompt = inject_pronunciation_rules(system_prompt, pron_rules)
+            system_prompt = inject_pronunciation_rules(
+                system_prompt, pronunciation_rules_for_policy(pron_rules, network_policy)
+            )
 
         # Resolve tenant-specific names early (used in greeting personalization below)
         tenant_agent_name = tenant.get("agent_name") if tenant else None
@@ -1147,8 +1212,10 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             )
 
         # Apply IVR scenario-based tool filtering
-        if session.scenario and session.scenario in _SCENARIO_TOOLS:
-            allowed_scenario = _SCENARIO_TOOLS[session.scenario]
+        allowed_scenario = (
+            _scenario_tool_names(session.scenario, network_policy) if session.scenario else None
+        )
+        if allowed_scenario is not None:
             if tools:
                 tools = [t for t in tools if t["name"] in allowed_scenario]
             logger.info(
@@ -1163,17 +1230,6 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             emphasis = _SCENARIO_EMPHASIS.get(session.scenario)
             if emphasis:
                 system_prompt = system_prompt + emphasis
-
-        # Per-tenant config extracted once — used for StoreClient AND LLM
-        # provider override.
-        tenant_config: dict[str, Any] = {}
-        if tenant and isinstance(tenant.get("config"), dict):
-            tenant_config = tenant["config"]
-
-        # Network sales/consultation conditions (delivery, payment, services…)
-        # — structured tenant data, rendered into the prompt only while
-        # config.sales_enabled is true. Built once per call.
-        network_policy = NetworkPolicy.from_tenant_config(tenant_config)
 
         # Mirror excluded_station_ids into session so _get_fitting_stations
         # (defined in _build_tool_router, no closure over tenant_config)
