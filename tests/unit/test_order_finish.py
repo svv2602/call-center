@@ -30,6 +30,7 @@ from src.agent.prompts import (
     ORDER_REQUEST_FAILED_TEXT,
     assemble_prompt,
 )
+from src.agent.tool_result_compressor import compress_tool_result
 from src.agent.tools import ALL_TOOLS
 from src.core.call_session import CallSession
 from src.main import _build_tool_router
@@ -120,9 +121,11 @@ class TestRequestCreatedIn1C:
         # The number is generated inside the handler — read it back from the
         # session, not from the fixture.
         assert session.order_id, "request number must still be kept in the session"
-        dumped = json.dumps(result, ensure_ascii=False)
+        # The number is in the raw result for the audit row only
+        # (`_audit_order_number`); what the model reads never names it.
+        dumped = compress_tool_result("confirm_order", result)
         assert session.order_id not in dumped
-        assert "onec-internal-number" not in dumped
+        assert "onec-internal-number" not in json.dumps(result, ensure_ascii=False)
         assert session.order_draft is None
 
 
@@ -175,7 +178,7 @@ class TestRequestFailed:
         result = await _confirm(session, _onec(RuntimeError("1C down")), store)
         store.confirm_order.assert_awaited_once()
         assert result.get("status") == "request_created"
-        assert "store-number" not in json.dumps(result, ensure_ascii=False)
+        assert "store-number" not in compress_tool_result("confirm_order", result)
 
     @pytest.mark.asyncio
     async def test_failure_marks_error_so_the_turn_does_not_retry(self) -> None:
