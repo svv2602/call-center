@@ -28,6 +28,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.agent.vehicle_translit import (
+    MODEL_CYRILLIC_ALIASES,
     generate_brand_aliases,
     generate_model_aliases,
     normalize_alias,
@@ -49,9 +50,16 @@ async def _load_brands(conn: Any) -> list[dict[str, Any]]:
 
 async def _load_models(conn: Any) -> list[dict[str, Any]]:
     result = await conn.execute(
-        text("SELECT id, brand_id, name FROM vehicle_models ORDER BY id")
+        text("""
+            SELECT m.id, m.brand_id, m.name,
+                   (SELECT COUNT(*) FROM vehicle_kits k WHERE k.model_id = m.id) AS kits
+            FROM vehicle_models m ORDER BY m.id
+        """)
     )
-    return [{"id": row.id, "brand_id": row.brand_id, "name": row.name} for row in result]
+    return [
+        {"id": row.id, "brand_id": row.brand_id, "name": row.name, "kits": row.kits}
+        for row in result
+    ]
 
 
 async def _wipe_auto_aliases(conn: Any) -> int:
@@ -120,10 +128,71 @@ def _build_brand_alias_rows(brands: list[dict[str, Any]]) -> list[dict[str, Any]
     return rows
 
 
-def _build_model_alias_rows(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Generate alias rows for all models. Uses vehicle_translit.generate_model_aliases."""
-    rows: list[dict[str, Any]] = []
+def _primary_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """One model per (brand, name): the catalogue has same-name duplicates
+    (Mercedes ``GLA-Class`` ×2 — 6 and 170 kits). Aliases on both make every
+    alias of that name ambiguous (``find_model_by_alias`` → None), so only the
+    one with the most kits (tie → lowest id) gets aliases."""
+    best: dict[tuple[int, str], dict[str, Any]] = {}
     for model in models:
+        key = (model["brand_id"], normalize_alias(model["name"]))
+        cur = best.get(key)
+        rank = (-(model.get("kits") or 0), model["id"])
+        if cur is None or rank < (-(cur.get("kits") or 0), cur["id"]):
+            best[key] = model
+    keep = {m["id"] for m in best.values()}
+    return [m for m in models if m["id"] in keep]
+
+
+def _alias_tier(model_name: str, alias_normalized: str) -> int:
+    """0 — the model's own name, 1 — hand-curated, 2 — char-by-char translit."""
+    if alias_normalized == normalize_alias(model_name):
+        return 0
+    hand = {normalize_alias(a) for a in MODEL_CYRILLIC_ALIASES.get(model_name, [])}
+    return 1 if alias_normalized in hand else 2
+
+
+def drop_model_alias_collisions(
+    rows: list[dict[str, Any]], names: dict[int, str]
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Default-deny: an alias pointing at >1 model of one brand is kept only
+    for the single model whose claim is strongest (own name > hand-curated >
+    translit); a tie at the top drops the alias for every model.
+
+    Returns ``(kept, dropped)``. ``names`` maps model_id → model name.
+    """
+    groups: dict[tuple[int, str], list[dict[str, Any]]] = {}
+    for row in rows:
+        groups.setdefault((row["brand_id"], row["alias_normalized"]), []).append(row)
+    kept: list[dict[str, Any]] = []
+    dropped: list[dict[str, Any]] = []
+    for group in groups.values():
+        if len({r["model_id"] for r in group}) <= 1:
+            kept.extend(group)
+            continue
+        tiers = {
+            r["model_id"]: _alias_tier(names[r["model_id"]], r["alias_normalized"]) for r in group
+        }
+        top = min(tiers.values())
+        winners = {mid for mid, t in tiers.items() if t == top}
+        if len(winners) == 1:
+            kept.extend(r for r in group if r["model_id"] in winners)
+            dropped.extend(r for r in group if r["model_id"] not in winners)
+        else:
+            dropped.extend(group)
+    return kept, dropped
+
+
+def _build_model_alias_rows(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Generate alias rows for all models. Uses vehicle_translit.generate_model_aliases.
+
+    Same-name duplicates get aliases once (``_primary_models``); an alias
+    that two models of a brand would share is resolved by
+    ``drop_model_alias_collisions`` (GLC-Class ≠ GLK-Class).
+    """
+    primary = _primary_models(models)
+    rows: list[dict[str, Any]] = []
+    for model in primary:
         variants = generate_model_aliases(model["name"])
         for alias, source in variants:
             rows.append(
@@ -136,7 +205,8 @@ def _build_model_alias_rows(models: list[dict[str, Any]]) -> list[dict[str, Any]
                     "confidence": None,
                 }
             )
-    return rows
+    kept, _dropped = drop_model_alias_collisions(rows, {m["id"]: m["name"] for m in primary})
+    return kept
 
 
 async def _update_last_history(conn: Any, count: int) -> None:

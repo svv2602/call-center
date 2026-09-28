@@ -1003,29 +1003,79 @@ class StoreClient:
 
     @staticmethod
     async def _find_vehicle_model(conn: Any, brand_id: int, name: str) -> Any:
-        """Find vehicle model: exact → aliases (brand-scoped) → pg_trgm fuzzy."""
+        """Find vehicle model within a brand.
+
+        as heard (exact → alias) → normalized variants from
+        ``vehicle_model_normalizer`` (exact → alias: «ГЛА», «джі ел ей»,
+        «GLA 200» → ``gla``) → prefix fallback (``gla`` → ``GLA-Class``, the
+        base model, never an AMG/Coupe sibling; ambiguous → None, no guess)
+        → pg_trgm fuzzy on the name as heard.
+
+        Same-name duplicates (two ``GLA-Class`` rows) resolve to the one with
+        the most kits.
+        """
         from sqlalchemy import text
 
         from src.agent.vehicle_alias_lookup import find_model_by_alias
-
-        # 1. Exact
-        result = await conn.execute(
-            text("""
-                SELECT id, name FROM vehicle_models
-                WHERE brand_id = :bid AND LOWER(name) = LOWER(:name)
-            """),
-            {"bid": brand_id, "name": name},
+        from src.agent.vehicle_model_normalizer import (
+            model_query_variants,
+            normalize_model_text,
+            pick_prefix_model,
+            prefix_like_pattern,
         )
-        row = result.mappings().first()
+
+        kits_order = (
+            "(SELECT COUNT(*) FROM vehicle_kits k WHERE k.model_id = vehicle_models.id) DESC, id"
+        )
+
+        async def _exact_or_alias(key: str) -> Any:
+            result = await conn.execute(
+                text(f"""
+                    SELECT id, name FROM vehicle_models
+                    WHERE brand_id = :bid AND LOWER(name) = LOWER(:name)
+                    ORDER BY {kits_order}
+                """),
+                {"bid": brand_id, "name": key},
+            )
+            row = result.mappings().first()
+            if row:
+                return row
+            # vehicle_aliases (Wave 8) — catches "Дастер" → Duster within Renault
+            return await find_model_by_alias(conn, brand_id, key)
+
+        # 1. As heard: exact, then alias
+        row = await _exact_or_alias(name)
         if row:
             return row
 
-        # 2. vehicle_aliases (Wave 8) — catches "Дастер" → Duster within Renault
-        alias_row = await find_model_by_alias(conn, brand_id, name)
-        if alias_row:
-            return alias_row
+        # 2. Normalized variants: exact, then alias
+        variants = model_query_variants(name)
+        for key in variants:
+            row = await _exact_or_alias(key)
+            if row:
+                return row
 
-        # 3. Fuzzy
+        # 3. Prefix fallback: "gle" → "GLE-Class" (base model, not "GLE AMG")
+        as_heard = normalize_model_text(name)
+        for key in dict.fromkeys([as_heard, *variants]):
+            if not key:
+                continue
+            result = await conn.execute(
+                text(f"""
+                    SELECT id, name FROM vehicle_models
+                    WHERE brand_id = :bid AND LOWER(name) LIKE :pattern ESCAPE '\\'
+                    ORDER BY {kits_order}
+                """),
+                {"bid": brand_id, "pattern": prefix_like_pattern(key)},
+            )
+            picked, ambiguous = pick_prefix_model(key, result.mappings().all())
+            if picked is not None:
+                return picked
+            if ambiguous:
+                # Several siblings, no base: a wrong model is worse than asking.
+                return None
+
+        # 4. Fuzzy
         result = await conn.execute(
             text("""
                 SELECT id, name, similarity(LOWER(name), LOWER(:name)) AS sim

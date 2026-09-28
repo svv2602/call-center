@@ -387,6 +387,33 @@ def translit_lat_to_cyr(name: str) -> str:
     return translit
 
 
+# --- Letter-code models ("GLC-Class", "X5", "CX-5") ---
+# A leading code of capitals is read letter by letter, so each letter keeps
+# its *sound*: C → «ц» (GLC → «Глц»), not the word-translit «к» that made
+# GLC-Class and GLK-Class both «Глк-клас» (prod 2026-09-28: the alias pointed
+# at the wrong model). X → «х» (BMW «Х5»), Q → «ку» (Audi «Ку5»).
+_CODE_LETTER_TO_CYR: dict[str, str] = {
+    "A": "а", "B": "б", "C": "ц", "D": "д", "E": "е", "F": "ф", "G": "г",
+    "H": "х", "I": "і", "J": "дж", "K": "к", "L": "л", "M": "м", "N": "н",
+    "O": "о", "P": "п", "Q": "ку", "R": "р", "S": "с", "T": "т", "U": "у",
+    "V": "в", "W": "в", "X": "х", "Y": "й", "Z": "з",
+}  # fmt: skip
+
+_MODEL_CODE_RE = re.compile(r"^([A-Z]{1,3})(?=[-\s(]|\d|$)")
+
+
+def translit_model_name(name: str) -> str:
+    """Model-name translit: a leading capital code letter by letter, the rest
+    by ``translit_lat_to_cyr`` ("GLC-Class" → "Глц-класс", "X5" → "Х5")."""
+    m = _MODEL_CODE_RE.match(name or "")
+    if not m:
+        return translit_lat_to_cyr(name)
+    code = "".join(_CODE_LETTER_TO_CYR[ch] for ch in m.group(1))
+    rest = name[m.end() :]
+    out = code + (translit_lat_to_cyr(rest.lower()) if rest else "")
+    return out[:1].upper() + out[1:]
+
+
 # --- Normalization for lookup ---
 
 
@@ -477,8 +504,9 @@ def generate_model_aliases(model_name: str) -> list[tuple[str, str]]:
         for cyr in MODEL_CYRILLIC_ALIASES[model_name]:
             _add(cyr, "auto_translit")
 
-    # Char-by-char translit — default (Russian "и") variant
-    translit_ru = translit_lat_to_cyr(model_name)
+    # Char-by-char translit — default (Russian "и") variant; a leading
+    # letter code keeps letter sounds (GLC → «Глц», not «Глк» = GLK)
+    translit_ru = translit_model_name(model_name)
     if translit_ru and normalize_alias(translit_ru) != normalize_alias(model_name):
         _add(translit_ru, "auto_translit")
 
