@@ -35,6 +35,9 @@ CONTENT_PERMISSIONS = [
     "stt_hints:write",
     "point_hints:read",
     "point_hints:write",
+    # Network promotions the bot speaks (``promotions`` table, migration 063).
+    "promotions:read",
+    "promotions:write",
 ]
 
 SYSTEM_PERMISSIONS = [
@@ -80,9 +83,15 @@ ROLE_DEFAULT_PERMISSIONS: dict[str, list[str]] = {
         "prompts:read",
         "vehicles:read",
         "operators:read",
+        "promotions:read",
+        "promotions:write",
     ],
     "operator": [
         "operators:read",
+        # Owner decision 2026-09-28: promotions are entered by hand and every
+        # role gets them by default.
+        "promotions:read",
+        "promotions:write",
     ],
     "content_manager": [
         *CONTENT_PERMISSIONS,
@@ -118,4 +127,5 @@ PERMISSION_GROUPS: dict[str, list[str]] = {
     "stt_hints": ["stt_hints:read", "stt_hints:write"],
     "stt_corrections": ["stt_corrections:read", "stt_corrections:write"],
     "point_hints": ["point_hints:read", "point_hints:write"],
+    "promotions": ["promotions:read", "promotions:write"],
 }

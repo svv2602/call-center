@@ -67,6 +67,7 @@ from src.api.middleware.security_headers import SecurityHeadersMiddleware
 from src.api.notifications import router as notifications_router
 from src.api.onec_data import router as onec_data_router
 from src.api.operators import router as operators_router
+from src.api.promotions import router as promotions_router
 from src.api.prompts import router as prompts_router
 from src.api.pronunciation import router as pronunciation_router
 from src.api.sandbox import router as sandbox_router
@@ -138,6 +139,7 @@ app.include_router(onec_data_router)
 app.include_router(operators_router)
 app.include_router(pronunciation_router)
 app.include_router(prompts_router)
+app.include_router(promotions_router)
 app.include_router(sandbox_router)
 app.include_router(scraper_router)
 app.include_router(stt_config_router)

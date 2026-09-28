@@ -33,7 +33,8 @@ class TestPermissionResolution:
 
     def test_operator_gets_minimal(self) -> None:
         result = resolve_permissions("operator")
-        assert result == ["operators:read"]
+        # promotions:* go to every role by default (owner decision 2026-09-28).
+        assert result == ["operators:read", "promotions:read", "promotions:write"]
 
     def test_content_manager_gets_content_perms(self) -> None:
         result = resolve_permissions("content_manager")
