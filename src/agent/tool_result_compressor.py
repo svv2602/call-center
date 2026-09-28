@@ -9,6 +9,13 @@ from __future__ import annotations
 import json
 from typing import Any
 
+#: Result keys with this prefix are written to ``call_tool_calls`` (the router
+#: audits the handler's raw result) and dropped before the model sees it.
+AUDIT_KEY_PREFIX = "_audit_"
+#: The 1C request number (``AI-<n>`` / ``AI-TEST-<n>``) of a created order
+#: request: kept out of the model's view — it must not name it to the caller.
+AUDIT_ORDER_NUMBER_KEY = "_audit_order_number"
+
 
 def _compact(obj: Any) -> str:
     """Compact JSON serialization (no spaces, no ASCII escaping)."""
@@ -375,6 +382,9 @@ def compress_tool_result(
     """
     if not isinstance(result, dict):
         return str(result)
+    if any(k.startswith(AUDIT_KEY_PREFIX) for k in result):
+        # Audit-only fields (the 1C request number) never reach the model.
+        result = {k: v for k, v in result.items() if not k.startswith(AUDIT_KEY_PREFIX)}
 
     if sales_enabled and tool_name == "search_tires":
         return _compress_search_tires(result, sales_enabled=True, args=args)

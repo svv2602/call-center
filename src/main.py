@@ -31,6 +31,7 @@ from src.agent.booking_result import is_booking_confirmed
 from src.agent.color_translit import latin_prefix_to_color
 from src.agent.confirm_detect import booking_was_confirmed
 from src.agent.network_policy import SERVICE_TOOLS, NetworkPolicy
+from src.agent.tool_result_compressor import AUDIT_ORDER_NUMBER_KEY
 from src.agent.parsers.date_parser import resolve_tool_date
 from src.agent.promotions import load_active_promotions, promo_overrides
 from src.agent.prompt_manager import (
@@ -1987,7 +1988,9 @@ def _build_tool_router(
                     "Order request %s created in 1C for call %s: %s",
                     order_number, session.channel_uuid, result,
                 )
-                return request_created
+                # The request number goes to the audit row (call_tool_calls),
+                # not to the model: `compress_tool_result` drops `_audit_*`.
+                return {**request_created, AUDIT_ORDER_NUMBER_KEY: order_number}
             except Exception:
                 logger.warning(
                     "1C order creation failed for call %s, falling back to Store API",
@@ -2017,7 +2020,10 @@ def _build_tool_router(
                 "Order request created via Store API for call %s: %s",
                 session.channel_uuid, result,
             )
-            return request_created
+            return {
+                **request_created,
+                AUDIT_ORDER_NUMBER_KEY: str(result.get("order_number") or result.get("id")),
+            }
         logger.warning(
             "Order request not created for call %s (Store API answer: %r)",
             session.channel_uuid, result,

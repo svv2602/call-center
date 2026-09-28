@@ -205,8 +205,13 @@ class TestCompleteRequest:
         assert result["message"] == ORDER_REQUEST_CREATED_TEXT
         # the AI-N number is logged and kept in the session, never shown to the LLM
         assert session.order_id
-        dumped = json.dumps(result, ensure_ascii=False)
+        # The number is in the raw result for the audit row only; what the
+        # model reads (`compress_tool_result`) never names it.
+        from src.agent.tool_result_compressor import compress_tool_result
+
+        dumped = compress_tool_result(SUBMIT_ORDER_TOOL, result, sales_enabled=True)
         assert session.order_id not in dumped and "onec-internal-number" not in dumped
+        assert "onec-internal-number" not in json.dumps(result, ensure_ascii=False)
 
     @pytest.mark.asyncio
     async def test_delivery_request_carries_city_address_and_named_phone(self) -> None:

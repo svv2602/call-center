@@ -21,6 +21,7 @@ import pytest
 
 from scripts.configure_tenants import PROKOLESO_CONFIG_PATCH, TVOYA_SHINA_CONFIG_PATCH
 from src.agent.network_policy import NetworkPolicy, mask_phone, phone_key
+from src.agent.tool_result_compressor import AUDIT_ORDER_NUMBER_KEY, compress_tool_result
 from src.agent.tools import SUBMIT_ORDER_TOOL
 from src.core.call_session import CallSession
 from src.main import _build_tool_router, _default_scenario, _scenario_tool_names
@@ -187,6 +188,10 @@ async def _submit(policy: NetworkPolicy) -> tuple[dict[str, Any], CallSession]:
             },
         )
     assert result["status"] == "request_created"
+    # the audit row carries the 1C number; the model never sees it
+    assert result[AUDIT_ORDER_NUMBER_KEY] == session.order_id
+    assert AUDIT_ORDER_NUMBER_KEY not in compress_tool_result(SUBMIT_ORDER_TOOL, result)
+    assert session.order_id not in compress_tool_result(SUBMIT_ORDER_TOOL, result)
     onec.create_order_1c.assert_awaited_once()
     return onec.create_order_1c.await_args.kwargs, session
 
