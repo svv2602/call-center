@@ -38,8 +38,14 @@ from src.agent.prompt_manager import (
 )
 from src.agent.prompts import assemble_prompt
 from src.agent.tool_loader import get_tools_with_overrides
+from src.agent.tools import (
+    SUBMIT_ORDER_TOOL,
+    check_order_request,
+    pickup_point_ids,
+    swap_order_chain_for_submit,
+)
 from src.config import get_settings
-from src.sandbox.mock_tools import build_mock_tool_router
+from src.sandbox.mock_tools import MOCK_RESPONSES, build_mock_tool_router
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -227,6 +233,9 @@ def _register_live_tools(
         logger.warning("Live tool mode: no StoreClient — Store tools remain mock")
 
     if onec_client is not None:
+        #: Pickup ids offered in this sandbox conversation — the only ones
+        #: `submit_order_request` accepts (as the live router).
+        offered_pickup_point_ids: set[str] = set()
 
         async def _get_pickup_points(city: str = "") -> dict[str, Any]:
             cache_key = f"onec:points:{network}"
@@ -291,6 +300,7 @@ def _register_live_tools(
                 except Exception:
                     pass
 
+            offered_pickup_point_ids.update(pickup_point_ids(result))
             return result
 
         async def _find_storage_live(**kwargs: Any) -> dict[str, Any]:
@@ -306,14 +316,30 @@ def _register_live_tools(
                 logger.warning("1C find_storage failed in sandbox", exc_info=True)
                 return {"error": "Сервіс зберігання тимчасово недоступний", "contracts": []}
 
+        async def _submit_order_request_live(**kwargs: Any) -> dict[str, Any]:
+            # The live completeness check (`check_order_request`, as in
+            # `src.main._build_tool_router`), but the sandbox places no real
+            # order: a complete request answers as the mock does.
+            _draft, question = check_order_request(
+                kwargs, offered_pickup_point_ids=offered_pickup_point_ids
+            )
+            if question is not None:
+                return question
+            logger.info("Sandbox: submit_order_request complete — no order sent to 1C")
+            return copy.deepcopy(MOCK_RESPONSES[SUBMIT_ORDER_TOOL])
+
         router.register("get_pickup_points", _get_pickup_points)
         router.register("find_storage", _find_storage_live)
+        router.register(SUBMIT_ORDER_TOOL, _submit_order_request_live)
         logger.info(
-            "Live tools registered: get_pickup_points, find_storage (network=%s)", network
+            "Live tools registered: get_pickup_points, find_storage, submit_order_request "
+            "(network=%s)",
+            network,
         )
     else:
         logger.info(
-            "Live tool mode: no OneCClient — get_pickup_points, find_storage remain mock"
+            "Live tool mode: no OneCClient — get_pickup_points, find_storage, "
+            "submit_order_request remain mock"
         )
 
     if onec_client is not None:
@@ -512,7 +538,12 @@ async def create_sandbox_agent(
             system_prompt = assemble_prompt(scenario=None, include_pronunciation=False)
     if policy.sales_enabled:
         dropped = unoffered_service_tools(policy)
-        tools = [t for t in tools if t["name"] not in dropped]
+        # As a live call: under sales an order is one submit_order_request.
+        kept = swap_order_chain_for_submit({t["name"] for t in tools})
+        tools = [t for t in tools if t["name"] not in dropped and t["name"] in kept]
+    else:
+        # Sales off: the sandbox shows the incumbent tool set.
+        tools = [t for t in tools if t["name"] != SUBMIT_ORDER_TOOL]
 
     # Load few-shot examples and safety rules
     few_shot_context = None
@@ -549,6 +580,8 @@ async def create_sandbox_agent(
     if tenant:
         if tenant.get("enabled_tools"):
             allowed = set(tenant["enabled_tools"])
+            if policy.sales_enabled:
+                allowed = swap_order_chain_for_submit(allowed)
             if tools:
                 tools = [t for t in tools if t["name"] in allowed]
         if tenant.get("prompt_suffix") and system_prompt:

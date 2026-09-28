@@ -10,6 +10,7 @@ import re
 import signal
 import sys
 import uuid as uuid_mod
+from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime, timedelta
 from datetime import date as date_type
 from pathlib import Path
@@ -51,7 +52,13 @@ from src.agent.prompts import (
     pronunciation_rules_for_policy,
 )
 from src.agent.tool_loader import get_tools_with_overrides
-from src.agent.tools import ALL_TOOLS
+from src.agent.tools import (
+    ALL_TOOLS,
+    SUBMIT_ORDER_TOOL,
+    check_order_request,
+    pickup_point_ids,
+    swap_order_chain_for_submit,
+)
 from src.api.admin_users import router as admin_users_router
 from src.api.analytics import router as analytics_router
 from src.api.auth import router as auth_router
@@ -507,8 +514,9 @@ _SCENARIO_TOOLS: dict[str, set[str]] = {
     },
     # Sales scope (tenants.config.sales_enabled): every tool — the tenant's
     # `enabled_tools` and `_scenario_tool_names` (services the network does
-    # not offer) cut it down.
-    "sales": {t["name"] for t in ALL_TOOLS},
+    # not offer) cut it down. The three-step order chain is not in it: under
+    # sales an order is one `submit_order_request` (wave 2-D).
+    "sales": swap_order_chain_for_submit({t["name"] for t in ALL_TOOLS}),
 }
 
 #: Tools that serve a network service — single source in ``network_policy``.
@@ -525,11 +533,15 @@ def _scenario_tool_names(scenario: str, network_policy: NetworkPolicy) -> set[st
     """Tools a scenario allows (None — the scenario does not filter).
 
     Under ``sales`` the tools of every service the network does not offer are
-    dropped — default-deny over the whole service enum.
+    dropped — default-deny over the whole service enum. With sales on, every
+    scenario (an IVR one too — it gets the sales order module) orders through
+    ``submit_order_request``, never the three-step chain.
     """
     allowed = _SCENARIO_TOOLS.get(scenario)
     if allowed is None:
         return None
+    if network_policy.sales_enabled:
+        allowed = swap_order_chain_for_submit(allowed)
     if scenario == "sales":
         allowed = set(allowed)
         for service, names in _SERVICE_TOOLS.items():
@@ -1178,6 +1190,10 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 # remember to list it when they enable transfers.
                 if "transfer_to_operator" in allowed:
                     allowed.add("create_callback_request")
+                # Sales: a tenant that lists the order chain orders through
+                # `submit_order_request` (its list predates the tool).
+                if network_policy.sales_enabled:
+                    allowed = swap_order_chain_for_submit(allowed)
                 if tools:
                     tools = [t for t in tools if t["name"] in allowed]
             if tenant.get("greeting") and templates:
@@ -1729,24 +1745,32 @@ def _build_tool_router(
         # Fallback to Store API if no draft in session
         return await client.update_delivery(**kwargs)
 
-    async def _confirm_order(**kwargs: Any) -> Any:
-        """Hand the order to a manager as a request: 1C direct, fallback Store API.
+    async def _place_order_request(
+        draft: dict[str, Any] | None,
+        *,
+        payment_method: str,
+        customer_name: str,
+        store_fallback: Callable[[], Awaitable[Any]],
+    ) -> dict[str, Any]:
+        """Hand an order to a manager as a request: 1C direct, fallback Store API.
 
-        An order ends as a *request* in 1C — a manager calls back and confirms
-        it (owner decision 2026-09-28). So the result never says «підтверджено»,
-        and the technical number (AI-N, 1C response) stays out of the
-        LLM-visible result — it is logged instead. When both 1C and the Store
-        API fallback fail, the caller hears «передам менеджеру», never
-        «прийнято», and no raw exception reaches the ToolRouter.
+        One path for `confirm_order` (draft from the session) and
+        `submit_order_request` (draft from one call, sales). An order ends as a
+        *request* in 1C — a manager calls back and confirms it (owner decision
+        2026-09-28). So the result never says «підтверджено», and the technical
+        number (AI-N, 1C response) stays out of the LLM-visible result — it is
+        logged instead. When both 1C and the Store API fallback fail, the
+        caller hears «передам менеджеру», never «прийнято», and no raw
+        exception reaches the ToolRouter.
         """
         from src.agent.prompts import ORDER_REQUEST_CREATED_TEXT, ORDER_REQUEST_FAILED_TEXT
 
         request_created = {
             "status": "request_created",
-            "payment_method": kwargs.get("payment_method", "cod"),
+            "payment_method": payment_method,
             "message": ORDER_REQUEST_CREATED_TEXT,
         }
-        if session.order_draft is not None and _onec_client is not None:
+        if draft is not None and _onec_client is not None:
             try:
                 # Generate AI order number via Redis sequence
                 order_seq = 1
@@ -1755,17 +1779,16 @@ def _build_tool_router(
                 order_number = f"AI-{order_seq}"
 
                 network = session.network_id or "ProKoleso"
-                draft = session.order_draft
                 result = await _onec_client.create_order_1c(
                     order_number=order_number,
                     items=draft.get("items", []),
                     customer_phone=draft.get("customer_phone", ""),
-                    payment_method=kwargs.get("payment_method", "cod"),
+                    payment_method=payment_method,
                     delivery_type=draft.get("delivery_type", "pickup"),
                     delivery_address=draft.get("address", ""),
                     delivery_city=draft.get("city", ""),
                     pickup_point_id=draft.get("pickup_point_id", ""),
-                    customer_name=kwargs.get("customer_name", ""),
+                    customer_name=customer_name,
                     network=network,
                 )
                 session.order_id = order_number
@@ -1789,7 +1812,7 @@ def _build_tool_router(
         # `order_number` is a created request; an error dict, an empty answer or an exception all
         # end as request_failed.
         try:
-            result = await client.confirm_order(**kwargs)
+            result = await store_fallback()
         except Exception:
             logger.warning(
                 "Store API order request failed for call %s", session.channel_uuid,
@@ -1816,6 +1839,70 @@ def _build_tool_router(
             "reason": "request_failed",
             "message": ORDER_REQUEST_FAILED_TEXT,
         }
+
+    async def _confirm_order(**kwargs: Any) -> Any:
+        """The last step of the three-step chain (IVR / sales off)."""
+        return await _place_order_request(
+            session.order_draft,
+            payment_method=kwargs.get("payment_method", "cod"),
+            customer_name=kwargs.get("customer_name", ""),
+            store_fallback=lambda: client.confirm_order(**kwargs),
+        )
+
+    #: Pickup point ids `get_pickup_points` offered in this call — the only
+    #: ones `submit_order_request` accepts.
+    offered_pickup_point_ids: set[str] = set()
+
+    async def _submit_order_request(**kwargs: Any) -> Any:
+        """Sales order in one call (wave 2-D): completeness in code, then the
+        same request path as `confirm_order`.
+
+        Default-deny: the first missing field comes back as a question and
+        nothing is sent to 1C.
+        """
+        draft, question = check_order_request(
+            kwargs,
+            offered_pickup_point_ids=offered_pickup_point_ids,
+            caller_phone=session.caller_phone or "",
+        )
+        if question is not None or draft is None:
+            logger.info(
+                "submit_order_request: missing %s for call %s",
+                (question or {}).get("field"), session.channel_uuid,
+            )
+            return question
+        request = draft
+
+        async def _store_fallback() -> Any:
+            # The Store API has no one-call order: draft → delivery → confirm.
+            created = await client.create_order(
+                items=request["items"],
+                customer_phone=request["customer_phone"],
+                customer_name=request["customer_name"],
+                call_id=str(session.channel_uuid),
+            )
+            order_id = created.get("order_id") if isinstance(created, dict) else None
+            if not order_id:
+                return None
+            await client.update_delivery(
+                order_id=order_id,
+                delivery_type=request["delivery_type"],
+                city=request["city"],
+                address=request["address"],
+                pickup_point_id=request["pickup_point_id"],
+            )
+            return await client.confirm_order(
+                order_id=order_id,
+                payment_method=request["payment_method"],
+                customer_name=request["customer_name"],
+            )
+
+        return await _place_order_request(
+            request,
+            payment_method=request["payment_method"],
+            customer_name=request["customer_name"],
+            store_fallback=_store_fallback,
+        )
 
     async def _book_fitting_with_metric(**kwargs: Any) -> Any:
         """Book fitting: try SOAP, fallback to Store API."""
@@ -2561,6 +2648,7 @@ def _build_tool_router(
     router.register("create_order_draft", _create_order_draft)
     router.register("update_order_delivery", _update_order_delivery)
     router.register("confirm_order", _confirm_order)
+    router.register(SUBMIT_ORDER_TOOL, _submit_order_request)
 
     async def _get_pickup_points(city: str = "", query: str = "") -> dict[str, Any]:
         network = session.network_id or "ProKoleso"
@@ -2635,6 +2723,7 @@ def _build_tool_router(
             except Exception:
                 pass
 
+        offered_pickup_point_ids.update(pickup_point_ids(result))
         return result
 
     router.register("get_pickup_points", _get_pickup_points)

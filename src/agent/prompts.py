@@ -607,18 +607,66 @@ _MOD_ORDER_FLOW_SALES = _replace_once(
     "назвав.",
 )
 
-# Goldset №2: the whole script was collected by talk, «так, оформлюйте» made
-# only the draft and the turn ended (the fitting-network bot offered fitting
-# instead). Under sales a confirmed summary is carried to confirm_order in the
-# same turn, and no fitting is offered after the request (owner, 2026-09-28).
+# Goldset №2/№3: the whole script was collected by talk, «так, оформлюйте»
+# made only the draft and the turn ended — a prompt rule «не зупиняйся після
+# чорновика» did not hold. Wave 2-D: under sales there is no chain to stop in —
+# the fields are collected by talk and ONE `submit_order_request` hands the
+# request over; its completeness is checked in code (`check_order_request`).
+# No fitting is offered after the request (owner, 2026-09-28). The step
+# numbers stay those of `_MOD_ORDER_FLOW` — the variant adds no literal number.
 _MOD_ORDER_FLOW_SALES = _replace_once(
     _MOD_ORDER_FLOW_SALES,
-    "⚡ Тільки після явного «так» → confirm_order\n",
+    "**Крок 3 — Створення чорновика:**\n"
+    "Перевір: product_id відомий, наявність підтверджена, кількість узгоджена, телефон є "
+    "(CallerID або названий).\n"
+    "⚡ → create_order_draft\n"
+    "⛔ НЕ ОЗВУЧУЙ технічний номер чорновика! Скажи просто:",
+    "**Крок 3 — Товар і кількість зібрано:**\n"
+    "Перевір: product_id відомий, наявність підтверджена, кількість узгоджена. Інструмент "
+    "тут не викликай — заявку створює один submit_order_request на останньому кроці.\n"
+    "Скажи просто:",
+)
+_MOD_ORDER_FLOW_SALES = _replace_once(
+    _MOD_ORDER_FLOW_SALES,
+    "- Самовивіз → get_pickup_points → «Який пункт видачі вам зручніше?»\n",
+    "- Самовивіз → get_pickup_points → «Який пункт видачі вам зручніше?» Id обраного пункту "
+    "— тільки з цього списку.\n",
+)
+_MOD_ORDER_FLOW_SALES = _replace_once(
+    _MOD_ORDER_FLOW_SALES,
+    "**Крок 7 — Оформлення доставки:**\n"
+    "⚡ → update_order_delivery (з адресою, отримувачем, телефоном та способом оплати)\n"
+    "\n"
+    "**Крок 8 — Заявка менеджеру:**\n"
+    "Озвуч ПОВНИЙ підсумок: товар, кількість, ціну за шину і суму, адресу доставки, "
+    "отримувача, спосіб оплати.\n"
+    "Запитай: «{ім'я}, все вірно? Передаю заявку менеджеру?»\n"
     "⚡ Тільки після явного «так» → confirm_order\n"
-    "- Клієнт сказав «так», а чорновика чи доставки ще немає — у цьому ж ході по черзі "
-    "create_order_draft → update_order_delivery → confirm_order, без нових питань: усе вже "
-    "зібрано. Не зупиняйся після чорновика.\n"
+    "- confirm_order створює ЗАЯВКУ:",
+    "**Крок 7 — Підсумок:**\n"
+    "Озвуч ПОВНИЙ підсумок: товар, кількість, ціну за шину і суму, спосіб отримання й адресу, "
+    "отримувача, спосіб оплати.\n"
+    "Запитай: «{ім'я}, все вірно? Передаю заявку менеджеру?»\n"
+    "\n"
+    "**Крок 8 — Заявка менеджеру:**\n"
+    "⚡ Тільки після явного «так» → submit_order_request ОДНИМ викликом з усім, що зібрано: "
+    "items (product_id і кількість), delivery_type, pickup_point_id або city і address, "
+    "recipient_name, payment_method; phone — тільки якщо клієнт назвав інший номер.\n"
+    "- Не кажи «менеджер зателефонує», поки не викликав submit_order_request.\n"
+    "- Результат зі status «missing_field» — заявку ще НЕ створено: запитай у клієнта те, що "
+    "названо в message, і виклич submit_order_request ще раз.\n"
+    "- submit_order_request створює ЗАЯВКУ:",
+)
+_MOD_ORDER_FLOW_SALES = _replace_once(
+    _MOD_ORDER_FLOW_SALES,
+    "⛔ НЕ диктуй технічний номер заявки і не обіцяй SMS.\n",
+    "⛔ НЕ диктуй технічний номер заявки і не обіцяй SMS.\n"
     "- Після заявки шиномонтаж НЕ пропонуй — запитай, чи є ще питання, або прощайся.\n",
+)
+_MOD_ORDER_FLOW_SALES = _replace_once(
+    _MOD_ORDER_FLOW_SALES,
+    "- НІКОЛИ не викликай confirm_order без явної згоди",
+    "- НІКОЛИ не викликай submit_order_request без явної згоди",
 )
 
 _MOD_FITTING = """\

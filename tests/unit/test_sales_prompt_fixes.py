@@ -145,13 +145,12 @@ class TestToolChoiceInSalesFrame:
 
 # ── (4) goldset group C — multi-turn cases ─────────────────────────────────
 
+# Wave 2-D: under sales an order is one submit_order_request.
 _ORDER_TOOLS = {
     "search_tires",
     "check_availability",
-    "create_order_draft",
     "get_pickup_points",
-    "update_order_delivery",
-    "confirm_order",
+    "submit_order_request",
 }
 
 
@@ -181,7 +180,12 @@ class TestGroupCCases:
         case = cases[cid]
         assert set(case.mocks) >= _ORDER_TOOLS
         assert len(case.turns) >= 6
-        assert _turns_expecting(case, "confirm_order") == [len(case.turns) - 1]
+        assert _turns_expecting(case, "submit_order_request") == [len(case.turns) - 1]
+        assert not set(case.mocks) & {
+            "create_order_draft",
+            "update_order_delivery",
+            "confirm_order",
+        }
 
     @pytest.mark.parametrize(
         "cid", ["tyres_two_or_three_variants_by_priority", "studded_none_studless_with_caveat"]

@@ -21,6 +21,7 @@ class TestMockResponses:
             "create_order_draft",
             "update_order_delivery",
             "confirm_order",
+            "submit_order_request",
             "get_pickup_points",
             "get_fitting_stations",
             "get_fitting_slots",

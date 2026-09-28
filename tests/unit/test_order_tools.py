@@ -17,6 +17,7 @@ class TestOrderToolsList:
             "create_order_draft",
             "update_order_delivery",
             "confirm_order",
+            "submit_order_request",
             "get_pickup_points",
         }
 

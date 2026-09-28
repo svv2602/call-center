@@ -2,19 +2,17 @@
 # an order is a REQUEST in 1C, a manager calls back to confirm. Payment terms
 # are the same in both networks.
 #
-# Mocks follow the live handlers in `src/main.py` (wave 6-Q):
-# - create_order_draft / update_order_delivery — session-only drafts, no
-#   delivery cost (the sandbox default mock carries `delivery_cost: 150`,
-#   a number Pro Koleso must never say);
-# - confirm_order — `request_created` + ORDER_REQUEST_CREATED_TEXT, or on a
-#   1C + Store API failure `request_failed` + ORDER_REQUEST_FAILED_TEXT (1C is
-#   called on confirm, not on the draft).
+# Mocks follow the live handlers in `src/main.py`. Wave 2-D: under sales an
+# order is ONE `submit_order_request` (the model stopped after
+# `create_order_draft` in goldset №2/№3; the chain is hidden from it) —
+# `request_created` + ORDER_REQUEST_CREATED_TEXT, or on a 1C + Store API
+# failure `request_failed` + ORDER_REQUEST_FAILED_TEXT. Missing fields are
+# asked for by the live handler; the mock answers the complete call.
 # Payment terms come from the tenant row's `config.network_policy`
 # (payment_methods, cod_fee_text, installment_banks) — it must be written for
 # both networks, see network_terms.yaml.
-# create_order_draft requires customer_phone and the sandbox has no caller
-# id — the number is spoken in words (a fake one; digits would trip the PII
-# test on customer lines).
+# The sandbox has no caller id — the phone is spoken in words (a fake one;
+# digits would trip the PII test on customer lines).
 
 - id: order_two_tyres_price_per_piece
   title: 1–2 шини можна, ціна — за штуку
@@ -41,7 +39,7 @@
   source: owner:order-is-a-request
   network: both
   sales_enabled: true
-  notes: the whole order script of _MOD_ORDER_FLOW, one step per turn (choice+quantity, phone for the draft, delivery, recipient, payment, confirmation) with a mock on every tool; confirm_order is expected on the last turn only
+  notes: the whole order script of _MOD_ORDER_FLOW_SALES, one step per turn (choice+quantity, phone, delivery, recipient, payment, confirmation) with a mock on every tool; one submit_order_request is expected on the last turn only, the old chain never
   mocks:
     search_tires:
       total: 2
@@ -56,17 +54,7 @@
       total: 1
       points:
         - {id: np1, address: 'Нова пошта, відділення №1', type: Нова пошта, city: Київ}
-    create_order_draft:
-      order_id: DRAFT-goldset
-      status: draft
-      items: [{product_id: t3, quantity: 2}]
-      message: Чорновик замовлення створено. Вкажіть спосіб доставки.
-    update_order_delivery:
-      order_id: DRAFT-goldset
-      delivery_type: delivery
-      status: delivery_set
-      message: Доставку оновлено. Підтвердіть замовлення.
-    confirm_order:
+    submit_order_request:
       status: request_created
       payment_method: cod
       message: 'Заявку прийнято. Клієнту скажи: «Заявку прийнято, менеджер зателефонує для підтвердження.» Номер заявки не називай — його в результаті немає. Про замовлення як про готове не говори: остаточно його погодить менеджер.'
@@ -89,7 +77,8 @@
         must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд']
     - user: так, усе правильно, оформлюйте
       expect:
-        tool_called: [confirm_order]
+        tool_called: [submit_order_request]
+        tool_not_called: [create_order_draft, update_order_delivery, confirm_order]
         must_contain: ['заявк', 'менеджер\w*\s+(?:\w+\s+){0,2}(зателефону|передзвон|перезвон|звʼяж|зв''яж)']
         must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд', '\bAI-\d+', 'номер\w*\s+заявк\w*\s+\S*\d']
 
@@ -98,7 +87,7 @@
   source: owner:order-is-a-request
   network: both
   sales_enabled: true
-  notes: the whole order script of _MOD_ORDER_FLOW, one step per turn (choice+quantity, phone for the draft, delivery, recipient, payment, confirmation) with a mock on every tool; confirm_order is expected on the last turn only
+  notes: the whole order script of _MOD_ORDER_FLOW_SALES, one step per turn (choice+quantity, phone, delivery, recipient, payment, confirmation) with a mock on every tool; one submit_order_request is expected on the last turn only, the old chain never
   mocks:
     search_tires:
       total: 2
@@ -113,17 +102,7 @@
       total: 1
       points:
         - {id: np1, address: 'Нова пошта, відділення №1', type: Нова пошта, city: Київ}
-    create_order_draft:
-      order_id: DRAFT-goldset
-      status: draft
-      items: [{product_id: t3, quantity: 2}]
-      message: Чорновик замовлення створено. Вкажіть спосіб доставки.
-    update_order_delivery:
-      order_id: DRAFT-goldset
-      delivery_type: delivery
-      status: delivery_set
-      message: Доставку оновлено. Підтвердіть замовлення.
-    confirm_order:
+    submit_order_request:
       error: true
       status: request_failed
       reason: request_failed
@@ -147,7 +126,8 @@
         must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд']
     - user: так, усе правильно, оформлюйте
       expect:
-        tool_called: [confirm_order]
+        tool_called: [submit_order_request]
+        tool_not_called: [create_order_draft, update_order_delivery, confirm_order]
         must_contain: ['менеджер', 'зателефону|передзвон|перезвон']
         must_not_contain: ['заявку прийнят', 'заявка прийнят', 'заявку принят', 'заявк\w*\s+(?:\w+\s+){0,2}(створен|оформлен|создан)']
 

@@ -585,7 +585,9 @@ class TestMainWiring:
         assert prompts._MOD_SCOPE_FITTING_ONLY not in system
         assert prompts._MOD_ORDER_FLOW_SALES in system and prompts._MOD_TIRE_SEARCH_SALES in system
         names = {t["name"] for t in kwargs["tools"]}
-        assert {"search_tires", "create_order_draft", "confirm_order", "book_fitting"} <= names
+        # Wave 2-D: under sales an order is one submit_order_request.
+        assert {"search_tires", "submit_order_request", "book_fitting"} <= names
+        assert not names & {"create_order_draft", "update_order_delivery", "confirm_order"}
         assert "find_storage" in names
         assert session is not None
         assert session.scenario == "sales"
@@ -599,7 +601,9 @@ class TestMainWiring:
         for mod in (prompts._MOD_FITTING, prompts._MOD_FITTING_UNAVAILABLE, prompts._MOD_STORAGE):
             assert mod not in system
         names = {t["name"] for t in kwargs["tools"]}
-        assert "search_tires" in names and "create_order_draft" in names
+        # Wave 2-D: the tenant list names the chain; sales swaps it for one tool.
+        assert "search_tires" in names and "submit_order_request" in names
+        assert not names & {"create_order_draft", "update_order_delivery", "confirm_order"}
         assert not names & {"book_fitting", "get_fitting_stations", "find_storage"}
 
     def test_prokoleso_on_without_tenant_tool_list_still_no_fitting(self) -> None:

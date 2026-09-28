@@ -163,6 +163,7 @@ call_center/
 | `create_order_draft` | 2 | Создание черновика заказа | `POST /orders` |
 | `update_order_delivery` | 2 | Указание способа и адреса доставки | `PATCH /orders/{id}/delivery` |
 | `confirm_order` | 2 | Подтверждение и финализация заказа | `POST /orders/{id}/confirm` |
+| `submit_order_request` | продажи | Заявка на заказ одним вызовом: товары, доставка/самовывоз (пункт — только из `get_pickup_points`), получатель, телефон, оплата (`cod`/`online`/`card_on_delivery`). Полноту проверяет код: нет поля → вопрос по первому недостающему, в 1С ничего не уходит. Только при `sales_enabled` — заменяет цепочку `create_order_draft` → `update_order_delivery` → `confirm_order` (она остаётся только при `sales_enabled=false`, включая IVR-сценарии; при продажах IVR-сценарий тоже получает `submit_order_request`) | 1C REST API (`create_order_1c`), fallback Store API |
 | `get_pickup_points` | 2 | Список пунктов выдачи (самовывоза) из 1C API, с фильтрацией по городу | 1C REST API |
 | `get_fitting_stations` | 3 | Список точек шиномонтажа | `GET /fitting/stations` |
 | `get_fitting_slots` | 3 | Доступные слоты для записи | `GET /fitting/stations/{id}/slots` |

@@ -98,15 +98,12 @@ class TestNoFittingAfterOrder:
     def test_order_flow_sales_says_no_fitting_after_request(self) -> None:
         assert re.search(r"шиномонтаж НЕ пропонуй", prompts._MOD_ORDER_FLOW_SALES)
 
-    def test_order_flow_sales_chains_to_confirm_order(self) -> None:
-        # a confirmed summary with no draft yet: draft → delivery → confirm in one turn
+    def test_order_flow_sales_is_one_submit_call(self) -> None:
+        # Wave 2-D: the chain rule did not hold — under sales there is no chain,
+        # one submit_order_request hands the request over.
         text = prompts._MOD_ORDER_FLOW_SALES
-        line = [ln for ln in text.splitlines() if "create_order_draft →" in ln]
-        assert line, "no chain rule"
-        assert re.search(
-            r"create_order_draft\s*→\s*update_order_delivery\s*→\s*confirm_order", line[0]
-        )
-        assert "у цьому ж ході" in line[0]
+        assert not re.search(r"create_order_draft|update_order_delivery|confirm_order", text)
+        assert "submit_order_request ОДНИМ викликом" in text
 
     def test_variants_add_no_literal_numbers(self) -> None:
         digits = re.compile(r"\d+")

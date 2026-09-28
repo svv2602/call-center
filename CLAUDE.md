@@ -38,9 +38,9 @@ All documentation is written in **Russian**. The AI agent speaks **Ukrainian** t
 
 Single source of truth for LLM agent tools is in `doc/development/00-overview.md` (section "Канонический список tools"). When referencing tools in any document, use these exact names:
 
-`get_vehicle_tire_sizes`, `search_tires`, `search_disks`, `check_availability`, `transfer_to_operator`, `create_callback_request`, `get_order_status`, `create_order_draft`, `update_order_delivery`, `confirm_order`, `get_pickup_points`, `get_fitting_stations`, `get_fitting_slots`, `reserve_fitting_slot`, `book_fitting`, `cancel_fitting`, `get_fitting_price`, `get_customer_bookings`, `find_storage`, `search_knowledge_base`, `update_customer_profile`
+`get_vehicle_tire_sizes`, `search_tires`, `search_disks`, `check_availability`, `transfer_to_operator`, `create_callback_request`, `get_order_status`, `create_order_draft`, `update_order_delivery`, `confirm_order`, `submit_order_request`, `get_pickup_points`, `get_fitting_stations`, `get_fitting_slots`, `reserve_fitting_slot`, `book_fitting`, `cancel_fitting`, `get_fitting_price`, `get_customer_bookings`, `find_storage`, `search_knowledge_base`, `update_customer_profile`
 
-**Important:** The tool is `create_order_draft` (not `create_order`).
+**Important:** The tool is `create_order_draft` (not `create_order`). Under `sales_enabled` the model gets `submit_order_request` (one call, completeness checked in code) instead of the `create_order_draft` → `update_order_delivery` → `confirm_order` chain; the chain stays only while `sales_enabled=false` (IVR scenarios included); with sales on an IVR scenario gets `submit_order_request` too.
 
 ## Tech Stack
 

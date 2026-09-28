@@ -112,6 +112,13 @@ MOCK_RESPONSES: dict[str, Any] = {
         "payment_method": "cod",
         "message": ORDER_REQUEST_CREATED_TEXT,
     },
+    # Same shape as the live `_submit_order_request` (main.py) once every
+    # field is there: the one-call sales order ends as the same request.
+    "submit_order_request": {
+        "status": "request_created",
+        "payment_method": "cod",
+        "message": ORDER_REQUEST_CREATED_TEXT,
+    },
     "get_pickup_points": {
         "total": 3,
         "points": [
