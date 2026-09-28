@@ -375,8 +375,9 @@ def render_sales_scope(policy: NetworkPolicy) -> str:
     ]
     if policy.pickup_available:
         pickup = (
-            "- Клієнт хоче забрати шини сам (самовивіз) → get_pickup_points з його містом; "
-            "адреси пунктів видачі називай тільки з результату."
+            "- Клієнт хоче забрати шини сам (самовивіз) → спочатку виклич get_pickup_points "
+            "з його містом, потім називай адреси пунктів видачі — тільки з результату. "
+            "Не обіцяй «можу назвати адреси» і не питай район замість виклику."
         )
         if "fitting" in policy.services:
             pickup += (
@@ -513,9 +514,10 @@ _MOD_TIRE_SEARCH_SALES = """\
    - Авто → get_vehicle_tire_sizes; кілька розмірів → «Який розмір зараз стоїть?»
    - Різноширока вісь (staggered_pairs) → search_tires з width/profile/diameter передньої осі та rear_* задньої.
 2. **Сезон:** «Вам літні, зимові чи всесезонні?» — ДО search_tires, без сезону пошук не виконається. Зимові → «Шиповані чи без шипів?»
-3. **Бренд або бюджет** — тільки якщо клієнт сам не сказав: «Є побажання по бренду чи бюджету?»
 
-⚡ Розмір + сезон відомі → search_tires.
+Бренд і бюджет НЕ питай. Клієнт сам назвав бренд чи бюджет — передай бренд у search_tires; не назвав — шукай без бренду.
+
+⚡ Розмір + сезон відомі (зимові — і шипи) → одразу search_tires у цьому ж ході, без уточнень і без перепитування «вірно?», далі 2–3 варіанти з результату.
 
 ⛔ НІКОЛИ НЕ ВИГАДУЙ БРЕНД/МОДЕЛЬ З МОВИ КЛІЄНТА: схоже на бренд слово — часто спотворення розпізнавання. Бренд існує лише тоді, коли він є в результаті search_tires; інакше перепитай.
 
@@ -603,6 +605,20 @@ _MOD_ORDER_FLOW_SALES = _replace_once(
     "- Блоку немає або способу там немає → «Спосіб оплати уточнить менеджер».\n"
     "- Менеджер, коли зателефонує, лише оформить оплату частинами — спосіб і банки ти вже "
     "назвав.",
+)
+
+# Goldset №2: the whole script was collected by talk, «так, оформлюйте» made
+# only the draft and the turn ended (the fitting-network bot offered fitting
+# instead). Under sales a confirmed summary is carried to confirm_order in the
+# same turn, and no fitting is offered after the request (owner, 2026-09-28).
+_MOD_ORDER_FLOW_SALES = _replace_once(
+    _MOD_ORDER_FLOW_SALES,
+    "⚡ Тільки після явного «так» → confirm_order\n",
+    "⚡ Тільки після явного «так» → confirm_order\n"
+    "- Клієнт сказав «так», а чорновика чи доставки ще немає — у цьому ж ході по черзі "
+    "create_order_draft → update_order_delivery → confirm_order, без нових питань: усе вже "
+    "зібрано. Не зупиняйся після чорновика.\n"
+    "- Після заявки шиномонтаж НЕ пропонуй — запитай, чи є ще питання, або прощайся.\n",
 )
 
 _MOD_FITTING = """\
@@ -1230,6 +1246,16 @@ _STAGE_OFFER_FITTING = """\
   - Якщо так — з'ясуй місто та проведи запис із linked_order_id
   - Якщо ні — подякуй та завершуй розмову
 - Якщо book_fitting НЕМАЄ → одразу подякуй та завершуй розмову\
+"""
+
+#: `_STAGE_OFFER_FITTING` under sales (goldset №2): «order + fitting in one
+#: call» is postponed by the owner, so the accepted request is closed without
+#: a fitting offer. The fitting-only prompt keeps the stage byte for byte.
+_STAGE_ORDER_ACCEPTED_SALES = """\
+
+## Заявку на замовлення прийнято
+Заявку вже передано менеджеру — він зателефонує клієнту і погодить замовлення. Номер заявки не називай.
+Шиномонтаж не пропонуй. Запитай, чи є ще питання, або подякуй та завершуй розмову.\
 """
 
 # ---------------------------------------------------------------------------
@@ -2189,7 +2215,8 @@ def build_system_prompt_with_context(
         if order_stage == "delivery_set":
             parts.append(_STAGE_ORDER_CONFIRMATION)
         elif order_stage == "confirmed":
-            parts.append(_STAGE_OFFER_FITTING)
+            sales = network_policy is not None and network_policy.sales_enabled
+            parts.append(_STAGE_ORDER_ACCEPTED_SALES if sales else _STAGE_OFFER_FITTING)
 
     if caller_phone or order_id:
         parts.append("\n## Контекст дзвінка")
