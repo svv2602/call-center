@@ -1,18 +1,38 @@
 # Order and payment (owner decisions 2026-09-28): both networks take orders;
 # an order is a REQUEST in 1C, a manager calls back to confirm. Payment terms
 # are the same in both networks.
+#
+# Mocks follow the live handlers in `src/main.py` (wave 6-Q):
+# - create_order_draft / update_order_delivery — session-only drafts, no
+#   delivery cost (the sandbox default mock carries `delivery_cost: 150`,
+#   a number Pro Koleso must never say);
+# - confirm_order — `request_created` + ORDER_REQUEST_CREATED_TEXT, or on a
+#   1C + Store API failure `request_failed` + ORDER_REQUEST_FAILED_TEXT (1C is
+#   called on confirm, not on the draft).
+# Payment terms come from the tenant row's `config.network_policy`
+# (payment_methods, cod_fee_text, installment_banks) — it must be written for
+# both networks, see network_terms.yaml.
+# create_order_draft requires customer_phone and the sandbox has no caller
+# id — the number is spoken in words (a fake one; digits would trip the PII
+# test on customer lines).
 
 - id: order_two_tyres_price_per_piece
   title: 1–2 шини можна, ціна — за штуку
   source: tshina:quantity_two_ru
   network: both
   sales_enabled: true
-  pending: 'wave-3-G-sales-scope-switch: until the switch the bot transfers every tyre order'
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: t3, brand: Bridgestone, model: Turanza 6, size: 205/55 R16, season: summer, price: 3700, in_stock: true}
+        - {id: t4, brand: Firestone, model: Roadhawk 2, size: 205/55 R16, season: summer, price: 3100, in_stock: true}
+        - {id: t5, brand: Laufenn, model: S Fit EQ+, size: 205/55 R16, season: summer, price: 2400, in_stock: true}
   turns:
     - user: потрібно дві літні шини 205/55 R16
       expect:
         tool_called: [{name: search_tires, args: {width: '^205$', diameter: '^16$'}}]
-        must_contain: ['за (одну )?шину|за штуку|за одиницю|за шт']
+        must_contain: ['за (одну |1 )?шину|за штуку|за одиницю|за шт']
         must_not_contain: ['(лише|тільки|только) комплект', 'мінімум (чотири|4)', 'минимум (четыре|4)']
         tool_not_called: [transfer_to_operator]
 
@@ -21,34 +41,75 @@
   source: owner:order-is-a-request
   network: both
   sales_enabled: true
-  pending: 'wave-2-D-order-finish-is-a-request: the order flow still says the order is confirmed'
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: t3, brand: Bridgestone, model: Turanza 6, size: 205/55 R16, season: summer, price: 3700, in_stock: true}
+        - {id: t4, brand: Firestone, model: Roadhawk 2, size: 205/55 R16, season: summer, price: 3100, in_stock: true}
+    create_order_draft:
+      order_id: DRAFT-goldset
+      status: draft
+      items: [{product_id: t3, quantity: 2}]
+      message: Чорновик замовлення створено. Вкажіть спосіб доставки.
+    update_order_delivery:
+      order_id: DRAFT-goldset
+      delivery_type: delivery
+      status: delivery_set
+      message: Доставку оновлено. Підтвердіть замовлення.
+    confirm_order:
+      status: request_created
+      payment_method: cod
+      message: 'Заявку прийнято. Клієнту скажи: «Заявку прийнято, менеджер зателефонує для підтвердження.» Номер заявки не називай — його в результаті немає. Про замовлення як про готове не говори: остаточно його погодить менеджер.'
   turns:
     - user: потрібні дві літні шини 205/55 R16
-    - user: беру першу, оформлюйте, доставка Новою поштою, оплата при отриманні
+    - user: беру першу, дві штуки, доставка Новою поштою в Київ, оплата при отриманні, відділення номер один, телефон нуль дев'яносто дев'ять сто двадцять три сорок п'ять шістдесят сім
+      expect:
+        must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд']
+    - user: так, усе правильно, оформлюйте
       expect:
         must_contain: ['заявк', 'менеджер\w*\s+(?:\w+\s+){0,2}(зателефону|передзвон|перезвон|звʼяж|зв''яж)']
-        must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд']
+        must_not_contain: ['замовлення\s+(?:\w+\s+){0,2}підтверджен', 'заказ\s+(?:\w+\s+){0,2}подтвержд', '\bAI-\d+', 'номер\w*\s+заявк\w*\s+\S*\d']
 
 - id: order_1c_failure_hands_to_manager
   title: 1С не прийняла — «передам менеджеру, вам зателефонують», без «заявку прийнято»
   source: owner:order-is-a-request
   network: both
   sales_enabled: true
-  pending: 'wave-2-D-order-finish-is-a-request: no 1C-failure branch in the order flow yet'
   mocks:
-    create_order_draft: {error: '1C unavailable', success: false}
+    search_tires:
+      total: 2
+      items:
+        - {id: t3, brand: Bridgestone, model: Turanza 6, size: 205/55 R16, season: summer, price: 3700, in_stock: true}
+        - {id: t4, brand: Firestone, model: Roadhawk 2, size: 205/55 R16, season: summer, price: 3100, in_stock: true}
+    create_order_draft:
+      order_id: DRAFT-goldset
+      status: draft
+      items: [{product_id: t3, quantity: 2}]
+      message: Чорновик замовлення створено. Вкажіть спосіб доставки.
+    update_order_delivery:
+      order_id: DRAFT-goldset
+      delivery_type: delivery
+      status: delivery_set
+      message: Доставку оновлено. Підтвердіть замовлення.
+    confirm_order:
+      error: true
+      status: request_failed
+      reason: request_failed
+      message: 'Заявку створити не вдалося. Клієнту скажи: «Передам менеджеру, вам зателефонують.» Не обіцяй, що заявка вже є, і не називай жодного номера. Далі — transfer_to_operator або create_callback_request, якщо вони є серед твоїх інструментів.'
   turns:
-    - user: оформіть дві шини 205/55 R16, першу модель, оплата карткою
+    - user: потрібні дві літні шини 205/55 R16
+    - user: беру першу, дві штуки, доставка Новою поштою в Київ, оплата карткою, відділення номер один, телефон нуль дев'яносто дев'ять сто двадцять три сорок п'ять шістдесят сім
+    - user: так, усе правильно, оформлюйте
       expect:
         must_contain: ['менеджер', 'зателефону|передзвон|перезвон']
-        must_not_contain: ['заявку прийнят', 'заявка прийнят', 'заявку принят']
+        must_not_contain: ['заявку прийнят', 'заявка прийнят', 'заявку принят', 'заявк\w*\s+(?:\w+\s+){0,2}(створен|оформлен|создан)']
 
 - id: order_think_no_reserve
   title: «я подумаю» — резерву немає
   source: owner:no-reserve
   network: both
   sales_enabled: true
-  pending: 'wave-3-G-sales-scope-switch: _MOD_OBJECTIONS still offers a reserve'
   turns:
     - user: потрібні дві літні шини 205/55 R16
     - user: я ще подумаю, відкладіть їх для мене поки
@@ -60,7 +121,7 @@
   source: owner:payment-terms
   network: both
   sales_enabled: true
-  pending: 'wave-3-G-sales-scope-switch: payment terms reach the prompt only with sales_enabled (NetworkPolicy from 1-A)'
+  notes: the fee is network_policy.cod_fee_text (owner — «2 % + 20 грн», may change); the case pins the owner value of 2026-09-28
   turns:
     - user: а можна оплатити при отриманні?
       expect:
@@ -72,7 +133,6 @@
   source: tshina:installments_ua
   network: both
   sales_enabled: true
-  pending: 'wave-3-G-sales-scope-switch: payment terms reach the prompt only with sales_enabled (NetworkPolicy from 1-A)'
   turns:
     - user: чи можна купити шини в розстрочку?
       expect:
@@ -84,7 +144,6 @@
   source: owner:payment-terms
   network: both
   sales_enabled: true
-  pending: 'wave-3-G-sales-scope-switch: payment terms reach the prompt only with sales_enabled (NetworkPolicy from 1-A)'
   turns:
     - user: а карткою можна заплатити одразу?
       expect:

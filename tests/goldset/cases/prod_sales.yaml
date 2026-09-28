@@ -8,7 +8,6 @@
   source: prod:ee8d68a6
   network: both
   sales_enabled: true
-  pending: 'wave-3-G-sales-scope-switch: until the switch a tyre purchase is transferred'
   turns:
     - user: там мені купити треба резину
       expect:
@@ -20,19 +19,29 @@
   source: prod:fdb4a7d4
   network: both
   sales_enabled: true
-  pending: 'wave-3-G-sales-scope-switch: until the switch a tyre price question is read as fitting price'
+  notes: the caller named no season — the tyre-search module asks it before search_tires, so the search is expected on the answer; tool args are checked there
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: s1, brand: Firestone, model: Multihawk 2, size: 155/70 R13, season: summer, price: 1650, in_stock: true}
+        - {id: s2, brand: Laufenn, model: G Fit EQ+, size: 155/70 R13, season: summer, price: 1400, in_stock: true}
   turns:
     - user: дізнатися вартість шин 155 на 70 на 13
       expect:
+        tool_not_called: [get_fitting_price, get_fitting_stations]
+        must_not_contain: ['шиномонтаж\w*\s+(?:\w+\s+){0,3}коштує', 'вартість\s+(?:\w+\s+){0,2}монтаж']
+    - user: літні
+      expect:
         tool_called: [{name: search_tires, args: {width: '^155$', profile: '^70$', diameter: '^13$'}}]
         tool_not_called: [get_fitting_price]
+        must_contain: ['за (одну |1 )?шину|за штуку|за шт|за одиницю']
 
 - id: prod_buying_new_mid_fitting
   title: «буду купувати нові» посеред запису — не «через мене не можна» (37dbaba3)
   source: prod:37dbaba3
   network: [tvoya-shina]
   sales_enabled: true
-  pending: 'wave-3-G-sales-scope-switch: the fitting flow still refuses tyre sales'
   turns:
     - user: записатися на шиномонтаж
     - user: Дніпро, Донецьке шосе
@@ -45,7 +54,6 @@
   source: prod:94d4b94b
   network: both
   sales_enabled: true
-  pending: 'wave-3-G-sales-scope-switch: get_order_status is outside the fitting-only scope'
   turns:
     - user: алло так добрий день а там я замовляв ціни в понеділок повинні відправити
       expect:

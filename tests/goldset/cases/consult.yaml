@@ -2,53 +2,115 @@
 # brand priority Bridgestone → Firestone → Laufenn, no studded in size →
 # studless with a caveat, a non-stock size is not offered, wheels are sold
 # and consulted in both networks. Real wording from prod is marked prod:<id>.
+#
+# Mocks follow the live result shapes (wave 6-Q):
+# - search_tires — `StoreClient._search_tires_ladder`: items {id, brand, model,
+#   size, season, price, in_stock}, already ranked by the network and cut to
+#   `recommend_count` (2–3); a relaxed search adds `relaxed` + `caveat_key`.
+#   The text path (`LLMAgent.process_message`) puts the caveat phrase
+#   (`tire_caveat_phrase`) in front of the reply — hence the `^` regexes.
+# - search_disks — `StoreClient.search_disks`: items carry `fit` {status, text,
+#   reasons} when a car is named; `vehicle` {found, brand, model}; a known car
+#   adds `fit_policy: no_spacers_no_redrilling`.
+# - search_knowledge_base — the live shape {total, articles}, text from
+#   knowledge_seed (the sandbox mock KB does not hold these articles).
+#
+# The season guard (`tire_season_refusal`) and the spoken query parser run
+# only in the voice path (pipeline + the live `_search_tires` in main.py);
+# the goldset plays the sandbox text path, so cases that need them stay
+# pending with that reason.
 
 - id: tyres_two_or_three_variants_by_priority
-  title: 2–3 варіанти, першим Bridgestone
+  title: 2–3 варіанти, першим Bridgestone, ціна за шину
   source: owner:brand-priority
   network: both
   sales_enabled: true
-  pending: 'wave-5-M-tire-consult-dialogue: the dialogue does not cap variants nor order by priority yet'
+  notes: the store ranks and cuts to recommend_count; the mock is that ranked answer — the case checks the model keeps it
   mocks:
     search_tires:
-      total: 5
+      total: 3
       items:
-        - {id: t1, brand: Michelin, model: Primacy 4+, size: 205/55 R16, season: summer, price: 3900, currency: UAH, in_stock: true}
-        - {id: t2, brand: Nokian, model: Hakka Blue 3, size: 205/55 R16, season: summer, price: 3500, currency: UAH, in_stock: true}
-        - {id: t3, brand: Bridgestone, model: Turanza 6, size: 205/55 R16, season: summer, price: 3700, currency: UAH, in_stock: true}
-        - {id: t4, brand: Firestone, model: Roadhawk 2, size: 205/55 R16, season: summer, price: 3100, currency: UAH, in_stock: true}
-        - {id: t5, brand: Laufenn, model: S Fit EQ+, size: 205/55 R16, season: summer, price: 2400, currency: UAH, in_stock: true}
+        - {id: t3, brand: Bridgestone, model: Turanza 6, size: 205/55 R16, season: summer, price: 3700, in_stock: true}
+        - {id: t4, brand: Firestone, model: Roadhawk 2, size: 205/55 R16, season: summer, price: 3100, in_stock: true}
+        - {id: t5, brand: Laufenn, model: S Fit EQ+, size: 205/55 R16, season: summer, price: 2400, in_stock: true}
   turns:
     - user: потрібні літні шини 205/55 R16
       expect:
         tool_called: [search_tires]
-        must_contain: ['Bridgestone']
-        must_not_contain: ['(?s)(?=.*michelin)(?=.*nokian)']
+        must_contain: ['Bridgestone', 'за (одну |1 )?шину|за штуку|за шт|за одиницю']
+        must_not_contain: ['за комплект', 'за (чотири|4) шини']
         max_sentences: 5
 
 - id: studded_none_studless_with_caveat
-  title: шипованих у розмірі немає — липучка із застереженням
+  title: шипованих у розмірі немає — застереження першою фразою, далі липучка
   source: tshina:studded_none_fallback_ru
   network: both
   sales_enabled: true
-  pending: 'wave-4-J-tire-search-filters-and-ladder: search_tires has no studded filter yet'
   mocks:
     search_tires:
-      total: 1
+      total: 2
+      relaxed: [studded]
+      caveat_key: no_studded_offer_friction
       items:
-        - {id: w1, brand: Bridgestone, model: Blizzak 6, size: 235/55 R19, season: winter, studded: false, price: 6900, currency: UAH, in_stock: true}
+        - {id: w1, brand: Bridgestone, model: Blizzak 6, size: 235/55 R19, season: winter, price: 6900, in_stock: true}
+        - {id: w2, brand: Firestone, model: Winterhawk 4, size: 235/55 R19, season: winter, price: 5200, in_stock: true}
   turns:
     - user: потрібні шиповані 235/55 R19
       expect:
-        must_contain: ['шипован\w*\s+(?:\w+\s+){0,5}(немає|нема|відсутн)', 'липучк|фрикційн|нешипован']
-        must_not_contain: ['який сезон', 'какой сезон']
+        tool_called: [{name: search_tires, args: {studded: '^true$'}}]
+        must_contain: ['^\W*Шипованих у цьому розмірі зараз немає', 'липучк|фрикційн']
+        must_not_contain: ['який сезон', 'какой сезон', '(?<!не )шипован\w*\s+(?:\w+\s+){0,2}Blizzak']
+
+- id: brand_unavailable_caveat_first
+  title: бренду немає — «зараз немає в наявності, ось альтернативи» першою фразою
+  source: owner:caveat-said-by-code
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 2
+      relaxed: [brand]
+      caveat_key: brand_unavailable_alternatives
+      items:
+        - {id: t3, brand: Bridgestone, model: Turanza 6, size: 205/55 R16, season: summer, price: 3700, in_stock: true}
+        - {id: t4, brand: Firestone, model: Roadhawk 2, size: 205/55 R16, season: summer, price: 3100, in_stock: true}
+  turns:
+    - user: є літні Michelin 205/55 R16?
+      expect:
+        tool_called: [search_tires]
+        must_contain: ['^\W*(\S+\s+){0,2}зараз немає в наявності|^\W*Цього бренду зараз немає', 'Bridgestone|Firestone']
+        must_not_contain: ['Michelin\s+(?:\w+\s+){0,3}(є в наявності|есть в наличии)']
+
+- id: tyres_season_asked_before_search
+  title: сезон не названо — спершу питання про сезон, пошук після відповіді
+  source: owner:season-first
+  network: both
+  sales_enabled: true
+  pending: 'wave-5-M-tire-consult-dialogue: checked by the voice path only — the season guard (tire_season_refusal) lives in pipeline/main.py, the sandbox text path does not run it'
+  turns:
+    - user: потрібні шини 205/55 R16
+      expect:
+        must_contain: ['літн|зимов|всесезон|летн|зимн']
+        tool_not_called: [search_tires]
+
+- id: tyres_season_any_searches_all
+  title: «без різниці» — це відповідь про сезон, пошук без перепитування
+  source: owner:season-first
+  network: both
+  sales_enabled: true
+  pending: 'wave-5-M-tire-consult-dialogue: checked by the voice path only — «без різниці» → season any is read by the spoken query parser (merge_tire_query) in the pipeline'
+  turns:
+    - user: потрібні шини 205/55 R16
+    - user: без різниці
+      expect:
+        tool_called: [search_tires]
+        must_not_contain: ['який сезон', 'какой сезон', 'літні, зимові чи всесезонні']
 
 - id: non_stock_size_not_offered
   title: нештатний розмір бот не пропонує — «підбирає спеціаліст»
   source: tshina:size_change_compare_ru
   network: both
   sales_enabled: true
-  pending: 'wave-5-M-tire-consult-dialogue: no non-stock-size rule in the dialogue yet'
   turns:
     - user: можна поставити 225/45 R17 замість 205/55 R16?
       expect:
@@ -61,7 +123,6 @@
   source: tshina:discount_question_ua
   network: both
   sales_enabled: true
-  pending: 'wave-3-G-sales-scope-switch: promotions are answered only in the sales scope'
   turns:
     - user: які знижки на зимові шини зараз є?
       expect:
@@ -72,7 +133,13 @@
   source: prod:c6a75668
   network: both
   sales_enabled: true
-  pending: 'wave-3-H-kb-tshina-faq-and-wheels: the tyre reference articles are not in the knowledge base yet'
+  mocks:
+    search_knowledge_base:
+      total: 1
+      articles:
+        - title: Індекс навантаження та швидкості
+          category: faq
+          content: Індекс навантаження — число на боковині після розміру; воно означає максимальну вагу, яку витримує одна шина. Наприклад, 91 — це 615 кілограмів на шину. Індекс ставлять не нижчий, ніж рекомендує виробник авто.
   turns:
     - user: Добрий день підкажіть будь ласка що таке індекс навантаження
       expect:
@@ -85,18 +152,127 @@
   source: owner:disks-both-networks
   network: both
   sales_enabled: true
-  pending: 'wave-3-G-sales-scope-switch: until the switch any wheel question is transferred'
+  mocks:
+    search_disks:
+      total: 2
+      items:
+        - {id: d1, brand: Replay, model: VV150, size: 6.5x16 5x112 ET46 DIA57.1, color: silver, diameter: 16, width: '6.5', pcd: 5x112, et: '46', dia: '57.1', price: 4200, in_stock: true}
+        - {id: d2, brand: Kosei, model: K1, size: 7x16 5x112 ET45 DIA57.1, color: black, diameter: 16, width: '7', pcd: 5x112, et: '45', dia: '57.1', price: 3600, in_stock: true}
   turns:
     - user: а диски у вас є?
       expect:
         must_not_contain: ['не продаєм', 'не продаем', 'тільки шини', 'только шины', 'не займаєм']
+        tool_not_called: [transfer_to_operator]
+
+- id: disk_fit_by_car_verdict
+  title: диски під авто — вердикт сумісності з результату, без проставок
+  source: owner:disks-both-networks
+  network: both
+  sales_enabled: true
+  mocks:
+    search_disks:
+      total: 2
+      vehicle: {found: true, brand: Skoda, model: Octavia, year: 2018}
+      fit_policy: no_spacers_no_redrilling
+      items:
+        - id: d1
+          brand: Replay
+          model: VV150
+          size: 6.5x16 5x112 ET46 DIA57.1
+          color: silver
+          diameter: 16
+          width: '6.5'
+          pcd: 5x112
+          et: '46'
+          dia: '57.1'
+          price: 4200
+          in_stock: true
+          fit: {status: fits, text: підходить, reasons: []}
+        - id: d2
+          brand: Kosei
+          model: K1
+          size: 7x16 5x112 ET45 DIA66.6
+          color: black
+          diameter: 16
+          width: '7'
+          pcd: 5x112
+          et: '45'
+          dia: '66.6'
+          price: 3600
+          in_stock: true
+          fit:
+            status: fits_with_rings
+            text: підходить з центрувальними кільцями
+            reasons: [{param: dia, status: fits_with_rings, disk: '66.6', car: '57.1'}]
+  turns:
+    - user: потрібні литі диски шістнадцятий радіус на Шкоду Октавію двадцять вісімнадцятого року
+      expect:
+        tool_called: [{name: search_disks, args: {diameter: '^16$', vehicle: 'octavia|октав'}}]
+        must_contain: ['підход|підійд|подход|подойд', 'кільц|кольц']
+        must_not_contain: ['проставк', 'проставоч', 'розсвердл', 'рассверл', 'адаптер']
+
+- id: disk_no_car_data_cannot_confirm
+  title: авто немає в базі — «не можу підтвердити сумісність», не «підходить»
+  source: owner:disks-both-networks
+  network: both
+  sales_enabled: true
+  mocks:
+    search_disks:
+      total: 2
+      vehicle: {found: false, brand: ЗАЗ, model: Таврія}
+      items:
+        - id: d7
+          brand: Replay
+          model: LF25
+          size: 5x13 4x98 ET35 DIA58.6
+          color: silver
+          diameter: 13
+          width: '5'
+          pcd: 4x98
+          et: '35'
+          dia: '58.6'
+          price: 2100
+          in_stock: true
+          fit: {status: cannot_confirm, text: не можу підтвердити сумісність — немає даних по авто, reasons: []}
+        - id: d8
+          brand: Kosei
+          model: K8
+          size: 5.5x13 4x98 ET38 DIA58.6
+          color: black
+          diameter: 13
+          width: '5.5'
+          pcd: 4x98
+          et: '38'
+          dia: '58.6'
+          price: 1900
+          in_stock: true
+          fit: {status: cannot_confirm, text: не можу підтвердити сумісність — немає даних по авто, reasons: []}
+  turns:
+    - user: диски тринадцятий радіус на Таврію є?
+      expect:
+        tool_called: [search_disks]
+        must_contain: ['не можу підтвердити|не можемо підтвердити|немає даних|не могу подтвердить|нет данных']
+        must_not_contain: ['(?<!не )(?<!що )(?<!чи )(?<!що вони )(?<!що диски )(?<!что )(?<!что они )(підходить|підходять|підійде|підійдуть|подходит|подходят|подойдет|подойдёт|подойдут)']
+
+- id: disk_spacers_not_offered
+  title: «а через проставки можна?» — проставки й розсвердлювання не пропонуємо
+  source: owner:disks-both-networks
+  network: both
+  sales_enabled: true
+  notes: knowledge_seed/wheels/07 (spacers/adapters) is an open owner question; the tool contract (fit_policy no_spacers_no_redrilling) already forbids the offer
+  turns:
+    - user: мені сподобались диски з іншою розболтовкою, можна поставити їх на Октавію через проставки?
+      expect:
+        must_not_contain:
+          - '^\W*так\b'
+          - '(?<!не )(пропону\w*|рекоменду\w*|порадж\w*|можна|можемо|предлага\w*|можно)\s+(?:\w+\s+){0,3}(проставк|адаптер|розсвердл|рассверл)'
+          - '(підберу|підберемо|підібрати|подберу|подберем)\s+(?:\w+\s+){0,2}(проставк|адаптер)'
 
 - id: disk_type_consult
   title: штамповка чи литі на зиму — консультація, не переведення
   source: tshina:disk_type_comparison_ru
   network: both
   sales_enabled: true
-  pending: 'wave-3-H-kb-tshina-faq-and-wheels: the wheel articles are not in the knowledge base yet'
   turns:
     - user: що краще ставити на зиму — штамповку чи литі диски?
       expect:
