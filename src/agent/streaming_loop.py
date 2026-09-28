@@ -24,6 +24,7 @@ from src.agent.booking_consent import (
     GATE_OFFER,
     is_booking_offer,
 )
+from src.agent.disk_intent import DiskToolRedirect
 from src.agent.history_compressor import summarize_old_messages
 from src.agent.intent_classifier import sales_intents
 from src.agent.network_claim_guard import guard_network_claims, guard_text
@@ -1599,6 +1600,9 @@ class StreamingAgentLoop:
         # тимчасово не відповідає»), and retrying one of those is legitimate.
         refused_this_turn: dict[str, str] = {}
         ended_on_refusal_loop = False
+        # Wheels asked for, tyre tool called: redirect to `search_disks` once
+        # per turn (sales scope only; see `disk_intent`).
+        disk_redirect = DiskToolRedirect(sales_enabled=self._sales_enabled, tools=tools)
 
         tool_round = 0
         while tool_round < self._max_tool_rounds:
@@ -1810,6 +1814,7 @@ class StreamingAgentLoop:
                     continue
                 seen_keys.add(dedup_key)
                 unique_tool_calls.append(tc)
+            disk_redirect.note_round(tc.name for tc in unique_tool_calls)
 
             suppressed_ids: set[str] = set()
             # Caveats of relaxed `search_tires` answers (sales scope, wave 5-M),
@@ -1850,6 +1855,9 @@ class StreamingAgentLoop:
                             "tool_use_id": tc.id,
                             "content": block_msg,
                         }
+                disk_msg = disk_redirect.check(tc.name, conversation_history)
+                if disk_msg is not None:
+                    return {"type": "tool_result", "tool_use_id": tc.id, "content": disk_msg}
                 refusal_key = tc.name + ":" + json.dumps(args, sort_keys=True)
                 already_refused = refused_this_turn.get(refusal_key)
                 if already_refused is not None:

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import anthropic
 
+from src.agent.disk_intent import DiskToolRedirect
 from src.agent.history_compressor import summarize_old_messages
 from src.agent.network_claim_guard import guard_text
 from src.agent.network_policy import NetworkPolicy, render_network_block
@@ -351,6 +352,8 @@ class LLMAgent:
         response_text = ""
         sales_enabled = bool(self._network_policy is not None and self._network_policy.sales_enabled)
         caveats: list[str] = []
+        # Text-path twin of the streamed `search_disks` redirect (`disk_intent`).
+        disk_redirect = DiskToolRedirect(sales_enabled=sales_enabled, tools=tools)
         tool_call_count = 0
         stop_reason = "end_turn"
         self.last_input_tokens = 0
@@ -495,12 +498,16 @@ class LLMAgent:
                     continue
                 seen_keys.add(dedup_key)
                 unique_tool_uses.append(tu)
+            disk_redirect.note_round(tu["name"] for tu in unique_tool_uses)
 
             # Execute tool calls in parallel (with per-tool timeout)
             async def _execute_one(tu: dict[str, Any]) -> dict[str, Any]:
                 args = tu["input"]
                 if self._pii_vault is not None:
                     args = self._pii_vault.restore_in_args(args)
+                disk_msg = disk_redirect.check(tu["name"], conversation_history)
+                if disk_msg is not None:
+                    return {"type": "tool_result", "tool_use_id": tu["id"], "content": disk_msg}
                 try:
                     raw = await asyncio.wait_for(
                         self._tool_router.execute(tu["name"], args),
