@@ -29,10 +29,17 @@ from src.agent.disk_fit_claim_guard import (
     collect_disk_verdict,
     drop_fit_claims,
 )
-from src.agent.disk_intent import DiskToolRedirect, run_disk_substitution_raw
+from src.agent.disk_intent import (
+    KB_TOOL,
+    DiskToolRedirect,
+    disk_consult_args,
+    is_disk_consult,
+    run_disk_substitution_raw,
+)
 from src.agent.history_compressor import summarize_old_messages
 from src.agent.intent_classifier import _triggered_intents, sales_intents
 from src.agent.network_claim_guard import guard_network_claims, guard_text
+from src.agent.network_facts import already_said_note, turn_facts
 from src.agent.network_policy import NetworkPolicy, render_network_block
 from src.agent.promotions import turn_network_overrides, turn_promotions_block
 from src.agent.prompts import (
@@ -67,7 +74,9 @@ from src.agent.tire_search_gate import (
     SEARCH_TOOL,
     ForcedTireSearch,
     forced_search_messages,
+    forced_tool_messages,
     run_forced_search,
+    run_forced_tool,
 )
 from src.agent.tool_result_compressor import compress_tool_result, tire_caveat_phrase
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
@@ -1815,10 +1824,44 @@ class StreamingAgentLoop:
         ended_on_refusal_loop = False
         # Wheels asked for, tyre tool called: redirect to `search_disks` once
         # per turn (sales scope only; see `disk_intent`).
-        disk_redirect = DiskToolRedirect(sales_enabled=self._sales_enabled, tools=tools)
+        # A wheel consultation is the knowledge base's, not the redirect's.
+        disk_redirect = DiskToolRedirect(
+            sales_enabled=self._sales_enabled, tools=tools, consult=is_disk_consult(user_text)
+        )
         # Fit verdicts of this turn's `search_disks` results (sales scope):
         # every one `cannot_confirm` → the model's «підходять» is dropped.
         disk_fit_state = DiskFitClaimState()
+
+        # The network facts the caller asked about (delivery, payment,
+        # warranty…) are the first thing heard, said by the code before the
+        # stream (`network_facts`) — outside `guard_network_claims`, which
+        # judges only the model's words. The model is told they were said.
+        facts = turn_facts(
+            user_text, self._network_policy, self._promo_overrides, tire_progress
+        )
+        said_facts = [fact for fact in facts if await self._speak_code_phrase(fact)]
+        if said_facts:
+            spoken_parts.extend(said_facts)
+            system += already_said_note(said_facts)
+
+        # A wheel consultation: the code searches the knowledge base
+        # (category wheels) before the first round.
+        consult_args = disk_consult_args(
+            user_text, sales_enabled=self._sales_enabled, tools=tools
+        )
+        if consult_args is not None:
+            consult_raw = await run_forced_tool(
+                KB_TOOL, consult_args, self._tool_router.execute, timeout=_TOOL_TIMEOUT_SEC
+            )
+            consult_content = compress_tool_result(
+                KB_TOOL, consult_raw, sales_enabled=self._sales_enabled, args=consult_args
+            )
+            if self._pii_vault is not None:
+                consult_content = self._pii_vault.mask(consult_content)
+            conversation_history.extend(
+                forced_tool_messages(KB_TOOL, consult_args, consult_content)
+            )
+            tool_calls_made += 1
 
         # The caller's tyre request is complete and was not searched yet: the
         # code searches before the first round (`tire_search_gate`), so the

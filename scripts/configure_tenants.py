@@ -71,6 +71,20 @@ _COMMON_NETWORK_POLICY: dict[str, Any] = {
     "payment_methods": ["cod", "card", "prepay", "installments"],
     "cod_fee_text": "2 % + 20 грн, тариф перевізника, може змінюватися",
     "installment_banks": ["monobank", "privatbank"],
+    # Warranty and returns are the same in both networks; the terms are the
+    # manager's (no day counts). Bridgestone's extended warranty — ТШ only.
+    "warranty_text": (
+        "на всі шини діє гарантія виробника на заводський брак; строк гарантії "
+        "встановлює виробник, точний строк уточнить менеджер"
+    ),
+    "returns_text": (
+        "шини без слідів монтажу та експлуатації можна повернути або обміняти; "
+        "строк і порядок повернення уточнить менеджер"
+    ),
+    "tracking_text": (
+        "номер ТТН надійде в SMS після відправки, статус можна перевірити "
+        "за номером замовлення або телефоном"
+    ),
     "brand_priority": ["bridgestone", "firestone", "laufenn"],
     "recommend_count": 3,
     "order_finish": "request_manager_callback",

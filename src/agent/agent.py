@@ -18,9 +18,16 @@ from src.agent.disk_fit_claim_guard import (
     collect_disk_verdict,
     drop_fit_claims_text,
 )
-from src.agent.disk_intent import DiskToolRedirect, run_disk_substitution_raw
+from src.agent.disk_intent import (
+    KB_TOOL,
+    DiskToolRedirect,
+    disk_consult_args,
+    is_disk_consult,
+    run_disk_substitution_raw,
+)
 from src.agent.history_compressor import summarize_old_messages
 from src.agent.network_claim_guard import guard_text
+from src.agent.network_facts import already_said_note, turn_facts
 from src.agent.network_policy import NetworkPolicy, render_network_block
 from src.agent.promotions import turn_network_overrides, turn_promotions_block
 from src.agent.prompts import (
@@ -35,7 +42,9 @@ from src.agent.tire_search_gate import (
     ForcedTireSearch,
     accumulate_query,
     forced_search_messages,
+    forced_tool_messages,
     run_forced_search,
+    run_forced_tool,
 )
 from src.agent.tool_result_compressor import compress_tool_result, tire_caveat_phrase
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
@@ -404,11 +413,37 @@ class LLMAgent:
         response_text = ""
         sales_enabled = bool(self._network_policy is not None and self._network_policy.sales_enabled)
         caveats: list[str] = []
-        # Text-path twin of the streamed `search_disks` redirect (`disk_intent`).
-        disk_redirect = DiskToolRedirect(sales_enabled=sales_enabled, tools=tools)
+        # Text-path twin of the streamed `search_disks` redirect (`disk_intent`);
+        # a wheel consultation is the knowledge base's, not the redirect's.
+        disk_redirect = DiskToolRedirect(
+            sales_enabled=sales_enabled, tools=tools, consult=is_disk_consult(user_text)
+        )
         # Fit verdicts of this turn's `search_disks` results (sales scope).
         disk_fit_state = DiskFitClaimState()
         tool_call_count = 0
+        # Text-path twin of the spoken network facts (`network_facts`): the
+        # code's phrases open the reply, and the model is told they were said.
+        facts = turn_facts(
+            user_text, self._network_policy, self._promo_overrides, self._tire_query
+        )
+        if facts:
+            system += already_said_note(facts)
+        # A wheel consultation: the code searches the knowledge base first.
+        consult_args = disk_consult_args(user_text, sales_enabled=sales_enabled, tools=tools)
+        if consult_args is not None:
+            consult_raw = await run_forced_tool(
+                KB_TOOL, consult_args, self._tool_router.execute, timeout=_TOOL_TIMEOUT_SEC
+            )
+            self._call_tools.add(KB_TOOL)
+            consult_content = compress_tool_result(
+                KB_TOOL, consult_raw, sales_enabled=sales_enabled, args=consult_args
+            )
+            if self._pii_vault is not None:
+                consult_content = self._pii_vault.mask(consult_content)
+            conversation_history.extend(
+                forced_tool_messages(KB_TOOL, consult_args, consult_content)
+            )
+            tool_call_count += 1
         # Text-path twin of the streamed forced search (`tire_search_gate`):
         # the request is complete, so the code searches before the first round.
         forced_args = ForcedTireSearch(sales_enabled=sales_enabled, tools=tools).plan(
@@ -658,10 +693,11 @@ class LLMAgent:
                 response_text, disk_fit_state, llm_call_id_var.get(None) or "unknown"
             )
 
-        # A relaxed tyre search's caveat comes first, said by the code — the
-        # text-mode twin of the spoken caveat in StreamingAgentLoop.
-        if caveats:
-            response_text = " ".join([*caveats, response_text]).strip()
+        # The network facts and a relaxed tyre search's caveat come first, said
+        # by the code — the text-mode twin of the spoken phrases in
+        # StreamingAgentLoop, added after the guard so it never judges them.
+        if facts or caveats:
+            response_text = " ".join([*facts, *caveats, response_text]).strip()
 
         return response_text, conversation_history
 

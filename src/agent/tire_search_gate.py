@@ -229,6 +229,21 @@ class ForcedTireSearch:
         return args
 
 
+async def run_forced_tool(
+    name: str,
+    args: dict[str, Any],
+    execute: Callable[[str, dict[str, Any]], Awaitable[Any]],
+    *,
+    timeout: float,
+) -> Any:
+    """Run a call the code makes itself through ``execute`` (``ToolRouter.execute``)."""
+    try:
+        return await asyncio.wait_for(execute(name, dict(args)), timeout=timeout)
+    except TimeoutError:
+        logger.error("Forced %s timed out after %ss", name, timeout)
+        return {"error": "Сервіс тимчасово не відповідає, спробуйте ще раз"}
+
+
 async def run_forced_search(
     args: dict[str, Any],
     execute: Callable[[str, dict[str, Any]], Awaitable[Any]],
@@ -236,27 +251,28 @@ async def run_forced_search(
     timeout: float,
 ) -> Any:
     """Run ``search_tires`` through ``execute`` (``ToolRouter.execute``)."""
-    try:
-        return await asyncio.wait_for(execute(SEARCH_TOOL, dict(args)), timeout=timeout)
-    except TimeoutError:
-        logger.error("Forced %s timed out after %ss", SEARCH_TOOL, timeout)
-        return {"error": "Сервіс тимчасово не відповідає, спробуйте ще раз"}
+    return await run_forced_tool(SEARCH_TOOL, args, execute, timeout=timeout)
 
 
-def forced_search_messages(
-    args: dict[str, Any], content: str
+def forced_tool_messages(
+    name: str, args: dict[str, Any], content: str
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """The history pair of the forced call: assistant ``tool_use`` + user ``tool_result``."""
+    """The history pair of a forced call: assistant ``tool_use`` + user ``tool_result``."""
     tool_id = f"toolu_forced_{uuid.uuid4().hex[:16]}"
     return (
         {
             "role": "assistant",
-            "content": [
-                {"type": "tool_use", "id": tool_id, "name": SEARCH_TOOL, "input": dict(args)}
-            ],
+            "content": [{"type": "tool_use", "id": tool_id, "name": name, "input": dict(args)}],
         },
         {
             "role": "user",
             "content": [{"type": "tool_result", "tool_use_id": tool_id, "content": content}],
         },
     )
+
+
+def forced_search_messages(
+    args: dict[str, Any], content: str
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """The history pair of the forced ``search_tires`` call."""
+    return forced_tool_messages(SEARCH_TOOL, args, content)

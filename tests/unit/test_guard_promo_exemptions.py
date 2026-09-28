@@ -509,7 +509,7 @@ def _agent_reply(text: str, policy: NetworkPolicy, promos: PromoOverrides | None
         network_policy=policy,
         promo_overrides=promos,
     )
-    reply, _ = asyncio.run(agent.process_message("Скільки коштує доставка?", []))
+    reply, _ = asyncio.run(agent.process_message("Коли будуть шини?", []))
     return reply
 
 

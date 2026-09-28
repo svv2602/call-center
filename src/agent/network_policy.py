@@ -104,6 +104,12 @@ class NetworkPolicy:
     cod_fee_text: str | None = None
     installment_banks: tuple[str, ...] = ()
     extended_warranty_brands: frozenset[str] = frozenset()
+    #: The network's standard warranty, returns and parcel-tracking terms as
+    #: the owner wrote them (a clause, no leading capital). ``None`` — not
+    #: written: the code says nothing about it, the manager answers.
+    warranty_text: str | None = None
+    returns_text: str | None = None
+    tracking_text: str | None = None
     brand_priority: tuple[str, ...] = ()
     recommend_count: int = RECOMMEND_COUNT_MAX
     order_finish: str = "request_manager_callback"
@@ -161,6 +167,9 @@ class NetworkPolicy:
             cod_fee_text=_parse_text(raw, "cod_fee_text"),
             installment_banks=_parse_names(raw, "installment_banks", allowed=BANK_LABELS),
             extended_warranty_brands=frozenset(_parse_names(raw, "extended_warranty_brands")),
+            warranty_text=_parse_text(raw, "warranty_text"),
+            returns_text=_parse_text(raw, "returns_text"),
+            tracking_text=_parse_text(raw, "tracking_text"),
             brand_priority=_parse_names(raw, "brand_priority"),
             recommend_count=_parse_recommend_count(raw),
             order_finish=order_finish,
@@ -320,6 +329,19 @@ def _promo_partner_suffix(policy: NetworkPolicy, promos: PromoOverrides | None) 
     return f"; за акцією — {', '.join(parts)} ({PROMO_TERMS_REF})"
 
 
+def payment_method_labels(policy: NetworkPolicy) -> list[str]:
+    """The network's payment methods as said to a caller, fee and banks included."""
+    methods: list[str] = []
+    for method in policy.payment_methods:
+        label = PAYMENT_LABELS[method]
+        if method == "cod" and policy.cod_fee_text:
+            label += f" (комісія {policy.cod_fee_text})"
+        elif method == "installments" and policy.installment_banks:
+            label += f" ({', '.join(BANK_LABELS[b] for b in policy.installment_banks)})"
+        methods.append(label)
+    return methods
+
+
 def render_network_block(
     policy: NetworkPolicy | None, promos: PromoOverrides | None = None
 ) -> str | None:
@@ -362,20 +384,14 @@ def render_network_block(
         lines.append("- Доставка: умови й вартість не називай — це уточнить менеджер.")
     if policy.delivery_eta_text:
         lines.append(f"- Термін доставки: {policy.delivery_eta_text}.")
+    if policy.tracking_text:
+        lines.append(f"- Відстеження посилки: {policy.tracking_text}.")
 
     if policy.pickup_available:
         lines.append("- Самовивіз: є; адреси називай тільки з get_pickup_points.")
 
     if policy.payment_methods:
-        methods: list[str] = []
-        for method in policy.payment_methods:
-            label = PAYMENT_LABELS[method]
-            if method == "cod" and policy.cod_fee_text:
-                label += f" (комісія {policy.cod_fee_text})"
-            elif method == "installments" and policy.installment_banks:
-                label += f" ({', '.join(BANK_LABELS[b] for b in policy.installment_banks)})"
-            methods.append(label)
-        lines.append(f"- Оплата: {'; '.join(methods)}.")
+        lines.append(f"- Оплата: {'; '.join(payment_method_labels(policy))}.")
     else:
         lines.append("- Оплата: способи не називай — це уточнить менеджер.")
 
@@ -408,6 +424,9 @@ def render_network_block(
         )
     else:
         lines.append("- Розширеної гарантії мережа не надає.")
+    # `warranty_text` / `returns_text` are not rendered: the code says them
+    # (`network_facts`), and the block keeps one warranty line — the extended
+    # one, which the promotion overrides extend.
 
     if policy.brand_priority:
         brands = ", ".join(_brand_label(b) for b in policy.brand_priority)

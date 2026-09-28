@@ -99,6 +99,56 @@ def has_disk_intent(text: str | None) -> bool:
     return _WHEEL_WORDS.search(low) is not None
 
 
+# ── A consultation about wheels, not a purchase ───────────────────────────
+#
+# Goldset `disk_type_consult` (red in every run to №10): «що краще ставити на
+# зиму — штамповку чи литі диски?» — the redirect ran `search_disks`, which
+# had no diameter and told the model to ask for one, so the caller got «який
+# радіус?» instead of an answer. A comparison or an advice question is answered
+# from the knowledge base: the code searches it (category ``wheels``) before
+# the first round and the redirect stands down for the turn.
+
+KB_TOOL = "search_knowledge_base"
+KB_WHEELS_CATEGORY = "wheels"
+
+#: Comparison / pros-and-cons words — a consultation even with a size named.
+_DISK_COMPARE = re.compile(
+    r"(?<![\w'])(?:краще|кращ(?:ий|і|а|е|их)|лучше|лучш(?:ий|ие|ая|ее|их)|відрізня\w*"
+    r"|отлича\w*|різниц\w*|разниц\w*|порівня\w*|сравн\w*|переваг\w*|преимущ\w*|плюс\w*"
+    r"|мінус\w*|минус\w*|недолік\w*|недостат\w*|варто|стоит\s+ли|надійніш\w*|надежне\w*"
+    r"|практичніш\w*|практичне\w*|міцніш\w*|прочне\w*)"
+)
+#: Advice words — a consultation only when no wheel size is named (with a size
+#: «які диски обрати на R16» is a purchase, and `search_disks` serves it).
+_DISK_ADVICE = re.compile(
+    r"(?<![\w'])(?:обрати|вибрати|выбрать|обира\w*|вибира\w*|выбира\w*|порад\w*|посовет\w*"
+    r"|совет\w*)"
+)
+
+
+def is_disk_consult(text: str | None) -> bool:
+    """True when the utterance asks for advice or a comparison about wheels."""
+    if not has_disk_intent(text):
+        return False
+    low = str(text).lower().replace("ё", "е").replace("’", "'")
+    if _DISK_COMPARE.search(low):
+        return True
+    return bool(_DISK_ADVICE.search(low)) and disk_diameter(low, {}) is None
+
+
+def disk_consult_args(
+    text: str | None, *, sales_enabled: bool, tools: Iterable[dict[str, Any]]
+) -> dict[str, Any] | None:
+    """The code's own ``search_knowledge_base`` arguments for a wheel consultation, or None."""
+    if not sales_enabled or not any(t.get("name") == KB_TOOL for t in tools):
+        return None
+    if not is_disk_consult(text):
+        return None
+    args = {"query": str(text).strip(), "category": KB_WHEELS_CATEGORY}
+    logger.info("Disk consultation: knowledge base search %r", args)
+    return args
+
+
 def last_customer_text(history: list[dict[str, Any]]) -> str:
     """The caller's latest free-text utterance (tool_result turns skipped)."""
     for msg in reversed(history):
@@ -333,8 +383,14 @@ async def run_disk_substitution_raw(
 class DiskToolRedirect:
     """Per-turn substitution of tyre-side tools by `search_disks`."""
 
-    def __init__(self, *, sales_enabled: bool, tools: Iterable[dict[str, Any]]) -> None:
-        self._armed = sales_enabled and any(t.get("name") == "search_disks" for t in tools)
+    def __init__(
+        self, *, sales_enabled: bool, tools: Iterable[dict[str, Any]], consult: bool = False
+    ) -> None:
+        # ``consult``: this turn is a wheel consultation (`is_disk_consult`) —
+        # the knowledge base answers it, no tool is replaced by `search_disks`.
+        self._armed = (
+            sales_enabled and not consult and any(t.get("name") == "search_disks" for t in tools)
+        )
         self._disks_called = False
         self._substituted = False
 
