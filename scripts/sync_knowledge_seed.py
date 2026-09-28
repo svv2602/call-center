@@ -11,11 +11,20 @@ plans one of:
 * ``SET_TENANT``     — the manifest (``knowledge_seed/TENANTS.md``) binds the
                        file to a network (or to shared) and ``tenant_id``
                        differs. Files outside the manifest keep their tenant.
+* ``SET_CATEGORY``   — the DB row sits in another category than the seed
+                       folder (prod had the wheels articles under
+                       ``general``, so a ``category="wheels"`` search missed
+                       them).
+* ``DEACTIVATE``     — a second active row with the same title (prod had
+                       shared ``general`` copies of the network-only fitting
+                       articles): ``active = false``, never deleted. The row
+                       kept is the one in the seed category, then the one
+                       whose text matches the file, then an active one.
 * ``UNCHANGED``.
 
 Never touched: articles of category ``promotions`` (admin promos), articles
-that match no seed file ("вне seed", reported only), ambiguous title matches
-(reported only).
+that match no seed file ("вне seed", reported only), duplicates when one of
+them is a promotion (reported only).
 
 Created and re-texted articles get ``embedding_status = 'pending'`` and an
 embedding task (``generate_article_embeddings.delay``), exactly like
@@ -55,6 +64,8 @@ SHARED = "shared"
 CREATE = "CREATE"
 UPDATE_CONTENT = "UPDATE_CONTENT"
 SET_TENANT = "SET_TENANT"
+SET_CATEGORY = "SET_CATEGORY"
+DEACTIVATE = "DEACTIVATE"
 UNCHANGED = "UNCHANGED"
 
 # | `delivery/06_delivery_tvoya_shina.md` | `tvoya-shina` |   /   | `...md` | shared |
@@ -140,6 +151,7 @@ class Action:
     set_tenant: bool = False
     new_tenant_id: str | None = None
     new_tenant_slug: str | None = None
+    new_category: str | None = None
     kinds: list[str] = field(default_factory=list)  # UPDATE_CONTENT and SET_TENANT can combine
 
     @property
@@ -222,9 +234,19 @@ def build_plan(
 
         matches = by_title.get(key, [])
         if len(matches) > 1:
-            ids = ", ".join(f"{m.id} ({m.category})" for m in matches)
-            plan.ambiguous.append(f"{s.rel_path}: «{s.title}» matches {len(matches)} rows: {ids}")
-            continue
+            if any(m.category in PROTECTED_CATEGORIES for m in matches):
+                ids = ", ".join(f"{m.id} ({m.category})" for m in matches)
+                plan.ambiguous.append(
+                    f"{s.rel_path}: «{s.title}» matches {len(matches)} rows: {ids}"
+                )
+                continue
+            keeper, *dupes = sorted(matches, key=lambda m: _keeper_rank(m, s))
+            for dupe in dupes:
+                if dupe.active:
+                    plan.actions.append(
+                        Action(kind=DEACTIVATE, kinds=[DEACTIVATE], seed=s, db=dupe)
+                    )
+            matches = [keeper]
 
         if not matches:
             plan.actions.append(
@@ -257,15 +279,14 @@ def build_plan(
             action.new_tenant_id = target_tenant
             action.new_tenant_slug = slug
             action.kinds.append(SET_TENANT)
+        if row.category != s.category:
+            action.new_category = s.category
+            action.kinds.append(SET_CATEGORY)
         if action.kinds:
             action.kind = "+".join(action.kinds)
         else:
             action.kinds.append(UNCHANGED)
 
-        if row.category != s.category:
-            plan.warnings.append(
-                f"{s.rel_path}: DB category {row.category!r} ≠ seed {s.category!r} (id={row.id}) — not changed"
-            )
         if row.title != s.title:
             plan.warnings.append(
                 f"{s.rel_path}: DB title «{row.title}» differs from H1 «{s.title}» only by "
@@ -285,12 +306,18 @@ def build_plan(
     return plan
 
 
+def _keeper_rank(row: DbArticle, s: SeedArticle) -> tuple[bool, bool, bool, str]:
+    """Sort key of duplicate rows: the kept one sorts first."""
+    same_text = normalize_content(row.content) in (s.body, s.raw)
+    return (row.category != s.category, not same_text, not row.active, row.id)
+
+
 def format_plan(plan: Plan, slug_by_id: dict[str, str]) -> str:
     def tenant_label(tid: str | None) -> str:
         return SHARED if tid is None else slug_by_id.get(tid, tid)
 
     lines: list[str] = []
-    for kind in (CREATE, UPDATE_CONTENT, SET_TENANT):
+    for kind in (CREATE, UPDATE_CONTENT, SET_TENANT, SET_CATEGORY, DEACTIVATE):
         acts = plan.of_kind(kind)
         lines.append(f"── {kind}: {len(acts)}")
         for a in acts:
@@ -303,6 +330,18 @@ def format_plan(plan: Plan, slug_by_id: dict[str, str]) -> str:
                 lines.append(
                     f"  ~ {a.seed.rel_path} id={a.db.id} «{a.db.title}» "
                     f"({len(normalize_content(a.db.content))} → {len(a.seed.body)} chars)"
+                )
+            elif kind == SET_CATEGORY:
+                assert a.db is not None
+                lines.append(
+                    f"  # {a.seed.rel_path} id={a.db.id} «{a.db.title}» "
+                    f"{a.db.category} → {a.new_category}"
+                )
+            elif kind == DEACTIVATE:
+                assert a.db is not None
+                lines.append(
+                    f"  x {a.seed.rel_path} duplicate id={a.db.id} [{a.db.category}] "
+                    f"tenant={tenant_label(a.db.tenant_id)} «{a.db.title}»"
                 )
             else:
                 assert a.db is not None
@@ -369,7 +408,8 @@ async def _snapshot(conn: Any, plan: Plan) -> dict[str, Any]:
     if ids:
         result = await conn.execute(
             text(
-                "SELECT id, title, category, tenant_id, md5(content) AS content_md5, embedding_status "
+                "SELECT id, title, category, tenant_id, active, md5(content) AS content_md5, "
+                "embedding_status "
                 "FROM knowledge_articles WHERE id = ANY(CAST(:ids AS uuid[])) ORDER BY title"
             ),
             {"ids": ids},
@@ -380,6 +420,7 @@ async def _snapshot(conn: Any, plan: Plan) -> dict[str, Any]:
                 "title": r.title,
                 "category": r.category,
                 "tenant_id": str(r.tenant_id) if r.tenant_id is not None else None,
+                "active": r.active,
                 "content_md5": r.content_md5,
                 "embedding_status": r.embedding_status,
             }
@@ -428,6 +469,11 @@ async def _apply(conn: Any, plan: Plan) -> tuple[list[str], list[str]]:
         if SET_TENANT in a.kinds:
             sets.append("tenant_id = CAST(:tenant_id AS uuid)")
             params["tenant_id"] = a.new_tenant_id
+        if SET_CATEGORY in a.kinds:
+            sets.append("category = :category")
+            params["category"] = a.new_category
+        if DEACTIVATE in a.kinds:
+            sets.append("active = false")
         # category guard: a row that turned into a promotion since planning is left alone
         result = await conn.execute(
             text(
@@ -505,7 +551,7 @@ async def run(apply: bool, snapshot_path: str, seed_root: str = SEED_ROOT) -> in
             await conn.commit()
         print(
             f"\nAPPLIED: created {len(created)}, content updated {len(retexted)}, "
-            f"tenant-only {len(writes) - len(created) - len(retexted)}"
+            f"tenant/category/deactivate only {len(writes) - len(created) - len(retexted)}"
         )
         for aid in created:
             print(f"  created id={aid}")

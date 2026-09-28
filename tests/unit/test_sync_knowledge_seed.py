@@ -9,6 +9,8 @@ import pytest
 
 from scripts.sync_knowledge_seed import (
     CREATE,
+    DEACTIVATE,
+    SET_CATEGORY,
     SET_TENANT,
     UNCHANGED,
     UPDATE_CONTENT,
@@ -224,12 +226,82 @@ def test_title_matching_ignores_spacing_and_case() -> None:
     assert any("spacing/case" in w for w in plan.warnings)
 
 
-def test_ambiguous_title_is_reported_not_acted_on() -> None:
+def test_duplicate_in_another_category_is_deactivated_keeper_fixed() -> None:
+    # prod: every fitting article also had a shared ``general`` copy
+    s = seed("fitting/01_fitting_a.md", "Ціни", category="fitting")
+    rows = [
+        row("Ціни", tenant=None, category="general", aid="g"),
+        row("Ціни", tenant=None, category="fitting", aid="f"),
+    ]
+    plan = build_plan([s], rows, MANIFEST, TENANT_IDS)
+    by_id = {a.db.id: a for a in plan.actions}
+    assert by_id["g"].kinds == [DEACTIVATE]
+    assert by_id["f"].kinds == [SET_TENANT]
+    assert by_id["f"].new_tenant_id == TENANT_IDS["tvoya-shina"]
+    assert plan.ambiguous == []
+
+
+def test_duplicate_same_category_keeps_the_row_with_the_seed_text() -> None:
     s = seed("faq/01_faq.md", "Питання", body="Нове.")
-    rows = [row("Питання", aid="a1"), row("питання ", aid="a2")]
+    rows = [row("Питання", "Старе.", aid="a1"), row("питання ", "Нове.", aid="a2")]
+    plan = build_plan([s], rows, MANIFEST, TENANT_IDS)
+    by_id = {a.db.id: a for a in plan.actions}
+    assert by_id["a1"].kinds == [DEACTIVATE]
+    assert by_id["a2"].kinds == [UNCHANGED]
+
+
+def test_seed_category_outranks_matching_text() -> None:
+    # the row to keep is the one the category search finds; its text is updated
+    s = seed("fitting/01_fitting_a.md", "Ціни", body="Нове.", category="fitting")
+    rows = [
+        row("Ціни", "Нове.", category="general", aid="a-general"),
+        row("Ціни", "Старе.", category="fitting", aid="b-fitting"),
+    ]
+    plan = build_plan([s], rows, MANIFEST, TENANT_IDS)
+    by_id = {a.db.id: a for a in plan.actions}
+    assert by_id["a-general"].kinds == [DEACTIVATE]
+    assert UPDATE_CONTENT in by_id["b-fitting"].kinds
+
+
+def test_inactive_duplicate_needs_no_action() -> None:
+    s = seed("faq/01_faq.md", "Питання")
+    dupe = DbArticle(
+        id="z", title="Питання", category="general", content="x", tenant_id=None, active=False
+    )
+    plan = build_plan([s], [row("Питання", aid="a0"), dupe], MANIFEST, TENANT_IDS)
+    assert [a.db.id for a in plan.actions] == ["a0"]
+
+
+def test_duplicate_with_a_promotion_is_reported_not_acted_on() -> None:
+    s = seed("faq/01_faq.md", "Питання", body="Нове.")
+    rows = [row("Питання", aid="a1"), row("Питання", category="promotions", aid="p")]
     plan = build_plan([s], rows, MANIFEST, TENANT_IDS)
     assert plan.actions == []
     assert len(plan.ambiguous) == 1
+
+
+def test_wrong_category_is_corrected() -> None:
+    # prod: the wheels articles sat under ``general``
+    s = seed("wheels/01_wheels_x.md", "Диски", category="wheels")
+    plan = build_plan([s], [row("Диски", category="general")], MANIFEST, TENANT_IDS)
+    act = only(plan)
+    assert act.kinds == [SET_CATEGORY]
+    assert act.new_category == "wheels"
+
+
+def test_apply_writes_category_and_deactivation() -> None:
+    s = seed("wheels/01_wheels_x.md", "Диски", category="wheels")
+    rows = [
+        row("Диски", category="general", aid="a-keep"),
+        row("Диски", category="faq", aid="b-dupe"),
+    ]
+    plan = build_plan([s], rows, MANIFEST, TENANT_IDS)
+    conn = _FakeConn()
+    asyncio.run(_apply(conn, plan))
+    sql = {params["id"]: (stmt, params) for stmt, params in conn.calls}
+    assert "active = false" in sql["b-dupe"][0] and "category =" not in sql["b-dupe"][0]
+    assert "category = :category" in sql["a-keep"][0] and sql["a-keep"][1]["category"] == "wheels"
+    assert "active = false" not in sql["a-keep"][0]
 
 
 def test_promotion_with_seed_title_is_never_touched() -> None:
