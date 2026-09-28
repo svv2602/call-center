@@ -61,13 +61,24 @@ CASES_DIR = Path(__file__).resolve().parent.parent / "tests" / "goldset" / "case
 # TODO(wave-1-A NetworkPolicy): build this map from `NetworkPolicy` for each
 # tenant (name, delivery terms, services, extended warranty) instead of the
 # literal list; `foreign_phrases` is the single place to switch.
+# A free-delivery phrase followed by a denial («безкоштовної доставки немає»,
+# «бесплатной доставки, к сожалению, нет») is not the offer.
+_NOT_DENIED = r"(?![\s,]+(?:\w+[\s,]+){0,2}(?:немає|нема|нет|не|ні)\b)"
+
 NETWORK_ONLY_PHRASES: dict[str, tuple[str, ...]] = {
     "tvoya-shina": (
         # The network's own name.
         r"тво[яєїюе]\w*\s+шин",
         # Free delivery is Tvoya Shina's term; Pro Koleso ships at carrier rates.
-        r"безкоштовн\w*\s+(?:\w+\s+){0,3}доставк|доставк\w*\s+(?:\w+\s+){0,3}безкоштовн",
-        r"бесплатн\w*\s+(?:\w+\s+){0,3}доставк|доставк\w*\s+(?:\w+\s+){0,3}бесплатн",
+        # Only the offer is a leak: «безкоштовної доставки немає» / «доставка не
+        # безкоштовна» is a correct Pro Koleso answer — a «не» before the adjective
+        # or between the words, a denial right after the noun.
+        r"(?<!\bне\s)(?<!\bні\s)безкоштовн\w*\s+(?:\w+\s+){0,3}доставк\w*(?!\w)"
+        + _NOT_DENIED
+        + r"|доставк\w*\s+(?:(?!(?:не|ні)\s)\w+\s+){0,3}безкоштовн",
+        r"(?<!\bне\s)бесплатн\w*\s+(?:\w+\s+){0,3}доставк\w*(?!\w)"
+        + _NOT_DENIED
+        + r"|доставк\w*\s+(?:(?!не\s)\w+\s+){0,3}бесплатн",
         # Extended Bridgestone warranty is Tvoya Shina only. Only the offer is a
         # leak: «розширеної гарантії немає» is a correct Pro Koleso answer.
         r"(?<!\w)(?:є|діє|надаємо|пропонуємо|оформ\w*)\s+(?:\w+\s+){0,2}розширен\w*\s+гаранті",
@@ -80,8 +91,10 @@ NETWORK_ONLY_PHRASES: dict[str, tuple[str, ...]] = {
     "prokoleso": (
         # The network's own name.
         r"про\s*колес",
-        # Carrier tariffs are Pro Koleso's delivery term; Tvoya Shina is free.
-        r"тариф\w*\s+перевізник|тариф\w*\s+перевозчик",
+        # Carrier tariffs for DELIVERY are Pro Koleso's term; Tvoya Shina delivers
+        # free. «Комісія 2 % + 20 грн, тариф перевізника» of cash on delivery is
+        # true in both networks, so the tariff counts only as the price of delivery.
+        r"доставк\w*[\s,—–-]+(?:\w+[\s,—–-]+){0,3}(?:за|по)\s+тариф\w*\s+(?:перевізник|перевозчик)",
         # «Не надаємо» for fitting/storage is Pro Koleso's line; Tvoya Shina has both.
         r"(?:монтаж|зберіганн|хранени)\w*\s+(?:\w+\s+){0,3}не\s+(?:надаєм|надаем|предоставля)",
         r"не\s+(?:надаєм|надаем|предоставля)\w*\s+(?:\w+\s+){0,2}(?:шино)?(?:монтаж|зберіганн|хранени)",

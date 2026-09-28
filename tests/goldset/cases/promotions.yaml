@@ -61,18 +61,16 @@
 - id: promo_pk_free_delivery_expired
   title: ПК — акції немає (закінчилась) → «чи є безкоштовна доставка?» — стандартні умови
   source: owner:promotions-2026-09-28
-  notes: no `promotions` — the ended Doublestar/Rydanz promotion is not live; the harness passes an empty list, never the table. «Безкоштовної доставки немає» is a right answer, so the default leak check (which reads it as an offer) is off and the offer forms are listed instead
+  notes: no `promotions` — the ended Doublestar/Rydanz promotion is not live; the harness passes an empty list, never the table. «Безкоштовної доставки немає» is a right answer; the default leak check skips denials, so it stays on. The offer forms below also catch the surzhyk «безплатн», which the leak list does not
   network: [prokoleso]
   sales_enabled: true
   turns:
     - user: чи є у вас безкоштовна доставка?
       expect:
-        network_leak: false
         must_contain: ['тариф\w*\s+перевізник|тариф\w*\s+перевозчик']
         must_not_contain:
           - '(?<!не\s)(?:є|діє|есть|действует)\s+(?:\w+\s+){0,2}(?:безкоштовн|бесплатн|безплатн)\w*\s+доставк'
           - 'доставк\w*\s+(?:\w+\s+){0,2}(?:—\s*)?(?<!не\s)(?:безкоштовн|бесплатн|безплатн)'
-          - 'тво[яєїюе]\w*\s+шин'
 
 - id: promo_pk_unrelated_brand_not_mentioned
   title: ПК — акція на Matador, питають про Bridgestone → акцію Matador не згадує

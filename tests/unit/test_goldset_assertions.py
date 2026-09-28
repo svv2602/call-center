@@ -173,6 +173,60 @@ class TestNetworkLeak:
         assert not rg.check_network_leak("tvoya-shina", obs(reply)).passed
         assert rg.check_network_leak("prokoleso", obs(reply)).passed
 
+    # Goldset №2: the cash-on-delivery commission is carried at carrier tariffs
+    # in both networks — Tvoya Shina saying so is true, not Pro Koleso's term.
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            "Якщо оплата при отриманні — комісія 2 % + 20 грн, тариф перевізника. Чи підтверджуєте?",
+            "Оплата при отриманні можливе накладеним платежем з комісією 2 % + 20 гривень, "
+            "плюс тариф перевізника. Також можна оплачувати карткою, передоплатою або частинами",
+        ],
+    )
+    def test_cod_commission_at_carrier_tariff_in_ts_is_not_a_leak(self, reply: str) -> None:
+        assert rg.check_network_leak("tvoya-shina", obs(reply)).passed
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            "Доставка — за тарифами перевізника.",
+            "Доставка Новою поштою за тарифами перевізника.",
+            "Доставка по Украине по тарифам перевозчика.",
+        ],
+    )
+    def test_delivery_at_carrier_tariffs_in_tvoya_shina_is_a_leak(self, reply: str) -> None:
+        assert not rg.check_network_leak("tvoya-shina", obs(reply)).passed
+        assert rg.check_network_leak("prokoleso", obs(reply)).passed
+
+    # Goldset №2, «акція закінчилась»: denying free delivery is Pro Koleso's
+    # right answer, not the offer.
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            "Безкоштовної доставки немає, доставка за тарифами перевізника.",
+            "Безкоштовної доставки, на жаль, немає.",
+            "Доставка не безкоштовна, за тарифами перевізника.",
+            "У нас не безкоштовна доставка, а за тарифами перевізника.",
+            "Бесплатной доставки нет, доставка по тарифам перевозчика.",
+            "Доставка не бесплатная.",
+            "У нас не бесплатная доставка.",
+        ],
+    )
+    def test_denying_free_delivery_in_prokoleso_is_not_a_leak(self, reply: str) -> None:
+        assert rg.check_network_leak("prokoleso", obs(reply)).passed
+
+    @pytest.mark.parametrize(
+        "reply",
+        [
+            "Доставка безкоштовна.",
+            "Безкоштовна доставка Новою поштою по всій Україні.",
+            "Є безкоштовна доставка.",
+            "Бесплатная доставка по Украине.",
+        ],
+    )
+    def test_offering_free_delivery_in_prokoleso_is_a_leak(self, reply: str) -> None:
+        assert not rg.check_network_leak("prokoleso", obs(reply)).passed
+
     def test_denying_extended_warranty_is_not_a_leak(self) -> None:
         reply = "Розширеної гарантії немає, діє стандартна гарантія виробника."
         assert rg.check_network_leak("prokoleso", obs(reply)).passed
