@@ -10,6 +10,11 @@ other. The conditions live in ``tenants.config`` instead:
 - ``config["network_policy"]`` — one sub-object with delivery, payment,
   services, warranty and brand priority. Being one object, a JSONB
   ``config || patch`` merge replaces it whole — no stale keys survive.
+- ``config["sales_preview_callers"]`` — phone numbers (or internal
+  extensions) whose calls get the sales scope while ``sales_enabled`` is off,
+  so an acceptance tester can try sales on a live line. Such a policy has
+  ``sales_preview=True`` and its 1C request is marked TEST. Any other caller
+  gets exactly the policy built without the list.
 
 Parsing is default-deny: a missing or malformed field never turns into a
 promise. Unknown delivery mode → ``unknown`` ("уточнить менеджер", never
@@ -22,6 +27,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+
+from src.utils.phone import normalize_phone_ua
 
 if TYPE_CHECKING:
     from src.agent.promotions import PromoOverrides
@@ -85,6 +92,8 @@ class NetworkPolicy:
     """
 
     sales_enabled: bool = False
+    #: Sales are on only because the caller is in ``sales_preview_callers``.
+    sales_preview: bool = False
     configured: bool = False
     services: frozenset[str] = frozenset()
     delivery_mode: str = "unknown"
@@ -100,8 +109,13 @@ class NetworkPolicy:
     order_finish: str = "request_manager_callback"
 
     @classmethod
-    def from_tenant_config(cls, cfg: Any) -> NetworkPolicy:
-        """Build a policy from ``tenants.config`` (a dict). Never raises."""
+    def from_tenant_config(cls, cfg: Any, caller_phone: str | None = None) -> NetworkPolicy:
+        """Build a policy from ``tenants.config`` (a dict). Never raises.
+
+        ``caller_phone`` (the call's caller id) turns sales on for this call
+        only when it is in ``config["sales_preview_callers"]`` and
+        ``sales_enabled`` is off; otherwise it changes nothing.
+        """
         if cfg is None:
             return cls()
         if not isinstance(cfg, dict):
@@ -109,15 +123,20 @@ class NetworkPolicy:
             return cls()
 
         sales_enabled = _parse_bool(cfg, "sales_enabled")
+        sales_preview = False
+        if not sales_enabled and _is_preview_caller(cfg, caller_phone):
+            sales_enabled = True
+            sales_preview = True
+            logger.info("network_policy: sales preview for caller %s", mask_phone(caller_phone))
 
         raw = cfg.get("network_policy")
         if raw is None:
-            return cls(sales_enabled=sales_enabled)
+            return cls(sales_enabled=sales_enabled, sales_preview=sales_preview)
         if not isinstance(raw, dict):
             logger.warning(
                 "network_policy: config.network_policy is %s, not dict", type(raw).__name__
             )
-            return cls(sales_enabled=sales_enabled)
+            return cls(sales_enabled=sales_enabled, sales_preview=sales_preview)
 
         delivery_mode = raw.get("delivery_mode", "unknown")
         if delivery_mode not in DELIVERY_MODES:
@@ -131,6 +150,7 @@ class NetworkPolicy:
 
         return cls(
             sales_enabled=sales_enabled,
+            sales_preview=sales_preview,
             configured=True,
             services=frozenset(_parse_names(raw, "services", allowed=SERVICE_LABELS)),
             delivery_mode=delivery_mode,
@@ -148,6 +168,50 @@ class NetworkPolicy:
 
 
 # ── Parsing helpers ─────────────────────────────────────────────────────
+
+#: A number of at least this many digits is compared by its last 9 digits
+#: (the subscriber part: ``+380 67…``, ``380 67…`` and ``067…`` are one
+#: number); a shorter one — an internal extension — only by all its digits.
+_PHONE_KEY_DIGITS = 9
+
+
+def phone_key(phone: Any) -> str | None:
+    """Comparison key of a phone number or extension, ``None`` if it has no digits."""
+    if not isinstance(phone, str):
+        return None
+    digits = normalize_phone_ua(phone)
+    if not digits:
+        return None
+    return digits[-_PHONE_KEY_DIGITS:] if len(digits) >= _PHONE_KEY_DIGITS else digits
+
+
+def mask_phone(phone: Any) -> str:
+    """``***1234`` — a phone for the logs (last 4 digits only)."""
+    digits = "".join(c for c in phone if c.isdigit()) if isinstance(phone, str) else ""
+    return f"***{digits[-4:]}"
+
+
+def _is_preview_caller(cfg: dict[str, Any], caller_phone: str | None) -> bool:
+    """Is the caller in ``config["sales_preview_callers"]``? Garbage → no."""
+    raw = cfg.get("sales_preview_callers")
+    if raw is None:
+        return False
+    if not isinstance(raw, list | tuple):
+        logger.warning(
+            "network_policy: sales_preview_callers is %s, not a list → empty", type(raw).__name__
+        )
+        return False
+    caller = phone_key(caller_phone)
+    if caller is None:
+        return False
+    for item in raw:
+        key = phone_key(item)
+        if key is None:
+            logger.warning("network_policy: sales_preview_callers item is not a phone → ignored")
+            continue
+        if key == caller:
+            return True
+    return False
 
 
 def _parse_bool(src: dict[str, Any], key: str) -> bool:

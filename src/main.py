@@ -877,8 +877,13 @@ async def handle_call(conn: AudioSocketConnection) -> None:
     # Network sales/consultation conditions (delivery, payment, services…)
     # — structured tenant data. `sales_enabled` is the scope switch: the
     # default scenario, the prompt frame and the tool set all follow it.
-    # Built once per call.
-    network_policy = NetworkPolicy.from_tenant_config(tenant_config)
+    # Built once per call. A caller in `sales_preview_callers` gets sales
+    # while the flag is off (acceptance testing on a live line). `caller_id`
+    # is already resolved here; `session.caller_phone` is set below, so it
+    # only helps a session recovered from Redis.
+    network_policy = NetworkPolicy.from_tenant_config(
+        tenant_config, caller_phone=caller_id or session.caller_phone
+    )
 
     if ivr_intent:
         session.scenario = ivr_intent
@@ -1918,6 +1923,12 @@ def _build_tool_router(
                 if _redis is not None:
                     order_seq = await _redis.incr("order:ai_sequence")
                 order_number = f"AI-{order_seq}"
+                request_customer_name = customer_name
+                if network_policy is not None and network_policy.sales_preview:
+                    # A sales-preview caller is a tester: the manager must
+                    # see the request is not a real order.
+                    order_number = f"AI-TEST-{order_seq}"
+                    request_customer_name = f"TEST {customer_name}".strip()
 
                 network = session.network_id or "ProKoleso"
                 result = await _onec_client.create_order_1c(
@@ -1929,7 +1940,7 @@ def _build_tool_router(
                     delivery_address=draft.get("address", ""),
                     delivery_city=draft.get("city", ""),
                     pickup_point_id=draft.get("pickup_point_id", ""),
-                    customer_name=customer_name,
+                    customer_name=request_customer_name,
                     network=network,
                 )
                 session.order_id = order_number
@@ -2016,10 +2027,14 @@ def _build_tool_router(
 
         async def _store_fallback() -> Any:
             # The Store API has no one-call order: draft → delivery → confirm.
+            # A sales-preview caller's order is marked TEST here too.
+            fallback_name = request["customer_name"]
+            if network_policy is not None and network_policy.sales_preview:
+                fallback_name = f"TEST {fallback_name}".strip()
             created = await client.create_order(
                 items=request["items"],
                 customer_phone=request["customer_phone"],
-                customer_name=request["customer_name"],
+                customer_name=fallback_name,
                 call_id=str(session.channel_uuid),
             )
             order_id = created.get("order_id") if isinstance(created, dict) else None
@@ -2035,7 +2050,7 @@ def _build_tool_router(
             return await client.confirm_order(
                 order_id=order_id,
                 payment_method=request["payment_method"],
-                customer_name=request["customer_name"],
+                customer_name=fallback_name,
             )
 
         return await _place_order_request(
