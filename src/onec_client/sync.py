@@ -8,9 +8,13 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
+
+from src.store_client.catalog_types import WHEEL
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -50,6 +54,118 @@ def _safe_int(value: str | int | None, default: int = 0) -> int:
         return int(value)
     except (ValueError, TypeError):
         return default
+
+
+_COMMERCIAL_DIAMETER_RE = re.compile(r"^\s*(\d+)\s*[CcСс]\s*$")
+
+
+def _parse_tire_diameter(value: str | int | None) -> tuple[int, bool]:
+    """Return ``(diameter, commercial)`` for a 1C ``diametr`` value.
+
+    1C sends C (light-truck) tyres as ``"16C"``; ``_safe_int`` alone turns that
+    into 0 and the SKU drops out of search by size. The Cyrillic «С» is accepted
+    too — 1C descriptions mix both alphabets.
+    """
+    if isinstance(value, str):
+        match = _COMMERCIAL_DIAMETER_RE.match(value)
+        if match:
+            return int(match.group(1)), True
+    return _safe_int(value), False
+
+
+# Wheel ``size`` as 1C writes it: ``16 4/100x6.5 ET50 DIA54.1``.
+# Seen on prod 2026-09-28 (6321 wheel SKU): a comma as the decimal mark,
+# a second PCD (``5/100-112``) and a DIA range cut short by 1C
+# (``DIA110.5-108.``) — the first number is the hub bore.
+_NUM = r"\d+(?:[.,]\d+)?"
+_DISK_SIZE_RE = re.compile(
+    rf"^(?P<diameter>\d+) (?P<bolt_count>\d+)/(?P<pcd>{_NUM})(?:-(?P<pcd_alt>{_NUM}))?"
+    rf"x(?P<width_j>{_NUM}) ET(?P<et>-?{_NUM}) DIA(?P<dia>{_NUM})(?:-\S*)?$"
+)
+
+_DISK_DIMENSIONS = ("diameter", "width_j", "bolt_count", "pcd", "pcd_alt", "et", "dia")
+
+# Exclusive upper bounds of the ``disk_products`` column types (migration 062).
+_DISK_COLUMN_LIMITS = {
+    "diameter": 32768,  # SMALLINT
+    "bolt_count": 32768,  # SMALLINT
+    "width_j": 1000,  # NUMERIC(4,1)
+    "et": 10000,  # NUMERIC(5,1)
+    "pcd": 10000,  # NUMERIC(6,2)
+    "pcd_alt": 10000,
+    "dia": 10000,
+}
+
+
+def _decimal(value: str) -> Decimal:
+    return Decimal(value.replace(",", "."))
+
+
+def parse_disk_size(size: str | None) -> dict[str, Any]:
+    """Parse a 1C wheel ``size`` into ``disk_products`` columns.
+
+    Pure function. An unreadable ``size`` gives ``parse_ok=False`` with every
+    dimension ``None`` — the row is still written, never guessed at.
+    """
+    match = _DISK_SIZE_RE.match((size or "").strip())
+    if match is None:
+        return dict.fromkeys(_DISK_DIMENSIONS) | {"parse_ok": False}
+    pcd_alt = match.group("pcd_alt")
+    parsed = {
+        "diameter": int(match.group("diameter")),
+        "width_j": _decimal(match.group("width_j")),
+        "bolt_count": int(match.group("bolt_count")),
+        "pcd": _decimal(match.group("pcd")),
+        "pcd_alt": _decimal(pcd_alt) if pcd_alt else None,
+        "et": _decimal(match.group("et")),
+        "dia": _decimal(match.group("dia")),
+        "parse_ok": True,
+    }
+    # One value too wide for its column would abort the whole wares
+    # transaction, tyres included — such a size is unparsed, not written.
+    if any(
+        parsed[key] is not None and abs(parsed[key]) >= limit
+        for key, limit in _DISK_COLUMN_LIMITS.items()
+    ):
+        return dict.fromkeys(_DISK_DIMENSIONS) | {"parse_ok": False}
+    return parsed
+
+
+_DIA_IN_DESCRIPTION_RE = re.compile(r"\bDIA\s*\d+(?:[.,]\d+)?(?:-\S*)?\s+", re.IGNORECASE)
+
+
+def parse_disk_color(description: str | None, model: str, manufacturer: str) -> str | None:
+    """Colour code from a wheel description, or ``None`` when it can't be isolated.
+
+    1C writes ``16 4/100х6.5 ЕТ50 DIA 54.1 W1903 ANTHRACITE WSP Italy``:
+    dimensions, then model name, colour, manufacturer, and sometimes a note in
+    brackets. The colour is whatever sits between the model and the manufacturer.
+    """
+    if not description or not model or not manufacturer:
+        return None
+    dia = _DIA_IN_DESCRIPTION_RE.search(description)
+    if dia is None:
+        return None
+    tail = description[dia.end() :]
+    if not tail.startswith(model):
+        return None
+    tail = tail[len(model) :]
+    end = tail.rfind(manufacturer)
+    if end < 0:
+        return None
+    color = tail[:end].strip()
+    return color or None
+
+
+def _disk_row(sku: str, product: dict[str, Any], ware: dict[str, Any]) -> dict[str, Any]:
+    """One ``disk_products`` row for a wheel SKU."""
+    return {
+        "sku": sku,
+        **parse_disk_size(product.get("size")),
+        "color": parse_disk_color(
+            product.get("text"), ware.get("model", ""), ware.get("manufacturer", "")
+        ),
+    }
 
 
 def _safe_bool(value: str | bool | None) -> bool:
@@ -284,9 +400,14 @@ class CatalogSyncService:
                 await conn.execute(sql, rows[i : i + _BATCH_SIZE])
 
     async def _upsert_wares(self, wares: list[dict[str, Any]]) -> None:
-        """UPSERT wares data into tire_models and tire_products (batch)."""
+        """UPSERT wares data into tire_models and tire_products (batch).
+
+        Wheels (``type == WHEEL``) stay in ``tire_products`` — price and stock
+        are shared — and additionally get a parsed ``disk_products`` row.
+        """
         model_rows: list[dict[str, Any]] = []
         product_rows: list[dict[str, Any]] = []
+        disk_rows: list[dict[str, Any]] = []
 
         for ware in wares:
             model_id = ware.get("model_id", "")
@@ -305,15 +426,20 @@ class CatalogSyncService:
                 }
             )
 
+            is_wheel = ware.get("type", "") == WHEEL
             for product in ware.get("product", []):
                 sku = product.get("sku", "")
                 if not sku:
                     continue
+                diameter, commercial = _parse_tire_diameter(product.get("diametr"))
+                if is_wheel:
+                    disk_rows.append(_disk_row(sku, product, ware))
                 product_rows.append(
                     {
                         "sku": sku,
                         "model_id": model_id,
-                        "diameter": _safe_int(product.get("diametr")),
+                        "diameter": diameter,
+                        "commercial": commercial,
                         "width": _safe_int(product.get("profile_width")),
                         "profile": _safe_int(product.get("profile_height")),
                         "size": product.get("size", ""),
@@ -340,15 +466,16 @@ class CatalogSyncService:
         """)
 
         product_sql = text("""
-            INSERT INTO tire_products (sku, model_id, diameter, width, profile,
+            INSERT INTO tire_products (sku, model_id, diameter, commercial, width, profile,
                                        size, speed_rating, load_rating, studded,
                                        description, updated_at)
-            VALUES (:sku, :model_id, :diameter, :width, :profile,
+            VALUES (:sku, :model_id, :diameter, :commercial, :width, :profile,
                     :size, :speed_rating, :load_rating, :studded,
                     :description, now())
             ON CONFLICT (sku) DO UPDATE SET
                 model_id = EXCLUDED.model_id,
                 diameter = EXCLUDED.diameter,
+                commercial = EXCLUDED.commercial,
                 width = EXCLUDED.width,
                 profile = EXCLUDED.profile,
                 size = EXCLUDED.size,
@@ -359,12 +486,45 @@ class CatalogSyncService:
                 updated_at = now()
         """)
 
+        disk_sql = text("""
+            INSERT INTO disk_products (sku, diameter, width_j, bolt_count, pcd, pcd_alt,
+                                       et, dia, color, parse_ok, updated_at)
+            VALUES (:sku, :diameter, :width_j, :bolt_count, :pcd, :pcd_alt,
+                    :et, :dia, :color, :parse_ok, now())
+            ON CONFLICT (sku) DO UPDATE SET
+                diameter = EXCLUDED.diameter,
+                width_j = EXCLUDED.width_j,
+                bolt_count = EXCLUDED.bolt_count,
+                pcd = EXCLUDED.pcd,
+                pcd_alt = EXCLUDED.pcd_alt,
+                et = EXCLUDED.et,
+                dia = EXCLUDED.dia,
+                color = EXCLUDED.color,
+                parse_ok = EXCLUDED.parse_ok,
+                updated_at = now()
+        """)
+
         async with self._engine.begin() as conn:
             # Models first (products reference them via FK)
             for i in range(0, len(model_rows), _BATCH_SIZE):
                 await conn.execute(model_sql, model_rows[i : i + _BATCH_SIZE])
             for i in range(0, len(product_rows), _BATCH_SIZE):
                 await conn.execute(product_sql, product_rows[i : i + _BATCH_SIZE])
+            # Wheels after products (disk_products.sku references tire_products)
+            for i in range(0, len(disk_rows), _BATCH_SIZE):
+                await conn.execute(disk_sql, disk_rows[i : i + _BATCH_SIZE])
+
+        if disk_rows:
+            unparsed = [row["sku"] for row in disk_rows if not row["parse_ok"]]
+            if unparsed:
+                logger.warning(
+                    "Wheel sync: %d of %d wheel SKU with unparsed size (parse_ok=false): %s",
+                    len(unparsed),
+                    len(disk_rows),
+                    ", ".join(unparsed[:20]),
+                )
+            else:
+                logger.info("Wheel sync: %d wheel SKU parsed", len(disk_rows))
 
     async def _upsert_stock(self, network: str, stock_items: list[dict[str, Any]]) -> None:
         """UPSERT stock data into tire_stock (batch)."""

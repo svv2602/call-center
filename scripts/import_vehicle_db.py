@@ -16,12 +16,15 @@ import re
 import sys
 from decimal import Decimal
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 
 from src.config import get_settings
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 logger = logging.getLogger(__name__)
@@ -328,6 +331,79 @@ def read_tire_sizes(csv_dir: Path) -> list[dict[str, Any]]:
     return rows
 
 
+DISK_SIZES_CSV = "test_table_car2_kit_disk_size.csv"
+
+
+def _disk_size_row(row: dict[str, str]) -> dict[str, Any] | None:
+    """One ``vehicle_disk_sizes`` row, or ``None`` when a NOT NULL column is missing.
+
+    ``et`` is legitimately ``NULL`` in ~1% of the source (11 828 of 1 144 266
+    rows, 2026-09-28) and is kept as NULL.
+    """
+    width = _decimal_from_csv(row.get("width") or "")
+    diameter = _decimal_from_csv(row.get("diameter") or "")
+    kit = row.get("kit") or ""
+    row_id = row.get("id") or ""
+    if width is None or diameter is None or not kit.isdigit() or not row_id.isdigit():
+        return None
+    try:
+        size_type = _smallint_or_none(row.get("type") or "")
+        axle = _smallint_or_none(row.get("axle") or "")
+        axle_group = _smallint_or_none(row.get("axle_group") or "")
+    except ValueError:
+        return None
+    return {
+        "id": int(row_id),
+        "kit_id": int(kit),
+        "width": width,
+        "diameter": diameter,
+        "et": _decimal_from_csv(row.get("et") or ""),
+        "type": 1 if size_type is None else size_type,
+        "axle": 0 if axle is None else axle,
+        "axle_group": axle_group,
+    }
+
+
+def iter_disk_sizes(csv_dir: Path, batch_size: int = BATCH_SIZE) -> Iterator[list[dict[str, Any]]]:
+    """Yield ``vehicle_disk_sizes`` rows from the optional disk-size CSV in batches.
+
+    Streams the file: at 1.1M rows a full list would sit in memory next to the
+    1.2M tyre-size rows. Quoting in the source is uneven (``NULL`` bare, numbers
+    quoted), hence ``csv.DictReader``. Rows missing a NOT NULL column are
+    skipped and counted in the log. No file → nothing yielded, with a warning:
+    the kit refresh has already cascaded the previous disk sizes away.
+    """
+    path = csv_dir / DISK_SIZES_CSV
+    if not path.is_file():
+        logger.warning(
+            "%s not found in %s — vehicle_disk_sizes left empty", DISK_SIZES_CSV, csv_dir
+        )
+        return
+    batch: list[dict[str, Any]] = []
+    read = skipped = 0
+    with open(path, encoding="utf-8", newline="") as f:
+        for raw in csv.DictReader(f):
+            row = _disk_size_row(raw)
+            if row is None:
+                skipped += 1
+                continue
+            read += 1
+            batch.append(row)
+            if len(batch) >= batch_size:
+                yield batch
+                batch = []
+    if batch:
+        yield batch
+    if skipped:
+        logger.warning("Skipped %d disk size rows without id/kit/width/diameter", skipped)
+    logger.info("Read %d disk sizes from %s", read, path.name)
+
+
+def count_disk_sizes(csv_dir: Path) -> int:
+    """Number of importable disk-size rows (dry-run report)."""
+    return sum(len(batch) for batch in iter_disk_sizes(csv_dir))
+
+
 async def _load_existing_brands(conn: Any) -> dict[int, dict[str, Any]]:
     """Return {id: {name, source}} for every existing brand."""
     result = await conn.execute(text("SELECT id, name, source FROM vehicle_brands"))
@@ -496,6 +572,27 @@ async def _refresh_kits_and_sizes(
         )
 
     return len(kits), len(tire_sizes)
+
+
+async def _insert_disk_sizes(conn: Any, csv_dir: Path) -> int:
+    """Insert ``vehicle_disk_sizes`` from the CSV, streamed in batches.
+
+    Runs in the kit-refresh transaction after the kits are reinserted: the
+    ``DELETE FROM vehicle_kits`` there has cascaded the old disk sizes away.
+    """
+    inserted = 0
+    for batch in iter_disk_sizes(csv_dir):
+        await conn.execute(
+            text("""
+                INSERT INTO vehicle_disk_sizes
+                    (id, kit_id, width, diameter, et, type, axle, axle_group)
+                VALUES
+                    (:id, :kit_id, :width, :diameter, :et, :type, :axle, :axle_group)
+            """),
+            batch,
+        )
+        inserted += len(batch)
+    return inserted
 
 
 async def _record_import_history(
@@ -671,6 +768,7 @@ async def import_data(
         diff_summary = _summarise_diff(brand_diff, model_diff, len(kits), len(tire_sizes))
 
         if mode == "dryrun":
+            diff_summary["disk_sizes"] = {"csv_count": count_disk_sizes(csv_dir)}
             history_id = await _record_import_history(
                 conn=conn,
                 mode="dryrun",
@@ -749,7 +847,13 @@ async def import_data(
         # because bulk-delete + 1.2M row insert takes 30-60s.
         async with engine.begin() as conn:
             k_inserted, ts_inserted = await _refresh_kits_and_sizes(conn, kits, tire_sizes)
-        logger.info("Refreshed kits: %d, tire_sizes: %d", k_inserted, ts_inserted)
+            ds_inserted = await _insert_disk_sizes(conn, csv_dir)
+        logger.info(
+            "Refreshed kits: %d, tire_sizes: %d, disk_sizes: %d",
+            k_inserted,
+            ts_inserted,
+            ds_inserted,
+        )
 
         # Legacy metadata (still read by /admin/vehicles/stats fallback)
         async with engine.begin() as conn:
