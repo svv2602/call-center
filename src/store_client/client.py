@@ -19,7 +19,52 @@ from typing import Any
 import aiohttp
 from aiobreaker import CircuitBreaker, CircuitBreakerError
 
+from src.agent.network_policy import RECOMMEND_COUNT_MAX, RECOMMEND_COUNT_MIN
+from src.store_client.catalog_types import TIRE_SEARCH_TYPES
+
 logger = logging.getLogger(__name__)
+
+# ── Tyre attributes the catalog keeps only as text ──────────────────────
+# Measured on prod 2026-09-28: ``tire_products.studded`` is false on all
+# 68730 rows — the sync never sets it. 1C writes the fact into
+# ``description``: «… [99T] Шип» (studded) vs «… Під шип» / «Под шип»
+# (studdable, sold without studs). Model names like «WinSpike» / «Stud»
+# are sold unstudded, so only the standalone word «шип» counts.
+_STUDDED_SQL = (
+    r"(COALESCE(p.description, '') ~* '(^|[^а-яёіїєґa-z])шип([^а-яёіїєґa-z]|$)'"
+    r" AND COALESCE(p.description, '') !~* '(под|під)\s+шип')"
+)
+# RunFlat: 1034 of 60578 passenger SKU, markers RunFlat / Run Flat / ZP /
+# SSR / ROF / RFT in ``description``.
+_RUNFLAT_SQL = r"COALESCE(p.description, '') ~* 'run\s?flat|(^|[^a-z])(rft|zp|ssr|rof)([^a-z]|$)'"
+
+#: Rows the offer ranking chooses from (in-stock passenger SKU of one size
+#: and season: at most ~110 on prod 2026-09-28).
+_RANKING_WINDOW = 300
+
+#: Result markers of the relaxation ladder (voiced by the prompt layer).
+CAVEAT_NO_STUDDED = "no_studded_offer_friction"
+CAVEAT_BRAND_UNAVAILABLE = "brand_unavailable_alternatives"
+
+
+def _tire_types_sql(bind_params: dict[str, Any]) -> str:
+    """``m.type_id IN (…)`` over the tyre-search allowlist (default-deny).
+
+    Wheels (``566``), truck tyres and any type 1C starts sending later stay
+    out of every lookup that answers "which tyre".
+    """
+    names = []
+    for i, type_id in enumerate(sorted(TIRE_SEARCH_TYPES)):
+        name = f"tire_type_{i}"
+        bind_params[name] = type_id
+        names.append(f":{name}")
+    return f"m.type_id IN ({', '.join(names)})"
+
+
+def _clamp_recommend_count(value: Any) -> int:
+    if isinstance(value, bool) or not isinstance(value, int):
+        return RECOMMEND_COUNT_MAX
+    return max(RECOMMEND_COUNT_MIN, min(RECOMMEND_COUNT_MAX, value))
 
 
 def _format_tire_size(row: Any) -> str:
@@ -34,6 +79,37 @@ def _format_tire_size(row: Any) -> str:
     elif axle == 2:
         size += " (зад)"
     return size
+
+
+def _staggered_pairs(rows: list[Any]) -> list[dict[str, str]] | None:
+    """Factory front/rear pairs of a staggered fitment, or ``None``.
+
+    ``vehicle_tire_sizes`` groups a pair by ``(kit_id, axle_group)`` with
+    ``axle`` 1 = front, 2 = rear (prod 2026-09-28: 84211 clean 1+2 groups).
+    Only factory sizes (``type`` 1), and only groups with exactly one front
+    and one rear row — an ambiguous group is not guessed.
+    """
+    groups: dict[tuple[Any, Any], dict[int, list[Any]]] = {}
+    for row in rows:
+        if row["type"] != 1 or row.get("axle") not in (1, 2):
+            continue
+        kit_id = row.get("kit_id")
+        if kit_id is None:
+            continue
+        axles = groups.setdefault((kit_id, row.get("axle_group")), {1: [], 2: []})
+        axles[row["axle"]].append(row)
+
+    pairs: list[dict[str, str]] = []
+    for axles in groups.values():
+        if len(axles[1]) != 1 or len(axles[2]) != 1:
+            continue
+        pair = {
+            "front": _format_tire_size({**axles[1][0], "axle": 0}),
+            "rear": _format_tire_size({**axles[2][0], "axle": 0}),
+        }
+        if pair not in pairs:
+            pairs.append(pair)
+    return pairs or None
 
 
 # Retry config
@@ -116,11 +192,14 @@ class StoreClient:
         # MVP: use PostgreSQL catalog if available
         if self._db_engine is not None:
             try:
-                return await self._search_tires_db(network=network, **params)
+                return await self._search_tires_ladder(network=network, **params)
             except Exception:
                 logger.warning("DB tire search failed, falling back to HTTP API", exc_info=True)
 
-        # Fallback: HTTP Store API
+        # Fallback: HTTP Store API (knows nothing of the network ranking)
+        for key in ("brand_priority", "recommend_count"):
+            params.pop(key, None)
+
         if any(k in params for k in ("vehicle_make", "vehicle_model", "vehicle_year")):
             query = {
                 "make": params.get("vehicle_make", ""),
@@ -603,7 +682,8 @@ class StoreClient:
 
             sizes_result = await conn.execute(
                 text(f"""
-                    SELECT DISTINCT ts.width, ts.height, ts.diameter, ts.type, ts.axle
+                    SELECT DISTINCT ts.width, ts.height, ts.diameter, ts.type, ts.axle,
+                           ts.kit_id, ts.axle_group
                     FROM vehicle_tire_sizes ts
                     JOIN vehicle_kits k ON ts.kit_id = k.id
                     WHERE k.model_id = :mid {year_filter}
@@ -621,14 +701,13 @@ class StoreClient:
                 "message": "Розміри шин не знайдено",
             }
 
-        stock_sizes = []
-        acceptable_sizes = []
+        stock_sizes: list[str] = []
+        acceptable_sizes: list[str] = []
         for row in rows:
             size_str = _format_tire_size(row)
-            if row["type"] == 1:
-                stock_sizes.append(size_str)
-            else:
-                acceptable_sizes.append(size_str)
+            target = stock_sizes if row["type"] == 1 else acceptable_sizes
+            if size_str not in target:
+                target.append(size_str)
 
         result: dict[str, Any] = {
             "found": True,
@@ -637,8 +716,14 @@ class StoreClient:
             "years": years[:10],
             "stock_sizes": stock_sizes,
         }
+        staggered_pairs = _staggered_pairs(rows)
+        if staggered_pairs:
+            result["staggered_pairs"] = staggered_pairs
         if acceptable_sizes:
             result["acceptable_sizes"] = acceptable_sizes
+            # Non-factory sizes: a specialist picks them, the bot never
+            # offers one on its own (owner decision 2026-09-28).
+            result["acceptable_sizes_policy"] = "specialist_only"
         if selected_year:
             result["selected_year"] = selected_year
 
@@ -760,26 +845,88 @@ class StoreClient:
 
         return sorted(result, key=lambda r: r["price"])
 
-    async def _search_tires_db(self, network: str = "", **params: Any) -> dict[str, Any]:
-        """Search tires in PostgreSQL catalog (synced from 1C)."""
+    @staticmethod
+    def _rank_tires(
+        rows: list[Any],
+        brand_priority: tuple[str, ...] | list[str] = (),
+        recommend_count: int = RECOMMEND_COUNT_MAX,
+    ) -> list[Any]:
+        """Pick what the bot offers: ``recommend_count`` (2–3) in-stock tyres.
+
+        1. One model — one variant (the first row of a model wins; the SQL
+           orders by price, so it is the cheapest in-stock SKU).
+        2. The network's ``brand_priority`` brands go first, one model each,
+           in the network's order — only when in stock.
+        3. The rest is spread over the price range (budget → premium), one
+           model per brand.
+
+        A brand the customer named is a SQL filter, so every row here is
+        that brand already. Empty ``brand_priority`` → only step 3.
+        """
+        count = _clamp_recommend_count(recommend_count)
+
+        seen_models: dict[tuple[str, str], Any] = {}
+        for r in rows:
+            if r["stock_quantity"] <= 0:
+                continue
+            key = (str(r["brand"]).strip().lower(), str(r["model"]).strip().lower())
+            seen_models.setdefault(key, r)
+        unique = list(seen_models.values())
+
+        picked: list[Any] = []
+        for brand in brand_priority or ():
+            if len(picked) >= count:
+                break
+            wanted = str(brand).strip().lower()
+            for r in unique:
+                if str(r["brand"]).strip().lower() == wanted and r not in picked:
+                    picked.append(r)
+                    break
+
+        # A named brand fills every slot with its models; otherwise one
+        # model per brand keeps the offer diverse.
+        brands = {str(r["brand"]).strip().lower() for r in unique}
+        one_per_brand = len(brands) > 1
+        taken = {str(r["brand"]).strip().lower() for r in picked}
+        rest: list[Any] = []
+        for r in unique:
+            b = str(r["brand"]).strip().lower()
+            if r in picked or (one_per_brand and b in taken):
+                continue
+            rest.append(r)
+            if one_per_brand:
+                taken.add(b)
+
+        slots = count - len(picked)
+        if slots > 0 and rest:
+            rest.sort(key=lambda r: r["price"])
+            if len(rest) <= slots:
+                picked.extend(rest)
+            elif slots == 1:
+                picked.append(rest[len(rest) // 2])
+            else:
+                last = len(rest) - 1
+                idx = sorted({round(i * last / (slots - 1)) for i in range(slots)})
+                picked.extend(rest[i] for i in idx)
+
+        return picked[:count]
+
+    async def _query_tire_rows(
+        self,
+        network: str,
+        params: dict[str, Any],
+        brand_priority: tuple[str, ...] | list[str] = (),
+    ) -> list[Any]:
+        """Catalog rows for a tyre query — tyre types only, cheapest first.
+
+        ``brand_priority`` brands sort ahead of the rest, so the LIMIT never
+        cuts them off (they are rarely among the cheapest rows).
+        """
         from sqlalchemy import text
 
-        # Vehicle search is not supported via 1C catalog
-        if any(k in params for k in ("vehicle_make", "vehicle_model", "vehicle_year")):
-            return {
-                "total": 0,
-                "items": [],
-                "message": "Для пошуку за авто спочатку виклич get_vehicle_tire_sizes, потім search_tires з розміром",
-            }
-
-        if not network:
-            network = "ProKoleso"
-
-        engine = self._db_engine
-
-        # Build WHERE clauses dynamically
         conditions = []
         bind_params: dict[str, Any] = {"network": network}
+        conditions.append(_tire_types_sql(bind_params))
 
         if params.get("width"):
             conditions.append("p.width = :width")
@@ -805,19 +952,31 @@ class StoreClient:
         if params.get("brand"):
             conditions.append("LOWER(m.manufacturer) = LOWER(:brand)")
             bind_params["brand"] = params["brand"]
+        # Only a real bool filters; None / anything else = "not asked".
+        studded = params.get("studded")
+        if studded is True:
+            conditions.append(_STUDDED_SQL)
+        elif studded is False:
+            conditions.append(f"NOT {_STUDDED_SQL}")
+        runflat = params.get("runflat")
+        if runflat is True:
+            conditions.append(_RUNFLAT_SQL)
+        elif runflat is False:
+            conditions.append(f"NOT ({_RUNFLAT_SQL})")
 
-        where_clause = " AND ".join(conditions) if conditions else "1=1"
+        where_clause = " AND ".join(conditions)
+        limit = int(params.get("_limit") or 50)
 
-        # If brand is specified, return up to 5 results sorted by price.
-        # Otherwise, pick diverse results across price segments (budget/mid/premium)
-        # so the customer sees the full range, not just the cheapest Chinese brands.
-        if params.get("brand"):
-            limit = 5
-            order = "s.price ASC NULLS LAST"
-        else:
-            # Fetch more rows to sample from different price segments
-            limit = 50
-            order = "s.price ASC NULLS LAST"
+        order = "s.price ASC NULLS LAST"
+        prio_names = []
+        for i, brand in enumerate(brand_priority or ()):
+            bind_params[f"prio_{i}"] = str(brand).strip().lower()
+            prio_names.append(f":prio_{i}")
+        if prio_names:
+            order = (
+                f"CASE WHEN LOWER(m.manufacturer) IN ({', '.join(prio_names)}) "
+                f"THEN 0 ELSE 1 END, {order}"
+            )
 
         query = text(f"""
             SELECT p.sku AS id, m.manufacturer AS brand, m.name AS model,
@@ -833,32 +992,166 @@ class StoreClient:
         """)
         bind_params["result_limit"] = limit
 
-        async with engine.connect() as conn:
+        async with self._db_engine.connect() as conn:
             result = await conn.execute(query, bind_params)
-            rows = list(result.mappings().all())
+            return list(result.mappings().all())
 
-        # Diversify: pick tires from different price segments
-        # so the customer sees budget, mid-range, and premium options
-        if not params.get("brand") and len(rows) > 5:
+    @staticmethod
+    def _tire_item(row: Any) -> dict[str, Any]:
+        return {
+            "id": row["id"],
+            "brand": row["brand"],
+            "model": row["model"],
+            "size": row["size"],
+            "season": row["season"],
+            "price": row["price"],
+            "in_stock": row["stock_quantity"] > 0,
+        }
+
+    async def _search_tires_db(self, network: str = "", **params: Any) -> dict[str, Any]:
+        """Search tires in PostgreSQL catalog (synced from 1C).
+
+        ``recommend_count`` given (the network policy) → the offer ranking of
+        ``_rank_tires``; absent → the legacy 5-card overview.
+        """
+        # Vehicle search is not supported via 1C catalog
+        if any(k in params for k in ("vehicle_make", "vehicle_model", "vehicle_year")):
+            return {
+                "total": 0,
+                "items": [],
+                "message": "Для пошуку за авто спочатку виклич get_vehicle_tire_sizes, потім search_tires з розміром",
+            }
+
+        if not network:
+            network = "ProKoleso"
+
+        brand_priority = params.pop("brand_priority", None) or ()
+        recommend_count = params.pop("recommend_count", None)
+
+        if recommend_count is None:
+            if params.get("brand"):
+                params = {**params, "_limit": 5}
+            rows = await self._query_tire_rows(network, params)
+        else:
+            # Ranking path: a wide window, so the price spread and the
+            # network's brands are not cut to the 50 cheapest rows.
+            params = {**params, "_limit": _RANKING_WINDOW}
+            rows = await self._query_tire_rows(network, params, brand_priority)
+
+        if recommend_count is not None:
+            rows = self._rank_tires(rows, brand_priority, recommend_count)
+        elif not params.get("brand") and len(rows) > 5:
+            # Legacy overview: budget, mid-range and premium options
             rows = self._pick_diverse_tires(rows)
 
-        items = [
-            {
-                "id": row["id"],
-                "brand": row["brand"],
-                "model": row["model"],
-                "size": row["size"],
-                "season": row["season"],
-                "price": row["price"],
-                "in_stock": row["stock_quantity"] > 0,
-            }
-            for row in rows
-        ]
-
+        items = [self._tire_item(row) for row in rows]
         return {
             "total": len(items),
             "items": items,
         }
+
+    async def _search_tires_ladder(self, network: str = "", **params: Any) -> dict[str, Any]:
+        """``_search_tires_db`` + the relaxation ladder.
+
+        Nothing matches → drop a filter and mark the result, so the answer
+        carries its own caveat instead of relying on the prompt:
+
+        - brand + studded: studded of other brands (``relaxed: ["brand"]``),
+          then the brand without studs, then anything;
+        - studded: friction tyres, ``caveat_key = no_studded_offer_friction``;
+        - brand: other brands, ``caveat_key = brand_unavailable_alternatives``.
+
+        A rear size (``rear_width/rear_profile/rear_diameter``) → staggered
+        search: one model in both sizes.
+        """
+        rear = {
+            "width": params.pop("rear_width", None),
+            "profile": params.pop("rear_profile", None),
+            "diameter": params.pop("rear_diameter", None),
+        }
+        has_rear = all(rear.values())
+
+        async def run(p: dict[str, Any]) -> dict[str, Any]:
+            if has_rear:
+                return await self._search_staggered(network, p, rear)
+            return await self._search_tires_db(network=network, **p)
+
+        result = await run(dict(params))
+        if result.get("items"):
+            return result
+
+        studded = params.get("studded") is True
+        brand = bool(params.get("brand"))
+        steps: list[list[str]] = []
+        if studded and brand:
+            steps.append(["brand"])
+        if studded:
+            steps.append(["studded"])
+        if brand:
+            steps.append(["studded", "brand"] if studded else ["brand"])
+
+        for drop in steps:
+            relaxed_params = {k: v for k, v in params.items() if k not in drop}
+            relaxed = await run(relaxed_params)
+            if relaxed.get("items"):
+                relaxed["relaxed"] = drop
+                relaxed["caveat_key"] = (
+                    CAVEAT_NO_STUDDED if "studded" in drop else CAVEAT_BRAND_UNAVAILABLE
+                )
+                return relaxed
+        return result
+
+    async def _search_staggered(
+        self, network: str, params: dict[str, Any], rear: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Staggered axles: one model offered in the front and the rear size."""
+        brand_priority = params.pop("brand_priority", None) or ()
+        recommend_count = params.pop("recommend_count", None)
+        params = {**params, "_limit": _RANKING_WINDOW}
+        front_rows = await self._query_tire_rows(network, params, brand_priority)
+        rear_rows = await self._query_tire_rows(network, {**params, **rear}, brand_priority)
+
+        def key(r: Any) -> tuple[str, str]:
+            return (str(r["brand"]).strip().lower(), str(r["model"]).strip().lower())
+
+        rear_by_model: dict[tuple[str, str], Any] = {}
+        for r in rear_rows:
+            if r["stock_quantity"] > 0:
+                rear_by_model.setdefault(key(r), r)
+        paired = [r for r in front_rows if key(r) in rear_by_model]
+        ranked = self._rank_tires(
+            paired, brand_priority, recommend_count if recommend_count is not None else 3
+        )
+
+        items = []
+        for row in ranked:
+            item = self._tire_item(row)
+            rear_row = rear_by_model[key(row)]
+            item["rear_id"] = rear_row["id"]
+            item["rear_size"] = rear_row["size"]
+            item["rear_price"] = rear_row["price"]
+            items.append(item)
+        return {"total": len(items), "items": items, "staggered": True}
+
+    async def _find_tire_sku_by_brand(self, brand: str, network: str) -> str:
+        """Cheapest tyre SKU of a brand (tyre types only); ``""`` if none."""
+        from sqlalchemy import text
+
+        bind_params: dict[str, Any] = {"brand": brand, "network": network}
+        types_sql = _tire_types_sql(bind_params)
+        query = text(f"""
+            SELECT p.sku AS id
+            FROM tire_products p
+            JOIN tire_models m ON p.model_id = m.id
+            LEFT JOIN tire_stock s ON p.sku = s.sku AND s.trading_network = :network
+            WHERE LOWER(m.manufacturer) = LOWER(:brand) AND {types_sql}
+            ORDER BY s.price ASC NULLS LAST
+            LIMIT 1
+        """)
+        async with self._db_engine.connect() as conn:
+            result = await conn.execute(query, bind_params)
+            row = result.mappings().first()
+        return str(row["id"]) if row else ""
 
     async def _check_availability_1c(
         self, product_id: str, query: str, network: str = ""
@@ -875,12 +1168,13 @@ class StoreClient:
             if query.strip().isdigit():
                 sku = query.strip()
             else:
-                # Try to find SKU by searching
-                search = await self._search_tires_db(brand=query, network=network)
-                items = search.get("items", [])
-                if not items:
+                # Find the cheapest tyre of the named brand. Own lookup, not
+                # search_tires: the relaxation ladder would answer with
+                # another brand. Tyre types only — a wheel brand must not
+                # come back as ``items[0]`` (FINDINGS I §4, D1).
+                sku = await self._find_tire_sku_by_brand(query, network)
+                if not sku:
                     return {"available": False, "message": "Товар не знайдено"}
-                sku = items[0].get("id", "")
 
         if not sku:
             return {"available": False, "message": "Потрібен ID товару або запит"}

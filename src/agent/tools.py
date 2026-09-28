@@ -62,6 +62,35 @@ MVP_TOOLS: list[dict] = [  # type: ignore[type-arg]
                     "type": "string",
                     "description": "Бренд шин (наприклад, Michelin, Continental)",
                 },
+                "studded": {
+                    "type": "boolean",
+                    "description": (
+                        "true — клієнт хоче шиповані, false — клієнт хоче без шипів (липучка). "
+                        "Не передавай, якщо клієнт не казав про шипи."
+                    ),
+                },
+                "runflat": {
+                    "type": "boolean",
+                    "description": (
+                        "true — клієнту потрібні RunFlat, false — клієнт не хоче RunFlat. "
+                        "Не передавай, якщо клієнт не казав про RunFlat."
+                    ),
+                },
+                "rear_width": {
+                    "type": "integer",
+                    "description": (
+                        "Тільки для різноширокої осі (staggered_pairs з get_vehicle_tire_sizes): "
+                        "ширина задньої шини. Тоді width/profile/diameter — передня вісь."
+                    ),
+                },
+                "rear_profile": {
+                    "type": "integer",
+                    "description": "Тільки для різноширокої осі: профіль задньої шини.",
+                },
+                "rear_diameter": {
+                    "type": "integer",
+                    "description": "Тільки для різноширокої осі: діаметр задньої шини.",
+                },
             },
             "required": ["width", "profile", "diameter", "season"],
         },

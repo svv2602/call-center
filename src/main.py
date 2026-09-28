@@ -1265,7 +1265,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             )
 
         # Per-call tool router, PII vault, and LLM agent
-        router = _build_tool_router(session, store_client=tenant_store_client)
+        router = _build_tool_router(
+            session, store_client=tenant_store_client, network_policy=network_policy
+        )
 
         # Wire tool call logging into the router
         if _call_logger is not None:
@@ -1633,8 +1635,16 @@ def _split_auto_number(auto_number: str) -> tuple[str | None, str | None]:
     return colour, brand
 
 
-def _build_tool_router(session: CallSession, store_client: StoreClient | None = None) -> ToolRouter:
-    """Build a ToolRouter with all canonical tools registered."""
+def _build_tool_router(
+    session: CallSession,
+    store_client: StoreClient | None = None,
+    network_policy: NetworkPolicy | None = None,
+) -> ToolRouter:
+    """Build a ToolRouter with all canonical tools registered.
+
+    ``network_policy`` (built once per call in ``handle_call``) carries the
+    network's tyre ranking — ``brand_priority`` and ``recommend_count``.
+    """
     router = ToolRouter()
 
     client = store_client or _store_client
@@ -1644,6 +1654,12 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
 
     async def _search_tires(**params: Any) -> dict[str, Any]:
         network = session.network_id or "ProKoleso"
+        # Ranking comes from the network policy, never from the LLM's args.
+        params.pop("brand_priority", None)
+        params.pop("recommend_count", None)
+        if network_policy is not None:
+            params["brand_priority"] = network_policy.brand_priority
+            params["recommend_count"] = network_policy.recommend_count
         return await client.search_tires(network=network, **params)
 
     async def _check_availability(
