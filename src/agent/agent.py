@@ -46,7 +46,11 @@ from src.agent.tire_search_gate import (
     run_forced_search,
     run_forced_tool,
 )
-from src.agent.tool_result_compressor import compress_tool_result, tire_caveat_phrase
+from src.agent.tool_result_compressor import (
+    compress_tool_result,
+    repeat_call_note,
+    tire_caveat_phrase,
+)
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
 from src.llm.router import llm_call_id_var
 from src.monitoring.metrics import (
@@ -415,6 +419,8 @@ class LLMAgent:
         caveats: list[str] = []
         # Text-path twin of the streamed `search_disks` redirect (`disk_intent`);
         # a wheel consultation is the knowledge base's, not the redirect's.
+        # Calls run successfully this turn (repeat stopper, sales scope).
+        done_this_turn: set[str] = set()
         disk_redirect = DiskToolRedirect(
             sales_enabled=sales_enabled, tools=tools, consult=is_disk_consult(user_text)
         )
@@ -614,6 +620,18 @@ class LLMAgent:
                 args = tu["input"]
                 if self._pii_vault is not None:
                     args = self._pii_vault.restore_in_args(args)
+                # Text-path twin of the streamed repeat stopper (sales scope).
+                repeat_key = tu["name"] + ":" + json.dumps(args, sort_keys=True)
+                if sales_enabled and repeat_key in done_this_turn:
+                    logger.warning(
+                        "Tool %s already ran this turn with the same arguments — not run again",
+                        tu["name"],
+                    )
+                    return {
+                        "type": "tool_result",
+                        "tool_use_id": tu["id"],
+                        "content": repeat_call_note(tu["name"]),
+                    }
                 disk_sub = disk_redirect.check(tu["name"], args, conversation_history)
                 if disk_sub is not None:
                     disk_content, disk_raw = await run_disk_substitution_raw(
@@ -638,6 +656,8 @@ class LLMAgent:
                     logger.error("Tool %s timed out after %ds", tu["name"], _TOOL_TIMEOUT_SEC)
                     tool_call_errors_total.labels(tool_name=tu["name"], error_type="timeout").inc()
                     raw = {"error": "Сервіс тимчасово не відповідає, спробуйте ще раз"}
+                if not (isinstance(raw, dict) and raw.get("error")):
+                    done_this_turn.add(repeat_key)
                 if sales_enabled and tu["name"] == "search_tires":
                     phrase = tire_caveat_phrase(raw, args)
                     if phrase and phrase not in caveats:

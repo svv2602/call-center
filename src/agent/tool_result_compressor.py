@@ -398,3 +398,16 @@ def compress_tool_result(
         return compressor(result)
 
     return _compact(result)
+
+
+#: `guard_refusal_repeated_total` reason of a successful call repeated in a turn.
+REPEAT_ALREADY_DONE = "already_done"
+
+
+def repeat_call_note(tool_name: str) -> str:
+    """The tool_result of a call this turn already ran with the same arguments."""
+    return (
+        f"✅ `{tool_name}` з тими самими аргументами вже виконано в цьому ході — "
+        "результат вище, він не зміниться. Не викликай повторно: відповідай "
+        "клієнту за ним або виклич інший інструмент."
+    )

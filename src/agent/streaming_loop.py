@@ -78,7 +78,12 @@ from src.agent.tire_search_gate import (
     run_forced_search,
     run_forced_tool,
 )
-from src.agent.tool_result_compressor import compress_tool_result, tire_caveat_phrase
+from src.agent.tool_result_compressor import (
+    REPEAT_ALREADY_DONE,
+    compress_tool_result,
+    repeat_call_note,
+    tire_caveat_phrase,
+)
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
 from src.core.audio_sender import send_audio_stream
 from src.core.sentence_buffer import BufferEvent, SentenceReady, buffer_sentences
@@ -1821,6 +1826,10 @@ class StreamingAgentLoop:
         # Only `error is True` counts. A transient failure is a string («Сервіс
         # тимчасово не відповідає»), and retrying one of those is legitimate.
         refused_this_turn: dict[str, str] = {}
+        # Sales scope: calls this turn has already run successfully with the
+        # same arguments — a repeat is answered from the history, not re-run
+        # (goldset: 5× the same get_vehicle_tire_sizes, then silence).
+        done_this_turn: set[str] = set()
         ended_on_refusal_loop = False
         # Wheels asked for, tyre tool called: redirect to `search_disks` once
         # per turn (sales scope only; see `disk_intent`).
@@ -2160,6 +2169,20 @@ class StreamingAgentLoop:
                         disk_content = self._pii_vault.mask(disk_content)
                     return {"type": "tool_result", "tool_use_id": tc.id, "content": disk_content}
                 refusal_key = tc.name + ":" + json.dumps(args, sort_keys=True)
+                if self._sales_enabled and refusal_key in done_this_turn:
+                    guard_refusal_repeated_total.labels(
+                        tool_name=tc.name, reason=REPEAT_ALREADY_DONE
+                    ).inc()
+                    logger.warning(
+                        "Tool %s already ran this turn with the same arguments — not run again",
+                        tc.name,
+                    )
+                    _suppressed.add(tc.id)
+                    return {
+                        "type": "tool_result",
+                        "tool_use_id": tc.id,
+                        "content": repeat_call_note(tc.name),
+                    }
                 already_refused = refused_this_turn.get(refusal_key)
                 if already_refused is not None:
                     guard_refusal_repeated_total.labels(
@@ -2195,6 +2218,8 @@ class StreamingAgentLoop:
                     refused_this_turn[refusal_key] = str(
                         raw.get("reason") or raw.get("action_required") or "unspecified"
                     )
+                elif not (isinstance(raw, dict) and raw.get("error")):
+                    done_this_turn.add(refusal_key)
                 if self._sales_enabled and tc.name == "search_tires":
                     phrase = tire_caveat_phrase(raw, args)
                     if phrase and phrase not in _caveats:
