@@ -218,6 +218,21 @@ export const HELP_PAGES = {
         ],
         tipsKey: 'help.tenants.tips',
     },
+    promotions: {
+        titleKey: 'help.promotions.title',
+        overviewKey: 'help.promotions.overview',
+        sections: [
+            { titleKey: 'help.promotions.list.title', contentKey: 'help.promotions.list.content' },
+            { titleKey: 'help.promotions.fields.title', contentKey: 'help.promotions.fields.content' },
+            { titleKey: 'help.promotions.overrides.title', contentKey: 'help.promotions.overrides.content' },
+            { titleKey: 'help.promotions.create.title', contentKey: 'help.promotions.create.content' },
+            { titleKey: 'help.promotions.create.steps', contentKey: 'help.promotions.create.stepsContent' },
+            { titleKey: 'help.promotions.article.title', contentKey: 'help.promotions.article.content' },
+            { titleKey: 'help.promotions.article.steps', contentKey: 'help.promotions.article.stepsContent' },
+            { titleKey: 'help.promotions.behavior.title', contentKey: 'help.promotions.behavior.content' },
+        ],
+        tipsKey: 'help.promotions.tips',
+    },
     users: {
         titleKey: 'help.users.title',
         overviewKey: 'help.users.overview',

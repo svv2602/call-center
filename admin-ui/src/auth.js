@@ -44,6 +44,7 @@ const PAGE_PERMISSIONS = {
     customers: 'customers:read',
     prompts: 'prompts:read',
     knowledge: 'knowledge:read',
+    promotions: 'promotions:read',
     scenarios: 'training:read',
     tools: 'training:read',
     sandbox: 'sandbox:read',
