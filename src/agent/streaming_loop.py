@@ -26,7 +26,7 @@ from src.agent.booking_consent import (
 )
 from src.agent.history_compressor import summarize_old_messages
 from src.agent.intent_classifier import sales_intents
-from src.agent.network_claim_guard import guard_network_claims
+from src.agent.network_claim_guard import guard_network_claims, guard_text
 from src.agent.network_policy import NetworkPolicy, render_network_block
 from src.agent.prompts import (
     SYSTEM_PROMPT,
@@ -1412,6 +1412,13 @@ class StreamingAgentLoop:
                         summary[:200],
                     )
                     return _fallback_text
+                # Network claims are judged per sentence and replaced, as on the
+                # streamed road — a refused promise becomes the policy's neutral
+                # line, not silence. `or _fallback_text` is belt and braces:
+                # a replacement is never dropped first, so it cannot empty.
+                summary = (
+                    guard_text(summary, self._network_policy, _current_call_id()) or _fallback_text
+                )
                 logger.info("Streaming summary fallback produced text")
                 return summary
         except TimeoutError:

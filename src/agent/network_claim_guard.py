@@ -18,11 +18,12 @@ Rules (each is default-deny over its whole set):
 - ``order_confirmed`` — «замовлення підтверджено/оформлено»: the order is a
   request a manager calls back about (``order_finish``), so always.
 
-The three policy-derived rules run only while ``policy.sales_enabled``. With
-sales off (both networks in production on 2026-09-28) ``tenants.config`` carries
-no ``network_policy`` at all, so the parsed policy is the empty default — and an
-empty ``services`` there means "not configured", not "not provided". Enforcing it
-would cut «записала вас на шиномонтаж» out of every Твоя Шина fitting call.
+``free_delivery`` and ``extended_warranty`` run only while ``policy.sales_enabled``.
+``service_offer`` runs while the policy is ``configured`` (a ``network_policy``
+dict is written in ``tenants.config``) or sales are on: only a written policy's
+empty ``services`` means "not provided". Unwritten (both networks in production
+on 2026-09-28) it means "not configured" — enforcing it would cut «записала вас
+на шиномонтаж» out of every Твоя Шина fitting call.
 ``order_confirmed`` depends on no configured field and runs always.
 
 Negations pass: a clause holding «не / ні / немає / нема / нет / ни» around the
@@ -212,18 +213,23 @@ def check_sentence(sentence: str, policy: NetworkPolicy | None) -> Verdict:
     ):
         return _verdict(RULE_ORDER_CONFIRMED, policy, [])
 
+    # `service_offer` needs to know the services are *real*, not the sales
+    # switch: a configured policy's empty set is "not provided" even while
+    # sales are off (Про Колесо offered fitting in 9 of 26 turns). Without a
+    # written policy it keeps the old `sales_enabled` gate — unchanged.
+    if policy.configured or policy.sales_enabled:
+        missing = [
+            key
+            for key in SERVICE_LABELS
+            if key not in policy.services and _affirmed(_service_pattern(key), text)
+        ]
+        if missing and _SERVICE_REFUSAL.search(text):
+            missing = []
+        if missing:
+            return _verdict(RULE_SERVICE_OFFER, policy, missing)
+
     if not policy.sales_enabled:
         return _PASS
-
-    missing = [
-        key
-        for key in SERVICE_LABELS
-        if key not in policy.services and _affirmed(_service_pattern(key), text)
-    ]
-    if missing and _SERVICE_REFUSAL.search(text):
-        missing = []
-    if missing:
-        return _verdict(RULE_SERVICE_OFFER, policy, missing)
 
     if policy.delivery_mode != "free" and _affirmed(_FREE_DELIVERY, text):
         return _verdict(RULE_FREE_DELIVERY, policy, [])
@@ -253,6 +259,45 @@ def blocked_rules(text: str, policy: NetworkPolicy | None) -> list[str]:
         for s in _SENTENCE_SPLIT.split(text or "")
         if (v := check_sentence(s, policy)).action != PASS and v.rule
     ]
+
+
+def guard_text(
+    text: str,
+    policy: NetworkPolicy | None,
+    call_id: str = "unknown",
+    site: str = "summary_fallback",
+) -> str:
+    """The same verdicts on a whole reply that has no sentence buffer.
+
+    Used where LLM text is synthesised directly (`_request_summary_fallback`).
+    A refused sentence is replaced, a repeated replacement is dropped — the
+    first one stays, so a non-empty reply never comes back empty. Replacements
+    pass `check_sentence` themselves, so one pass is final (no re-judging).
+    """
+    if not guard_enabled() or not text or not text.strip():
+        return text
+    out: list[str] = []
+    spoken_replacements: set[str] = set()
+    changed = False
+    for sentence in _SENTENCE_SPLIT.split(text.strip()):
+        verdict = check_sentence(sentence, policy)
+        if verdict.action == PASS:
+            out.append(sentence)
+            continue
+        changed = True
+        network_claim_blocked_total.labels(rule=verdict.rule).inc()
+        logger.warning(
+            "network_claim_blocked: call=%s, site=%s, rule=%s, action=%s, text=%r",
+            call_id,
+            site,
+            verdict.rule,
+            verdict.action,
+            sentence[:200],
+        )
+        if verdict.action == REPLACE and verdict.replacement not in spoken_replacements:
+            spoken_replacements.add(verdict.replacement)
+            out.append(verdict.replacement)
+    return " ".join(out) if changed else text
 
 
 # ── The stream filter ───────────────────────────────────────────────────

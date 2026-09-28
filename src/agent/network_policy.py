@@ -54,9 +54,16 @@ RECOMMEND_COUNT_MAX = 3
 
 @dataclass(frozen=True)
 class NetworkPolicy:
-    """What a network offers. Defaults promise nothing."""
+    """What a network offers. Defaults promise nothing.
+
+    ``configured`` tells "the owner wrote this network's policy" (a dict under
+    ``config["network_policy"]``) from "nothing was written" (key missing or
+    garbage). Only a configured policy's empty ``services`` means "not
+    provided"; an unconfigured one's means "unknown".
+    """
 
     sales_enabled: bool = False
+    configured: bool = False
     services: frozenset[str] = frozenset()
     delivery_mode: str = "unknown"
     delivery_carriers: tuple[str, ...] = ()
@@ -102,6 +109,7 @@ class NetworkPolicy:
 
         return cls(
             sales_enabled=sales_enabled,
+            configured=True,
             services=frozenset(_parse_names(raw, "services", allowed=SERVICE_LABELS)),
             delivery_mode=delivery_mode,
             delivery_carriers=_parse_names(raw, "delivery_carriers", lower=False),
