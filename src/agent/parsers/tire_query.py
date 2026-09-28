@@ -48,12 +48,13 @@ __all__ = [
     "parse_budget",
     "parse_nail_type",
     "parse_quantity",
+    "parse_tech_refusals",
     "parse_tech_requirements",
     "parse_tire_size",
 ]
 
 NailType = Literal["studdable", "studless", "studded"]
-TechRequirement = Literal["runflat", "xl", "reinforced", "commercial"]
+TechRequirement = Literal["runflat", "xl", "commercial"]
 BudgetScope = Literal["per_tire", "per_set"]
 
 # ═══════════════════════════════════════════════════════════
@@ -750,31 +751,84 @@ def normalize_tire_brand(text: str) -> str | None:
 #  Tech requirements
 # ═══════════════════════════════════════════════════════════
 
+#: «посилені / усиленные» is XL (tshina `a1d7882c2`): the catalogue has one
+#: load facet, `is_xl`; a separate «reinforced» key had no reader but the label.
 _TECH_PATTERNS: tuple[tuple[TechRequirement, re.Pattern[str]], ...] = (
     ("runflat", re.compile(r"run[\s-]?flat|\brft\b|ран\s?фл[еэєя]т\w*")),
-    ("xl", re.compile(r"\bxl\b|extra\s*load|[еэ]кстра\s*ло[ау]д|ікс\s*ель|икс\s*эль")),
-    ("reinforced", re.compile(r"посилен\w*|усилен\w*|reinforced")),
+    (
+        "xl",
+        re.compile(
+            r"\bxl\b|extra\s*load|[еэ]кстра\s*ло[ау]д|ікс\s*ель|икс\s*эль"
+            r"|посилен\w*|усилен\w*|reinforced"
+        ),
+    ),
     (
         "commercial",
         re.compile(
             r"комерц\w*|коммерч\w*|\bбус\w*|фургон\w*|мікроавтобус\w*|микроавтобус\w*"
-            r"|вантажопас\w*|грузопас\w*|цешк\w*"
+            r"|вантажопас\w*|грузопас\w*|цешк\w*|газел\w*"
         ),
     ),
 )
 
+#: «без ранфлета», «не потрібен ранфлет», «не треба мені XL», «ніяких
+#: ранфлетів», «no runflat» — a refusal, not a requirement (tshina
+#: `14f13515f`). The negation is the word right before the key, optionally
+#: followed by a modal («потрібен / нужны / хочу») and one filler word from a
+#: closed list — never an arbitrary word: «без шипів ранфлет» wants runflat.
+_NEG_WORD = r"(?:без|не|no|not|without|ніяких|никаких|жодних|жодного)"
+_NEG_MODAL = (
+    r"(?:потріб\w*|треба|хочу|хочемо|бажано"  # ua
+    r"|нужн\w*|нужен|надо|хотим"  # ru
+    r"|need\w*|want)"  # en
+)
+_NEG_FILLER = r"(?:мені|мне|нам|ці|цих|эти|этих|ваш\w*|всяк\w*|any|the)"
+_NEG_BEFORE_RE = re.compile(rf"(?<![\w']){_NEG_WORD}(?:\s+{_NEG_MODAL})?(?:\s+{_NEG_FILLER})?\s+$")
+#: «ранфлет не потрібен», «XL не нужно» — after the key only with a modal:
+#: «ранфлет не дорогий» is not a refusal.
+_NEG_AFTER_RE = re.compile(rf"^[\w']*\s+(?:мені\s+|мне\s+|нам\s+)?не\s+{_NEG_MODAL}(?![\w'])")
 
-def parse_tech_requirements(text: str) -> list[TechRequirement] | None:
-    """runflat / XL / посилені / C (комерційні) — or ``None``.
 
-    A size said with a C/LT suffix («215/75 R16C») counts as commercial.
-    """
+def _tech_mentions(text: str) -> tuple[list[TechRequirement], list[TechRequirement]]:
+    """(wanted, refused) — a key is refused only when every mention is negated."""
     norm = normalize_spoken_numbers(text)
-    found: list[TechRequirement] = [
-        kind for kind, pattern in _TECH_PATTERNS if pattern.search(norm)
-    ]
-    if "commercial" not in found:
+    wanted: list[TechRequirement] = []
+    refused: list[TechRequirement] = []
+    for kind, pattern in _TECH_PATTERNS:
+        negated = affirmed = False
+        for m in pattern.finditer(norm):
+            if _NEG_BEFORE_RE.search(norm[: m.start()]) or _NEG_AFTER_RE.search(norm[m.end() :]):
+                negated = True
+            else:
+                affirmed = True
+        if affirmed:
+            wanted.append(kind)
+        elif negated:
+            refused.append(kind)
+    if "commercial" not in wanted and "commercial" not in refused:
         sizes = parse_tire_size(text) or []
         if any(s.suffix is not None for s in sizes):
-            found.append("commercial")
-    return found or None
+            wanted.append("commercial")
+    return wanted, refused
+
+
+def parse_tech_requirements(text: str) -> list[TechRequirement] | None:
+    """runflat / XL (посилені) / C (комерційні, «на бус») — or ``None``.
+
+    A size said with a C/LT suffix («215/75 R16C») counts as commercial.
+    A negated key («без ранфлета», «не потрібен XL») is not a requirement —
+    see `parse_tech_refusals`.
+    """
+    wanted, _ = _tech_mentions(text)
+    return wanted or None
+
+
+def parse_tech_refusals(text: str) -> list[TechRequirement] | None:
+    """Keys the caller turned down («без ранфлета», «XL не треба») — or ``None``.
+
+    Separate from `parse_tech_requirements` so a caller that merges turns can
+    drop a requirement said earlier. A key both refused and asked for in one
+    utterance counts as asked for.
+    """
+    _, refused = _tech_mentions(text)
+    return refused or None

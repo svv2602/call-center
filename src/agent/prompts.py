@@ -2423,7 +2423,6 @@ _TIRE_NAIL_LABELS: dict[str, str] = {
 _TIRE_TECH_LABELS: dict[str, str] = {
     "runflat": "RunFlat",
     "xl": "XL (посилене навантаження)",
-    "reinforced": "посилені",
     "commercial": "C (комерційні, для буса)",
 }
 

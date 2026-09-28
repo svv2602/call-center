@@ -20,6 +20,7 @@ from src.agent.parsers.tire_query import (
     parse_budget,
     parse_nail_type,
     parse_quantity,
+    parse_tech_refusals,
     parse_tech_requirements,
     parse_tire_size,
 )
@@ -432,13 +433,25 @@ def test_brands_in_order_without_duplicates() -> None:
         ("RFT", ["runflat"]),
         ("XL", ["xl"]),
         ("екстра лоад", ["xl"]),
-        ("посилені", ["reinforced"]),
-        ("посилених", ["reinforced"]),
-        ("усиленные", ["reinforced"]),
+        # «посилені / усиленные» is XL — the catalogue has one load facet.
+        ("посилені", ["xl"]),
+        ("посилених", ["xl"]),
+        ("усиленные", ["xl"]),
+        ("усиленных", ["xl"]),
+        ("reinforced", ["xl"]),
+        ("посилені XL", ["xl"]),
         ("комерційні", ["commercial"]),
         ("коммерческие", ["commercial"]),
         ("для буса", ["commercial"]),
         ("на фургон", ["commercial"]),
+        ("на бус", ["commercial"]),
+        ("на мікроавтобус", ["commercial"]),
+        ("для мікроавтобуса", ["commercial"]),
+        ("на микроавтобус", ["commercial"]),
+        ("для микроавтобуса", ["commercial"]),
+        ("на газель", ["commercial"]),
+        ("для газелі", ["commercial"]),
+        ("на газели", ["commercial"]),
         ("215/75R16C", ["commercial"]),
         ("ранфлет XL", ["runflat", "xl"]),
     ],
@@ -450,6 +463,73 @@ def test_tech_requirements(text: str, expected: list[str]) -> None:
 @pytest.mark.parametrize("text", ["звичайні шини", "205/55 R16", "", "автобус"])
 def test_tech_requirements_none(text: str) -> None:
     assert parse_tech_requirements(text) is None
+    assert parse_tech_refusals(text) is None
+
+
+#: A negated key is a refusal: it is never a requirement and always a refusal
+#: (tshina `14f13515f`). UA + RU + EN, negation before and after the key.
+_TECH_NEGATIONS: list[tuple[str, str]] = [
+    ("без ранфлета", "runflat"),
+    ("без ранфлету", "runflat"),
+    ("не потрібен ранфлет", "runflat"),
+    ("не потрібні ранфлети", "runflat"),
+    ("не треба run flat", "runflat"),
+    ("не треба мені ранфлет", "runflat"),
+    ("не хочу ранфлет", "runflat"),
+    ("ніяких ранфлетів", "runflat"),
+    ("не нужен runflat", "runflat"),
+    ("не надо ранфлет", "runflat"),
+    ("никаких ранфлетов", "runflat"),
+    ("no runflat please", "runflat"),
+    ("without run-flat", "runflat"),
+    ("ранфлет не потрібен", "runflat"),
+    ("ранфлети мені не треба", "runflat"),
+    ("без XL", "xl"),
+    ("літні шини без xl", "xl"),
+    ("не нужны усиленные", "xl"),
+    ("без посилених", "xl"),
+    ("XL не нужно", "xl"),
+    ("не надо коммерческие", "commercial"),
+    ("без комерційних", "commercial"),
+]
+
+
+@pytest.mark.parametrize(("text", "key"), _TECH_NEGATIONS)
+def test_negated_tech_key_is_a_refusal_not_a_requirement(text: str, key: str) -> None:
+    assert key not in (parse_tech_requirements(text) or [])
+    assert key in (parse_tech_refusals(text) or [])
+
+
+@pytest.mark.parametrize(
+    ("text", "wanted", "refused"),
+    [
+        # Affirmative forms stay requirements.
+        ("потрібен ранфлет", ["runflat"], None),
+        ("мені ранфлет", ["runflat"], None),
+        ("ранфлет обов'язково", ["runflat"], None),
+        ("нужны RFT", ["runflat"], None),
+        ("покажи RunFlat", ["runflat"], None),
+        ("шины XL", ["xl"], None),
+        # A negation of another word does not reach the key.
+        ("без шипів, але ранфлет", ["runflat"], None),
+        ("без шипів ранфлет", ["runflat"], None),
+        ("без різниці, ранфлет", ["runflat"], None),
+        ("не знаю ранфлет", ["runflat"], None),
+        ("ранфлет не дорогий", ["runflat"], None),
+        # One asked for, one turned down.
+        ("хочу runflat, не xl", ["runflat"], ["xl"]),
+        ("усиленные без ранфлета", ["xl"], ["runflat"]),
+        # Asked for and turned down in one breath — asked for wins.
+        ("без ранфлета? ні, давайте ранфлет", ["runflat"], None),
+        # An explicit refusal beats the C suffix of the size.
+        ("215/75R16C без комерційних", None, ["commercial"]),
+    ],
+)
+def test_tech_requirements_and_refusals(
+    text: str, wanted: list[str] | None, refused: list[str] | None
+) -> None:
+    assert parse_tech_requirements(text) == wanted
+    assert parse_tech_refusals(text) == refused
 
 
 # ═══════════════════════════════════════════════════════════
@@ -467,3 +547,18 @@ def test_tech_requirements_none(text: str) -> None:
 )
 def test_normalize_spoken_numbers(text: str, expected: str) -> None:
     assert normalize_spoken_numbers(text) == expected
+
+
+class TestRefusalDropsEarlierRequirement:
+    """«ранфлет» then «без ранфлета»: the session no longer asks for RunFlat."""
+
+    def test_refusal_subtracts_from_stored_tech(self) -> None:
+        from src.core.pipeline import merge_tire_query
+
+        merged = merge_tire_query({"tech": ["runflat", "xl"]}, "без ранфлета")
+        assert merged["tech"] == ["xl"]
+
+    def test_last_requirement_refused_removes_the_key(self) -> None:
+        from src.core.pipeline import merge_tire_query
+
+        assert "tech" not in merge_tire_query({"tech": ["runflat"]}, "ранфлет не потрібен")

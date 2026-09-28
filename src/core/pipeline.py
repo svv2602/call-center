@@ -859,6 +859,7 @@ def merge_tire_query(
         parse_budget,
         parse_nail_type,
         parse_quantity,
+        parse_tech_refusals,
         parse_tech_requirements,
         parse_tire_size,
     )
@@ -906,6 +907,11 @@ def merge_tire_query(
     tech = parse_tech_requirements(text)
     if tech:
         out["tech"] = list(tech)
+    else:
+        refused = parse_tech_refusals(text)
+        if refused:
+            # «ранфлет» then «без ранфлета»: the refusal drops what was said before.
+            out["tech"] = [t for t in out.get("tech") or [] if t not in refused] or None
     return {k: v for k, v in out.items() if v not in (None, "", [], {})}
 
 
