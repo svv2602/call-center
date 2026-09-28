@@ -503,8 +503,11 @@ guard_refusal_repeated_total = Counter(
 tool_audit_write_failures_total = Counter(
     "callcenter_tool_audit_write_failures_total",
     "Failures of the tool-call audit write (call_tool_calls row lost) by tool "
-    "name and which path in ToolRouter.execute failed",
-    ["tool_name", "path"],  # path: result, error
+    "name and which path failed (ToolRouter.execute result/error, or a "
+    "transfer refused by the false-transfer guard)",
+    # path: result, error — ToolRouter.execute; blocked — streaming_loop
+    # audit_blocked_transfer (a refused transfer_to_operator)
+    ["tool_name", "path"],
 )
 
 tool_rounds_per_turn = Histogram(
