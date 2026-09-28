@@ -783,6 +783,35 @@ async def import_call(request: ImportCallRequest, user: dict[str, Any] = _perm_w
 # ── Send message ─────────────────────────────────────────────
 
 
+async def _load_sandbox_tenant(conn: Any, tenant_id: str) -> dict[str, Any] | None:
+    """The tenant a sandbox conversation plays as, or None.
+
+    ``config`` is part of it: the sandbox agent builds the network policy
+    («Умови мережі», ``sales_enabled``, tyre ranking) from it exactly as a
+    live call does — without it the sandbox tests a network with no policy.
+    """
+    result = await conn.execute(
+        text("""
+            SELECT slug, name, network_id, enabled_tools, prompt_suffix, config
+            FROM tenants WHERE id = :id AND is_active = true
+        """),
+        {"id": tenant_id},
+    )
+    row = result.first()
+    if not row:
+        return None
+    tenant = dict(row._mapping)
+    config = tenant.get("config")
+    if isinstance(config, str):
+        try:
+            config = json.loads(config)
+        except ValueError:
+            logger.warning("sandbox: tenant %s config is not JSON", tenant_id)
+            config = None
+    tenant["config"] = config if isinstance(config, dict) else {}
+    return tenant
+
+
 @router.post("/conversations/{conversation_id}/send")
 async def send_message(
     conversation_id: UUID,
@@ -818,16 +847,7 @@ async def send_message(
     tenant: dict[str, Any] | None = None
     if conv.tenant_id:
         async with engine.begin() as conn:
-            tenant_result = await conn.execute(
-                text("""
-                    SELECT slug, name, network_id, enabled_tools, prompt_suffix
-                    FROM tenants WHERE id = :id AND is_active = true
-                """),
-                {"id": str(conv.tenant_id)},
-            )
-            tenant_row = tenant_result.first()
-            if tenant_row:
-                tenant = dict(tenant_row._mapping)
+            tenant = await _load_sandbox_tenant(conn, str(conv.tenant_id))
 
     # Determine conversation history
     history: list[dict[str, Any]] = []

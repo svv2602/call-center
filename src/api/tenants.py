@@ -17,6 +17,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 from sqlalchemy import text
 
+from src.agent.network_policy import (
+    BANK_LABELS,
+    DELIVERY_MODES,
+    ORDER_FINISH_MODES,
+    PAYMENT_LABELS,
+    RECOMMEND_COUNT_MAX,
+    RECOMMEND_COUNT_MIN,
+    SERVICE_LABELS,
+)
 from src.agent.tools import ALL_TOOLS
 from src.api.auth import require_permission
 from src.api.database import get_engine as _get_engine
@@ -49,6 +58,9 @@ class TenantCreate(BaseModel):
     config: dict[str, Any] = {}
     working_hours: dict[str, Any] | None = None
     is_active: bool = True
+    # Not stored: the owner's explicit "this network provides none of the
+    # services its tools serve" (see `_check_service_coverage`).
+    confirm_no_services: bool = False
 
 
 class TenantUpdate(BaseModel):
@@ -62,6 +74,15 @@ class TenantUpdate(BaseModel):
     config: dict[str, Any] | None = None
     working_hours: dict[str, Any] | None = None
     is_active: bool | None = None
+    confirm_no_services: bool = False
+
+
+class NetworkSettingsUpdate(BaseModel):
+    """The «Умови мережі» form: two ``config`` keys, merged into the rest."""
+
+    sales_enabled: bool = False
+    network_policy: dict[str, Any]
+    confirm_no_services: bool = False
 
 
 # ─── Validation helpers ───────────────────────────────────
@@ -117,6 +138,199 @@ async def _check_extension_uniqueness(
             status_code=409,
             detail=f"Extension(s) already assigned to tenant '{conflict._mapping['slug']}'",
         )
+
+
+# ─── Network policy validation ────────────────────────────
+#
+# `NetworkPolicy.from_tenant_config` is lenient on purpose — a live call must
+# never fail on bad config, so garbage silently becomes "promise nothing".
+# The admin API is the other side: a typo saved here would silently switch a
+# service or a payment method off in every call. So the write path is strict
+# and answers 422 with every problem named.
+
+_POLICY_ENUM_LISTS: dict[str, dict[str, str]] = {
+    "services": SERVICE_LABELS,
+    "payment_methods": PAYMENT_LABELS,
+    "installment_banks": BANK_LABELS,
+}
+_POLICY_NAME_LISTS: tuple[str, ...] = (
+    "delivery_carriers",
+    "extended_warranty_brands",
+    "brand_priority",
+)
+_POLICY_TEXTS: tuple[str, ...] = ("delivery_eta_text", "cod_fee_text")
+_POLICY_KEYS: frozenset[str] = frozenset(
+    {
+        *_POLICY_ENUM_LISTS,
+        *_POLICY_NAME_LISTS,
+        *_POLICY_TEXTS,
+        "delivery_mode",
+        "pickup_available",
+        "recommend_count",
+        "order_finish",
+    }
+)
+
+#: Tools that serve each network service — the same map `src.main` uses to cut
+#: the tools of services a network does not offer (pinned equal by a test).
+_SERVICE_TOOLS: dict[str, frozenset[str]] = {
+    "fitting": frozenset(
+        {
+            "get_fitting_stations",
+            "get_fitting_slots",
+            "reserve_fitting_slot",
+            "book_fitting",
+            "cancel_fitting",
+            "get_fitting_price",
+            "get_customer_bookings",
+        }
+    ),
+    "storage": frozenset({"find_storage"}),
+}
+
+
+def _list_errors(raw: dict[str, Any], key: str, *, allowed: dict[str, str] | None) -> list[str]:
+    value = raw.get(key)
+    if value is None:
+        return []
+    if not isinstance(value, list):
+        return [f"{key} must be a list"]
+    errors: list[str] = []
+    for item in value:
+        if not isinstance(item, str) or not item.strip():
+            errors.append(f"{key}: {item!r} is not a non-empty string")
+        elif allowed is not None and item.strip().lower() not in allowed:
+            errors.append(f"{key}: {item!r} is not one of {list(allowed)}")
+    return errors
+
+
+def _policy_errors(raw: Any) -> list[str]:
+    """Every problem of a ``config.network_policy`` value (empty = valid)."""
+    if not isinstance(raw, dict):
+        return [f"network_policy must be an object, got {type(raw).__name__}"]
+    errors: list[str] = []
+
+    unknown = sorted(set(raw) - _POLICY_KEYS)
+    if unknown:
+        errors.append(f"network_policy: unknown keys {unknown}; allowed {sorted(_POLICY_KEYS)}")
+
+    mode = raw.get("delivery_mode", "unknown")
+    if mode not in DELIVERY_MODES:
+        errors.append(f"delivery_mode {mode!r} is not one of {list(DELIVERY_MODES)}")
+
+    finish = raw.get("order_finish", ORDER_FINISH_MODES[0])
+    if finish not in ORDER_FINISH_MODES:
+        errors.append(f"order_finish {finish!r} is not one of {list(ORDER_FINISH_MODES)}")
+
+    for key, allowed in _POLICY_ENUM_LISTS.items():
+        errors.extend(_list_errors(raw, key, allowed=allowed))
+    for key in _POLICY_NAME_LISTS:
+        errors.extend(_list_errors(raw, key, allowed=None))
+
+    for key in _POLICY_TEXTS:
+        value = raw.get(key)
+        if value is not None and not isinstance(value, str):
+            errors.append(f"{key} must be a string or null")
+
+    if not isinstance(raw.get("pickup_available", False), bool):
+        errors.append("pickup_available must be true or false")
+
+    count = raw.get("recommend_count", RECOMMEND_COUNT_MAX)
+    if (
+        isinstance(count, bool)
+        or not isinstance(count, int)
+        or not RECOMMEND_COUNT_MIN <= count <= RECOMMEND_COUNT_MAX
+    ):
+        errors.append(
+            f"recommend_count {count!r} must be an integer "
+            f"{RECOMMEND_COUNT_MIN}..{RECOMMEND_COUNT_MAX}"
+        )
+    return errors
+
+
+def _config_policy_errors(config: dict[str, Any]) -> list[str]:
+    """Problems of the policy keys of a whole ``tenants.config``."""
+    errors: list[str] = []
+    if "sales_enabled" in config and not isinstance(config["sales_enabled"], bool):
+        errors.append("sales_enabled must be true or false")
+    if "network_policy" in config:
+        errors.extend(_policy_errors(config["network_policy"]))
+    return errors
+
+
+def _raise_policy_errors(errors: list[str]) -> None:
+    if errors:
+        raise HTTPException(status_code=422, detail="; ".join(errors))
+
+
+def _uncovered_services(config: dict[str, Any], enabled_tools: list[str] | None) -> list[str]:
+    """Services whose tools this tenant has but the written policy leaves out.
+
+    A written ``network_policy`` (or ``sales_enabled``) makes a live call read
+    a service missing from ``services`` as "not provided": the claim guard
+    refuses it and the sales scope strips its tools. An empty policy ``{}``
+    would therefore silently cut fitting from a fitting network. Default-deny
+    over the whole service enum; empty ``enabled_tools`` means every tool.
+    """
+    raw = config.get("network_policy")
+    if not isinstance(raw, dict) and config.get("sales_enabled") is not True:
+        return []
+    services = raw.get("services") if isinstance(raw, dict) else None
+    offered = {
+        s.strip().lower()
+        for s in (services if isinstance(services, list) else [])
+        if isinstance(s, str)
+    }
+    tools = set(enabled_tools) if enabled_tools else set(_VALID_TOOL_NAMES)
+    return [
+        service
+        for service in SERVICE_LABELS
+        if service not in offered and tools & _SERVICE_TOOLS.get(service, frozenset())
+    ]
+
+
+def _check_service_coverage(
+    config: dict[str, Any], enabled_tools: list[str] | None, *, confirmed: bool
+) -> None:
+    """422 unless every service the tenant's tools serve is listed or confirmed."""
+    if confirmed:
+        return
+    missing = _uncovered_services(config, enabled_tools)
+    if missing:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"network_policy.services lacks {missing}, but the tenant has tools "
+                "for them — the bot would refuse these services. Add them to "
+                "services, or confirm that the network does not provide them "
+                "(confirm_no_services=true)."
+            ),
+        )
+
+
+def _normalize_policy(raw: dict[str, Any]) -> dict[str, Any]:
+    """A validated policy with enum names lowercased and strings stripped."""
+    out: dict[str, Any] = {}
+    for key, value in raw.items():
+        if key in _POLICY_ENUM_LISTS and isinstance(value, list):
+            out[key] = list(dict.fromkeys(v.strip().lower() for v in value))
+        elif key in _POLICY_NAME_LISTS and isinstance(value, list):
+            out[key] = list(dict.fromkeys(v.strip() for v in value))
+        elif key in _POLICY_TEXTS and isinstance(value, str):
+            out[key] = value.strip() or None
+        else:
+            out[key] = value
+    return out
+
+
+def _as_dict(value: Any) -> dict[str, Any]:
+    """A JSONB column value as a dict (a driver may hand back a str)."""
+    if isinstance(value, str):
+        try:
+            value = json.loads(value)
+        except ValueError:
+            return {}
+    return value if isinstance(value, dict) else {}
 
 
 # ─── CRUD endpoints ──────────────────────────────────────
@@ -198,6 +412,10 @@ async def create_tenant(request: TenantCreate, _: dict[str, Any] = _perm_w) -> d
         _validate_working_hours(request.working_hours)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"working_hours: {exc}") from exc
+    _raise_policy_errors(_config_policy_errors(request.config))
+    _check_service_coverage(
+        request.config, request.enabled_tools, confirmed=request.confirm_no_services
+    )
 
     engine = await _get_engine()
 
@@ -262,6 +480,8 @@ async def update_tenant(
             _validate_working_hours(request.working_hours)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=f"working_hours: {exc}") from exc
+    if request.config is not None:
+        _raise_policy_errors(_config_policy_errors(request.config))
 
     engine = await _get_engine()
 
@@ -312,6 +532,25 @@ async def update_tenant(
     async with engine.begin() as conn:
         if request.extensions is not None:
             await _check_extension_uniqueness(conn, request.extensions, str(tenant_id))
+        # Nothing uncovered even with every tool → no need to read the row.
+        if (
+            request.config is not None
+            and not request.confirm_no_services
+            and _uncovered_services(request.config, None)
+        ):
+            enabled_tools = request.enabled_tools
+            if enabled_tools is None:
+                current = await conn.execute(
+                    text("SELECT enabled_tools FROM tenants WHERE id = :id"),
+                    {"id": str(tenant_id)},
+                )
+                current_row = current.first()
+                if not current_row:
+                    raise HTTPException(status_code=404, detail="Tenant not found")
+                enabled_tools = list(current_row._mapping["enabled_tools"] or [])
+            _check_service_coverage(
+                request.config, enabled_tools, confirmed=request.confirm_no_services
+            )
         result = await conn.execute(
             text(f"""
                 UPDATE tenants
@@ -326,6 +565,55 @@ async def update_tenant(
 
     logger.info("Updated tenant %s", tenant_id)
     return {"message": "Tenant updated"}
+
+
+@router.put("/{tenant_id}/network-settings")
+async def update_network_settings(
+    tenant_id: UUID, request: NetworkSettingsUpdate, _: dict[str, Any] = _perm_w
+) -> dict[str, Any]:
+    """Save the «Умови мережі» form.
+
+    Only ``sales_enabled`` and ``network_policy`` change; every other
+    ``config`` key (``store_api_url``, ``excluded_station_ids``,
+    ``agent_provider_override`` …) is kept. ``network_policy`` is replaced
+    whole, so no stale key of an old policy survives.
+    """
+    _raise_policy_errors(_policy_errors(request.network_policy))
+    patch = {
+        "sales_enabled": request.sales_enabled,
+        "network_policy": _normalize_policy(request.network_policy),
+    }
+
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text("SELECT config, enabled_tools FROM tenants WHERE id = :id FOR UPDATE"),
+            {"id": str(tenant_id)},
+        )
+        row = result.first()
+        if not row:
+            raise HTTPException(status_code=404, detail="Tenant not found")
+        merged = {**_as_dict(row._mapping["config"]), **patch}
+        _check_service_coverage(
+            merged,
+            list(row._mapping["enabled_tools"] or []),
+            confirmed=request.confirm_no_services,
+        )
+        await conn.execute(
+            text("""
+                UPDATE tenants
+                SET config = CAST(:config AS jsonb), updated_at = now()
+                WHERE id = :id
+            """),
+            {"id": str(tenant_id), "config": json.dumps(merged)},
+        )
+
+    logger.info(
+        "Updated network settings of tenant %s (sales_enabled=%s)",
+        tenant_id,
+        request.sales_enabled,
+    )
+    return {"message": "Network settings updated", "config": merged}
 
 
 @router.delete("/{tenant_id}")

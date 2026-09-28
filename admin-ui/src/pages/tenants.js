@@ -1,6 +1,6 @@
 import { api } from '../api.js';
 import { showToast } from '../notifications.js';
-import { formatDate, escapeHtml, closeModal } from '../utils.js';
+import { formatDate, escapeHtml, closeModal, showModal } from '../utils.js';
 import { registerPageLoader } from '../router.js';
 import { t } from '../i18n.js';
 import { makeSortable } from '../sorting.js';
@@ -10,6 +10,9 @@ import * as tw from '../tw.js';
 // ─── State ───────────────────────────────────────────────────
 let _offset = 0;
 let _allTools = [];
+// config keys owned by the «Условия сети» form, carried through the edit modal
+const NET_CONFIG_KEYS = ['sales_enabled', 'network_policy'];
+let _editPolicyKeys = {};
 
 // Canonical tool names (fallback if API unavailable)
 const CANONICAL_TOOLS = [
@@ -190,6 +193,7 @@ async function loadTenants(offset) {
                             <button class="px-1.5 py-0.5 text-neutral-400 hover:text-neutral-700 dark:hover:text-neutral-200 text-sm cursor-pointer" onclick="this.nextElementSibling.classList.toggle('hidden')">&hellip;</button>
                             <div class="hidden absolute right-0 z-20 mt-1 w-40 bg-white dark:bg-neutral-800 border border-neutral-200 dark:border-neutral-700 rounded-md shadow-lg py-1">
                                 <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.tenants.editTenant('${tn.id}')">${t('common.edit')}</button>
+                                <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" data-id="${escapeHtml(tn.id)}" onclick="window._pages.tenants.editNetworkSettings(this.dataset.id)">${t('tenants.net.menu')}</button>
                                 <button class="w-full text-left px-3 py-1.5 text-xs hover:bg-neutral-100 dark:hover:bg-neutral-700 cursor-pointer" onclick="window._pages.tenants.toggleTenant('${tn.id}', ${tn.is_active})">${tn.is_active ? t('common.deactivate') : t('common.activate')}</button>
                                 <button class="w-full text-left px-3 py-1.5 text-xs text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 cursor-pointer" data-id="${escapeHtml(tn.id)}" data-name="${escapeHtml(tn.name)}" onclick="window._pages.tenants.deleteTenant(this.dataset.id, this.dataset.name)">${t('common.delete')}</button>
                             </div>
@@ -239,6 +243,7 @@ async function showCreateTenant() {
     document.getElementById('tenantGreeting').value = '';
     document.getElementById('tenantPromptSuffix').value = '';
     document.getElementById('tenantConfig').value = '{}';
+    _editPolicyKeys = {};
     document.getElementById('tenantIsActive').checked = true;
     document.getElementById('tenantToolsContainer').innerHTML = renderToolCheckboxes([]);
     fillWorkingHours(null);
@@ -267,6 +272,15 @@ async function editTenant(id) {
         const providerOverride = cfg.agent_provider_override || '';
         const restCfg = { ...cfg };
         delete restCfg.agent_provider_override;
+        // sales_enabled / network_policy belong to the «Условия сети» form:
+        // carried through this save unchanged, not shown in the raw JSON.
+        _editPolicyKeys = {};
+        for (const key of NET_CONFIG_KEYS) {
+            if (key in restCfg) {
+                _editPolicyKeys[key] = restCfg[key];
+                delete restCfg[key];
+            }
+        }
         document.getElementById('tenantConfig').value = JSON.stringify(restCfg, null, 2);
         document.getElementById('tenantIsActive').checked = tn.is_active !== false;
         document.getElementById('tenantToolsContainer').innerHTML = renderToolCheckboxes(tn.enabled_tools || []);
@@ -317,9 +331,27 @@ async function saveTenant() {
         return;
     }
 
+    // Put back the form-managed keys (a key typed into the raw JSON wins).
+    for (const [key, value] of Object.entries(_editPolicyKeys)) {
+        if (!(key in config)) config[key] = value;
+    }
+
     const working_hours = readWorkingHoursFromForm();
     const body = { name, network_id, agent_name, greeting, enabled_tools, extensions, prompt_suffix, config, working_hours, is_active };
     if (!id) body.slug = slug;
+
+    // A written policy (or sales on) without a service the tools serve makes
+    // the bot refuse that service — the API wants it confirmed.
+    const policy = config.network_policy;
+    if ((policy && typeof policy === 'object') || config.sales_enabled === true) {
+        const services = (policy && Array.isArray(policy.services)) ? policy.services.map(s => String(s).trim().toLowerCase()) : [];
+        const missing = _uncoveredServices(services, enabled_tools);
+        if (missing.length > 0) {
+            const names = missing.map(s => t(`tenants.net.service.${s}`)).join(', ');
+            if (!confirm(t('tenants.net.noServicesConfirm', { services: names }))) return;
+            body.confirm_no_services = true;
+        }
+    }
 
     try {
         if (id) {
@@ -357,6 +389,263 @@ async function deleteTenant(id, name) {
     }
 }
 
+// ─── «Умови мережі» (config.sales_enabled + config.network_policy) ─────
+// Enum values mirror src/agent/network_policy.py (DELIVERY_MODES,
+// PAYMENT_LABELS, BANK_LABELS, SERVICE_LABELS, RECOMMEND_COUNT_MIN/MAX);
+// the API rejects anything else with 422. Saved through
+// PUT /admin/tenants/{id}/network-settings, which merges the two keys into
+// config — store_api_url, excluded_station_ids, agent_provider_override and
+// every other key stay as they are.
+
+const NET_DELIVERY_MODES = ['free', 'carrier_tariff', 'unknown'];
+const NET_PAYMENT_METHODS = ['cod', 'card', 'prepay', 'installments'];
+const NET_BANKS = ['monobank', 'privatbank'];
+const NET_SERVICES = ['fitting', 'storage'];
+const NET_RECOMMEND_COUNTS = [2, 3];
+// Same map as src/main.py _SERVICE_TOOLS: a service left out of the policy
+// strips these tools and the guard refuses the service in live calls.
+const NET_SERVICE_TOOLS = {
+    fitting: ['get_fitting_stations', 'get_fitting_slots', 'reserve_fitting_slot', 'book_fitting',
+        'cancel_fitting', 'get_fitting_price', 'get_customer_bookings'],
+    storage: ['find_storage'],
+};
+
+// Input classes copied from the tenant modal (index.html) — never removed at
+// runtime, so the dark-theme contrast stays intact.
+const _netInput = 'w-full text-sm bg-white dark:bg-neutral-800 text-neutral-800 dark:text-neutral-200 border border-neutral-300 dark:border-neutral-600 rounded px-2 py-1.5 focus:outline-none focus:border-blue-500';
+const _netLabel = 'block text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1';
+const _netHint = 'text-xs text-neutral-500 dark:text-neutral-400 mt-0.5';
+const _netSection = 'border-t border-neutral-200 dark:border-neutral-700 pt-3 space-y-2';
+
+let _netState = { id: null, wasSalesEnabled: false, enabledTools: [], orderFinish: null };
+
+function _netCheckboxes(name, values, labelPrefix) {
+    return values.map(v => `
+        <label class="flex items-center gap-1.5 text-xs cursor-pointer">
+            <input type="checkbox" class="tn-net-${name}" value="${v}">
+            <span>${t(`${labelPrefix}.${v}`)}</span>
+        </label>`).join('');
+}
+
+function _ensureNetworkModal() {
+    // Rebuilt on every open so the labels follow a language switch.
+    const old = document.getElementById('tenantNetworkModal');
+    if (old) old.remove();
+    const el = document.createElement('div');
+    el.id = 'tenantNetworkModal';
+    el.className = 'modal-overlay fixed inset-0 bg-black/50 z-[100] justify-center items-center';
+    el.setAttribute('role', 'dialog');
+    el.setAttribute('aria-modal', 'true');
+    // Only translated labels and fixed enum values are interpolated here;
+    // tenant data is written through DOM properties in _fillNetworkForm.
+    el.innerHTML = `
+        <div class="bg-white dark:bg-neutral-900 border border-neutral-200 dark:border-neutral-800 rounded-xl shadow-2xl w-full max-w-lg max-h-[90vh] overflow-hidden flex flex-col">
+            <div class="modal-fixed-header">
+                <h2 class="text-base font-semibold text-neutral-900 dark:text-neutral-50" id="tnNetTitle"></h2>
+            </div>
+            <div class="modal-body">
+            <div class="space-y-3">
+                <p id="tnNetNotConfigured" class="hidden text-xs text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded px-2 py-1.5">${t('tenants.net.notConfigured')}</p>
+                <div>
+                    <label class="flex items-center gap-2 text-sm cursor-pointer">
+                        <input type="checkbox" id="tnNetSalesEnabled">
+                        <span class="font-medium">${t('tenants.net.salesEnabled')}</span>
+                    </label>
+                    <p class="${_netHint}">${t('tenants.net.salesEnabledHint')}</p>
+                    <p id="tnNetSalesWarning" class="hidden mt-1 text-xs text-red-700 dark:text-red-300 bg-red-50 dark:bg-red-950/30 border border-red-200 dark:border-red-800 rounded px-2 py-1.5">${t('tenants.net.salesWarning')}</p>
+                </div>
+                <div class="${_netSection}">
+                    <label class="${_netLabel}">${t('tenants.net.services')}</label>
+                    <div class="flex flex-wrap gap-3">${_netCheckboxes('service', NET_SERVICES, 'tenants.net.service')}</div>
+                    <p class="${_netHint}">${t('tenants.net.servicesHint')}</p>
+                </div>
+                <div class="${_netSection}">
+                    <div>
+                        <label class="${_netLabel}" for="tnNetDeliveryMode">${t('tenants.net.deliveryMode')}</label>
+                        <select id="tnNetDeliveryMode" class="${_netInput}">
+                            ${NET_DELIVERY_MODES.map(m => `<option value="${m}">${t(`tenants.net.delivery.${m}`)}</option>`).join('')}
+                        </select>
+                    </div>
+                    <div>
+                        <label class="${_netLabel}" for="tnNetCarriers">${t('tenants.net.carriers')}</label>
+                        <input id="tnNetCarriers" type="text" class="${_netInput}">
+                        <p class="${_netHint}">${t('tenants.net.commaHint')}</p>
+                    </div>
+                    <div>
+                        <label class="${_netLabel}" for="tnNetEta">${t('tenants.net.eta')}</label>
+                        <input id="tnNetEta" type="text" class="${_netInput}">
+                    </div>
+                    <label class="flex items-center gap-1.5 text-xs cursor-pointer">
+                        <input type="checkbox" id="tnNetPickup">
+                        <span>${t('tenants.net.pickup')}</span>
+                    </label>
+                </div>
+                <div class="${_netSection}">
+                    <label class="${_netLabel}">${t('tenants.net.payment')}</label>
+                    <div class="flex flex-wrap gap-3">${_netCheckboxes('payment', NET_PAYMENT_METHODS, 'tenants.net.pay')}</div>
+                    <div>
+                        <label class="${_netLabel}" for="tnNetCodFee">${t('tenants.net.codFee')}</label>
+                        <input id="tnNetCodFee" type="text" class="${_netInput}">
+                    </div>
+                    <div>
+                        <label class="${_netLabel}">${t('tenants.net.banks')}</label>
+                        <div class="flex flex-wrap gap-3">${_netCheckboxes('bank', NET_BANKS, 'tenants.net.bank')}</div>
+                    </div>
+                </div>
+                <div class="${_netSection}">
+                    <div>
+                        <label class="${_netLabel}" for="tnNetWarranty">${t('tenants.net.warranty')}</label>
+                        <input id="tnNetWarranty" type="text" class="${_netInput}">
+                        <p class="${_netHint}">${t('tenants.net.warrantyHint')}</p>
+                    </div>
+                    <div>
+                        <label class="${_netLabel}" for="tnNetBrandPriority">${t('tenants.net.brandPriority')}</label>
+                        <input id="tnNetBrandPriority" type="text" class="${_netInput}">
+                        <p class="${_netHint}">${t('tenants.net.brandPriorityHint')}</p>
+                    </div>
+                    <div>
+                        <label class="${_netLabel}" for="tnNetRecommendCount">${t('tenants.net.recommendCount')}</label>
+                        <select id="tnNetRecommendCount" class="${_netInput}">
+                            ${NET_RECOMMEND_COUNTS.map(n => `<option value="${n}">${n}</option>`).join('')}
+                        </select>
+                    </div>
+                </div>
+            </div>
+            <div class="flex justify-end gap-2 mt-4">
+                <button onclick="window._pages.tenants.closeNetworkSettings()" class="px-3 py-1.5 text-sm border border-neutral-300 dark:border-neutral-600 rounded-md text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 cursor-pointer">${t('common.cancel')}</button>
+                <button onclick="window._pages.tenants.saveNetworkSettings()" class="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 cursor-pointer">${t('common.save')}</button>
+            </div>
+            </div>
+        </div>`;
+    document.body.appendChild(el);
+    el.querySelector('#tnNetSalesEnabled').addEventListener('change', (e) => {
+        document.getElementById('tnNetSalesWarning').classList.toggle('hidden', !e.target.checked);
+    });
+}
+
+function _setChecked(name, values) {
+    const set = new Set((Array.isArray(values) ? values : []).map(v => String(v).trim().toLowerCase()));
+    document.querySelectorAll(`#tenantNetworkModal .tn-net-${name}`).forEach(cb => {
+        cb.checked = set.has(cb.value);
+    });
+}
+
+function _getChecked(name) {
+    return Array.from(document.querySelectorAll(`#tenantNetworkModal .tn-net-${name}:checked`)).map(cb => cb.value);
+}
+
+function _joinList(values) {
+    return Array.isArray(values) ? values.filter(v => typeof v === 'string').join(', ') : '';
+}
+
+function _splitList(value) {
+    const out = [];
+    for (const part of value.split(',')) {
+        const item = part.trim();
+        if (item && !out.includes(item)) out.push(item);
+    }
+    return out;
+}
+
+function _fillNetworkForm(tn) {
+    const cfg = (tn.config && typeof tn.config === 'object') ? tn.config : {};
+    const configured = cfg.network_policy && typeof cfg.network_policy === 'object' && !Array.isArray(cfg.network_policy);
+    const p = configured ? cfg.network_policy : {};
+    const sales = cfg.sales_enabled === true;
+    _netState = {
+        id: tn.id,
+        wasSalesEnabled: sales,
+        enabledTools: tn.enabled_tools || [],
+        orderFinish: typeof p.order_finish === 'string' ? p.order_finish : null,
+    };
+
+    document.getElementById('tnNetTitle').textContent = t('tenants.net.title', { name: tn.name || tn.slug || '' });
+    document.getElementById('tnNetNotConfigured').classList.toggle('hidden', !!configured);
+    document.getElementById('tnNetSalesEnabled').checked = sales;
+    document.getElementById('tnNetSalesWarning').classList.toggle('hidden', !sales);
+    _setChecked('service', p.services);
+    document.getElementById('tnNetDeliveryMode').value = NET_DELIVERY_MODES.includes(p.delivery_mode) ? p.delivery_mode : 'unknown';
+    document.getElementById('tnNetCarriers').value = _joinList(p.delivery_carriers);
+    document.getElementById('tnNetEta').value = typeof p.delivery_eta_text === 'string' ? p.delivery_eta_text : '';
+    document.getElementById('tnNetPickup').checked = p.pickup_available === true;
+    _setChecked('payment', p.payment_methods);
+    document.getElementById('tnNetCodFee').value = typeof p.cod_fee_text === 'string' ? p.cod_fee_text : '';
+    _setChecked('bank', p.installment_banks);
+    document.getElementById('tnNetWarranty').value = _joinList(p.extended_warranty_brands);
+    document.getElementById('tnNetBrandPriority').value = _joinList(p.brand_priority);
+    const count = NET_RECOMMEND_COUNTS.includes(p.recommend_count) ? p.recommend_count : Math.max(...NET_RECOMMEND_COUNTS);
+    document.getElementById('tnNetRecommendCount').value = String(count);
+}
+
+function _readNetworkForm() {
+    const policy = {
+        services: _getChecked('service'),
+        delivery_mode: document.getElementById('tnNetDeliveryMode').value,
+        delivery_carriers: _splitList(document.getElementById('tnNetCarriers').value),
+        delivery_eta_text: document.getElementById('tnNetEta').value.trim() || null,
+        pickup_available: document.getElementById('tnNetPickup').checked,
+        payment_methods: _getChecked('payment'),
+        cod_fee_text: document.getElementById('tnNetCodFee').value.trim() || null,
+        installment_banks: _getChecked('bank'),
+        extended_warranty_brands: _splitList(document.getElementById('tnNetWarranty').value),
+        brand_priority: _splitList(document.getElementById('tnNetBrandPriority').value),
+        recommend_count: parseInt(document.getElementById('tnNetRecommendCount').value, 10),
+    };
+    // The form has no field for order_finish (one mode so far) — keep it.
+    if (_netState.orderFinish) policy.order_finish = _netState.orderFinish;
+    return {
+        sales_enabled: document.getElementById('tnNetSalesEnabled').checked,
+        network_policy: policy,
+    };
+}
+
+function _uncoveredServices(services, enabledTools) {
+    const tools = new Set(enabledTools || []);
+    const all = tools.size === 0;  // empty enabled_tools = every tool
+    return NET_SERVICES.filter(s => !services.includes(s)
+        && (all || NET_SERVICE_TOOLS[s].some(name => tools.has(name))));
+}
+
+async function editNetworkSettings(id) {
+    try {
+        const data = await api(`/admin/tenants/${id}`);
+        _ensureNetworkModal();
+        _fillNetworkForm(data.tenant);
+        showModal('tenantNetworkModal');
+    } catch (e) {
+        showToast(t('tenants.loadFailed', { error: e.message }), 'error');
+    }
+}
+
+function closeNetworkSettings() {
+    closeModal('tenantNetworkModal');
+}
+
+async function saveNetworkSettings() {
+    const id = _netState.id;
+    if (!id) return;
+    const body = _readNetworkForm();
+
+    if (body.sales_enabled && !_netState.wasSalesEnabled) {
+        if (!confirm(t('tenants.net.salesConfirm'))) return;
+    }
+    const missing = _uncoveredServices(body.network_policy.services, _netState.enabledTools);
+    if (missing.length > 0) {
+        const names = missing.map(s => t(`tenants.net.service.${s}`)).join(', ');
+        if (!confirm(t('tenants.net.noServicesConfirm', { services: names }))) return;
+        body.confirm_no_services = true;
+    }
+
+    try {
+        await api(`/admin/tenants/${id}/network-settings`, { method: 'PUT', body: JSON.stringify(body) });
+        showToast(t('tenants.net.saved'));
+        closeModal('tenantNetworkModal');
+        loadTenants(_offset);
+    } catch (e) {
+        showToast(t('tenants.saveFailed', { error: e.message }), 'error');
+    }
+}
+
 // ─── Init & exports ──────────────────────────────────────────
 
 export function init() {
@@ -378,4 +667,5 @@ window._pages = window._pages || {};
 window._pages.tenants = {
     loadTenants, showCreateTenant, editTenant, saveTenant,
     toggleTenant, deleteTenant,
+    editNetworkSettings, saveNetworkSettings, closeNetworkSettings,
 };

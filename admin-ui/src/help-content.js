@@ -212,6 +212,8 @@ export const HELP_PAGES = {
             { titleKey: 'help.tenants.creating.steps', contentKey: 'help.tenants.creating.stepsContent' },
             { titleKey: 'help.tenants.tools.title', contentKey: 'help.tenants.tools.content' },
             { titleKey: 'help.tenants.workingHours.title', contentKey: 'help.tenants.workingHours.content' },
+            { titleKey: 'help.tenants.network.title', contentKey: 'help.tenants.network.content' },
+            { titleKey: 'help.tenants.network.steps', contentKey: 'help.tenants.network.stepsContent' },
             { titleKey: 'help.tenants.affects.title', contentKey: 'help.tenants.affects.content' },
         ],
         tipsKey: 'help.tenants.tips',

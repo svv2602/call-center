@@ -88,8 +88,14 @@ def _register_live_tools(
     knowledge_search: Any = None,
     tenant_id: str = "",
     store_client: Any = None,
+    network_policy: NetworkPolicy | None = None,
 ) -> None:
-    """Override mock handlers with real handlers where available."""
+    """Override mock handlers with real handlers where available.
+
+    ``network_policy`` ranks ``search_tires`` exactly as the live tool router
+    does (``src.main._build_tool_router``): brand priority and variant count
+    come from the network, never from the LLM's args.
+    """
     # Register real knowledge search (pgvector) if available
     if knowledge_search is not None:
 
@@ -109,7 +115,20 @@ def _register_live_tools(
         router.register("get_vehicle_tire_sizes", store_client.get_vehicle_tire_sizes)
 
         async def _search_tires(**params: Any) -> dict[str, Any]:
+            params.pop("brand_priority", None)
+            params.pop("recommend_count", None)
+            if network_policy is not None:
+                params["brand_priority"] = network_policy.brand_priority
+                params["recommend_count"] = network_policy.recommend_count
             return await store_client.search_tires(network=network, **params)
+
+        async def _search_disks(**params: Any) -> dict[str, Any]:
+            # As the live router: the offer size comes from the policy, not the LLM.
+            params.pop("recommend_count", None)
+            params.pop("network", None)
+            if network_policy is not None:
+                params["recommend_count"] = network_policy.recommend_count
+            return await store_client.search_disks(network=network, **params)
 
         async def _check_availability(
             product_id: str = "", query: str = "", **kw: Any
@@ -117,6 +136,7 @@ def _register_live_tools(
             return await store_client.check_availability(product_id, query, network=network, **kw)
 
         router.register("search_tires", _search_tires)
+        router.register("search_disks", _search_disks)
         router.register("check_availability", _check_availability)
         router.register("get_order_status", store_client.search_orders)
         router.register("create_order_draft", store_client.create_order)
@@ -461,6 +481,7 @@ async def create_sandbox_agent(
             knowledge_search=knowledge_search,
             tenant_id=tenant_id,
             store_client=store_client,
+            network_policy=NetworkPolicy.from_tenant_config((tenant or {}).get("config")),
         )
 
     # Modular prompt assembly for sandbox: skip pronunciation (text mode, no TTS)
@@ -542,6 +563,7 @@ async def create_sandbox_agent(
         few_shot_context=few_shot_context,
         safety_context=safety_context,
         promotions_context=promotions_context,
+        # Kept literal: `test_network_policy` pins this call site by AST.
         network_policy=NetworkPolicy.from_tenant_config((tenant or {}).get("config")),
     )
 
