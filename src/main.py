@@ -1630,7 +1630,22 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
         return await client.update_delivery(**kwargs)
 
     async def _confirm_order(**kwargs: Any) -> Any:
-        """Confirm order: try 1C direct, fallback to Store API."""
+        """Hand the order to a manager as a request: 1C direct, fallback Store API.
+
+        An order ends as a *request* in 1C — a manager calls back and confirms
+        it (owner decision 2026-09-28). So the result never says «підтверджено»,
+        and the technical number (AI-N, 1C response) stays out of the
+        LLM-visible result — it is logged instead. When both 1C and the Store
+        API fallback fail, the caller hears «передам менеджеру», never
+        «прийнято», and no raw exception reaches the ToolRouter.
+        """
+        from src.agent.prompts import ORDER_REQUEST_CREATED_TEXT, ORDER_REQUEST_FAILED_TEXT
+
+        request_created = {
+            "status": "request_created",
+            "payment_method": kwargs.get("payment_method", "cod"),
+            "message": ORDER_REQUEST_CREATED_TEXT,
+        }
         if session.order_draft is not None and _onec_client is not None:
             try:
                 # Generate AI order number via Redis sequence
@@ -1656,13 +1671,11 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 session.order_id = order_number
                 session.order_draft = None
                 orders_created_total.inc()
-                return {
-                    "order_id": order_number,
-                    "status": "confirmed",
-                    "payment_method": kwargs.get("payment_method", "cod"),
-                    "message": f"Замовлення {order_number} підтверджено.",
-                    "onec_response": result,
-                }
+                logger.info(
+                    "Order request %s created in 1C for call %s: %s",
+                    order_number, session.channel_uuid, result,
+                )
+                return request_created
             except Exception:
                 logger.warning(
                     "1C order creation failed for call %s, falling back to Store API",
@@ -1672,11 +1685,37 @@ def _build_tool_router(session: CallSession, store_client: StoreClient | None = 
                 # Fallback: use Store API 3-step flow
                 session.order_draft = None
 
-        # Store API fallback (or no draft)
-        result = await client.confirm_order(**kwargs)
-        if isinstance(result, dict) and result.get("id"):
+        # Store API fallback (or no draft). Default-deny: only a truthy `id` or
+        # `order_number` is a created request; an error dict, an empty answer or an exception all
+        # end as request_failed.
+        try:
+            result = await client.confirm_order(**kwargs)
+        except Exception:
+            logger.warning(
+                "Store API order request failed for call %s", session.channel_uuid,
+                exc_info=True,
+            )
+            result = None
+        # `order_id` is no marker: StoreClient echoes the requested id back.
+        if isinstance(result, dict) and not result.get("error") and (
+            result.get("id") or result.get("order_number")
+        ):
             orders_created_total.inc()
-        return result
+            logger.info(
+                "Order request created via Store API for call %s: %s",
+                session.channel_uuid, result,
+            )
+            return request_created
+        logger.warning(
+            "Order request not created for call %s (Store API answer: %r)",
+            session.channel_uuid, result,
+        )
+        return {
+            "error": True,
+            "status": "request_failed",
+            "reason": "request_failed",
+            "message": ORDER_REQUEST_FAILED_TEXT,
+        }
 
     async def _book_fitting_with_metric(**kwargs: Any) -> Any:
         """Book fitting: try SOAP, fallback to Store API."""

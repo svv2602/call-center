@@ -226,7 +226,7 @@ class TestFormatCallerHistory:
         assert result is not None
         # All 17 tools should produce actions
         assert "шукав шини" in result
-        assert "підтвердив замовлення" in result
+        assert "передав заявку на замовлення" in result
         assert "переведено на оператора" in result
 
 

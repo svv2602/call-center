@@ -10,6 +10,7 @@ import copy
 from typing import Any
 
 from src.agent.agent import ToolRouter
+from src.agent.prompts import ORDER_REQUEST_CREATED_TEXT
 
 MOCK_RESPONSES: dict[str, Any] = {
     "get_vehicle_tire_sizes": {
@@ -104,12 +105,12 @@ MOCK_RESPONSES: dict[str, Any] = {
         "total": 12950,
         "estimated_delivery": "2026-02-22",
     },
+    # Same shape as the live `_confirm_order` (main.py): a request for a
+    # manager, no number the bot could read out, never «підтверджено».
     "confirm_order": {
-        "order_id": "ORD-2026-0099",
-        "status": "confirmed",
-        "total": 12950,
+        "status": "request_created",
         "payment_method": "cod",
-        "message": "Замовлення підтверджено. Номер: ORD-2026-0099",
+        "message": ORDER_REQUEST_CREATED_TEXT,
     },
     "get_pickup_points": {
         "total": 3,

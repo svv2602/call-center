@@ -222,6 +222,13 @@ class TestBuildSystemPromptWithContext:
         assert "CallerID клієнта: +380671234567" in result
         assert "Поточне замовлення (чорновик): DRAFT-123" in result
 
+    def test_request_number_is_marked_not_for_the_caller(self) -> None:
+        """After confirm_order the number is a 1C request, not a draft, and not spoken."""
+        result = build_system_prompt_with_context("base", is_modular=True, order_id="AI-7")
+        assert "Заявка на замовлення: AI-7" in result
+        assert "клієнту не називай" in result
+        assert "чорновик" not in result
+
     def test_no_caller_context_when_empty(self) -> None:
         """No caller context section when phone/order_id are None."""
         result = build_system_prompt_with_context("base")
@@ -249,7 +256,8 @@ class TestBuildSystemPromptWithContext:
     def test_stage_confirmed_injects_offer_fitting(self) -> None:
         """confirmed stage injects OFFER_FITTING."""
         result = build_system_prompt_with_context("base", is_modular=True, order_stage="confirmed")
-        assert "Замовлення підтверджено" in result
+        assert "Заявку на замовлення прийнято" in result
+        assert "Замовлення підтверджено" not in result
         assert "шиномонтаж" in result
 
     def test_stage_draft_no_injection(self) -> None:
@@ -262,7 +270,7 @@ class TestBuildSystemPromptWithContext:
         """No stage = no injection."""
         result = build_system_prompt_with_context("base", is_modular=True, order_stage=None)
         assert "Підтвердження замовлення" not in result
-        assert "Замовлення підтверджено" not in result
+        assert "Заявку на замовлення прийнято" not in result
 
     def test_safety_and_few_shot_injected(self) -> None:
         """Safety context and few-shot context are injected."""
