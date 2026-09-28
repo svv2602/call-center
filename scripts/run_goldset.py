@@ -48,6 +48,7 @@ import sys
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import date
 from pathlib import Path
 from typing import Any
 
@@ -97,7 +98,24 @@ ASSERTION_KEYS: tuple[str, ...] = (
     "network_leak",
 )
 CASE_KEYS = frozenset(
-    {"id", "title", "network", "sales_enabled", "pending", "source", "notes", "mocks", "turns"}
+    {
+        "id",
+        "title",
+        "network",
+        "sales_enabled",
+        "pending",
+        "source",
+        "notes",
+        "mocks",
+        "promotions",
+        "turns",
+    }
+)
+PROMOTION_KEYS = frozenset({"title", "bot_text", "valid_to", "overrides", "mention_brands"})
+# The keys `src.agent.promotions.promo_overrides` reads. Default-deny: a typo
+# («free_delivry») would silently grant nothing, so an unknown key is an error.
+PROMOTION_OVERRIDE_KEYS = frozenset(
+    {"free_delivery", "discount", "extended_warranty_brands", "partner_service"}
 )
 TURN_KEYS = frozenset({"user", "expect", "expect_by_network"})
 _ID_RE = re.compile(r"^[a-z0-9_]+$")
@@ -126,6 +144,9 @@ class Case:
     source: str = ""
     mocks: dict[str, Any] = field(default_factory=dict)
     title: str = ""
+    # The network's promotions for this case, as `ActivePromotion` fields.
+    # Absent in the case = none: a case never depends on the `promotions` table.
+    promotions: tuple[dict[str, Any], ...] = ()
 
 
 class CaseError(ValueError):
@@ -164,6 +185,56 @@ def _check_expect(where: str, expect: Any) -> None:
         raise CaseError(f"{where}: transfer_reason must be a string")
 
 
+def _as_day(value: Any) -> date | None:
+    if isinstance(value, date):
+        return value
+    if isinstance(value, str):
+        try:
+            return date.fromisoformat(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _parse_promotions(cid: str, raw: Any) -> tuple[dict[str, Any], ...]:
+    if raw is None:
+        return ()
+    if not isinstance(raw, list):
+        raise CaseError(f"{cid}: promotions must be a list")
+    out: list[dict[str, Any]] = []
+    for n, p in enumerate(raw, 1):
+        where = f"{cid} promotion {n}"
+        if not isinstance(p, dict):
+            raise CaseError(f"{where}: must be a mapping")
+        if set(p) - PROMOTION_KEYS:
+            raise CaseError(f"{where}: unknown key(s) {sorted(set(p) - PROMOTION_KEYS)}")
+        for key in ("title", "bot_text"):
+            if not isinstance(p.get(key), str) or not p[key].strip():
+                raise CaseError(f"{where}: {key} is required")
+        valid_to = _as_day(p.get("valid_to"))
+        if valid_to is None:
+            raise CaseError(f"{where}: valid_to (YYYY-MM-DD) is required")
+        overrides = p.get("overrides") or {}
+        if not isinstance(overrides, dict):
+            raise CaseError(f"{where}: overrides must be a mapping")
+        if set(overrides) - PROMOTION_OVERRIDE_KEYS:
+            unknown = sorted(set(overrides) - PROMOTION_OVERRIDE_KEYS)
+            raise CaseError(f"{where}: unknown override(s) {unknown}")
+        brands = p.get("mention_brands") or []
+        if not (isinstance(brands, list) and all(isinstance(b, str) for b in brands)):
+            raise CaseError(f"{where}: mention_brands must be a list of strings")
+        out.append(
+            {
+                "title": p["title"].strip(),
+                "bot_text": p["bot_text"].strip(),
+                "valid_to": valid_to,
+                "overrides": dict(overrides),
+                "mention_brands": tuple(brands),
+            }
+        )
+    return tuple(out)
+
+
 def parse_case(raw: Any) -> Case:
     """Validate one case mapping and build a ``Case``. Raises ``CaseError``."""
     if not isinstance(raw, dict):
@@ -193,6 +264,8 @@ def parse_case(raw: Any) -> Case:
     if not isinstance(mocks, dict):
         raise CaseError(f"{cid}: mocks must be a mapping tool -> result")
 
+    promotions = _parse_promotions(cid, raw.get("promotions"))
+
     raw_turns = raw.get("turns")
     if not isinstance(raw_turns, list) or not raw_turns:
         raise CaseError(f"{cid}: turns must be a non-empty list")
@@ -221,6 +294,7 @@ def parse_case(raw: Any) -> Case:
         source=str(raw.get("source") or ""),
         mocks=mocks,
         title=str(raw.get("title") or ""),
+        promotions=promotions,
     )
 
 
@@ -553,6 +627,28 @@ async def _play_sandbox_turn(
     return obs, res.updated_history
 
 
+def case_promotions(case: Case, today: date | None = None) -> list[Any]:
+    """The case's promotions live on ``today`` (Kyiv), as ``ActivePromotion``.
+
+    Only live ones, as ``load_active_promotions`` would return them: a case
+    whose promotion has ended plays without it.
+    """
+    from src.agent.promotions import ActivePromotion, kyiv_today
+
+    day = today or kyiv_today()
+    return [
+        ActivePromotion(
+            title=p["title"],
+            bot_text=p["bot_text"],
+            valid_to=p["valid_to"],
+            overrides=copy.deepcopy(p["overrides"]),
+            mention_brands=tuple(p["mention_brands"]),
+        )
+        for p in case.promotions
+        if p["valid_to"] >= day
+    ]
+
+
 def _const_handler(result: Any) -> Callable[..., Awaitable[Any]]:
     async def _handler(**_kwargs: object) -> Any:
         return copy.deepcopy(result)
@@ -602,6 +698,8 @@ class SandboxAgentFactory:
             provider_override=provider,
             tenant=tenant,
             tenant_id=str(tenant["id"]),
+            # The case's promotions, never the table (empty when it names none).
+            promotions_override=case_promotions(case),
         )
         for tool, result in case.mocks.items():
             agent.tool_router.register(tool, _const_handler(result))

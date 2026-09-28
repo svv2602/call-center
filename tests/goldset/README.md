@@ -67,3 +67,7 @@ python -m scripts.run_goldset --include-pending --yes --json-out /tmp/goldset.js
 2. Условие сети — `network: both` + `expect_by_network`.
 3. Ожидание недостижимо до волны — `pending: '<чеклист>: <почему>'`.
 4. `python -m scripts.run_goldset --validate`.
+
+## Акции в кейсе
+
+Поле `promotions:` — список акций сети на время кейса: `title`, `bot_text`, `valid_to` (дата), `overrides` (`free_delivery`, `extended_warranty_brands`, `discount`, `partner_service`), `mention_brands`. Харнесс передаёт их в песочницу вместо таблицы `promotions` (БД не читается и не пишется); истёкшие отбрасываются, как у живого звонка. Нет поля — у кейса нет акций. Бесплатная доставка брендовой акции проходит гард только во фразе с брендом из `mention_brands`.

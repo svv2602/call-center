@@ -1,0 +1,152 @@
+# Network promotions (owner decisions 2026-09-28): a live promotion beats the
+# network's standard terms, but only within its own conditions (brands, way of
+# purchase) and dates; every network has its own.
+#
+# `promotions:` is the network's list for the case — the harness passes it to
+# the sandbox instead of the `promotions` table (`promotions_override`), so a
+# case never depends on the DB. Absent = no promotions. An expired promotion is
+# written as its absence: `load_active_promotions` would not return it either.
+# Texts are copied from `scripts/migrate_promotions.py:KNOWN_PROMOTIONS` — what
+# prod holds after the migration.
+#
+# With sales on, the text path runs the reply through `guard_text` with the
+# promotions' exemptions (6579e81), so a claim the promotion covers must come
+# through, and one it does not cover is replaced by the network's standard
+# line («Доставка — за тарифами перевізника.»).
+#
+# `network_leak: false` only where the promotion itself legitimately says what
+# is another network's standard term (free delivery; «Твоя Шина» as the
+# partner); those turns name the remaining leak phrases explicitly.
+
+- id: promo_pk_free_delivery_brand_in_scope
+  title: ПК — акція «безкоштовна доставка Doublestar та Rydanz», питають про Doublestar → безкоштовно, гард не вирізає
+  source: owner:promotions-2026-09-28
+  notes: the guard lets a free-delivery sentence through only when it names a brand of the promotion; «доставка цих шин безкоштовна» without the brand is replaced — red here is that design, not the model
+  network: [prokoleso]
+  sales_enabled: true
+  promotions:
+    - title: Безкоштовна доставка шин Doublestar та Rydanz
+      bot_text: Безкоштовна доставка «Новою Поштою» по Україні на всі шини Doublestar та Rydanz — навіть при замовленні однієї шини. Діє на літні, зимові та всесезонні шини.
+      valid_to: 2026-12-31
+      overrides: {free_delivery: true}
+      mention_brands: [doublestar, rydanz]
+  turns:
+    - user: скільки коштує доставка шин Doublestar?
+      expect:
+        network_leak: false
+        must_contain: ['безкоштовн|бесплатн|безплатн']
+        must_not_contain:
+          # the guard's replacement — the sentence was cut
+          - 'доставка\s*[—-]\s*за\s+тарифами\s+перевізника'
+          - '\d+\s*(грн|гривень|гривні|гривен)'
+          - 'тво[яєїюе]\w*\s+шин'
+
+- id: promo_pk_free_delivery_brand_out_of_scope
+  title: ПК — та сама акція, питають про Michelin → стандартні умови, без «безкоштовно»
+  source: owner:promotions-2026-09-28
+  network: [prokoleso]
+  sales_enabled: true
+  promotions:
+    - title: Безкоштовна доставка шин Doublestar та Rydanz
+      bot_text: Безкоштовна доставка «Новою Поштою» по Україні на всі шини Doublestar та Rydanz — навіть при замовленні однієї шини. Діє на літні, зимові та всесезонні шини.
+      valid_to: 2026-12-31
+      overrides: {free_delivery: true}
+      mention_brands: [doublestar, rydanz]
+  turns:
+    - user: скільки коштує доставка шин Michelin?
+      expect:
+        must_contain: ['тариф\w*\s+перевізник|тариф\w*\s+перевозчик']
+        must_not_contain: ['безкоштовн', 'бесплатн', 'безплатн']
+
+- id: promo_pk_free_delivery_expired
+  title: ПК — акції немає (закінчилась) → «чи є безкоштовна доставка?» — стандартні умови
+  source: owner:promotions-2026-09-28
+  notes: no `promotions` — the ended Doublestar/Rydanz promotion is not live; the harness passes an empty list, never the table. «Безкоштовної доставки немає» is a right answer, so the default leak check (which reads it as an offer) is off and the offer forms are listed instead
+  network: [prokoleso]
+  sales_enabled: true
+  turns:
+    - user: чи є у вас безкоштовна доставка?
+      expect:
+        network_leak: false
+        must_contain: ['тариф\w*\s+перевізник|тариф\w*\s+перевозчик']
+        must_not_contain:
+          - '(?<!не\s)(?:є|діє|есть|действует)\s+(?:\w+\s+){0,2}(?:безкоштовн|бесплатн|безплатн)\w*\s+доставк'
+          - 'доставк\w*\s+(?:\w+\s+){0,2}(?:—\s*)?(?<!не\s)(?:безкоштовн|бесплатн|безплатн)'
+          - 'тво[яєїюе]\w*\s+шин'
+
+- id: promo_pk_unrelated_brand_not_mentioned
+  title: ПК — акція на Matador, питають про Bridgestone → акцію Matador не згадує
+  source: owner:promotions-2026-09-28
+  network: [prokoleso]
+  sales_enabled: true
+  promotions:
+    - title: Гарантія на шини Matador
+      bot_text: Гарантія 12 місяців на легкові шини Matador, куплені на сайті Prokoleso.ua, від проколів, порізів та інших пошкоджень. Якщо шину можна відремонтувати — компенсуємо вартість ремонту, якщо ні — суму пропорційно залишку протектора; виплата на картку протягом 5 робочих днів.
+      valid_to: 2026-12-31
+      overrides: {extended_warranty_brands: [matador]}
+      mention_brands: [matador]
+  turns:
+    - user: мені потрібні шини Bridgestone, розмір двісті п'ять п'ятдесят п'ять шістнадцять
+      expect:
+        must_not_contain: ['matador|матадор', 'акці|акци']
+
+- id: promo_pk_partner_fitting
+  title: ПК — партнерська акція «Ексклюзивне сервісне обслуговування» → «не надаємо» або знижка на шиномонтаж у Твоя Шина за акцією; запису немає
+  source: owner:promotions-2026-09-28
+  notes: «Твоя Шина» is legitimate here as the promotion's partner, so the default leak check is off; the booking offer and the fitting tools stay forbidden
+  network: [prokoleso]
+  sales_enabled: true
+  promotions:
+    - title: Ексклюзивне сервісне обслуговування на 3 роки
+      bot_text: При покупці комплекту з 4 шин будь-якого бренду — знижка 25% на шиномонтаж і безкоштовний ремонт проколів у зоні протектора протягом 3 років у сервісних центрах «Твоя Шина». Активувати треба протягом 30 днів від покупки, назвавши номер замовлення.
+      valid_to: 2026-12-31
+      overrides:
+        discount: true
+        partner_service: {service: fitting, network_label: Твоя Шина}
+  turns:
+    - user: чи можна у вас змонтувати шини?
+      expect:
+        network_leak: false
+        must_contain:
+          # either the network's refusal, or the promotion: a discount on fitting
+          # tied to the partner network in the same sentence, in either order
+          - 'не\s+(?:надаєм|надаем|пропонуєм|предоставля)|(?:знижк|скидк)[^.!?]{0,60}монтаж[^.!?]{0,60}тво[яєїюе]\w*\s+шин|тво[яєїюе]\w*\s+шин[^.!?]{0,60}(?:знижк|скидк)[^.!?]{0,40}монтаж'
+        must_not_contain:
+          - 'запи(?:шу|сую|шемо|сати|сатися|суємо)\s+(?:\w+\s+){0,2}на\s+(?:шино)?монтаж'
+          - 'запиш(?:у|ем)\s+(?:\w+\s+){0,2}на\s+(?:шино)?монтаж'
+          - '(?:залиш|здат|прийм|зберіга)\w*\s+(?:\w+\s+){0,2}на\s+зберіганн'
+        tool_not_called: [get_fitting_stations, get_fitting_slots, book_fitting]
+
+- id: promo_pk_no_partner_promo_fitting
+  title: ПК — без акції «чи можна змонтувати?» → тільки «не надаємо», Твоя Шина не згадується
+  source: owner:promotions-2026-09-28
+  network: [prokoleso]
+  sales_enabled: true
+  turns:
+    - user: чи можна у вас змонтувати шини?
+      expect:
+        must_contain: ['не\s+(?:надаєм|надаем|пропонуєм|предоставля)']
+        must_not_contain: ['тво[яєїюе]\w*\s+шин', 'знижк\w*\s+(?:\w+\s+){0,4}(?:шино)?монтаж|скидк\w*\s+(?:\w+\s+){0,4}(?:шино)?монтаж']
+        tool_not_called: [get_fitting_stations, get_fitting_slots, book_fitting]
+
+- id: promo_ts_michelin_service_program
+  title: ТШ — «Сервісна програма MICHELIN» → розширена гарантія на Мішлен за умови покупки в торговому центрі
+  source: owner:promotions-2026-09-28
+  notes: the network's own extended warranty is Bridgestone only; «тільки Bridgestone» here means the promotion was ignored
+  network: [tvoya-shina]
+  sales_enabled: true
+  promotions:
+    - title: Сервісна програма MICHELIN
+      bot_text: 'Сервісна програма MICHELIN: при покупці в торговому центрі «Твоя Шина» і встановленні там комплекту від 4 шин MICHELIN, вироблених після 01.01.2022, пошкоджену шину, яку не можна відремонтувати (прокол, розрив чи здуття боковини), безкоштовно замінять на таку саму. Не діє на шини, куплені в кредит або частинами.'
+      valid_to: 2026-12-31
+      overrides: {extended_warranty_brands: [michelin]}
+      mention_brands: [michelin]
+  turns:
+    - user: чи є розширена гарантія на Мішлен?
+      expect:
+        must_contain:
+          - 'програм'
+          - 'торгов\w*\s+(?:\w+\s+){0,1}центр|\bТЦ\b'
+        must_not_contain:
+          - '(?:тільки|лише|только)\s+(?:на\s+)?(?:шини\s+)?(?:bridgestone|бріджстоун|бриджстоун)'
+          - '(?:michelin|мішлен|мишлен)\w*\s+(?:\w+\s+){0,3}(?:немає|нема|нет)\b'

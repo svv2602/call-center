@@ -9,6 +9,7 @@ import argparse
 import asyncio
 import json
 import re
+from datetime import date
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, create_autospec
@@ -277,6 +278,67 @@ class TestParseCase:
             case(pending="wave-3-G-sales-scope-switch")
 
 
+_DOUBLESTAR = {
+    "title": "Безкоштовна доставка шин Doublestar та Rydanz",
+    "bot_text": "Безкоштовна доставка на шини Doublestar та Rydanz.",
+    "valid_to": "2026-12-31",
+    "overrides": {"free_delivery": True},
+    "mention_brands": ["doublestar", "rydanz"],
+}
+
+
+class TestCasePromotions:
+    def test_absent_means_none(self) -> None:
+        assert case().promotions == ()
+        assert rg.case_promotions(case(), today=date(2026, 9, 28)) == []
+
+    def test_fields_reach_active_promotion(self) -> None:
+        from src.agent.promotions import ActivePromotion
+
+        c = case(promotions=[_DOUBLESTAR])
+        (p,) = rg.case_promotions(c, today=date(2026, 9, 28))
+        assert isinstance(p, ActivePromotion)
+        assert p.title == _DOUBLESTAR["title"]
+        assert p.bot_text == _DOUBLESTAR["bot_text"]
+        assert p.valid_to == date(2026, 12, 31)
+        assert p.overrides == {"free_delivery": True}
+        assert p.mention_brands == ("doublestar", "rydanz")
+
+    def test_yaml_date_is_accepted(self) -> None:
+        c = case(promotions=[{**_DOUBLESTAR, "valid_to": date(2026, 12, 31)}])
+        assert rg.case_promotions(c, today=date(2026, 12, 31))[0].valid_to == date(2026, 12, 31)
+
+    def test_ended_promotion_is_not_passed(self) -> None:
+        c = case(promotions=[_DOUBLESTAR])
+        assert rg.case_promotions(c, today=date(2027, 1, 1)) == []
+
+    def test_promotion_scopes_reach_the_guard_overrides(self) -> None:
+        from src.agent.promotions import promo_overrides
+
+        c = case(promotions=[_DOUBLESTAR])
+        o = promo_overrides(rg.case_promotions(c, today=date(2026, 9, 28)))
+        assert o.free_delivery_brand_scopes == (frozenset({"doublestar", "rydanz"}),)
+
+    @pytest.mark.parametrize(
+        ("promotions", "msg"),
+        [
+            ({"title": "x"}, "must be a list"),
+            (["x"], "mapping"),
+            ([{**_DOUBLESTAR, "colour": "red"}], "unknown key"),
+            ([{**_DOUBLESTAR, "title": " "}], "title"),
+            ([{k: v for k, v in _DOUBLESTAR.items() if k != "bot_text"}], "bot_text"),
+            ([{**_DOUBLESTAR, "valid_to": "31.12.2026"}], "valid_to"),
+            ([{k: v for k, v in _DOUBLESTAR.items() if k != "valid_to"}], "valid_to"),
+            ([{**_DOUBLESTAR, "overrides": {"free_delivry": True}}], "unknown override"),
+            ([{**_DOUBLESTAR, "overrides": ["free_delivery"]}], "overrides"),
+            ([{**_DOUBLESTAR, "mention_brands": "doublestar"}], "mention_brands"),
+        ],
+    )
+    def test_rejects(self, promotions: Any, msg: str) -> None:
+        with pytest.raises(rg.CaseError, match=msg):
+            case(promotions=promotions)
+
+
 class TestSchemaFileMatchesCode:
     def test_case_keys(self) -> None:
         assert set(SCHEMA["properties"]) == set(rg.CASE_KEYS)
@@ -293,6 +355,22 @@ class TestSchemaFileMatchesCode:
 
     def test_pending_pattern(self) -> None:
         assert SCHEMA["properties"]["pending"]["pattern"] == rg._PENDING_RE.pattern
+
+    def test_promotion_keys(self) -> None:
+        promo = SCHEMA["definitions"]["promotion"]
+        assert set(promo["properties"]) == set(rg.PROMOTION_KEYS)
+        assert set(promo["properties"]["overrides"]["properties"]) == set(
+            rg.PROMOTION_OVERRIDE_KEYS
+        )
+
+    def test_override_keys_are_the_ones_promo_overrides_reads(self) -> None:
+        import inspect
+
+        from src.agent import promotions
+
+        src = inspect.getsource(promotions.promo_overrides)
+        read = set(re.findall(r'o\.get\("(\w+)"\)', src))
+        assert read == set(rg.PROMOTION_OVERRIDE_KEYS)
 
 
 # ── runner wiring ─────────────────────────────────────────────────────────
@@ -514,6 +592,8 @@ class TestSandboxAgentFactory:
         assert seen["provider_override"] == "openai-gpt41-mini"
         assert seen["tool_mode"] == "mock"
         assert tenants["tvoya-shina"]["config"] == {"agent_provider_override": "openai-gpt41-mini"}
+        # No `promotions` in the case: an empty list, never None (None = the DB).
+        assert seen["promotions_override"] == []
         name, handler = agent.tool_router.register.call_args.args
         assert name == "search_tires"
         assert asyncio.run(handler(width=205)) == {"items": []}
@@ -524,6 +604,123 @@ class TestSandboxAgentFactory:
         )
         assert seen["tenant_id"] == "t2"
         assert seen["provider_override"] is None
+
+    def test_case_promotions_reach_the_agent(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        import src.sandbox.agent_runner as runner
+        from src.agent.promotions import ActivePromotion
+
+        seen: dict[str, Any] = {}
+
+        async def fake_create(engine: Any, **kwargs: Any) -> Any:
+            seen.update(kwargs)
+            return MagicMock(spec=["tool_router"])
+
+        monkeypatch.setattr(runner, "create_sandbox_agent", fake_create)
+        tenants = {"prokoleso": {"id": "t2", "config": {}}}
+        factory = rg.SandboxAgentFactory(engine=None, tenants=tenants, router=None, provider=None)
+        live = {**_DOUBLESTAR, "valid_to": "2999-12-31"}
+        ended = {**_DOUBLESTAR, "title": "Минула", "valid_to": "2020-01-31"}
+
+        asyncio.run(factory("prokoleso", case(promotions=[live, ended])))
+        (p,) = seen["promotions_override"]
+        assert isinstance(p, ActivePromotion)
+        assert (p.title, p.valid_to) == (_DOUBLESTAR["title"], date(2999, 12, 31))
+        assert p.mention_brands == ("doublestar", "rydanz")
+
+
+# ── create_sandbox_agent: promotions_override ─────────────────────────────
+
+
+def _sandbox_kwargs(
+    monkeypatch: pytest.MonkeyPatch, sales: bool, override: list[Any] | None
+) -> tuple[dict[str, Any], list[str]]:
+    """LLMAgent kwargs from ``create_sandbox_agent`` and the DB loads it made."""
+    from scripts.configure_tenants import PROKOLESO_CONFIG_PATCH
+    from src.agent.promotions import ActivePromotion
+    from src.sandbox import agent_runner
+
+    captured: dict[str, Any] = {}
+    db_loads: list[str] = []
+
+    class _PM:
+        def __init__(self, _engine: Any) -> None:
+            pass
+
+        async def get_active_prompt(self) -> dict[str, Any]:
+            return {"id": None}
+
+    async def _empty(*_a: Any, **_k: Any) -> list[Any]:
+        return []
+
+    async def _from_db(*_a: Any, **_k: Any) -> list[Any]:
+        db_loads.append("promotions")
+        return [ActivePromotion(title="З БАЗИ", bot_text="з бази", valid_to=date(2999, 1, 1))]
+
+    async def _kb(*_a: Any, **_k: Any) -> list[Any]:
+        db_loads.append("knowledge_articles")
+        return []
+
+    def _agent(**kwargs: Any) -> dict[str, Any]:
+        captured.update(kwargs)
+        return captured
+
+    monkeypatch.setattr(agent_runner, "PromptManager", _PM)
+    monkeypatch.setattr(agent_runner, "get_tools_with_overrides", _empty)
+    monkeypatch.setattr(agent_runner, "get_few_shot_examples", _empty)
+    monkeypatch.setattr(agent_runner, "get_safety_rules_for_prompt", _empty)
+    monkeypatch.setattr(agent_runner, "load_active_promotions", _from_db)
+    monkeypatch.setattr(agent_runner, "fetch_tenant_promotions", _kb)
+    monkeypatch.setattr(agent_runner, "LLMAgent", _agent)
+    asyncio.run(
+        agent_runner.create_sandbox_agent(
+            MagicMock(spec=["begin"]),
+            tenant={"config": {**PROKOLESO_CONFIG_PATCH, "sales_enabled": sales}},
+            tenant_id="t2",
+            promotions_override=override,
+        )
+    )
+    return captured, db_loads
+
+
+class TestSandboxPromotionsOverride:
+    def _override(self) -> list[Any]:
+        from src.agent.promotions import ActivePromotion
+
+        return [
+            ActivePromotion(
+                title="Безкоштовна доставка шин Doublestar та Rydanz",
+                bot_text="Безкоштовна доставка на шини Doublestar та Rydanz.",
+                valid_to=date(2026, 12, 31),
+                overrides={"free_delivery": True},
+                mention_brands=("doublestar", "rydanz"),
+            )
+        ]
+
+    def test_override_replaces_the_table_for_prompt_and_guard(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        kwargs, db_loads = _sandbox_kwargs(monkeypatch, sales=True, override=self._override())
+        assert db_loads == []
+        assert "Doublestar та Rydanz" in kwargs["promotions_context"]
+        assert "З БАЗИ" not in kwargs["promotions_context"]
+        scopes = kwargs["promo_overrides"].free_delivery_brand_scopes
+        assert scopes == (frozenset({"doublestar", "rydanz"}),)
+
+    def test_empty_override_means_no_promotions(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        kwargs, db_loads = _sandbox_kwargs(monkeypatch, sales=True, override=[])
+        assert db_loads == []
+        assert kwargs["promotions_context"] is None
+        assert kwargs["promo_overrides"].free_delivery_brand_scopes == ()
+
+    def test_no_override_reads_the_table(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        kwargs, db_loads = _sandbox_kwargs(monkeypatch, sales=True, override=None)
+        assert db_loads == ["promotions"]
+        assert "З БАЗИ" in kwargs["promotions_context"]
+
+    def test_sales_off_keeps_the_old_path(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        kwargs, db_loads = _sandbox_kwargs(monkeypatch, sales=False, override=self._override())
+        assert db_loads == ["knowledge_articles"]
+        assert kwargs["promo_overrides"] is None
 
 
 # ── the corpus itself ─────────────────────────────────────────────────────

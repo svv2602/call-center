@@ -30,6 +30,11 @@
             "description": "tool name -> result returned instead of the default sandbox mock.",
             "type": "object"
         },
+        "promotions": {
+            "description": "The network's promotions for this case (src.agent.promotions.ActivePromotion), used instead of the promotions table when sales_enabled. Absent = none. One past valid_to is not passed — an expired promotion is written as its absence.",
+            "type": "array",
+            "items": {"$ref": "#/definitions/promotion"}
+        },
         "turns": {
             "type": "array",
             "minItems": 1,
@@ -54,6 +59,34 @@
         }
     },
     "definitions": {
+        "promotion": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["title", "bot_text", "valid_to"],
+            "properties": {
+                "title": {"type": "string", "minLength": 1},
+                "bot_text": {"type": "string", "minLength": 1},
+                "valid_to": {"description": "last day, inclusive", "type": "string", "format": "date"},
+                "overrides": {
+                    "description": "standard network conditions the promotion beats (promo_overrides)",
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                        "free_delivery": {"type": "boolean"},
+                        "discount": {"type": "boolean"},
+                        "extended_warranty_brands": {"type": "array", "items": {"type": "string"}},
+                        "partner_service": {
+                            "type": "object",
+                            "properties": {
+                                "service": {"type": "string"},
+                                "network_label": {"type": "string"}
+                            }
+                        }
+                    }
+                },
+                "mention_brands": {"description": "brands the promotion is about; a free-delivery promotion covers only these", "type": "array", "items": {"type": "string"}}
+            }
+        },
         "toolSpec": {
             "oneOf": [
                 {"type": "string"},

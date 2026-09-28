@@ -21,7 +21,12 @@ from typing import TYPE_CHECKING, Any
 from src.agent.agent import LLMAgent
 from src.agent.network_policy import NetworkPolicy, unoffered_service_tools
 from src.agent.parsers.date_parser import resolve_tool_date
-from src.agent.promotions import format_promotions_block, load_active_promotions, promo_overrides
+from src.agent.promotions import (
+    ActivePromotion,
+    format_promotions_block,
+    load_active_promotions,
+    promo_overrides,
+)
 from src.agent.prompt_manager import (
     PromptManager,
     fetch_tenant_promotions,
@@ -426,6 +431,7 @@ async def create_sandbox_agent(
     knowledge_search: Any = None,
     tenant_id: str = "",
     store_client: Any = None,
+    promotions_override: list[ActivePromotion] | None = None,
 ) -> LLMAgent:
     """Create an LLMAgent configured for sandbox testing.
 
@@ -442,6 +448,10 @@ async def create_sandbox_agent(
         redis_client: Optional Redis client for tool caching.
         tenant: Optional tenant dict with enabled_tools/prompt_suffix.
         knowledge_search: Optional KnowledgeSearch for pgvector-backed search.
+        promotions_override: With ``sales_enabled``, today's promotions to use
+            instead of the ``promotions`` table — for the prompt block and the
+            claim guard alike (the goldset brings its own; nothing is read
+            from the DB). ``None`` = load from the DB as a live call does.
 
     Returns:
         Configured LLMAgent instance.
@@ -525,7 +535,10 @@ async def create_sandbox_agent(
         # Same source choice as a live call: sales on → `promotions` table,
         # and the same live list gives the claim guard its exemptions.
         if policy.sales_enabled:
-            live_promos = await load_active_promotions(engine, tenant_id, redis=redis)
+            if promotions_override is not None:
+                live_promos = list(promotions_override)
+            else:
+                live_promos = await load_active_promotions(engine, tenant_id, redis=redis)
             promotions_context = format_promotions_block(live_promos)
             claim_overrides = promo_overrides(live_promos)
         else:
