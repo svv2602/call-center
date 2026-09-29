@@ -245,7 +245,9 @@
   turns:
     - user: потрібні літні шини на Мерседес ГЛА двадцять дев'ятнадцятого року
       expect:
-        tool_called: [{name: get_vehicle_tire_sizes, args: {brand: 'merc|мерс', model: 'gla|гла'}}]
+        # since 04122b2 the code looks the car up itself: the caller's words
+        # reach the tool as vehicle_text, the catalogue reads the model
+        tool_called: [{name: get_vehicle_tire_sizes, args: {vehicle_text: 'мерс.*(?:гла|gla)'}}]
         must_contain: ['215/60|двісті п.ятнадцять|235/50|двісті тридцять п.ять']
         tool_not_called: [transfer_to_operator]
 
@@ -266,7 +268,8 @@
   turns:
     - user: зимові шини на Мерседес джі ел сі двадцятого року
       expect:
-        tool_called: [{name: get_vehicle_tire_sizes, args: {brand: 'merc|мерс', model: 'glc|глц|гл\s*с|джі|джи|g\s*l\s*c'}}]
+        # since 04122b2 the code looks the car up itself (vehicle_text)
+        tool_called: [{name: get_vehicle_tire_sizes, args: {vehicle_text: 'мерс.*(?:джі|джи|glc|глц)'}}]
         must_contain: ['235/60|235/55|двісті тридцять п.ять']
         tool_not_called: [transfer_to_operator]
 
