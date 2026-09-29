@@ -267,6 +267,8 @@ export const HELP_PAGES = {
             { titleKey: 'help.vehicles.aliases.steps', contentKey: 'help.vehicles.aliases.stepsContent' },
             { titleKey: 'help.vehicles.import.title', contentKey: 'help.vehicles.import.content' },
             { titleKey: 'help.vehicles.import.steps', contentKey: 'help.vehicles.import.stepsContent' },
+            { titleKey: 'help.vehicles.sync.title', contentKey: 'help.vehicles.sync.content' },
+            { titleKey: 'help.vehicles.sync.steps', contentKey: 'help.vehicles.sync.stepsContent' },
             { titleKey: 'help.vehicles.affects.title', contentKey: 'help.vehicles.affects.content' },
         ],
         tipsKey: 'help.vehicles.tips',

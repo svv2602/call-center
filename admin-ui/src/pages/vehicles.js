@@ -4,6 +4,7 @@ import { showToast } from '../notifications.js';
 import { registerPageLoader } from '../router.js';
 import { t } from '../i18n.js';
 import { makeSortable } from '../sorting.js';
+import { hasPermission } from '../auth.js';
 import * as tw from '../tw.js';
 
 // ==================== State ====================
@@ -69,6 +70,238 @@ async function loadStats() {
     } catch (e) {
         el.innerHTML = `<div class="${tw.emptyState}">${t('vehicles.failedToLoad', { error: escapeHtml(e.message) })}</div>`;
     }
+}
+
+// ==================== tshina sync (status + manual run) ====================
+// The block is created from JS under the stats row: the import pane is
+// admin-only, while the status is for anyone with vehicles:read. Runs are
+// Celery tasks; the page polls /tshina-sync/run/{id} every 3 s until done.
+
+let syncStatus = null;              // last GET /tshina-sync/status
+let syncTaskId = null;              // manual run being polled
+let syncPollHandle = null;
+let syncConfirmFull = false;        // inline confirmation of the full run is open
+let syncLastRun = null;             // last GET /tshina-sync/run/{id} (done)
+
+function ensureSyncBlock() {
+    let el = document.getElementById('tshinaSyncBlock');
+    if (el) return el;
+    const stats = document.getElementById('vehiclesStats');
+    if (!stats) return null;
+    el = document.createElement('div');
+    el.id = 'tshinaSyncBlock';
+    el.className = tw.card;
+    stats.insertAdjacentElement('afterend', el);
+    return el;
+}
+
+async function loadSyncStatus() {
+    const el = ensureSyncBlock();
+    if (!el) return;
+    try {
+        syncStatus = await api('/admin/vehicles/tshina-sync/status');
+        if (syncActiveTaskId() && !syncPollHandle) pollSyncRun(syncActiveTaskId());
+        renderSync();
+    } catch (e) {
+        el.innerHTML = `<div class="${tw.emptyState}">${t('vehicles.failedToLoad', { error: escapeHtml(e.message) })}</div>`;
+    }
+}
+
+// A marker naming a run already seen finished (worker killed before it freed
+// the marker) is not a live run: the next start takes it over server-side.
+function syncActiveTaskId() {
+    const id = syncStatus?.active?.task_id;
+    return id && id !== syncLastRun?.task_id ? id : null;
+}
+
+function syncModeLabel(mode) {
+    return { dry_run: t('vehicles.syncModeDryRun'), incremental: t('vehicles.syncModeIncremental'), full: t('vehicles.syncModeFull') }[mode] || escapeHtml(mode || '');
+}
+
+function syncStatusBadge(status) {
+    const cls = { ok: tw.badgeGreen, dry_run: tw.badgeBlue, error: tw.badgeRed, guarded: tw.badgeYellow, skipped: tw.badgeGray, locked: tw.badgeYellow, disabled: tw.badgeGray }[status] || tw.badgeGray;
+    return `<span class="${cls}">${escapeHtml(status || '-')}</span>`;
+}
+
+function renderSyncResult() {
+    const run = syncLastRun;
+    if (!run) return '';
+    if (run.error) {
+        return `<div class="mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm">${t('vehicles.syncRunFailed', { mode: syncModeLabel(run.mode), error: escapeHtml(run.error) })}</div>`;
+    }
+    const res = run.result || {};
+    if (res.status === 'locked') {
+        return `<div class="mt-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-sm">${t('vehicles.syncRunLocked')}</div>`;
+    }
+    if (res.status === 'disabled') {
+        return `<div class="mt-3 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-sm">${t('vehicles.syncDisabled')}</div>`;
+    }
+    const rows = (res.resources || []).map(r => `
+        <tr>
+            <td class="${tw.td}" data-label="${t('vehicles.syncResource')}"><code>${escapeHtml(r.resource)}</code></td>
+            <td class="${tw.td}" data-label="${t('vehicles.syncStatus')}">${syncStatusBadge(r.status)}</td>
+            <td class="${tw.td}" data-label="${t('vehicles.syncPages')}">${r.pages ?? 0}</td>
+            <td class="${tw.td}" data-label="${t('vehicles.syncUpserted')}">${r.upserted ?? 0}</td>
+            <td class="${tw.td}" data-label="${t('vehicles.syncDeleted')}">${r.deleted ?? 0}</td>
+            <td class="${tw.td}" data-label="${t('vehicles.syncRejected')}">${r.rejected ?? 0}</td>
+            <td class="${tw.td}" data-label="${t('vehicles.syncSkipped')}">${r.skipped ?? 0}</td>
+            <td class="${tw.td} text-xs" data-label="${t('vehicles.syncLastError')}">${escapeHtml(r.error || '')}</td>
+        </tr>`).join('');
+    return `
+        <div class="mt-4">
+            <div class="text-sm font-medium text-neutral-800 dark:text-neutral-200 mb-2">${t('vehicles.syncRunDone', { mode: syncModeLabel(run.mode) })} ${syncStatusBadge(res.status)}</div>
+            ${run.mode === 'dry_run' ? `<div class="text-xs text-neutral-500 mb-2">${t('vehicles.syncDryRunNote')}</div>` : ''}
+            <div class="overflow-x-auto"><table class="${tw.table}">
+                <thead><tr>
+                    <th class="${tw.th}">${t('vehicles.syncResource')}</th>
+                    <th class="${tw.th}">${t('vehicles.syncStatus')}</th>
+                    <th class="${tw.th}">${t('vehicles.syncPages')}</th>
+                    <th class="${tw.th}">${t('vehicles.syncUpserted')}</th>
+                    <th class="${tw.th}">${t('vehicles.syncDeleted')}</th>
+                    <th class="${tw.th}">${t('vehicles.syncRejected')}</th>
+                    <th class="${tw.th}">${t('vehicles.syncSkipped')}</th>
+                    <th class="${tw.th}">${t('vehicles.syncLastError')}</th>
+                </tr></thead>
+                <tbody>${rows}</tbody>
+            </table></div>
+        </div>`;
+}
+
+function renderSync() {
+    const el = ensureSyncBlock();
+    if (!el || !syncStatus) return;
+    const s = syncStatus;
+    const canWrite = hasPermission('vehicles:write');
+    const running = Boolean(syncTaskId || syncActiveTaskId() || s.lock_held);
+    const disabled = !s.enabled || running;
+    const stateBadge = s.enabled
+        ? `<span class="${tw.badgeGreen}">${t('vehicles.syncEnabled')}</span>`
+        : `<span class="${tw.badgeGray}">${t('vehicles.syncOff')}</span>`;
+    const runningNote = running
+        ? `<div class="flex items-center gap-2 text-sm text-neutral-600 dark:text-neutral-300 mt-2"><div class="spinner"></div>${
+            syncTaskId || syncActiveTaskId() ? t('vehicles.syncRunning', { mode: syncModeLabel(s.active?.mode || syncLastRun?.mode) }) : t('vehicles.syncRunningNightly')
+        }</div>`
+        : '';
+
+    const rows = (s.resources || []).map(r => `
+        <tr>
+            <td class="${tw.td}" data-label="${t('vehicles.syncResource')}"><code>${escapeHtml(r.resource)}</code></td>
+            <td class="${tw.td}" data-label="${t('vehicles.syncLastSuccess')}">${formatDate(r.last_success_at)}</td>
+            <td class="${tw.td}" data-label="${t('vehicles.syncLastAttempt')}">${formatDate(r.last_attempt_at)}</td>
+            <td class="${tw.td}" data-label="${t('vehicles.syncUpsertedDeleted')}">${r.last_success_at ? `${r.upserted ?? 0} / ${r.deleted ?? 0}` : '-'}</td>
+            <td class="${tw.td}" data-label="${t('vehicles.syncWatermark')}">${r.watermark ? formatDate(r.watermark) : t('vehicles.syncNoWatermark')}</td>
+            <td class="${tw.td}" data-label="${t('vehicles.syncFullAt')}">${formatDate(r.full_sync_at)}</td>
+            <td class="${tw.td} text-xs ${r.last_error ? 'text-red-600 dark:text-red-400' : ''}" data-label="${t('vehicles.syncLastError')}">${escapeHtml(r.last_error || '')}</td>
+        </tr>`).join('');
+
+    const btnState = disabled ? 'disabled' : '';
+    const dimmed = disabled ? ' opacity-50 cursor-not-allowed' : '';
+    const buttons = canWrite ? `
+        <div class="flex flex-wrap items-center gap-2 mt-3">
+            <button class="${tw.btnSecondary} ${tw.btnSm}${dimmed}" ${btnState} onclick="window._pages.vehicles.runSync('dry_run')">${t('vehicles.syncBtnDryRun')}</button>
+            <button class="${tw.btnPrimary} ${tw.btnSm}${dimmed}" ${btnState} onclick="window._pages.vehicles.runSync('incremental')">${t('vehicles.syncBtnIncremental')}</button>
+            <button class="${tw.btnDanger} ${tw.btnSm}${dimmed}" ${btnState} onclick="window._pages.vehicles.runSync('full')">${t('vehicles.syncBtnFull')}</button>
+        </div>
+        ${syncConfirmFull && !disabled ? `
+        <div class="mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md text-sm text-neutral-800 dark:text-neutral-200">
+            <div class="mb-2">${t('vehicles.syncFullConfirmText')}</div>
+            <div class="flex gap-2">
+                <button class="${tw.btnDanger} ${tw.btnSm}" onclick="window._pages.vehicles.confirmFullSync()">${t('vehicles.syncFullConfirmBtn')}</button>
+                <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.vehicles.cancelFullSync()">${t('common.cancel')}</button>
+            </div>
+        </div>` : ''}` : '';
+
+    el.innerHTML = `
+        <div class="flex flex-wrap items-center justify-between gap-2 mb-2">
+            <div class="flex items-center gap-2">
+                <div class="text-sm font-medium text-neutral-800 dark:text-neutral-200">${t('vehicles.syncTitle')}</div>
+                ${stateBadge}
+            </div>
+            <button class="${tw.btnSecondary} ${tw.btnSm}" onclick="window._pages.vehicles.loadSyncStatus()">${t('common.refresh')}</button>
+        </div>
+        ${s.enabled ? '' : `<div class="p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md text-sm mb-2">${t('vehicles.syncDisabled')}</div>`}
+        <div class="overflow-x-auto"><table class="${tw.table}">
+            <thead><tr>
+                <th class="${tw.th}">${t('vehicles.syncResource')}</th>
+                <th class="${tw.th}">${t('vehicles.syncLastSuccess')}</th>
+                <th class="${tw.th}">${t('vehicles.syncLastAttempt')}</th>
+                <th class="${tw.th}">${t('vehicles.syncUpsertedDeleted')}</th>
+                <th class="${tw.th}">${t('vehicles.syncWatermark')}</th>
+                <th class="${tw.th}">${t('vehicles.syncFullAt')}</th>
+                <th class="${tw.th}">${t('vehicles.syncLastError')}</th>
+            </tr></thead>
+            <tbody>${rows}</tbody>
+        </table></div>
+        ${runningNote}
+        ${buttons}
+        ${renderSyncResult()}
+    `;
+}
+
+function runSync(mode) {
+    if (mode === 'full') {
+        // Inline confirmation in the block, not confirm(): the full run may delete rows.
+        syncConfirmFull = true;
+        renderSync();
+        return;
+    }
+    startSync(mode, false);
+}
+
+function confirmFullSync() {
+    syncConfirmFull = false;
+    startSync('full', true);
+}
+
+function cancelFullSync() {
+    syncConfirmFull = false;
+    renderSync();
+}
+
+async function startSync(mode, confirmFull) {
+    try {
+        const res = await api('/admin/vehicles/tshina-sync/run', {
+            method: 'POST',
+            body: JSON.stringify({ mode, confirm_full: confirmFull }),
+        });
+        syncLastRun = null;
+        showToast(t('vehicles.syncStarted', { mode: syncModeLabel(mode) }));
+        pollSyncRun(res.task_id);
+        await loadSyncStatus();
+    } catch (e) {
+        showToast(t('vehicles.syncStartFailed', { error: e.message }), 'error');
+        loadSyncStatus();
+    }
+}
+
+function pollSyncRun(taskId) {
+    if (syncPollHandle) clearInterval(syncPollHandle);
+    syncTaskId = taskId;
+    syncPollHandle = setInterval(async () => {
+        try {
+            const run = await api(`/admin/vehicles/tshina-sync/run/${encodeURIComponent(taskId)}`);
+            if (!run.done) return;
+            clearInterval(syncPollHandle);
+            syncPollHandle = null;
+            syncTaskId = null;
+            syncLastRun = run;
+            if (run.error || run.result?.status === 'error') {
+                showToast(t('vehicles.syncFinishedWithErrors', { mode: syncModeLabel(run.mode) }), 'error');
+            } else {
+                showToast(t('vehicles.syncRunDone', { mode: syncModeLabel(run.mode) }));
+            }
+            loadSyncStatus();
+            if (run.mode !== 'dry_run') loadStats();
+        } catch (e) {
+            // 404: the run record expired (1 day) — stop; other errors are transient.
+            if (/404|not found|expired/i.test(e.message)) {
+                clearInterval(syncPollHandle);
+                syncPollHandle = null;
+                syncTaskId = null;
+                loadSyncStatus();
+            }
+        }
+    }, 3000);
 }
 
 // ==================== Browse: Breadcrumb ====================
@@ -925,6 +1158,7 @@ function search() {
 export function init() {
     registerPageLoader('vehicles', () => {
         loadStats();
+        loadSyncStatus();
         switchTab(currentTab);
     });
 }
@@ -967,4 +1201,9 @@ window._pages.vehicles = {
     applyImport,
     discardStagedImport,
     discardImport,
+    // tshina sync
+    loadSyncStatus,
+    runSync,
+    confirmFullSync,
+    cancelFullSync,
 };

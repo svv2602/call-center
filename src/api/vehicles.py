@@ -16,13 +16,16 @@ sizes) imported via migration 014. Wave 8 extends the router with:
 from __future__ import annotations
 
 import io
+import json
 import logging
 import os
 import shutil
 import tempfile
+import uuid
 import zipfile
+from datetime import UTC, date, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import (
     APIRouter,
@@ -31,6 +34,7 @@ from fastapi import (
     File,
     HTTPException,
     Query,
+    Request,
     UploadFile,
 )
 from pydantic import BaseModel, Field
@@ -38,6 +42,7 @@ from sqlalchemy import text
 
 from src.api.auth import require_permission
 from src.api.database import get_engine as _get_engine
+from src.config import get_settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/admin/vehicles", tags=["vehicles"])
@@ -147,6 +152,224 @@ async def get_vehicle_stats(
         data = dict(row._mapping)
         data["imported_at"] = None
         return data
+
+
+# ==================== tshina Data API sync (status + manual run) ====================
+#
+# Literal ``/tshina-sync/...`` routes. The run itself happens in Celery
+# (``tshina_sync_manual``), never in the API process. Busy = the pg advisory
+# lock of the nightly task is held OR the Redis marker of a manual run is set
+# (a queued task holds no pg lock yet, so the lock alone would let a second
+# click queue a second run).
+
+_TSHINA_READY_STATES = frozenset({"SUCCESS", "FAILURE", "REVOKED"})
+_TSHINA_STATE_COLUMNS = (
+    "watermark",
+    "last_success_at",
+    "last_attempt_at",
+    "last_error",
+    "upserted",
+    "deleted",
+    "full_sync_at",
+)
+_TSHINA_LOCK_HELD_SQL = """
+    SELECT EXISTS (
+        SELECT 1 FROM pg_locks
+        WHERE locktype = 'advisory' AND granted
+          AND classid::bigint = :classid AND objid::bigint = :objid AND objsubid = 1
+    )
+"""
+
+
+class TshinaSyncRunRequest(BaseModel):
+    mode: Literal["dry_run", "incremental", "full"]
+    confirm_full: bool = False
+
+
+async def _get_redis() -> Any:
+    from src.core.redis_client import get_redis
+
+    return await get_redis()
+
+
+def _iso(value: Any) -> Any:
+    return value.isoformat() if isinstance(value, (datetime, date)) else value
+
+
+async def _tshina_lock_held(conn: Any) -> bool:
+    """Is the advisory lock of ``run_sync`` (nightly or manual) held right now?"""
+    from src.integrations.tshina_sync import ADVISORY_LOCK_KEY
+
+    result = await conn.execute(
+        text(_TSHINA_LOCK_HELD_SQL),
+        {"classid": ADVISORY_LOCK_KEY >> 32, "objid": ADVISORY_LOCK_KEY & 0xFFFFFFFF},
+    )
+    return bool(result.scalar())
+
+
+def _task_state(task_id: str) -> tuple[str, Any]:
+    """(Celery state, result or exception) of a task — the result backend is Redis."""
+    from celery.result import AsyncResult  # type: ignore[import-untyped]
+
+    from src.tasks.celery_app import app as celery_app
+
+    res = AsyncResult(task_id, app=celery_app)
+    state = res.state
+    return state, res.result if state in _TSHINA_READY_STATES else None
+
+
+@router.get("/tshina-sync/status")
+async def tshina_sync_status(_: dict[str, Any] = _perm_r) -> dict[str, Any]:
+    """Per-resource ``data_sync_state`` + on/off + whether a run is in progress."""
+    from src.integrations.tshina_api import RESOURCES
+    from src.tasks.tshina_sync_tasks import ACTIVE_KEY, RUN_KEY
+
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        result = await conn.execute(
+            text(
+                "SELECT resource, watermark, last_success_at, last_attempt_at, last_error, "
+                "upserted, deleted, full_sync_at FROM data_sync_state"
+            )
+        )
+        by_resource = {row.resource: row for row in result}
+        lock_held = await _tshina_lock_held(conn)
+
+    resources = []
+    for name in RESOURCES:
+        row = by_resource.get(name)
+        item: dict[str, Any] = {"resource": name}
+        for col in _TSHINA_STATE_COLUMNS:
+            item[col] = _iso(getattr(row, col)) if row is not None else None
+        resources.append(item)
+
+    active = None
+    try:
+        redis = await _get_redis()
+        task_id = await redis.get(ACTIVE_KEY)
+        if task_id:
+            raw = await redis.get(RUN_KEY.format(task_id=task_id))
+            active = {"task_id": task_id, **(json.loads(raw) if raw else {})}
+    except Exception:
+        logger.warning("tshina sync status: Redis unavailable", exc_info=True)
+
+    return {
+        "enabled": get_settings().tshina_api.enabled,
+        "lock_held": lock_held,
+        "active": active,
+        "resources": resources,
+    }
+
+
+@router.post("/tshina-sync/run", status_code=202)
+async def tshina_sync_run(
+    body: TshinaSyncRunRequest,
+    request: Request,
+    user: dict[str, Any] = _perm_w,
+) -> dict[str, Any]:
+    """Queue a manual sync in Celery; poll ``GET /tshina-sync/run/{task_id}``.
+
+    ``full`` deletes rows missing from the snapshot (guarded at 90 %), so it
+    needs ``confirm_full=true``. Disabled (no URL/token) or already running
+    → 409 with nothing queued and no request to tshina.
+    """
+    if body.mode == "full" and not body.confirm_full:
+        raise HTTPException(
+            status_code=400,
+            detail="Full reconciliation may delete rows missing in tshina: "
+            "confirm_full=true required",
+        )
+    if not get_settings().tshina_api.enabled:
+        raise HTTPException(
+            status_code=409,
+            detail="tshina sync is disabled: TSHINA_API_BASE_URL or TSHINA_API_TOKEN is not set",
+        )
+
+    from src.tasks.tshina_sync_tasks import (
+        ACTIVE_KEY,
+        ACTIVE_TTL_S,
+        RUN_KEY,
+        RUN_TTL_S,
+        tshina_sync_manual,
+    )
+
+    busy = HTTPException(status_code=409, detail="tshina sync is already running")
+    engine = await _get_engine()
+    async with engine.begin() as conn:
+        if await _tshina_lock_held(conn):
+            raise busy
+
+    redis = await _get_redis()
+    task_id = str(uuid.uuid4())
+    claimed = await redis.set(ACTIVE_KEY, task_id, nx=True, ex=ACTIVE_TTL_S)
+    if not claimed:
+        holder = await redis.get(ACTIVE_KEY)
+        # A worker killed at the hard time limit never reaches its ``finally``:
+        # a marker naming a finished task is stale — take it over.
+        if holder and _task_state(holder)[0] in _TSHINA_READY_STATES:
+            logger.warning("tshina sync: stale marker of finished task %s, taking over", holder)
+            await redis.delete(ACTIVE_KEY)
+            claimed = await redis.set(ACTIVE_KEY, task_id, nx=True, ex=ACTIVE_TTL_S)
+        if not claimed:
+            raise busy
+
+    run = {
+        "mode": body.mode,
+        "user": user.get("sub"),
+        "queued_at": datetime.now(UTC).isoformat(),
+    }
+    try:
+        await redis.set(RUN_KEY.format(task_id=task_id), json.dumps(run), ex=RUN_TTL_S)
+        tshina_sync_manual.apply_async(kwargs={"mode": body.mode}, task_id=task_id)
+    except Exception as exc:
+        await redis.delete(ACTIVE_KEY)
+        logger.exception("tshina sync: could not queue the %s run", body.mode)
+        raise HTTPException(status_code=503, detail=f"Could not queue the sync: {exc}") from exc
+
+    logger.info("tshina sync %s queued: task=%s by user=%s", body.mode, task_id, user.get("sub"))
+    try:
+        from src.api.admin_users import write_audit_log
+        from src.api.middleware.rate_limit import _get_client_ip
+
+        await write_audit_log(
+            engine,
+            user_id=user.get("user_id"),
+            username=user.get("sub"),
+            action="tshina_sync_run",
+            resource_type="admin/vehicles/tshina-sync",
+            resource_id=task_id,
+            details={"mode": body.mode, "confirm_full": body.confirm_full},
+            ip_address=_get_client_ip(request),
+        )
+    except Exception:
+        logger.warning("tshina sync: audit log write failed for task %s", task_id, exc_info=True)
+    return {"task_id": task_id, "status": "queued", **run}
+
+
+@router.get("/tshina-sync/run/{task_id}")
+async def tshina_sync_run_status(task_id: str, _: dict[str, Any] = _perm_r) -> dict[str, Any]:
+    """State of a manual run started from this page (result kept 1 day)."""
+    from src.tasks.tshina_sync_tasks import RUN_KEY
+
+    redis = await _get_redis()
+    raw = await redis.get(RUN_KEY.format(task_id=task_id))
+    if raw is None:
+        # Only ids this endpoint issued: no reading arbitrary Celery results.
+        raise HTTPException(status_code=404, detail="Unknown or expired sync run")
+    state, payload = _task_state(task_id)
+    out: dict[str, Any] = {
+        "task_id": task_id,
+        **json.loads(raw),
+        "state": state,
+        "done": state in _TSHINA_READY_STATES,
+        "result": None,
+        "error": None,
+    }
+    if state == "SUCCESS":
+        out["result"] = payload
+    elif state in _TSHINA_READY_STATES:
+        out["error"] = str(payload)[:1000]
+    return out
 
 
 @router.get("/brands")
