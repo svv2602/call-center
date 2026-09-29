@@ -58,7 +58,9 @@ _SEASONS = frozenset({"summer", "winter", "all_season"})
 #: ``tire_query["tech"]`` values that are ``search_tires`` boolean arguments.
 _TECH_FLAGS = frozenset({"runflat", "xl", "commercial"})
 #: What an utterance must say (in ``merge_tire_query`` terms) to be a request.
-_REQUEST_KEYS = ("sizes", "rear_size", "season", "nail", "brands", "tech")
+#: ``diameter`` — the answer to «Який діаметр?»: with the car's one factory
+#: size of it (`vehicle_lookup_gate`) it completes the request.
+_REQUEST_KEYS = ("sizes", "rear_size", "season", "nail", "brands", "tech", "diameter")
 
 
 def _size(text: Any) -> tuple[int, int, int] | None:

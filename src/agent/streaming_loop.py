@@ -75,6 +75,7 @@ from src.agent.tire_search_gate import (
     ForcedTireSearch,
     forced_search_messages,
     forced_tool_messages,
+    last_assistant_text,
     run_forced_search,
     run_forced_tool,
 )
@@ -85,6 +86,7 @@ from src.agent.tool_result_compressor import (
     tire_caveat_phrase,
 )
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
+from src.agent.vehicle_lookup_gate import LOOKUP_TOOL, VehicleLookupGate, drop_stud_questions
 from src.core.audio_sender import send_audio_stream
 from src.core.sentence_buffer import BufferEvent, SentenceReady, buffer_sentences
 from src.llm.models import (
@@ -1547,6 +1549,10 @@ class StreamingAgentLoop:
         # two filler sources never open with the same word back-to-back.
         self._tool_wait_counter = random.randrange(_MAX_TOOL_WAIT_POOL_LEN)
         self._last_thinking_filler = ""
+        # The code's own car lookups and the factory size they put into the
+        # turn's ``tire_progress`` (`vehicle_lookup_gate`, sales scope only).
+        # One loop per call, so this lives as long as the call's history.
+        self._vehicle_gate = VehicleLookupGate(sales_enabled=self._sales_enabled)
 
     @property
     def _tts(self) -> TTSEngine:
@@ -1717,6 +1723,13 @@ class StreamingAgentLoop:
         if self._pii_vault is not None:
             user_text = self._pii_vault.mask(user_text)
 
+        # The factory size a car lookup of this call gave (`vehicle_lookup_gate`)
+        # is part of the request the prompt and the search gate read. The
+        # session keeps the caller's own words; the loop adds the size each turn.
+        if self._sales_enabled:
+            self._vehicle_gate.note_turn(user_text, tire_progress)
+            tire_progress = self._vehicle_gate.apply(tire_progress) or None
+
         # Add user message
         conversation_history.append({"role": "user", "content": user_text})
 
@@ -1872,6 +1885,32 @@ class StreamingAgentLoop:
             )
             tool_calls_made += 1
 
+        # The caller named a car: the code looks up its factory sizes before
+        # the first round (`vehicle_lookup_gate`), and the one that fits the
+        # request goes into it before the search gate below. Once per turn.
+        lookup_args = self._vehicle_gate.plan(
+            user_text, last_assistant_text(conversation_history), tools
+        )
+        if lookup_args is not None:
+            if self._pii_vault is not None:
+                lookup_args = self._pii_vault.restore_in_args(lookup_args)
+            lookup_raw = await run_forced_tool(
+                LOOKUP_TOOL, lookup_args, self._tool_router.execute, timeout=_TOOL_TIMEOUT_SEC
+            )
+            shown_args = self._vehicle_gate.settle(lookup_raw)
+            if shown_args is not None:
+                lookup_content = compress_tool_result(
+                    LOOKUP_TOOL, lookup_raw, sales_enabled=self._sales_enabled, args=shown_args
+                )
+                if self._pii_vault is not None:
+                    lookup_content = self._pii_vault.mask(lookup_content)
+                conversation_history.extend(
+                    forced_tool_messages(LOOKUP_TOOL, shown_args, lookup_content)
+                )
+                done_this_turn.add(LOOKUP_TOOL + ":" + json.dumps(shown_args, sort_keys=True))
+                tool_calls_made += 1
+            tire_progress = self._vehicle_gate.apply(tire_progress) or None
+
         # The caller's tyre request is complete and was not searched yet: the
         # code searches before the first round (`tire_search_gate`), so the
         # caller never hears a question and then the results. Once per turn.
@@ -1957,6 +1996,9 @@ class StreamingAgentLoop:
                 )
                 if self._sales_enabled:
                     judged = drop_fit_claims(judged, disk_fit_state, _current_call_id())
+                    # Studs exist only on winter tyres: out of season the
+                    # model's «шиповані чи липучка?» goes (`vehicle_lookup_gate`).
+                    judged = drop_stud_questions(judged, tire_progress, _current_call_id())
                 buffered = drop_repeated_sentences(
                     guard_network_claims(
                         judged,
@@ -2226,6 +2268,8 @@ class StreamingAgentLoop:
                         _caveats.append(phrase)
                 if self._sales_enabled and tc.name == "search_disks":
                     collect_disk_verdict(raw, disk_fit_state, _caveats)
+                if tc.name == LOOKUP_TOOL:
+                    self._vehicle_gate.note_model_call(args, raw)
                 content = compress_tool_result(
                     tc.name, raw, sales_enabled=self._sales_enabled, args=args
                 )

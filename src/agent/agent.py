@@ -43,6 +43,7 @@ from src.agent.tire_search_gate import (
     accumulate_query,
     forced_search_messages,
     forced_tool_messages,
+    last_assistant_text,
     run_forced_search,
     run_forced_tool,
 )
@@ -52,6 +53,11 @@ from src.agent.tool_result_compressor import (
     tire_caveat_phrase,
 )
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
+from src.agent.vehicle_lookup_gate import (
+    LOOKUP_TOOL,
+    VehicleLookupGate,
+    drop_stud_questions_text,
+)
 from src.llm.router import llm_call_id_var
 from src.monitoring.metrics import (
     history_compression_mode,
@@ -257,6 +263,11 @@ class LLMAgent:
         # The caller's tyre request, as the live pipeline keeps it in
         # ``session.tire_query`` (`merge_tire_query`, sales scope only).
         self._tire_query: dict[str, Any] = {}
+        # The code's own car lookups and the factory size they put into
+        # ``_tire_query`` (`vehicle_lookup_gate`, sales scope only).
+        self._vehicle_gate = VehicleLookupGate(
+            sales_enabled=bool(network_policy is not None and network_policy.sales_enabled)
+        )
         # Accumulated usage from last process_message call (all LLM rounds)
         self.last_input_tokens: int = 0
         self.last_output_tokens: int = 0
@@ -325,6 +336,8 @@ class LLMAgent:
             self._tire_query = accumulate_query(
                 self._tire_query, user_text, conversation_history, tools_called
             )
+            self._vehicle_gate.note_turn(user_text, self._tire_query)
+            self._tire_query = self._vehicle_gate.apply(self._tire_query) or {}
 
         # Mask PII before sending to LLM
         if self._pii_vault is not None:
@@ -450,6 +463,32 @@ class LLMAgent:
                 forced_tool_messages(KB_TOOL, consult_args, consult_content)
             )
             tool_call_count += 1
+        # Text-path twin of the streamed forced car lookup (`vehicle_lookup_gate`):
+        # the caller named a car — its factory sizes before the first round,
+        # and the one that fits the request goes into it before the search gate.
+        lookup_args = self._vehicle_gate.plan(
+            user_text, last_assistant_text(conversation_history), tools
+        )
+        if lookup_args is not None:
+            if self._pii_vault is not None:
+                lookup_args = self._pii_vault.restore_in_args(lookup_args)
+            lookup_raw = await run_forced_tool(
+                LOOKUP_TOOL, lookup_args, self._tool_router.execute, timeout=_TOOL_TIMEOUT_SEC
+            )
+            self._call_tools.add(LOOKUP_TOOL)
+            shown_args = self._vehicle_gate.settle(lookup_raw)
+            if shown_args is not None:
+                lookup_content = compress_tool_result(
+                    LOOKUP_TOOL, lookup_raw, sales_enabled=sales_enabled, args=shown_args
+                )
+                if self._pii_vault is not None:
+                    lookup_content = self._pii_vault.mask(lookup_content)
+                conversation_history.extend(
+                    forced_tool_messages(LOOKUP_TOOL, shown_args, lookup_content)
+                )
+                done_this_turn.add(LOOKUP_TOOL + ":" + json.dumps(shown_args, sort_keys=True))
+                tool_call_count += 1
+            self._tire_query = self._vehicle_gate.apply(self._tire_query) or {}
         # Text-path twin of the streamed forced search (`tire_search_gate`):
         # the request is complete, so the code searches before the first round.
         forced_args = ForcedTireSearch(sales_enabled=sales_enabled, tools=tools).plan(
@@ -664,6 +703,8 @@ class LLMAgent:
                         caveats.append(phrase)
                 if sales_enabled and tu["name"] == "search_disks":
                     collect_disk_verdict(raw, disk_fit_state, caveats)
+                if tu["name"] == LOOKUP_TOOL:
+                    self._vehicle_gate.note_model_call(args, raw)
                 content = compress_tool_result(
                     tu["name"], raw, sales_enabled=sales_enabled, args=args
                 )
@@ -711,6 +752,11 @@ class LLMAgent:
             # goes; the verdict below is the code's own, not judged.
             response_text = drop_fit_claims_text(
                 response_text, disk_fit_state, llm_call_id_var.get(None) or "unknown"
+            )
+            # Studs exist only on winter tyres: out of season the model's
+            # «шиповані чи липучка?» goes (`vehicle_lookup_gate`).
+            response_text = drop_stud_questions_text(
+                response_text, self._tire_query, llm_call_id_var.get(None) or "unknown"
             )
 
         # The network facts and a relaxed tyre search's caveat come first, said

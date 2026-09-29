@@ -1729,7 +1729,27 @@ def _build_tool_router(
     client = store_client or _store_client
     assert client is not None, "StoreClient must be initialized before handling calls"
 
-    router.register("get_vehicle_tire_sizes", client.get_vehicle_tire_sizes)
+    async def _get_vehicle_tire_sizes(
+        vehicle_text: str | None = None, **params: Any
+    ) -> dict[str, Any]:
+        # ``vehicle_text`` — the caller's utterance, passed only by the code's
+        # own lookup (`vehicle_lookup_gate`, not in the LLM schema, sales only):
+        # the car is read out of it by the catalogue. A brand AND a model, or
+        # nothing — never a guess.
+        sales = network_policy is not None and network_policy.sales_enabled
+        text = vehicle_text.strip() if isinstance(vehicle_text, str) else ""
+        if sales and text and not (params.get("brand") or params.get("model")):
+            try:
+                vehicle = await client.resolve_vehicle_text(text)
+            except Exception:
+                logger.warning("get_vehicle_tire_sizes: car lookup failed", exc_info=True)
+                vehicle = None
+            if not vehicle or not vehicle.get("brand") or not vehicle.get("model"):
+                return {"found": False, "vehicle_resolved": False}
+            params = {**params, **vehicle}
+        return await client.get_vehicle_tire_sizes(**params)
+
+    router.register("get_vehicle_tire_sizes", _get_vehicle_tire_sizes)
 
     async def _search_tires(**params: Any) -> dict[str, Any]:
         if network_policy is not None and network_policy.sales_enabled:
