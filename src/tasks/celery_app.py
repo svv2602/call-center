@@ -35,6 +35,7 @@ app = Celery(
         "src.tasks.promo_summary_tasks",
         "src.tasks.pricing_sync",
         "src.tasks.fitting_prices_tasks",
+        "src.tasks.tshina_sync_tasks",
     ],
 )
 
@@ -65,6 +66,7 @@ app.conf.update(
         "src.tasks.promo_summary_tasks.*": {"queue": "embeddings"},
         "src.tasks.pricing_sync.*": {"queue": "stats"},
         "src.tasks.fitting_prices_tasks.*": {"queue": "catalog"},
+        "src.tasks.tshina_sync_tasks.*": {"queue": "catalog"},
     },
 )
 
@@ -148,6 +150,19 @@ app.conf.beat_schedule = {
         "task": "src.tasks.fitting_prices_tasks.refresh_fitting_prices",
         "schedule": crontab(minute=45),  # Every hour at :45; TTL 2h keeps cache warm
         "kwargs": {"triggered_by": "beat"},
+    },
+    # tshina Data API (labels, tyre tests, vehicle directory); a no-op without
+    # TSHINA_API_BASE_URL + TSHINA_API_TOKEN. 04:40 — after tshina's night jobs
+    # and clear of backup-database (04:00) and cleanup-expired-data (Sun 03:00).
+    # The Sunday full snapshot replaces that day's increment: both share one
+    # lock, and the full walk upserts everything the increment would.
+    "tshina-sync-incremental": {
+        "task": "src.tasks.tshina_sync_tasks.tshina_sync_incremental",
+        "schedule": crontab(hour=4, minute=40, day_of_week="mon-sat"),  # Mon–Sat 04:40 Kyiv
+    },
+    "tshina-sync-full": {
+        "task": "src.tasks.tshina_sync_tasks.tshina_sync_full",
+        "schedule": crontab(hour=4, minute=40, day_of_week="sunday"),  # Sunday 04:40 Kyiv
     },
 }
 

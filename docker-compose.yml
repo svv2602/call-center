@@ -308,6 +308,11 @@ services:
       - "127.0.0.1:9187:9187"
     environment:
       DATA_SOURCE_NAME: "postgresql://callcenter:${POSTGRES_PASSWORD}@postgres:5432/callcenter?sslmode=disable"
+      # data_sync_state → callcenter_data_sync_last_success_timestamp (the
+      # celery-worker's own metrics are not scraped)
+      PG_EXPORTER_EXTEND_QUERY_PATH: /etc/postgres_exporter/queries.yaml
+    volumes:
+      - ./prometheus/postgres-exporter-queries.yaml:/etc/postgres_exporter/queries.yaml:ro
     depends_on:
       - postgres
     restart: unless-stopped

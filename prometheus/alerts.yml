@@ -380,6 +380,24 @@ groups:
             Last successful partition management was {{ $value | humanizeDuration }} ago.
             Expected: weekly on Mondays at 02:00.
 
+      # tshina Data API sync stale: resource not fully applied in 48 h.
+      # The gauge exists only while the sync is enabled (token + URL set),
+      # so a disabled sync never alerts.
+      - alert: TshinaDataSyncStale
+        expr: >
+          (time() - callcenter_data_sync_last_success_timestamp) > 172800
+        for: 15m
+        labels:
+          severity: high
+        annotations:
+          summary: "tshina data sync is stale for {{ $labels.resource }}"
+          description: >
+            Last successful sync of {{ $labels.resource }} was {{ $value | humanizeDuration }} ago.
+            Expected: Mon–Sat 04:40 Kyiv increment, Sunday 04:40 full snapshot.
+            The timestamp comes from data_sync_state via postgres-exporter
+            (prometheus/postgres-exporter-queries.yaml): no row, no alert.
+            Check data_sync_state.last_error and celery-worker logs.
+
       # Partition errors
       - alert: PartitionManagementFailed
         expr: increase(callcenter_partition_errors_total[1h]) > 0

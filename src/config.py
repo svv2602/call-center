@@ -95,6 +95,29 @@ class OneCSettings(BaseSettings):
     model_config = {"env_prefix": "ONEC_"}
 
 
+class TshinaApiSettings(BaseSettings):
+    """tshina Data API (EU labels, tyre tests, vehicle directory) — nightly sync.
+
+    Off by default: without ``base_url`` or ``token`` the sync tasks log
+    «disabled» and send no request. On the stand nginx basic-auth owns the
+    ``Authorization`` header, so with ``basic_user`` set the token travels in
+    ``X-Api-Token``; without it — ``Authorization: Bearer <token>``.
+    """
+
+    base_url: str = ""
+    token: str = ""
+    basic_user: str = ""
+    basic_password: str = ""
+    timeout: int = 60
+    page_limit: int = 1000
+
+    model_config = {"env_prefix": "TSHINA_API_"}
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.base_url.strip() and self.token.strip())
+
+
 class DatabaseSettings(BaseSettings):
     url: str = "postgresql+asyncpg://callcenter:callcenter_dev_pass@localhost:5432/callcenter_dev"
 
@@ -325,6 +348,7 @@ class Settings(BaseSettings):
     openai: OpenAISettings = OpenAISettings()
     store_api: StoreAPISettings = StoreAPISettings()
     onec: OneCSettings = OneCSettings()
+    tshina_api: TshinaApiSettings = TshinaApiSettings()
     database: DatabaseSettings = DatabaseSettings()
     redis: RedisSettings = RedisSettings()
     ari: ARISettings = ARISettings()

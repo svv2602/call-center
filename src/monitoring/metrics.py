@@ -340,6 +340,30 @@ partition_errors_total = Counter(
     "Total partition management failures",
 )
 
+# --- tshina Data API sync (src/integrations/tshina_sync.py) ---
+# Set only when the sync is enabled (TSHINA_API_BASE_URL + TSHINA_API_TOKEN):
+# a disabled sync leaves no series, so the staleness alert stays silent.
+
+data_sync_last_success_timestamp = Gauge(
+    "callcenter_data_sync_last_success_timestamp",
+    "Unix timestamp of the last fully applied sync of a tshina resource",
+    ["resource"],
+)
+
+data_sync_rows_total = Counter(
+    "callcenter_data_sync_rows_total",
+    "Rows handled by the tshina sync",
+    ["resource", "op"],  # upserted, deleted, rejected, skipped
+)
+
+data_sync_errors_total = Counter(
+    "callcenter_data_sync_errors_total",
+    "tshina sync failures",
+    # auth, bad_request, http, rate_limit, network, protocol, db,
+    # snapshot_guard, alias_collision
+    ["resource", "kind"],
+)
+
 
 # --- Admin WebSocket metrics ---
 

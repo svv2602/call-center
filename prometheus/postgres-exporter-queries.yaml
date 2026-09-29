@@ -1,0 +1,19 @@
+# Custom queries of postgres-exporter (PG_EXPORTER_EXTEND_QUERY_PATH).
+#
+# Celery-worker metrics are not scraped (Prometheus scrapes call-processor
+# only), so a timestamp a task sets in-process never reaches an alert. The
+# state the task writes to the database does: one series per synced resource,
+# none while the tshina sync is off (no rows) — so a disabled sync never alerts.
+callcenter_data_sync:
+  query: >
+    SELECT resource,
+           EXTRACT(EPOCH FROM last_success_at) AS last_success_timestamp
+    FROM data_sync_state
+    WHERE last_success_at IS NOT NULL
+  metrics:
+    - resource:
+        usage: "LABEL"
+        description: "tshina Data API resource"
+    - last_success_timestamp:
+        usage: "GAUGE"
+        description: "Unix time of the last successful sync of the resource"
