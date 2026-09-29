@@ -520,7 +520,7 @@ def test_sales_off_nothing_said_nothing_noted(run: Any) -> None:
 
 @LOOPS
 def test_no_topic_nothing_said(run: Any) -> None:
-    reply, systems, _ = run("потрібні шини", TS)
+    reply, systems, _ = run("розкажіть про шини", TS)
     assert reply == LLM_REPLY
     assert "Вже сказано клієнту" not in systems[0]
 

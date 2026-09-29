@@ -53,6 +53,7 @@ from src.agent.tool_result_compressor import (
     tire_caveat_phrase,
 )
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
+from src.agent.vague_tyre_buy import VagueBuyGate
 from src.agent.vehicle_lookup_gate import (
     LOOKUP_TOOL,
     VehicleLookupGate,
@@ -268,6 +269,11 @@ class LLMAgent:
         self._vehicle_gate = VehicleLookupGate(
             sales_enabled=bool(network_policy is not None and network_policy.sales_enabled)
         )
+        # «купити резину» with no car and no size: the code's question is the
+        # whole reply, once per call (`vague_tyre_buy`, sales scope only).
+        self._vague_gate = VagueBuyGate(
+            sales_enabled=bool(network_policy is not None and network_policy.sales_enabled)
+        )
         # Accumulated usage from last process_message call (all LLM rounds)
         self.last_input_tokens: int = 0
         self.last_output_tokens: int = 0
@@ -447,6 +453,26 @@ class LLMAgent:
         )
         if facts:
             system += already_said_note(facts)
+        # Text-path twin of the spoken first question of a tyre pick
+        # (`vague_tyre_buy`): the code's question is the whole reply, no round.
+        vague_phrase = self._vague_gate.plan(
+            user_text,
+            query=self._tire_query,
+            history=conversation_history,
+            tools_called=tools_called,
+            last_bot_text=last_assistant_text(conversation_history),
+            in_fitting="fitting" in (active_scenarios or ()) or scenario == "fitting",
+        )
+        if vague_phrase is not None:
+            conversation_history.append(
+                {"role": "assistant", "content": [{"type": "text", "text": vague_phrase}]}
+            )
+            self.last_input_tokens = 0
+            self.last_output_tokens = 0
+            self.last_cached_input_tokens = 0
+            self.last_provider_key = ""
+            self.last_error = None
+            return vague_phrase, conversation_history
         # A wheel consultation: the code searches the knowledge base first.
         consult_args = disk_consult_args(user_text, sales_enabled=sales_enabled, tools=tools)
         if consult_args is not None:

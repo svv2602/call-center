@@ -86,6 +86,7 @@ from src.agent.tool_result_compressor import (
     tire_caveat_phrase,
 )
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
+from src.agent.vague_tyre_buy import VagueBuyGate
 from src.agent.vehicle_lookup_gate import LOOKUP_TOOL, VehicleLookupGate, drop_stud_questions
 from src.core.audio_sender import send_audio_stream
 from src.core.sentence_buffer import BufferEvent, SentenceReady, buffer_sentences
@@ -1553,6 +1554,9 @@ class StreamingAgentLoop:
         # turn's ``tire_progress`` (`vehicle_lookup_gate`, sales scope only).
         # One loop per call, so this lives as long as the call's history.
         self._vehicle_gate = VehicleLookupGate(sales_enabled=self._sales_enabled)
+        # «купити резину» with no car and no size: the code asks the first
+        # question of the pick, once per call (`vague_tyre_buy`, sales only).
+        self._vague_gate = VagueBuyGate(sales_enabled=self._sales_enabled)
 
     @property
     def _tts(self) -> TTSEngine:
@@ -1861,6 +1865,33 @@ class StreamingAgentLoop:
         facts = turn_facts(
             user_text, self._network_policy, self._promo_overrides, tire_progress
         )
+
+        # «купити резину» with no car and no size (`vague_tyre_buy`): the
+        # code's question is the whole reply and no LLM round runs — a phrase
+        # before the stream would still leave the model a round for the menu
+        # question or a second one, and a guard after the stream would have to
+        # take back a reply already partly heard. Nothing to call is lost: with
+        # no car and no size there is no search and no lookup to run.
+        vague_phrase = self._vague_gate.plan(
+            user_text,
+            query=tire_progress,
+            history=conversation_history,
+            tools_called=tools_called,
+            last_bot_text=last_assistant_text(conversation_history),
+            in_fitting="fitting" in (active_scenarios or ()) or scenario == "fitting",
+        )
+        if vague_phrase is not None and await self._speak_code_phrase(vague_phrase):
+            conversation_history.append(
+                {"role": "assistant", "content": [{"type": "text", "text": vague_phrase}]}
+            )
+            return TurnResult(
+                spoken_text=vague_phrase,
+                tool_calls_made=0,
+                stop_reason="end_turn",
+                total_usage=Usage(0, 0, 0),
+                interrupted=self._barge_in is not None and self._barge_in.is_set(),
+            )
+
         said_facts = [fact for fact in facts if await self._speak_code_phrase(fact)]
         if said_facts:
             spoken_parts.extend(said_facts)
