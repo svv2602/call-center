@@ -1561,10 +1561,13 @@ class StoreClient:
                    p.size, m.seasonality AS season,
                    COALESCE(s.price, 0) AS price,
                    COALESCE(s.stock_quantity, 0) AS stock_quantity,
-                   {_RUNFLAT_COLUMN_SQL} AS runflat
+                   {_RUNFLAT_COLUMN_SQL} AS runflat,
+                   l.energy_class AS eu_fuel, l.wet_grip_class AS eu_wet,
+                   l.noise_db AS eu_noise_db
             FROM tire_products p
             JOIN tire_models m ON p.model_id = m.id
             LEFT JOIN tire_stock s ON p.sku = s.sku AND s.trading_network = :network
+            LEFT JOIN tire_eu_labels l ON l.sku = p.sku
             WHERE {where_clause}
             ORDER BY {order}
             LIMIT :result_limit
@@ -1588,7 +1591,28 @@ class StoreClient:
         }
         if row.get("runflat") is True:
             item["runflat"] = True
+        label = StoreClient._eu_label(row)
+        if label:
+            item["eu_label"] = label
         return item
+
+    @staticmethod
+    def _eu_label(row: Any) -> dict[str, Any]:
+        """The EU label of a catalogue row (``tire_eu_labels``, LEFT JOIN).
+
+        ``{"fuel": "C", "wet": "B", "noise_db": 71}`` — only the fields the
+        label has; no label row (or a row without the columns) → ``{}``, so
+        the item carries no ``eu_label`` key at all.
+        """
+        label: dict[str, Any] = {}
+        for key, column in (("fuel", "eu_fuel"), ("wet", "eu_wet")):
+            value = row.get(column)
+            if value is not None and str(value).strip():
+                label[key] = str(value).strip().upper()
+        noise = row.get("eu_noise_db")
+        if noise is not None:
+            label["noise_db"] = int(noise)
+        return label
 
     async def _search_tires_db(self, network: str = "", **params: Any) -> dict[str, Any]:
         """Search tires in PostgreSQL catalog (synced from 1C).

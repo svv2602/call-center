@@ -301,7 +301,7 @@
   source: tshina:consultant-dialogue-2026-09-29
   network: both
   sales_enabled: true
-  notes: probe 2026-09-29 (vehicle-lookup-gate) — ProKoleso 0/2; the code looks the car up (vehicle_lookup_gate), the factory R17 size goes into the request, so «летние» is searched by the search gate; studs are not asked for summer tyres
+  notes: probe 2026-09-29 (vehicle-lookup-gate) — ProKoleso 0/2; the code looks the car up (vehicle_lookup_gate), the factory R17 size goes into the request, so «летние» is searched by the search gate; studs are not asked for summer tyres. Turns 4–5 (wave 2-C) — the search items carry `eu_label` (`tire_eu_labels`, values from the neighbours' result); the code compares the named tyres of the last search by their label classes before the first round (`tyre_compare`) — Taurus was 4th, beyond the three the model is shown
   mocks:
     get_vehicle_tire_sizes:
       found: true
@@ -312,11 +312,11 @@
     search_tires:
       total: 5
       items:
-        - {id: a1, brand: Firestone, model: Roadhawk 2, size: 215/55 R17 98W, season: summer, price: 5184, in_stock: true}
-        - {id: a2, brand: Bridgestone, model: Turanza T005, size: 215/55 R17 94V, season: summer, price: 5766, in_stock: true}
-        - {id: a3, brand: Bridgestone, model: Turanza 6, size: 215/55 R17 98W, season: summer, price: 6687, in_stock: true}
-        - {id: a4, brand: Taurus, model: SUMMER 3, size: 215/55 R17 98W, season: summer, price: 3450, in_stock: true}
-        - {id: a5, brand: Matador, model: Hectorra 5, size: 215/55 R17 98Y, season: summer, price: 4425, in_stock: true}
+        - {id: a1, brand: Firestone, model: Roadhawk 2, size: 215/55 R17 98W, season: summer, price: 5184, in_stock: true, eu_label: {fuel: B, wet: A, noise_db: 71}}
+        - {id: a2, brand: Bridgestone, model: Turanza T005, size: 215/55 R17 94V, season: summer, price: 5766, in_stock: true, eu_label: {fuel: A, wet: A, noise_db: 71}}
+        - {id: a3, brand: Bridgestone, model: Turanza 6, size: 215/55 R17 98W, season: summer, price: 6687, in_stock: true, eu_label: {fuel: C, wet: B, noise_db: 71}}
+        - {id: a4, brand: Taurus, model: SUMMER 3, size: 215/55 R17 98W, season: summer, price: 3450, in_stock: true, eu_label: {fuel: B, wet: B, noise_db: 71}}
+        - {id: a5, brand: Matador, model: Hectorra 5, size: 215/55 R17 98Y, season: summer, price: 4425, in_stock: true, eu_label: {fuel: C, wet: B, noise_db: 72}}
   turns:
     - user: шины на камри
       expect:
@@ -333,7 +333,11 @@
         tool_not_called: [transfer_to_operator]
     - user: таурус лучше бриджестоуна?
       expect:
+        must_contain: ['Taurus SUMMER 3: мокра дорога B, економія палива B', 'Turanza T005: мокра дорога A, економія палива A', 'Turanza 6: мокра дорога B, економія палива C']
+        must_not_contain: ['в базі знань немає', 'новіш\w* модел', 'можлив\w* покращ']
         tool_not_called: [transfer_to_operator]
     - user: а чем Туранза 6 лучше Т005?
       expect:
+        must_contain: ['Turanza T005: мокра дорога A, економія палива A', 'Turanza 6: мокра дорога B, економія палива C']
+        must_not_contain: ['в базі знань немає', 'новіш\w* модел', 'можлив\w* покращ']
         tool_not_called: [transfer_to_operator]

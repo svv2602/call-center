@@ -86,6 +86,7 @@ from src.agent.tool_result_compressor import (
     tire_caveat_phrase,
 )
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
+from src.agent.tyre_compare import TyreCompare, compare_said_note
 from src.agent.vague_tyre_buy import VagueBuyGate
 from src.agent.vehicle_lookup_gate import LOOKUP_TOOL, VehicleLookupGate, drop_stud_questions
 from src.core.audio_sender import send_audio_stream
@@ -1557,6 +1558,9 @@ class StreamingAgentLoop:
         # «купити резину» with no car and no size: the code asks the first
         # question of the pick, once per call (`vague_tyre_buy`, sales only).
         self._vague_gate = VagueBuyGate(sales_enabled=self._sales_enabled)
+        # The call's last `search_tires` result, all of it — the tyres a
+        # compare question may name (`tyre_compare`, sales scope only).
+        self._tyre_compare = TyreCompare(sales_enabled=self._sales_enabled)
 
     @property
     def _tts(self) -> TTSEngine:
@@ -1897,6 +1901,14 @@ class StreamingAgentLoop:
             spoken_parts.extend(said_facts)
             system += already_said_note(said_facts)
 
+        # «таурус лучше бриджестоуна?» — two tyres of the call's last search
+        # compared by the code from their EU labels, before the stream
+        # (`tyre_compare`); the model is told what was said. One per turn.
+        compare_phrase = self._tyre_compare.plan(user_text)
+        if compare_phrase is not None and await self._speak_code_phrase(compare_phrase):
+            spoken_parts.append(compare_phrase)
+            system += compare_said_note(compare_phrase)
+
         # A wheel consultation: the code searches the knowledge base
         # (category wheels) before the first round.
         consult_args = disk_consult_args(
@@ -1952,6 +1964,7 @@ class StreamingAgentLoop:
             forced_raw = await run_forced_search(
                 forced_args, self._tool_router.execute, timeout=_TOOL_TIMEOUT_SEC
             )
+            self._tyre_compare.note_search(forced_raw)
             if isinstance(forced_raw, dict) and forced_raw.get("error") is True:
                 refused_this_turn[SEARCH_TOOL + ":" + json.dumps(forced_args, sort_keys=True)] = str(
                     forced_raw.get("reason") or forced_raw.get("action_required") or "unspecified"
@@ -2294,6 +2307,7 @@ class StreamingAgentLoop:
                 elif not (isinstance(raw, dict) and raw.get("error")):
                     done_this_turn.add(refusal_key)
                 if self._sales_enabled and tc.name == "search_tires":
+                    self._tyre_compare.note_search(raw)
                     phrase = tire_caveat_phrase(raw, args)
                     if phrase and phrase not in _caveats:
                         _caveats.append(phrase)

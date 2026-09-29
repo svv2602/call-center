@@ -53,6 +53,7 @@ from src.agent.tool_result_compressor import (
     tire_caveat_phrase,
 )
 from src.agent.tools import ALL_TOOLS, filter_tools_by_state
+from src.agent.tyre_compare import TyreCompare, compare_said_note
 from src.agent.vague_tyre_buy import VagueBuyGate
 from src.agent.vehicle_lookup_gate import (
     LOOKUP_TOOL,
@@ -274,6 +275,11 @@ class LLMAgent:
         self._vague_gate = VagueBuyGate(
             sales_enabled=bool(network_policy is not None and network_policy.sales_enabled)
         )
+        # The call's last `search_tires` result, all of it — the tyres a
+        # compare question may name (`tyre_compare`, sales scope only).
+        self._tyre_compare = TyreCompare(
+            sales_enabled=bool(network_policy is not None and network_policy.sales_enabled)
+        )
         # Accumulated usage from last process_message call (all LLM rounds)
         self.last_input_tokens: int = 0
         self.last_output_tokens: int = 0
@@ -453,6 +459,12 @@ class LLMAgent:
         )
         if facts:
             system += already_said_note(facts)
+        # Text-path twin of the spoken tyre comparison (`tyre_compare`): the
+        # code's phrase opens the reply after the facts; the model is told.
+        compare = self._tyre_compare.plan(user_text)
+        compared = [compare] if compare is not None else []
+        if compare is not None:
+            system += compare_said_note(compare)
         # Text-path twin of the spoken first question of a tyre pick
         # (`vague_tyre_buy`): the code's question is the whole reply, no round.
         vague_phrase = self._vague_gate.plan(
@@ -525,6 +537,7 @@ class LLMAgent:
                 forced_args, self._tool_router.execute, timeout=_TOOL_TIMEOUT_SEC
             )
             self._call_tools.add(SEARCH_TOOL)
+            self._tyre_compare.note_search(forced_raw)
             forced_phrase = tire_caveat_phrase(forced_raw, forced_args)
             if forced_phrase:
                 caveats.append(forced_phrase)
@@ -724,6 +737,7 @@ class LLMAgent:
                 if not (isinstance(raw, dict) and raw.get("error")):
                     done_this_turn.add(repeat_key)
                 if sales_enabled and tu["name"] == "search_tires":
+                    self._tyre_compare.note_search(raw)
                     phrase = tire_caveat_phrase(raw, args)
                     if phrase and phrase not in caveats:
                         caveats.append(phrase)
@@ -788,8 +802,8 @@ class LLMAgent:
         # The network facts and a relaxed tyre search's caveat come first, said
         # by the code — the text-mode twin of the spoken phrases in
         # StreamingAgentLoop, added after the guard so it never judges them.
-        if facts or caveats:
-            response_text = " ".join([*facts, *caveats, response_text]).strip()
+        if facts or compared or caveats:
+            response_text = " ".join([*facts, *compared, *caveats, response_text]).strip()
 
         return response_text, conversation_history
 

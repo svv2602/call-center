@@ -219,12 +219,14 @@ def _compress_search_tires(
     rear axle of a staggered pair (``rear_size``/``rear_price``, never
     ``rear_id``) and the caveat the loop has already spoken stay, so the model
     neither repeats the caveat nor presents a friction tyre as the studded one
-    asked for. Off — byte-identical.
+    asked for; the EU label (``eu_label``) stays too. Off — byte-identical.
     """
     items = result.get("items", [])
     essential_keys: tuple[str, ...] = ("brand", "model", "size", "price", "in_stock")
     if sales_enabled:
-        essential_keys = (*essential_keys, "rear_size", "rear_price", "runflat")
+        # ``eu_label`` (``tire_eu_labels``): the classes the model may quote
+        # when asked to compare — never characteristics beyond them.
+        essential_keys = (*essential_keys, "rear_size", "rear_price", "runflat", "eu_label")
     compressed = [{k: v for k, v in item.items() if k in essential_keys} for item in items[:3]]
     out: dict[str, Any] = {"total": result.get("total", len(items))}
     out["items"] = compressed
