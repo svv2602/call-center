@@ -100,7 +100,7 @@ from src.api.websocket import router as websocket_router
 from src.config import Settings, get_settings
 from src.core.audio_socket import AudioSocketConnection, AudioSocketServer
 from src.core.audio_stats import InboundAudioStats
-from src.core.call_session import CallSession, CallState, SessionStore
+from src.core.call_session import SESSION_TTL, CallSession, CallState, SessionStore
 from src.core.pipeline import CallPipeline
 from src.events.publisher import publish_event
 from src.logging.pii_vault import PIIVault
@@ -510,7 +510,13 @@ async def store_caller_id(request: Request, data: dict[str, str]) -> dict[str, s
         if channel_id:
             await _redis.set(f"call:channel:{call_uuid}", channel_id, ex=120)
         if channel_name:
-            await _redis.set(f"call:channel_name:{call_uuid}", channel_name, ex=120)
+            # Read by transfer_to_operator at transfer time — any moment of the call,
+            # not just its start. With ex=120 every transfer after the 2nd minute found
+            # no mapping and the caller heard "оператори недоступні" (0 successful
+            # transfers after 120 s, 21 failures in 13 calls over 60 days). Same TTL
+            # source as the call session. caller/exten/channel stay at 120 s: they are
+            # read only at call start (or not at all).
+            await _redis.set(f"call:channel_name:{call_uuid}", channel_name, ex=SESSION_TTL)
     return {"status": "ok"}
 
 
