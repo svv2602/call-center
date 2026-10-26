@@ -135,6 +135,40 @@ class TestLLMAgentInit:
         call_kwargs = agent._client.messages.create.call_args
         assert call_kwargs.kwargs["tools"] is custom
 
+    @pytest.mark.asyncio
+    async def test_direct_sdk_usage_is_read_by_its_own_field_names(self) -> None:
+        """The legacy Anthropic path reads the SDK's real ``Usage`` (goldset 10-26).
+
+        A spec-less ``MagicMock`` usage answers any attribute, so the router's
+        ``cached_input_tokens`` read off the SDK object passed the tests and
+        crashed the first real call (the sandbox without a provider override).
+        """
+        from unittest.mock import AsyncMock, MagicMock
+
+        from anthropic.types import Message, TextBlock, Usage
+
+        from src.agent.agent import LLMAgent
+
+        agent = LLMAgent(api_key="test-key")
+        response = Message(
+            id="msg_1",
+            type="message",
+            role="assistant",
+            model="claude-test",
+            content=[TextBlock(type="text", text="Відповідь")],
+            stop_reason="end_turn",
+            stop_sequence=None,
+            usage=Usage(input_tokens=10, output_tokens=5, cache_read_input_tokens=4),
+        )
+        agent._client = MagicMock(spec=["messages"])
+        agent._client.messages = MagicMock(spec=["create"])
+        agent._client.messages.create = AsyncMock(return_value=response)
+
+        text, _ = await agent.process_message("Тест", [])
+
+        assert text == "Відповідь"
+        assert agent.last_cached_input_tokens == 4
+
 
 class TestSystemPrompt:
     """Test system prompt content."""

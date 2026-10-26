@@ -645,7 +645,9 @@ class LLMAgent:
                 latency_ms = int((time.monotonic() - start) * 1000)
                 self.last_input_tokens += response.usage.input_tokens
                 self.last_output_tokens += response.usage.output_tokens
-                self.last_cached_input_tokens += response.usage.cached_input_tokens
+                # The SDK's own Usage: the router's `cached_input_tokens` is
+                # `cache_read_input_tokens` here (and may be None).
+                self.last_cached_input_tokens += response.usage.cache_read_input_tokens or 0
                 stop_reason = response.stop_reason or "end_turn"
                 logger.info(
                     "Claude response: stop=%s, latency=%dms, tokens_in=%d, tokens_out=%d",
