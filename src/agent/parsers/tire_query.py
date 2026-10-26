@@ -45,6 +45,7 @@ __all__ = [
     "QuantityParse",
     "TechRequirement",
     "TireSize",
+    "blank_load_index_requirement",
     "excluded_tire_brands",
     "extract_tire_brands",
     "is_analog_request",
@@ -53,6 +54,8 @@ __all__ = [
     "normalize_spoken_numbers",
     "normalize_tire_brand",
     "parse_budget",
+    "parse_load_index_refusal",
+    "parse_load_index_requirement",
     "parse_nail_type",
     "parse_need_refusals",
     "parse_needs",
@@ -60,6 +63,7 @@ __all__ = [
     "parse_tech_refusals",
     "parse_tech_requirements",
     "parse_tire_size",
+    "tire_item_load_index",
 ]
 
 NailType = Literal["studdable", "studless", "studded"]
@@ -1117,3 +1121,112 @@ def parse_need_refusals(text: str) -> list[Need] | None:
     """
     _, refused = _need_mentions(text)
     return refused or None
+
+
+# ═══════════════════════════════════════════════════════════
+#  Load index («індекс навантаження від 102»)
+# ═══════════════════════════════════════════════════════════
+
+#: The load words themselves — never a bare «індекс» (it is also the speed index).
+_LOAD_WORD = (
+    r"(?:(?:індекс\w*|индекс\w*)\s+)?(?:навантаж\w*|нагрузк\w*|нагрузоч\w*)"
+    r"(?:\s+(?:індекс\w*|индекс\w*))?"
+)
+#: Words that may stand between the load word and a MINIMUM: «не нижче», «від»,
+#: «має бути», «мінімум». «до 105» alone is a maximum — not read.
+_LOAD_MIN_FILLER = (
+    r"(?:не\s+нижче|не\s+ниже|не\s+менше|не\s+меньше|від|вiд|от|з|с|мінімум|минимум"
+    r"|щонайменше|хоча\s+б|хотя\s+бы|має|мають|бути|повинен|повинна|должен|должна|быть"
+    r"|потрібен|потрібно|треба|нужен|нужно|надо|бажано|желательно|десь|где-то|приблизно"
+    r"|примерно|у\s+межах|в\s+межах|в\s+пределах|в\s+діапазоні|в\s+диапазоне|у\s+діапазоні"
+    r"|мені|мне|нам|щоб|чтобы|був|было|би|бы)"
+)
+_LOAD_INDEX_MIN, _LOAD_INDEX_MAX = 50, 150
+#: «індекс навантаження 102–105 / від 102 до 105 / 109/107 / не нижче 102».
+_LOAD_REQUIREMENT_RE = re.compile(
+    rf"(?<![\w']){_LOAD_WORD}[\s,:\-—–]*(?:{_LOAD_MIN_FILLER}[\s,:]+){{0,3}}"
+    r"(?<![\d/.,])(\d{2,3})(?![\d.,]\d)"
+    r"(?:\s*(?:[-–—/]|до|по)\s*(\d{2,3})(?!\d))?"
+    r"(?!\s*(?:кг|кілогр\w*|килогр\w*|kg|грн|гривен\w*|гривн\w*|гривень|%))"
+)
+#: «індекс не важливий», «навантаження без різниці», «неважно какая нагрузка».
+_LOAD_TOPIC = rf"(?:{_LOAD_WORD}|індекс\w*|индекс\w*)"
+_LOAD_GAP = r"(?:\s+(?:мені|мне|нам|взагалі|вообще|особливо|особо|тут))?"
+#: RU «не важен» is not in `_INDIFFERENT` (its stem is «важн»).
+_LOAD_INDIFFERENT = rf"(?:{_INDIFFERENT}|не\s+важен)"
+_LOAD_REFUSAL_RE = re.compile(
+    rf"(?<![\w']){_LOAD_TOPIC}{_LOAD_GAP}\s+{_LOAD_INDIFFERENT}(?![\w'])"
+    rf"|(?<![\w']){_LOAD_INDIFFERENT}(?:,?\s+(?:який|яка|яке|какой|какая|какое))?"
+    rf"\s+{_LOAD_TOPIC}"
+)
+
+
+def _load_requirement_match(text: str) -> tuple[str, re.Match[str] | None]:
+    norm = normalize_spoken_numbers(text or "").translate(_APOSTROPHES)
+    for m in _LOAD_REQUIREMENT_RE.finditer(norm):
+        values = [int(g) for g in m.groups() if g is not None]
+        if all(_LOAD_INDEX_MIN <= v <= _LOAD_INDEX_MAX for v in values):
+            return norm, m
+    return norm, None
+
+
+def parse_load_index_requirement(text: str) -> int | None:
+    """The minimum load index the caller asked for — or ``None``.
+
+    «індекс навантаження 102–105» / «не нижче 102» / «від 102» / «индекс
+    нагрузки 102» (UA + RU, numbers as words too). A range is its lower bound;
+    a dual index «109/107» is its first (single-wheel) number. Read only next
+    to the load words («індекс навантаження / навантаження / индекс нагрузки /
+    нагрузк…»): a bare «102» may be a price or a number, a bare «індекс» may be
+    the speed index. A load in kilograms is not an index. «До 105» alone is a
+    maximum — not a requirement.
+    """
+    _, m = _load_requirement_match(text)
+    if m is None:
+        return None
+    first = int(m.group(1))
+    if m.group(2) is None:
+        return first
+    if "/" in m.string[m.end(1) : m.start(2)]:
+        return first  # «109/107» — dual index, the single-wheel one
+    return min(first, int(m.group(2)))
+
+
+def parse_load_index_refusal(text: str) -> bool:
+    """«індекс не важливий», «нагрузка без разницы» — the caller drops the index."""
+    if parse_load_index_requirement(text) is not None:
+        return False
+    low = (text or "").lower().translate(_APOSTROPHES)
+    return bool(_LOAD_REFUSAL_RE.search(low))
+
+
+def blank_load_index_requirement(text: str) -> str:
+    """``text`` with the load-index phrase blanked — or ``text`` itself when none.
+
+    For the budget reader: «індекс навантаження від 102 до 105» is not «до 105 грн».
+    """
+    norm, m = _load_requirement_match(text)
+    if m is None:
+        return text
+    return _blank(norm, [m.span()])
+
+
+#: « 95H» / « 109/107R» after the rim of a catalogue size («205/55 R16 91V»).
+_SIZE_LOAD_INDEX_RE = re.compile(
+    r"[RrРр]\s?\d{2}(?:[.,]5)?\s*(?:C|С|LT|c|с|lt)?\s+(\d{2,3})(?:/\d{2,3})?\s*[A-Za-z]\b"
+)
+
+
+def tire_item_load_index(item: dict[str, object]) -> int | None:
+    """The load index of an offered tyre (``StoreClient._tire_item``) — or ``None``.
+
+    ``load_index`` first (a string; «109/107» → 109), then the tail of ``size``
+    («205/55 R16 91V» → 91). Unknown is ``None`` — not «below».
+    """
+    raw = item.get("load_index")
+    if raw is not None and str(raw).strip():
+        m = re.match(r"\s*(\d{2,3})(?!\d)", str(raw))
+        if m:
+            return int(m.group(1))
+    m = _SIZE_LOAD_INDEX_RE.search(str(item.get("size") or ""))
+    return int(m.group(1)) if m else None

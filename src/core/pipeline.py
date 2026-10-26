@@ -878,11 +878,14 @@ def merge_tire_query(
     """
     from src.agent.intent_classifier import sales_intents
     from src.agent.parsers.tire_query import (
+        blank_load_index_requirement,
         excluded_tire_brands,
         extract_tire_brands,
         is_tire_question,
         mentions_tyre_noun,
         parse_budget,
+        parse_load_index_refusal,
+        parse_load_index_requirement,
         parse_nail_type,
         parse_need_refusals,
         parse_needs,
@@ -896,12 +899,14 @@ def merge_tire_query(
     full = [s for s in sizes if s.is_full]
     nail = parse_nail_type(text)
     brands = extract_tire_brands(text)
+    # «індекс навантаження від 102 до 105» is not «до 105 грн» (wave 7-Q).
+    budget_text = blank_load_index_requirement(text)
     started = bool(state) or consult_started
     if not started:
         # «А є шини до 6000?» as the first line is a budget too (tshina
         # `762168d31`, R18): a cap or a per-tyre/per-set scope WITH a tyre
         # word. A bare «до 6000» may be about the time or the booking.
-        first_budget = parse_budget(text)
+        first_budget = parse_budget(budget_text)
         started = bool(full or nail or brands) or bool(
             (
                 sales_intents(text)
@@ -939,7 +944,7 @@ def merge_tire_query(
     quantity = parse_quantity(text)
     if quantity is not None and quantity.count is not None:
         out["quantity"] = quantity.count
-    budget = parse_budget(text)
+    budget = parse_budget(budget_text)
     if budget is not None:
         out["budget"] = {"amount": budget.amount, "scope": budget.scope, "is_cap": budget.is_cap}
     if brands:
@@ -965,6 +970,14 @@ def merge_tire_query(
     if needs or not_needed:
         kept = [n for n in out.get("needs") or [] if n not in not_needed]
         out["needs"] = kept + [n for n in needs if n not in kept] or None
+    # Load index (wave 7-Q): the lower bound of what the caller asked for —
+    # `search_tires` drops offers with a known lower index. «Індекс не
+    # важливий» drops it.
+    load_index_min = parse_load_index_requirement(text)
+    if load_index_min is not None:
+        out["load_index_min"] = load_index_min
+    elif parse_load_index_refusal(text):
+        out.pop("load_index_min", None)
     return {k: v for k, v in out.items() if v not in (None, "", [], {})}
 
 

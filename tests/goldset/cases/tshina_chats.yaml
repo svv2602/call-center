@@ -627,6 +627,7 @@
   network: both
   sales_enabled: true
   notes: tshina tester 20.10 п.12 — the index was not read and 95–99 were shown silently; the size string has no index on purpose, the fact is the item field
+  pending: 'wave-7-Q-load-index-requirement: checked by the voice path only — the requirement is read by merge_tire_query and the offer is filtered and flagged (load_index_below) in the search_tires handler of src/main.py; the sandbox answers search_tires from the mock, so the flag never reaches the model here'
   mocks:
     search_tires:
       total: 2

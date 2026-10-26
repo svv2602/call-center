@@ -260,6 +260,20 @@ def _compress_search_tires(
                 out["price_corridor_widened"] = True
             if result.get("message"):
                 out["message"] = result["message"]
+        below = result.get("load_index_below")
+        if isinstance(below, dict) and below.get("required"):
+            # Wave 7-Q: none of the offered tyres meets the caller's load index.
+            shown = [str(x) for x in below.get("shown") or ()]
+            span = f"{shown[0]}–{shown[-1]}" if len(shown) > 1 else "".join(shown)
+            out["load_index_below"] = {
+                "required": below["required"],
+                "shown": list(below.get("shown") or ()),
+                "say": (
+                    f"З індексом навантаження від {below['required']} у цьому розмірі "
+                    f"зараз немає — скажи це клієнту прямо; у показаних індекс {span}, "
+                    "не кажи, що вони підходять за індексом"
+                ),
+            }
         if result.get("budget_source"):
             out["budget_source"] = result["budget_source"]
         if result.get("price_mode") and result.get("budget_source") != _BUDGET_SOURCE_CALLER:

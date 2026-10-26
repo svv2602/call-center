@@ -2668,6 +2668,12 @@ def _render_tire_progress(p: dict[str, Any]) -> str:
     if tech:
         names = ", ".join(_TIRE_TECH_LABELS.get(str(t), str(t)) for t in tech)
         lines.append(f"- Особливості: ✅ {names}")
+    load_index_min = p.get("load_index_min")
+    if load_index_min:
+        lines.append(
+            f"- Індекс навантаження: ✅ від {load_index_min} — search_tires прибирає "
+            "шини з нижчим індексом; якщо таких немає, скажи це клієнту прямо"
+        )
     needs = p.get("needs") or []
     if needs:
         names = ", ".join(_TIRE_NEED_LABELS.get(str(n), str(n)) for n in needs)

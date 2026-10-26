@@ -694,3 +694,185 @@ class TestPromptModules:
         extra = prompts.infer_expanded_modules("fitting", {"search_tires"}, SALES_ON) or []
         assert prompts._MOD_TIRE_SEARCH not in extra
         assert prompts._MOD_TIRE_SEARCH_SALES in extra
+
+
+# ── load index requirement (wave 7-Q) ─────────────────────────────────
+
+LOAD_INDEX_LINE = "гума 205/65 R16 літня, індекс навантаження 102-105, бренд будь-який"
+
+
+def _tyre_row(sku: str, brand: str, price: int, **over: Any) -> dict[str, Any]:
+    """A row as ``StoreClient._query_tire_rows`` selects it."""
+    row: dict[str, Any] = {
+        "id": sku,
+        "brand": brand,
+        "model": "M",
+        "size": "205/65 R16",
+        "season": "summer",
+        "price": price,
+        "stock_quantity": 4,
+        "runflat": False,
+        "eu_fuel": None,
+        "eu_wet": None,
+        "eu_noise_db": None,
+        "attr_studded": None,
+        "attr_xl": None,
+        "load_index": None,
+        "speed_index": None,
+        "desc_studded": False,
+        "desc_studdable": False,
+        "desc_xl": False,
+    }
+    row.update(over)
+    return row
+
+
+def _offer(*rows: dict[str, Any]) -> dict[str, Any]:
+    items = [StoreClient._tire_item(r) for r in rows]
+    return {"total": len(items), "items": items}
+
+
+#: Bridgestone 95 and Firestone 99 — the goldset case `tc_load_index_range_not_met`.
+ALL_BELOW = (
+    _tyre_row("l1", "Bridgestone", 3900, load_index="95", speed_index="H"),
+    _tyre_row("l2", "Firestone", 3300, load_index="99", speed_index="H", attr_xl=True),
+)
+#: 95 (field), 99 (size tail only), unknown, 104 (field), 109/107 (dual).
+MIXED = (
+    _tyre_row("m1", "Bridgestone", 3900, load_index="95"),
+    _tyre_row("m2", "Firestone", 3300, size="205/65 R16 99H"),
+    _tyre_row("m3", "Kumho", 3000),
+    _tyre_row("m4", "Michelin", 5200, load_index="104", speed_index="V"),
+    _tyre_row("m5", "Nokian", 4800, load_index="109/107"),
+)
+
+SEARCH_ARGS = {"width": 205, "profile": 65, "diameter": 16, "season": "summer"}
+
+
+def _load_router(
+    session: CallSession, policy: NetworkPolicy, answer: dict[str, Any]
+) -> tuple[Any, Any]:
+    from src.main import _build_tool_router
+
+    store = create_autospec(StoreClient, instance=True)
+    store.search_tires.return_value = answer
+    store.resolve_vehicle_text.return_value = None
+    return _build_tool_router(session, store_client=store, network_policy=policy), store
+
+
+async def _search(session: CallSession, policy: NetworkPolicy, answer: dict[str, Any]) -> Any:
+    router, _ = _load_router(session, policy, answer)
+    with patch("src.main._call_logger", None):
+        return await router.execute("search_tires", dict(SEARCH_ARGS))
+
+
+class TestLoadIndexMerge:
+    def test_requirement_is_collected_without_a_budget(self) -> None:
+        state = merge_tire_query({}, LOAD_INDEX_LINE)
+        assert state["load_index_min"] == 102
+        assert state["sizes"] == ["205/65 R16"] and state["season"] == "summer"
+        state = merge_tire_query(state, "індекс навантаження від 102 до 105")
+        assert "budget" not in state
+
+    def test_budget_beside_the_index_is_kept(self) -> None:
+        state = merge_tire_query({"season": "summer"}, "індекс навантаження 102, до 5000 грн")
+        assert state["load_index_min"] == 102
+        assert state["budget"] == {"amount": 5000, "scope": None, "is_cap": True}
+
+    def test_newer_value_overwrites(self) -> None:
+        state = merge_tire_query({"season": "summer", "load_index_min": 102}, "нагрузка не ниже 98")
+        assert state["load_index_min"] == 98
+
+    def test_not_important_drops_it(self) -> None:
+        state = merge_tire_query({"season": "summer", "load_index_min": 102}, "індекс не важливий")
+        assert "load_index_min" not in state
+
+    def test_bare_number_is_not_a_requirement(self) -> None:
+        state = merge_tire_query({"season": "summer"}, "102")
+        assert "load_index_min" not in state
+
+    @pytest.mark.asyncio
+    async def test_sales_off_turn_collects_nothing(self) -> None:
+        h = _pipeline_harness(SALES_OFF)
+        with fsm_flags(enabled=False):
+            await h.run(LOAD_INDEX_LINE)
+        assert h.session.tire_query == {}
+        assert "tire_progress" not in h.llm_kwargs[-1]
+
+
+class TestLoadIndexProgressBlock:
+    def test_row_rendered_from_session_state(self) -> None:
+        h = _pipeline_harness(SALES_ON)
+        h.session.tire_query = merge_tire_query({}, LOAD_INDEX_LINE)
+        assert "- Індекс навантаження: ✅ від 102" in _prompt_from_session(h)
+
+    def test_no_row_without_requirement(self) -> None:
+        h = _pipeline_harness(SALES_ON)
+        h.session.tire_query = merge_tire_query({}, "гума 205/65 R16 літня")
+        assert "Індекс навантаження" not in _prompt_from_session(h)
+
+    @pytest.mark.asyncio
+    async def test_turn_collects_and_hands_it_to_the_llm(self) -> None:
+        h = _pipeline_harness(SALES_ON)
+        with fsm_flags(enabled=False):
+            await h.run(LOAD_INDEX_LINE)
+        assert h.session.tire_query["load_index_min"] == 102
+        assert h.llm_kwargs[-1]["tire_progress"]["load_index_min"] == 102
+
+
+class TestLoadIndexFilter:
+    @pytest.mark.asyncio
+    async def test_below_dropped_unknown_kept(self) -> None:
+        session = CallSession(uuid.uuid4())
+        session.tire_query = {"season": "summer", "load_index_min": 102}
+        result = await _search(session, SALES_ON, _offer(*MIXED))
+        assert [i["id"] for i in result["items"]] == ["m3", "m4", "m5"]
+        assert result["total"] == 3
+        assert "load_index_below" not in result
+        # The caller heard the filtered offer — that is what is remembered.
+        assert session.last_tire_offer["ids"] == ["m3", "m4", "m5"]
+
+    @pytest.mark.asyncio
+    async def test_unknown_index_alone_is_offered(self) -> None:
+        session = CallSession(uuid.uuid4())
+        session.tire_query = {"season": "summer", "load_index_min": 102}
+        result = await _search(session, SALES_ON, _offer(MIXED[0], MIXED[2]))
+        assert [i["id"] for i in result["items"]] == ["m3"]
+        assert "load_index_below" not in result
+
+    @pytest.mark.asyncio
+    async def test_none_meets_it_keeps_the_offer_and_flags(self) -> None:
+        session = CallSession(uuid.uuid4())
+        session.tire_query = {"season": "summer", "load_index_min": 102}
+        result = await _search(session, SALES_ON, _offer(*ALL_BELOW))
+        assert [i["id"] for i in result["items"]] == ["l1", "l2"]
+        assert result["load_index_below"] == {"required": 102, "shown": [95, 99]}
+        said = json.loads(compress_tool_result("search_tires", result, sales_enabled=True))
+        assert said["load_index_below"]["required"] == 102
+        assert "від 102" in said["load_index_below"]["say"]
+        assert "95–99" in said["load_index_below"]["say"]
+
+    @pytest.mark.asyncio
+    async def test_end_to_end_from_the_callers_words(self) -> None:
+        session = CallSession(uuid.uuid4())
+        session.tire_query = merge_tire_query({}, LOAD_INDEX_LINE)
+        result = await _search(session, SALES_ON, _offer(*ALL_BELOW, MIXED[3]))
+        assert [i["id"] for i in result["items"]] == ["m4"]
+
+    @pytest.mark.asyncio
+    async def test_without_requirement_byte_identical(self) -> None:
+        session = CallSession(uuid.uuid4())
+        session.tire_query = {"season": "summer"}
+        answer = _offer(*MIXED)
+        before = json.dumps(answer, ensure_ascii=False, sort_keys=True)
+        result = await _search(session, SALES_ON, answer)
+        assert json.dumps(result, ensure_ascii=False, sort_keys=True) == before
+
+    @pytest.mark.asyncio
+    async def test_sales_off_byte_identical(self) -> None:
+        session = CallSession(uuid.uuid4())
+        session.tire_query = {"season": "summer", "load_index_min": 102}
+        answer = _offer(*ALL_BELOW, MIXED[3])
+        before = json.dumps(answer, ensure_ascii=False, sort_keys=True)
+        result = await _search(session, SALES_OFF, answer)
+        assert json.dumps(result, ensure_ascii=False, sort_keys=True) == before

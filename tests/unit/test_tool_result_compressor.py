@@ -399,3 +399,53 @@ def test_sales_on_summer_tyre_carries_no_studs_key() -> None:
     item = json.loads(compress_tool_result("search_tires", result, sales_enabled=True))["items"][0]
     assert item["season"] == "summer"
     assert "studded" not in item
+
+
+# ── load index below the caller's minimum (wave 7-Q) ─────────────────
+
+
+def _below_fixture() -> dict[str, Any]:
+    rows = [
+        _catalog_row(id="l1", season="summer", load_index="95", speed_index="H"),
+        _catalog_row(id="l2", season="summer", load_index="99", speed_index="H", attr_xl=True),
+    ]
+    items = [StoreClient._tire_item(row) for row in rows]
+    return {
+        "total": 2,
+        "items": items,
+        "load_index_below": {"required": 102, "shown": [95, 99]},
+    }
+
+
+def test_sales_on_load_index_below_reaches_the_model() -> None:
+    out = json.loads(compress_tool_result("search_tires", _below_fixture(), sales_enabled=True))
+    flag = out["load_index_below"]
+    assert flag["required"] == 102
+    assert flag["shown"] == [95, 99]
+    assert "від 102" in flag["say"] and "95–99" in flag["say"]
+
+
+def test_sales_on_single_shown_index_is_not_a_range() -> None:
+    result = _below_fixture()
+    result["load_index_below"] = {"required": 102, "shown": [95]}
+    out = json.loads(compress_tool_result("search_tires", result, sales_enabled=True))
+    say = out["load_index_below"]["say"]
+    assert "у показаних індекс 95," in say
+    assert "–" not in say
+
+
+def test_sales_on_without_flag_has_no_load_index_key() -> None:
+    result = _below_fixture()
+    del result["load_index_below"]
+    out = compress_tool_result("search_tires", result, sales_enabled=True)
+    assert "load_index_below" not in out
+
+
+def test_sales_off_load_index_flag_does_not_move_a_byte() -> None:
+    flagged = _below_fixture()
+    plain = _below_fixture()
+    del plain["load_index_below"]
+    assert compress_tool_result("search_tires", flagged) == compress_tool_result(
+        "search_tires", plain
+    )
+    assert "load_index_below" not in compress_tool_result("search_tires", flagged)

@@ -701,3 +701,102 @@ class TestRefusalDropsEarlierRequirement:
         from src.core.pipeline import merge_tire_query
 
         assert "tech" not in merge_tire_query({"tech": ["runflat"]}, "ранфлет не потрібен")
+
+
+# ═══════════════════════════════════════════════════════════
+#  Load index (wave 7-Q)
+# ═══════════════════════════════════════════════════════════
+
+
+class TestLoadIndexRequirement:
+    @pytest.mark.parametrize(
+        ("text", "minimum"),
+        [
+            ("гума 205/65 R16 літня, індекс навантаження 102-105, бренд будь-який", 102),
+            ("індекс навантаження 102–105", 102),
+            ("індекс навантаження від 102 до 105", 102),
+            ("індекс навантаження сто два – сто п'ять", 102),
+            ("индекс нагрузки не ниже сто два", 102),
+            ("индекс нагрузки 102", 102),
+            ("нагрузка 102", 102),
+            ("нагрузочный индекс 100", 100),
+            ("індексом навантаження не менше 98", 98),
+            ("індекс навантаження має бути не нижче 102", 102),
+            ("індекс навантаження: мінімум 100", 100),
+            ("навантаження від 104", 104),
+            ("индекс нагрузки 109/107", 109),
+            ("индекс нагрузки сто девять дробь сто семь", 109),
+            ("індекс навантаження 105-102", 102),
+        ],
+    )
+    def test_minimum_is_read(self, text: str, minimum: int) -> None:
+        from src.agent.parsers.tire_query import parse_load_index_requirement
+
+        assert parse_load_index_requirement(text) == minimum
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "102",
+            "до 102",
+            "ціна 102 грн",
+            "індекс 102",  # bare «індекс» — may be the speed index
+            "індекс навантаження до 105",  # a maximum, not a minimum
+            "навантаження на шину 850 кг",
+            "навантаження 120 кг",  # in the index range — only «кг» says it is not one
+            "посилене навантаження",
+            "205/65 R16 102",
+            "",
+        ],
+    )
+    def test_not_a_requirement(self, text: str) -> None:
+        from src.agent.parsers.tire_query import parse_load_index_requirement
+
+        assert parse_load_index_requirement(text) is None
+
+    @pytest.mark.parametrize(
+        ("text", "refused"),
+        [
+            ("індекс не важливий", True),
+            ("навантаження мені без різниці", True),
+            ("неважно какая нагрузка", True),
+            ("индекс нагрузки не важен", True),
+            ("индекс скорости не важен", False),
+            ("шум не важливий", False),
+            ("індекс навантаження 102, ціна не важлива", False),
+        ],
+    )
+    def test_refusal(self, text: str, refused: bool) -> None:
+        from src.agent.parsers.tire_query import parse_load_index_refusal
+
+        assert parse_load_index_refusal(text) is refused
+
+    def test_blank_leaves_the_budget_and_nothing_else(self) -> None:
+        from src.agent.parsers.tire_query import blank_load_index_requirement
+
+        blanked = blank_load_index_requirement("індекс навантаження від 102 до 105")
+        assert parse_budget(blanked) is None
+        kept = parse_budget(blank_load_index_requirement("індекс навантаження 102, до 5000 грн"))
+        assert kept is not None and kept.amount == 5000 and kept.is_cap
+        assert blank_load_index_requirement("до 105 грн") == "до 105 грн"
+
+
+class TestTireItemLoadIndex:
+    @pytest.mark.parametrize(
+        ("item", "index"),
+        [
+            ({"load_index": "95", "size": "205/65 R16"}, 95),
+            ({"load_index": 99, "size": "205/65 R16"}, 99),
+            ({"load_index": "109/107", "size": "215/75 R16C"}, 109),
+            ({"size": "205/55 R16 91V"}, 91),
+            ({"size": "215/75 R16C 109/107R"}, 109),
+            ({"size": "205/55 R16 94V XL"}, 94),
+            ({"load_index": " ", "size": "205/65 R16 95H"}, 95),
+            ({"size": "205/65 R16"}, None),
+            ({}, None),
+        ],
+    )
+    def test_index_of_an_offer(self, item: dict[str, object], index: int | None) -> None:
+        from src.agent.parsers.tire_query import tire_item_load_index
+
+        assert tire_item_load_index(item) == index

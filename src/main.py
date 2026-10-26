@@ -1822,6 +1822,7 @@ def _build_tool_router(
         if needs:
             params["needs"] = list(needs)
         result, applied_mode = await _search_by_price_mode(network, params, price_mode)
+        _apply_load_index_min(result)
         await _mark_runflat_required(result, params)
         if isinstance(result, dict):
             if session.tire_query.get("budget"):
@@ -1894,6 +1895,48 @@ def _build_tool_router(
             len(result.get("items") or []) if isinstance(result, dict) else 0,
         )
         return result, price_mode
+
+    def _apply_load_index_min(result: Any) -> None:
+        """The caller's minimum load index (wave 7-Q, ``tire_query.load_index_min``).
+
+        An offer with a KNOWN lower index is dropped; an unknown index is not
+        «below» and stays. Nothing left → the offer stays as it was, flagged
+        ``load_index_below`` so the model says there is none with that index.
+        """
+        from src.agent.parsers.tire_query import tire_item_load_index
+
+        required = session.tire_query.get("load_index_min")
+        if not required or not isinstance(result, dict) or not result.get("items"):
+            return
+        items = result["items"]
+        below = [
+            i
+            for i in items
+            if isinstance(i, dict)
+            and (idx := tire_item_load_index(i)) is not None
+            and idx < int(required)
+        ]
+        if not below:
+            return
+        kept = [i for i in items if not any(i is b for b in below)]
+        if kept:
+            result["items"] = kept
+            total = result.get("total")
+            result["total"] = (
+                max(len(kept), total - len(below)) if type(total) is int else len(kept)
+            )
+        else:
+            result["load_index_below"] = {
+                "required": int(required),
+                "shown": sorted({tire_item_load_index(i) for i in below}),
+            }
+        logger.info(
+            "search_tires: load index >= %s for call %s — %d below dropped, %d kept",
+            required,
+            session.channel_uuid,
+            len(below) if kept else 0,
+            len(kept),
+        )
 
     def _remember_tire_offer(result: dict[str, Any], params: dict[str, Any]) -> None:
         """``session.last_tire_offer`` ← the offer the caller heard (items only)."""
