@@ -13,16 +13,23 @@ from __future__ import annotations
 
 import asyncio
 import json
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import AsyncMock, create_autospec
 
 import pytest
 
 from scripts.configure_tenants import TVOYA_SHINA_CONFIG_PATCH
 from src.agent.agent import LLMAgent, ToolRouter
-from src.agent.disk_intent import DISK_ASK_DIAMETER, DiskSubstitution, has_disk_intent
+from src.agent.disk_intent import (
+    DISK_ASK_DIAMETER,
+    DiskSubstitution,
+    DiskToolRedirect,
+    has_disk_intent,
+    is_disk_consult,
+)
 from src.agent.network_policy import NetworkPolicy
 from src.agent.streaming_loop import StreamingAgentLoop
+from src.agent.tire_search_gate import ForcedTireSearch, turn_names_the_tyres
 from src.llm.models import (
     LLMResponse,
     StreamDone,
@@ -41,6 +48,9 @@ from tests.unit.mocks.mock_tts import MockTTSEngine
 OCTAVIA = "потрібні литі диски шістнадцятий радіус на Шкоду Октавію 2018"
 TAVRIA = "диски тринадцятий радіус на Таврію є?"
 MARK = "виконано search_disks"
+GOLDSET_NOT_DISKS = (
+    "Да что ж такое, мне не диски нужны! Летние шины RunFlat 255/50 R19 есть? Бренд любой"
+)
 
 _TOOLS = [
     {"name": name, "description": "", "input_schema": {"type": "object"}}
@@ -105,6 +115,17 @@ class TestHasDiskIntent:
             "кованые",
             "литьё семнадцатое",
             "гальмівні диски і литі диски на Октавію",
+            # A wheel asked for next to a negation is still asked for.
+            "не литі, а штамповані диски",
+            "не литі диски, а штамповані",
+            "диски потрібні, не шини",
+            "не литые, а штампованные диски",
+            # Not a negation of the wheel: default deny for a purchase.
+            "не маєте дисків на шістнадцять?",
+            "а нет дисков R16?",
+            "не ті диски, а більші",
+            "чи не дисків R16 шукаєте?",
+            "не диски ли нужны на октавию?",
         ],
     )
     def test_wheels_are_heard(self, text: str) -> None:
@@ -123,6 +144,27 @@ class TestHasDiskIntent:
             "шины на дисках храните?",
             "шини під литі диски",
             "",
+            # Goldset 10-26 `tc_tyres_not_disks_runflat`: the caller says what
+            # they do NOT want — UA and RU, cases, either word order.
+            GOLDSET_NOT_DISKS,
+            "мне не диски нужны",
+            "мені не диски, а шини",
+            "не диски, а шини",
+            "не диск, а шина",
+            "не дисков, а шин",
+            "не дисків",
+            "не диска",
+            "не про диски питаю",
+            "мені не потрібні литі диски",
+            "не нужны мне литые диски",
+            "диски не треба, тільки шини",
+            "диски не потрібні",
+            "диски не нужны",
+            "дисков не надо",
+            "дисків нам не потрібно",
+            "литые диски мне не нужны",
+            "без дисків",
+            "без дисков",
         ],
     )
     def test_not_wheels(self, text: str) -> None:
@@ -327,3 +369,76 @@ class TestTextPath:
         assert calls.count("search_tires") == 1
         assert calls.count("search_disks") == 0
         assert _marked(history) == []
+
+
+# ── «Не диски» reaches the callers (goldset 10-26) ───────────────────
+
+
+class TestNegatedWheelsReachTheCallers:
+    """The callers read the predicate; the negation must reach each of them."""
+
+    _QUERY: ClassVar[dict[str, Any]] = {
+        "sizes": ["255/50 R19"],
+        "season": "summer",
+        "tech": ["runflat"],
+    }
+
+    def test_forced_tyre_search_fires(self) -> None:
+        assert turn_names_the_tyres(GOLDSET_NOT_DISKS)
+        gate = ForcedTireSearch(sales_enabled=True, tools=_TOOLS)
+        hist = [{"role": "user", "content": GOLDSET_NOT_DISKS}]
+        args = gate.plan(dict(self._QUERY), GOLDSET_NOT_DISKS, hist)
+        assert args == {
+            "width": 255,
+            "profile": 50,
+            "diameter": 19,
+            "season": "summer",
+            "runflat": True,
+        }
+
+    def test_forced_tyre_search_stays_sales_only(self) -> None:
+        hist = [{"role": "user", "content": GOLDSET_NOT_DISKS}]
+        gate = ForcedTireSearch(sales_enabled=False, tools=_TOOLS)
+        assert gate.plan(dict(self._QUERY), GOLDSET_NOT_DISKS, hist) is None
+
+    def test_redirect_does_not_substitute(self) -> None:
+        assert not is_disk_consult(GOLDSET_NOT_DISKS)
+        redirect = DiskToolRedirect(sales_enabled=True, tools=_TOOLS)
+        hist = [{"role": "user", "content": GOLDSET_NOT_DISKS}]
+        assert redirect.check("search_tires", {"diameter": 19}, hist) is None
+
+    def test_redirect_still_substitutes_a_wheel_asked_next_to_a_negation(self) -> None:
+        text = "не литі, а штамповані диски R16"
+        redirect = DiskToolRedirect(sales_enabled=True, tools=_TOOLS)
+        sub = redirect.check("search_tires", {}, [{"role": "user", "content": text}])
+        assert sub is not None
+        assert sub.args is not None
+        assert sub.args["diameter"] == 16
+
+    def test_streamed_tyre_call_runs_as_asked(self) -> None:
+        calls, history = _stream_turn(
+            [_round(("t1", "search_tires")), _text("Ок.")], user_text=GOLDSET_NOT_DISKS
+        )
+        assert calls.count("search_disks") == 0
+        assert calls.count("search_tires") == 1
+        assert _marked(history) == []
+
+    def test_text_path_forced_search_then_model_call(self) -> None:
+        # The text path keeps the request itself: the code's own search runs
+        # before round 1, then the model's call runs as asked.
+        calls, history = _text_turn(
+            [_resp("search_tires"), _resp(text="Ок.")], user_text=GOLDSET_NOT_DISKS
+        )
+        assert calls.count("search_disks") == 0
+        assert calls.log[0] == (
+            "search_tires",
+            {"width": 255, "profile": 50, "diameter": 19, "season": "summer", "runflat": True},
+        )
+        assert calls.log[1] == ("search_tires", {"diameter": 16})
+        assert _marked(history) == []
+
+    def test_text_path_sales_off_no_forced_search(self) -> None:
+        calls, _ = _text_turn(
+            [_resp("search_tires"), _resp(text="Ок.")], user_text=GOLDSET_NOT_DISKS, sales=False
+        )
+        assert calls.log == [("search_tires", {"diameter": 16})]

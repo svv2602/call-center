@@ -71,14 +71,13 @@ _DISK = r"диск(?:а|у|ом|е|і|и|ів|ов|ам|ами|ах)?"
 
 # Wheel adjectives that name a wheel on their own: литі / литые / литий / литой,
 # штамповані / штампованные / штамповка, ковані / кованые, лиття / литьё.
-_WHEEL_WORDS = re.compile(
-    r"\b(?:" + _DISK + r"|лит(?:і|ий|а|е|их|им|ими|у|ої|ою|ые|ых|ым|ыми|ой|ую|ая|ое)"
+_WHEEL_ADJ = (
+    r"лит(?:і|ий|а|е|их|им|ими|у|ої|ою|ые|ых|ым|ыми|ой|ую|ая|ое)"
     r"|лиття|литье|литво"
     r"|штампован\w*|штамповк\w*"
     r"|кован(?:і|ий|а|е|их|им|ими|у|ої|ою|ые|ых|ым|ыми|ой|ую|ая|ое)"
-    r")\b",
-    re.IGNORECASE,
 )
+_WHEEL_WORDS = re.compile(r"\b(?:" + _DISK + "|" + _WHEEL_ADJ + r")\b", re.IGNORECASE)
 
 # Phrases where «диск» is not a wheel the customer wants to buy.
 _NOT_WHEEL = re.compile(
@@ -90,12 +89,38 @@ _NOT_WHEEL = re.compile(
 )
 
 
+# «Мені не диски потрібні» — the caller says what they do NOT want (goldset
+# 10-26 `tc_tyres_not_disks_runflat`: «Да что ж такое, мне не диски нужны!
+# Летние шины RunFlat 255/50 R19 есть?» went to `search_disks`). Only the
+# negated phrase is cut, so a wheel asked for in the same utterance still
+# counts: «не литі, а штамповані диски», «не литі диски, а штамповані».
+# Narrow on purpose (default deny for a wheel purchase): between «не» and the
+# wheel only a want word, «про / о / об» and a wheel adjective may stand —
+# «не маєте дисків R16?», «не ті диски» are still about wheels, and so is the
+# question «чи не / не … ли».
+_NEED = r"(?:треба|надо|потрібн\w*|нужн\w*|цікав\w*|интерес\w*)(?:\s+(?:мені|мне|нам)\b)?"
+_ADJ_DISK = r"(?:(?:" + _WHEEL_ADJ + r")\s+)?" + _DISK
+# «не диски», «не дисків», «не нужны мне литые диски», «не про диски»
+_NOT_THEN_DISK = r"(?<!\bчи\s)\b(?:не|ні)\s+(?:" + _NEED + r"\s+|(?:про|о|об)\s+)?"
+# «диски не треба», «литые диски мне не нужны», «дисків нам не потрібно»
+_DISK_THEN_NOT = r"\s+(?:(?:мені|мне|нам)\s+)?(?:не|ні)\s+" + _NEED
+_NEGATED_DISK = re.compile(
+    _NOT_THEN_DISK + _ADJ_DISK + r"\b(?!\s+ли\b)" + r"|\b" + _ADJ_DISK + _DISK_THEN_NOT,
+    re.IGNORECASE,
+)
+
+
 def has_disk_intent(text: str | None) -> bool:
-    """True when the utterance asks about wheels (disks), UA or RU."""
+    """True when the utterance asks about wheels (disks), UA or RU.
+
+    A wheel phrase the caller negates («не диски», «диски не треба») is cut out
+    first, like brake discs and «шини на дисках» (`_NOT_WHEEL`).
+    """
     if not text:
         return False
     low = text.lower().replace("ё", "е")
     low = _NOT_WHEEL.sub(" ", low)
+    low = _NEGATED_DISK.sub(" ", low)
     return _WHEEL_WORDS.search(low) is not None
 
 
