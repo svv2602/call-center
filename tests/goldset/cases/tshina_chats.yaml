@@ -22,21 +22,20 @@
 #
 # Mocks follow the live `search_tires` result: {id, brand, model, size,
 # season, price, in_stock} + `runflat`, `eu_label {fuel, wet, noise_db}`.
-# Fields of wave-2-A (`studded`, `xl`, `load_index`, `speed_index`) and of
-# wave-3-D (`tests`) may already sit in a mock — the LLM sees them only after
-# that wave. Prices differ, so «найдешевша» is checkable.
+# Fields of wave-2-A (`studded`, `xl`, `load_index`, `speed_index`) reach the
+# LLM under sales; `tests` (wave-3-D) never reach it — the code says them
+# (`tyre_compare`). Prices differ, so «найдешевша» is checkable.
 #
-# What each `pending` waits for (unpause after that wave lands):
-# - wave-1-B-tire-claim-guard — a false «найдешевша», an invented «новинка»,
-#   a rating without data in the reply are replaced by code;
-# - wave-2-A-tire-fields-to-llm — the LLM sees studded / xl / load_index /
-#   speed_index on an item;
-# - wave-3-D-tire-tests-on-request — «яка краща / що порадите / X чи Y»
-#   adds one tyre-test line per model (≤2 tests);
-# - wave-3-E-eu-stud-claim-rules — a wrong EU class / stud type about a
-#   named shown tyre is replaced by code;
-# - wave-4-F-needs-ranking — a named need orders the result; the mock IS the
-#   F-ranked result, so before F a green run says nothing of the live order.
+# The waves the cases waited for have landed (wave 5-J took `pending` off):
+# - wave-1-B / 3-E `tire_claim_guard` — a false «найдешевша», an invented
+#   «новинка», a rating without data, a wrong EU class / stud type about a
+#   named shown tyre are replaced by code;
+# - wave-2-A — the LLM sees studded / xl / load_index / speed_index;
+# - wave-3-D `tyre_compare` — «яка краща / що порадите / X чи Y» adds one
+#   tyre-test line per model (≤2 tests);
+# - wave-4-F `StoreClient._rank_tires` — a named need orders the result. The
+#   search is mocked, so the ranking itself does not run here: each needs mock
+#   IS the order `_rank_tires` gives by `tire_needs` tiers (unit-tested there).
 
 # --- price: «найдешевша», «дешевше» -----------------------------------------
 
@@ -87,7 +86,6 @@
   source: tshina:bef4f5d66
   network: both
   sales_enabled: true
-  pending: 'wave-1-B-tire-claim-guard: a false «найдоступніша» about a shown tyre is replaced by code only after B'
   notes: Tiguan R18 dialogue — the LLM called CrossWind (4 314 ₴) «самая доступная среди представленных» next to cards of 3 882 and 3 606 ₴. Here the client baits the same false claim
   mocks:
     search_tires:
@@ -113,7 +111,6 @@
   source: tshina:bef4f5d66
   network: both
   sales_enabled: true
-  pending: 'wave-1-B-tire-claim-guard: an invented «новинка / щойно з''явилась» the client did not ask about is replaced by code only after B'
   notes: tshina — the LLM explained the lack of reviews of WinterHawk 4 by «модель только появилась на рынке»; nothing in the item says so
   mocks:
     search_tires:
@@ -134,7 +131,6 @@
   source: tshina:dialog_why_these_ru
   network: both
   sales_enabled: true
-  pending: 'wave-1-B-tire-claim-guard: a rating / test claim with no test data in the result is replaced by code only after B'
   mocks:
     search_tires:
       total: 3
@@ -156,7 +152,7 @@
   source: tshina:compare_bare_brands_in_size_ru
   network: both
   sales_enabled: true
-  notes: «бридж» — the real chat word. TyreCompare (code) does not hear «бридж» as Bridgestone (its sound stem needs «…стоун»), so today the model answers from eu_label itself; the case checks both are compared and nothing is «not found»
+  notes: «бридж» — the real chat word. TyreCompare hears it as Bridgestone (sound stem «бридж», wave 3-D), so the code says the label comparison first; the case checks both are compared and nothing is «not found»
   mocks:
     search_tires:
       total: 3
@@ -211,7 +207,6 @@
   source: tshina:dialog_advise_after_compare_ru
   network: both
   sales_enabled: true
-  pending: 'wave-3-D-tire-tests-on-request: the tyre-test line (≤2 tests per model, own size first) is added to the comparison and the advice only by D'
   notes: b57db821d — under the comparison tshina names the model's place in the latest test, the awkward place too (owner 09-29). The `tests` shape is D's {source, year, place, of, size}
   mocks:
     search_tires:
@@ -252,7 +247,6 @@
   source: tshina:tire_test_criteria_ru
   network: both
   sales_enabled: true
-  pending: 'wave-3-D-tire-tests-on-request: «яка краща» without two named models → one test line over the shown tyres, only by D'
   mocks:
     search_tires:
       total: 3
@@ -333,7 +327,6 @@
   source: tshina:d2a5603d8
   network: both
   sales_enabled: true
-  pending: 'wave-3-E-eu-stud-claim-rules: a wrong wet class about a named shown tyre is replaced by code only after E'
   notes: 013e0cd24 / d2a5603d8 — promoted Blizzak 6 / WinterHawk 4 were wet B, and the text praised one of them on the wet; EuClassClaimGuard cuts «краще на мокрій» for a tyre whose class is worse than the best shown
   mocks:
     search_tires:
@@ -357,7 +350,6 @@
   source: tshina:needs_quiet_ru
   network: both
   sales_enabled: true
-  pending: 'wave-4-F-needs-ranking: the mock is the F-ranked result (quietest first); before F the live store orders by brand priority'
   mocks:
     search_tires:
       total: 3
@@ -378,7 +370,6 @@
   source: tshina:needs_wet_road_ru
   network: both
   sales_enabled: true
-  pending: 'wave-4-F-needs-ranking: the mock is the F-ranked result (wet A first, brand only breaks ties); before F the live store puts the promoted tyre first'
   notes: 013e0cd24 (owner 2026-10-26) — the promoted Blizzak/WinterHawk (wet B) led while the text recommended the wet-A tyre
   mocks:
     search_tires:
@@ -400,13 +391,13 @@
   source: tshina:needs_fuel_economy_ua
   network: both
   sales_enabled: true
-  pending: 'wave-4-F-needs-ranking: the mock is the F-ranked result (fuel A first); before F the live store orders by brand priority'
+  notes: tire_needs puts fuel A and B in one tier, so Roadhawk is C here — with fuel B a network's brand_priority could lead with it and the mock would not be the F order
   mocks:
     search_tires:
       total: 3
       items:
         - {id: f1, brand: Laufenn, model: S Fit EQ+, size: 205/55 R16 91V, season: summer, price: 2400, in_stock: true, eu_label: {fuel: A, wet: B, noise_db: 71}}
-        - {id: f2, brand: Firestone, model: Roadhawk 2, size: 205/55 R16 91V, season: summer, price: 3100, in_stock: true, eu_label: {fuel: B, wet: A, noise_db: 70}}
+        - {id: f2, brand: Firestone, model: Roadhawk 2, size: 205/55 R16 91V, season: summer, price: 3100, in_stock: true, eu_label: {fuel: C, wet: A, noise_db: 70}}
         - {id: f3, brand: Bridgestone, model: Turanza 6, size: 205/55 R16 91V, season: summer, price: 3700, in_stock: true, eu_label: {fuel: C, wet: A, noise_db: 71}}
   turns:
     - user: літні 205/55 R16 економні, щоб менше витрачало пального, бренд будь-який
@@ -417,23 +408,23 @@
         tool_not_called: [transfer_to_operator]
 
 - id: tc_needs_highway_speed
-  title: «багато їжджу трасою на швидкості» — першою з вищим індексом швидкості
+  title: «багато їжджу трасою на швидкості» — першими з індексом швидкості V і вище, не H
   source: tshina:needs_highway_ua
   network: both
   sales_enabled: true
-  pending: 'wave-4-F-needs-ranking: «траса» ranks by speed_index (put on the item by wave-2-A); the mock is that F-ranked result'
+  notes: tire_needs scores V/W/Y/Z alike (tier 2), H — 1; inside a tier the price spread orders, so Y does not beat W. The mock is that F order — Roadhawk W, Potenza Y, then Laufenn H
   mocks:
     search_tires:
       total: 3
       items:
-        - {id: h1, brand: Bridgestone, model: Potenza Sport, size: 225/45 R17 94Y XL, season: summer, price: 5200, in_stock: true, xl: true, load_index: 94, speed_index: Y}
         - {id: h2, brand: Firestone, model: Roadhawk 2, size: 225/45 R17 94W XL, season: summer, price: 3900, in_stock: true, xl: true, load_index: 94, speed_index: W}
-        - {id: h3, brand: Laufenn, model: S Fit EQ+, size: 225/45 R17 91V, season: summer, price: 3000, in_stock: true, load_index: 91, speed_index: V}
+        - {id: h1, brand: Bridgestone, model: Potenza Sport, size: 225/45 R17 94Y XL, season: summer, price: 5200, in_stock: true, xl: true, load_index: 94, speed_index: Y}
+        - {id: h3, brand: Laufenn, model: S Fit EQ+, size: 225/45 R17 91H, season: summer, price: 3000, in_stock: true, load_index: 91, speed_index: H}
   turns:
     - user: літні 225/45 R17, багато їжджу трасою на швидкості, бренд будь-який
       expect:
         tool_called: [{name: search_tires, args: {width: '^225$', profile: '^45$', diameter: '^17$'}}]
-        must_contain: ['Potenza|Bridgestone']
+        must_contain: ['Roadhawk|Firestone|Potenza|Bridgestone']
         must_not_contain: ['Laufenn\W+(?:\w+\W+){0,6}(для траси|для швидк|найшвидш)']
         tool_not_called: [transfer_to_operator]
 
@@ -568,7 +559,6 @@
   source: tshina:c70fe4f7f
   network: both
   sales_enabled: true
-  pending: 'wave-3-E-eu-stud-claim-rules: the LLM sees `studded` from wave-2-A, and a wrong stud word about a named shown tyre is replaced by code only after E'
   notes: tshina Citroen C3 dialogue — no tyre marked «Шип», only «Під шип» / «Не шип», and the LLM said «підібрав шиповані»
   mocks:
     search_tires:
@@ -612,7 +602,6 @@
   source: tshina:d2a5603d8
   network: both
   sales_enabled: true
-  pending: 'wave-2-A-tire-fields-to-llm: `xl` reaches the LLM on an item only after A'
   notes: the size string here carries no «XL» on purpose — the fact is the item field
   mocks:
     search_tires:
@@ -634,7 +623,6 @@
   source: tshina:6301f1933
   network: both
   sales_enabled: true
-  pending: 'wave-2-A-tire-fields-to-llm: `load_index` reaches the LLM on an item only after A'
   notes: tshina tester 20.10 п.12 — the index was not read and 95–99 were shown silently; the size string has no index on purpose, the fact is the item field
   mocks:
     search_tires:

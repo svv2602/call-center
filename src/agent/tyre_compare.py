@@ -48,12 +48,20 @@ a test gets no word about tests at all (never «даних немає»):
 - in the comparison phrase, after the label verdict, for each compared tyre
   that has a test;
 - on an advice question (``is_advice_question``: «яка краща / яку порадите /
-  що порадите / що б ви взяли», «какая лучше / что посоветуете / что бы вы
-  взяли» — the explicit forms only, not a taking or a price question) that
-  is not a comparison of two named tyres: the tests of the tyres it names
-  (``named_items``), or of the shown ones (the first ``SHOWN`` of the
-  result) when it names none. No test among them → ``None``, the model
-  answers as before.
+  що порадите / що б ви взяли / що б ви мені порадили», «какая лучше / что
+  посоветуете / что бы вы взяли» — the explicit forms only, not a taking or
+  a price question) that is not a comparison of two named tyres: the tests
+  of the tyres it names (``named_items``), or of the shown ones (the first
+  ``SHOWN`` of the result) when it names none. No test among them →
+  ``None``, the model answers as before.
+
+«Порівняйте їх / порівняй / сравните их / сравни» naming no tyre
+(``_COMPARE_SHOWN``, wave 5-J; the compare words only — «яка різниця» or
+«X чи Y» naming none stays silent) is about the shown tyres: their labels
+compared (``compare_phrase``) when at least two of them carry the same class
+or dB to weigh (a verdict exists), otherwise their tests (``tests_phrase``);
+neither → ``None``. Naming one tyre stays silent; naming ≥2 is the
+comparison above.
 """
 
 from __future__ import annotations
@@ -104,11 +112,15 @@ _ADVICE = re.compile(
     _B + r"(?:(?:яка|яку|котра|котру|какая|какую|которая|которую|що|что)\s+"
     r"(?:(?:з|из)\s+них\s+)?(?:кращ[аеу]|лучш[еаяу]\w*)"
     r"|(?:що|что|яку|какую|котру|которую)\s+"
-    r"(?:(?:б|би|бы)\s+(?:ви|вы)|(?:ви|вы)\s+(?:б|би|бы))\s+"
-    r"(?:взяли|вибрали|выбрали|поставили)"
+    r"(?:(?:б|би|бы)\s+(?:ви|вы)|(?:ви|вы)\s+(?:б|би|бы))\s+(?:(?:мені|мне|нам)\s+)?"
+    r"(?:взяли|вибрали|выбрали|поставили|порадили|посоветовали)"
     r"|порад(?:ите|ити|ьте|иш|ь)|посоветуе\w*|посоветуй\w*"
     r"|рекомендує\w*|рекомендуе\w*)(?![\w'])"
 )
+#: «Порівняйте їх» / «сравни» — a compare request that may name no tyre (then
+#: it is about the shown ones). Not «яка різниця» / «X чи Y»: naming nothing,
+#: those are not a request to compare what was shown (default-deny).
+_COMPARE_SHOWN = re.compile(_B + r"(?:порівня\w*|порівнн\w*|сравн\w*)(?![\w'])")
 #: A price question is the model's (the price corridor, «а є дешевше?»).
 _PRICE = re.compile(
     _B + r"(?:скільк\w*|скольк\w*|цін[аиуіо]\w*|цен[аыуео]\w*|кошту\w*|стоит\w*|стоят\w*"
@@ -505,6 +517,17 @@ class TyreCompare:
         if is_compare_question(user_text) and 2 <= len(named) <= MAX_COMPARED:
             phrase = compare_phrase(named)
             kind = "compare"
+        elif (
+            not named
+            and is_compare_question(user_text)
+            and _COMPARE_SHOWN.search(_normalize(user_text or ""))
+        ):
+            # «Порівняйте їх»: the shown tyres — labels if they weigh, else tests.
+            named = _unique_models(self._items[:SHOWN])
+            phrase = compare_phrase(named) if _verdict(named) else tests_phrase(named)
+            if not phrase:
+                return None
+            kind = "compare_shown"
         elif is_advice_question(user_text) and len(named) <= MAX_COMPARED:
             # Tests only, of the tyres named — or of the shown ones.
             picked = named or _unique_models(self._items[:SHOWN])

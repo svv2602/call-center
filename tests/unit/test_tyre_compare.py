@@ -691,3 +691,86 @@ def test_short_bridgestone_starts_the_comparison() -> None:
     for said in ("мішлен чи бридж", "мішлен чи бріджстоун"):
         assert [i["brand"] for i in named_items(said, items)] == ["Michelin", "Bridgestone"]
         assert _gate(items).plan(said) is not None
+
+
+# ── «Порівняйте їх» naming no tyre (wave 5-J, R08) ────────────────────
+
+
+def test_advice_question_conditional_advised() -> None:
+    assert is_advice_question("що б ви мені порадили?")
+    assert is_advice_question("что бы вы посоветовали")
+    # past tense without «б» reports advice, it does not ask for it
+    assert not is_advice_question("ви мені порадили туранзу")
+
+
+@pytest.mark.parametrize("said", ["порівняйте їх", "порівняй", "сравните их", "сравни"])
+def test_compare_them_is_the_labels_of_the_shown(said: str) -> None:
+    # the shown three are labelled and the verdict weighs them
+    assert _gate().plan(said) == compare_phrase(ITEMS[:SHOWN])
+
+
+def test_compare_them_adds_the_tests_of_the_shown() -> None:
+    items = _with_tests()
+    t6 = next(i for i in items if i["model"] == "Turanza 6")
+    phrase = _gate(items).plan("порівняйте їх")
+    assert phrase is not None
+    assert phrase.endswith(_tests_sentence(t6))
+
+
+def test_compare_them_without_labels_is_the_tests_of_the_shown() -> None:
+    items = _with_tests()
+    for item in items:
+        item.pop("eu_label")
+    t6 = next(i for i in items if i["model"] == "Turanza 6")
+    assert _gate(items).plan("порівняйте їх") == _tests_sentence(t6)
+
+
+def test_compare_them_without_tests_and_labels_is_silent() -> None:
+    items = copy.deepcopy(ITEMS)
+    for item in items:
+        item.pop("eu_label")
+    assert _gate(items).plan("порівняйте їх") is None
+    assert _gate(items).plan("сравните их") is None
+    # one label among the shown weighs nothing — still silent
+    items[0]["eu_label"] = {"wet": "A"}
+    assert _gate(items).plan("порівняйте їх") is None
+
+
+def test_compare_them_ignores_a_tyre_the_caller_was_not_shown() -> None:
+    items = copy.deepcopy(ITEMS)
+    for item in items:
+        item.pop("eu_label")
+    items[SHOWN]["tests"] = copy.deepcopy(FIRESTONE_TEST)
+    assert _gate(items).plan("порівняйте їх") is None
+
+
+def test_compare_them_keeps_the_named_comparison() -> None:
+    gate = _gate(_with_tests())
+    t6 = next(i for i in gate.last_items if i["model"] == "Turanza 6")
+    assert gate.plan("порівняйте туранзу 6 і таурус") == compare_phrase([t6, BY_MODEL["SUMMER 3"]])
+
+
+def test_compare_them_other_shapes_stay_silent() -> None:
+    gate = _gate(_with_tests())
+    # «яка різниця» / «X чи Y» naming nothing are not a request to compare
+    assert gate.plan("яка різниця між ними") is None
+    assert gate.plan("літні чи зимові?") is None
+    # one tyre named — not the shown ones
+    assert gate.plan("порівняйте з таурусом") is None
+    # a price or a taking — the model's
+    assert gate.plan("порівняйте ціни") is None
+    assert gate.plan("порівняли, беру") is None
+
+
+def test_compare_them_sales_off_says_nothing() -> None:
+    off = TyreCompare(sales_enabled=False)
+    off.note_search({"items": copy.deepcopy(ITEMS)})
+    assert off.plan("порівняйте їх") is None
+
+
+@LOOPS
+def test_compare_them_is_said_by_both_loops(run: Any) -> None:
+    _, replies, systems = run([*MODEL_SEARCH, ("порівняйте їх", [], MODEL_REPLY)])
+    phrase = compare_phrase(ITEMS[:SHOWN])
+    assert replies[-1] == f"{phrase} {MODEL_REPLY}"
+    assert compare_said_note(phrase) in systems[-1][0]
