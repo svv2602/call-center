@@ -567,6 +567,115 @@ class TestStudGroups:
         assert _fired(GROUP_LIE, state) == set()
 
 
+# ── stud: a list told tyre by tyre, at its commas (wave 11-Y) ────────────
+
+#: The goldset 5 replies (10-26, both networks): WinterHawk 4 is studdable.
+COMMA_LIE = (
+    "Є Bridgestone Blizzak 6 без шипів за 4150 гривень, Firestone WinterHawk 4 шиповані "
+    "за 3300 гривень, Nokian Nordman 8 шиповані за 3600 гривень."
+)
+COMMA_HEDGED_LIE = (
+    "Шипована Nokian Nordman 8 за 3600 гривень, Firestone WinterHawk 4 — шипована можливо, "
+    "Bridgestone Blizzak 6 — без шипів."
+)
+
+
+class TestStudCommaList:
+    @pytest.mark.parametrize(
+        ("sentence", "truth"),
+        [
+            (COMMA_LIE, GROUP_TRUTH),
+            # «можливо» does not excuse the part: the truth comes from the result.
+            (COMMA_HEDGED_LIE, GROUP_TRUTH),
+            (
+                "Nordman 8 шипована, Blizzak 6 шипована.",
+                f"Шиповані — {NORDMAN}. Без шипів — {BLIZZAK}.",
+            ),
+            (
+                "Blizzak 6 — мабуть шипована, WinterHawk 4 під шип.",
+                f"Під шип — {WINTERHAWK}. Без шипів — {BLIZZAK}.",
+            ),
+            # Primacy 4 has no ``studded``: its part is not judged, Blizzak 6's is.
+            ("Blizzak 6 шипована, Primacy 4 шипована.", f"Без шипів — {BLIZZAK}."),
+        ],
+    )
+    def test_wrong_kind_of_any_tyre_is_replaced_by_the_truth(
+        self, sentence: str, truth: str
+    ) -> None:
+        assert _fired(sentence, _group_state()) == {RULE_STUD}
+        assert _judge(sentence, _group_state()) == truth
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            # The goldset form, every kind right.
+            "Є Bridgestone Blizzak 6 без шипів за 4150 гривень, Firestone WinterHawk 4 під шип "
+            "за 3300 гривень, Nokian Nordman 8 шиповані за 3600 гривень.",
+            "Шипована Nokian Nordman 8 за 3600 гривень, Firestone WinterHawk 4 — під шип "
+            "можливо, Bridgestone Blizzak 6 — без шипів.",
+            # «Без шипів» is true of a studdable tyre: it is sold without studs.
+            "WinterHawk 4 без шипів, Nordman 8 шиповані.",
+            "Nordman 8 шипована, Primacy 4 шипована.",
+        ],
+    )
+    def test_right_kind_of_every_tyre_passes(self, sentence: str) -> None:
+        assert _fired(sentence, _group_state()) == set()
+        assert _judge(sentence, _group_state()) == sentence
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            # Every sentence lies about Blizzak 6; one unclear part cancels the whole cut.
+            # A part with no tyre.
+            "Blizzak 6 шипована, за 4150 гривень, Nordman 8 шипована.",
+            "Blizzak 6 шипована, а ще, Nordman 8 шипована.",
+            # A part with two tyres.
+            "Blizzak 6 шипована, Nordman 8 і Ice Cruiser 7 шиповані.",
+            # A part with no kind.
+            "Blizzak 6 шипована, Nordman 8 за 3600 гривень, Ice Cruiser 7 шипована.",
+            # A part with two kinds.
+            "Blizzak 6 шипована, Nordman 8 шипована або без шипів.",
+            # A brand alone: which model is meant is a guess.
+            "Blizzak 6 шипована, Nokian шипована.",
+            # A condition, a comparison in a part.
+            "Blizzak 6 шипована, якщо Nordman 8 шипована.",
+            "Blizzak 6 шипована, Nordman 8 краще шипована.",
+            # A question.
+            "Blizzak 6 шипована, Nordman 8 шипована?",
+        ],
+    )
+    def test_part_that_is_not_clean_cancels_the_cut(self, sentence: str) -> None:
+        assert _fired(sentence, _group_state()) == set()
+        assert _judge(sentence, _group_state()) == sentence
+
+    def test_w_chain_keeps_the_group_path(self) -> None:
+        # «X, Y та Z шиповані» is one group of one kind (W), not three parts.
+        sentence = "Nordman 8, Ice Cruiser 7 та Blizzak 6 шиповані."
+        assert _fired(sentence, _group_state()) == {RULE_STUD}
+        assert _judge(sentence, _group_state()) == (
+            f"Шиповані — {NORDMAN} і {ICE}. Без шипів — {BLIZZAK}."
+        )
+        assert _fired("Nordman 8, Ice Cruiser 7 та WinterHawk 4 з шипами.", _group_state()) == {
+            RULE_STUD
+        }
+
+    def test_one_tyre_keeps_the_old_path(self) -> None:
+        sentence = "Bridgestone Blizzak 6 шипована, за 4150 гривень."
+        assert _fired(sentence, _group_state()) == {RULE_STUD}
+        assert _judge(sentence, _group_state()) == f"Без шипів — {BLIZZAK}."
+
+    def test_rest_of_the_reply_is_kept(self) -> None:
+        text = f"Ось що є. {COMMA_LIE} Ціна від 3300 гривень."
+        assert _judge(text, _group_state()) == f"Ось що є. {GROUP_TRUTH} Ціна від 3300 гривень."
+
+    def test_sales_off_judges_no_list(self) -> None:
+        state = TireClaimState(sales_enabled=False)
+        state.note("search_tires", {"items": copy.deepcopy(GROUP_ITEMS)})
+        for sentence in (COMMA_LIE, COMMA_HEDGED_LIE):
+            assert _fired(sentence, state) == set()
+            assert _judge(sentence, state) == sentence
+
+
 # ── the switch, sales scope, the stream ──────────────────────────────────
 
 

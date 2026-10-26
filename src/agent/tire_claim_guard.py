@@ -756,11 +756,45 @@ def _stud_groups(sentence: str, ctx: ClaimContext) -> list[tuple[str, list[dict[
     return groups
 
 
+#: A list told tyre by tyre: «X без шипів за …, Y шиповані за …, Z шиповані».
+_STUD_COMMA = re.compile(r"\s*,\s*")
+
+
+def _stud_comma_groups(
+    sentence: str, ctx: ClaimContext
+) -> list[tuple[str, list[dict[str, Any]]]] | None:
+    """(kind, [tyre]) of each comma part, or ``None`` unless every part is clean.
+
+    Clean: the part names exactly one tyre (its model, not a brand alone) and
+    exactly one kind; a price or «є» beside them does not matter. One unclear
+    part cancels the whole cut — the guard is silent then. A hedge («можливо»,
+    «мабуть») does not excuse a part: what is said instead is the truth from
+    the result, so judging a hedged claim cannot put a lie in the caller's ear.
+    """
+    groups: list[tuple[str, list[dict[str, Any]]]] = []
+    for part in _STUD_COMMA.split(_STUD_ASIDE.sub(" ", sentence)):
+        named = named_items(part, ctx.items)
+        if len(named) != 1 or not _model_said(named[0], part):
+            return None
+        rest = _mark_tyres(part, named).replace(_TYRE_MARK, " ")
+        if _OTHER_REFERENT.search(rest) or _GROUP_COMPARE.search(rest):
+            return None
+        claimed = _stud_claim(rest)
+        if claimed is None:
+            return None
+        groups.append((claimed, named))
+    return groups
+
+
 def _rule_stud_groups(sentence: str, ctx: ClaimContext) -> Refusal | None:
-    """Two or more tyres named: each group's kind against each of its tyres."""
+    """Two or more tyres named: each group's kind against each of its tyres.
+
+    The groups are cut at a contrast (W); a sentence that does not cut there
+    is tried tyre by tyre at its commas (Y).
+    """
     if len(named_items(sentence, ctx.items)) < 2:
         return None
-    groups = _stud_groups(sentence, ctx)
+    groups = _stud_groups(sentence, ctx) or _stud_comma_groups(sentence, ctx)
     if not groups:
         return None
     for claimed, tyres in groups:
