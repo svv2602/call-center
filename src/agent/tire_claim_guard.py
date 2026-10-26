@@ -20,6 +20,23 @@ Rules (`RULES`, first match names the refusal):
   no data behind it: no shown tyre carries ``tests`` (filled by the tyre-tests
   checklist) and no shown ``rating`` equals the number said.
 
+- ``eu_class`` (`Dialog/EuClassClaimGuard.php`) — «клас A по мокрій /
+  категорія B економії палива / 71 дБ» about the one named tyre, against its
+  ``eu_label`` (``wet`` / ``fuel`` / ``noise_db``). Unlike tshina, a tyre
+  without the value is not a reason for silence: the class said is made up.
+  Silent: no axis named with the letter («має клас C»), a dB range, two
+  axes and the letter matches either.
+- ``stud`` (`Dialog/StudClaimGuard.php`) — «шипована / з шипами» unless
+  ``studded == "studded"``; «липучка / без шипів / фрикційна» about a
+  ``"studded"`` tyre; «під шип» unless ``"studdable"``. An item without
+  ``studded`` (summer, unknown) is never judged. «Під шип» is cut out before
+  «шип» is looked for; two kinds in one sentence («шиповані чи липучка») —
+  silent. Stud *questions* out of season are `drop_stud_questions`' job.
+
+``eu_class`` and ``stud`` are silent on any ambiguity, as in tshina: no tyre
+or two named, another tyre or a comparison in the sentence («ніж у …», «у
+першої»), a question or condition, a negation not part of a form.
+
 ``novelty`` and ``unbacked_rating`` are silent in a turn that consulted the
 knowledge base: its articles do say «один із лідерів тестів ADAC», and that
 is a backed claim the guard cannot tell apart.
@@ -33,7 +50,9 @@ an emptied turn is not silence here). ``novelty`` in a cause clause («…, бо
 neutral sentence, which carries no new fact. A rule's fixed sentence is said
 once per filter — a second copy is dropped.
 
-More rules (EU classes, studs) join `RULES` without touching the loops.
+More rules join `RULES` without touching the loops. The code's own
+comparison phrase (`tyre_compare`) never passes the guard: it is spoken
+before the stream and added after `guard_tire_claims_text`.
 
 Sales scope only: the loops note results and wrap the stream only under
 ``sales_enabled``. Switch: env ``TIRE_CLAIM_GUARD_ENABLED`` (default on;
@@ -68,12 +87,16 @@ KNOWLEDGE_TOOL = "search_knowledge_base"
 RULE_CHEAPEST = "cheapest"
 RULE_NOVELTY = "novelty"
 RULE_UNBACKED_RATING = "unbacked_rating"
+RULE_EU_CLASS = "eu_class"
+RULE_STUD = "stud"
 
 #: Neutral sentences — no fact the code has not checked.
 REPLACEMENTS: dict[str, str] = {
     RULE_CHEAPEST: "Ціни у варіантів різні, можу назвати кожну.",
     RULE_NOVELTY: "Даних про те, коли модель з'явилась, у мене немає.",
     RULE_UNBACKED_RATING: "Даних тестів і рейтингів для цих шин у мене немає.",
+    RULE_EU_CLASS: "Класи EU-етикетки цієї шини краще звірити з даними магазину.",
+    RULE_STUD: "Чи шипована ця модель, краще звірити з даними магазину.",
 }
 
 _L = r"[^\W\d_]"
@@ -357,12 +380,181 @@ def rule_unbacked_rating(sentence: str, ctx: ClaimContext) -> Refusal | None:
     return None
 
 
+def _subject_masked(sentence: str, ctx: ClaimContext) -> tuple[dict[str, Any] | None, str]:
+    """The one tyre the sentence is about, and the sentence without its name.
+
+    The brand and model words are blanked so a model letter («Aplus A702»,
+    «… S») is not read as a class letter and a brand is not an ordinal.
+    """
+    subject = _subject(sentence, ctx)
+    if subject is None:
+        return None, sentence
+    masked = sentence
+    words = re.split(r"[\s\-‐–]+", f"{subject.get('brand') or ''} {subject.get('model') or ''}")
+    for word in sorted({w for w in words if w}, key=len, reverse=True):
+        masked = re.sub(rf"(?<![\w]){re.escape(word)}(?![\w])", " ", masked, flags=re.IGNORECASE)
+    return subject, masked
+
+
+#: Another tyre or a comparison in the sentence («ніж у …», «у першої»,
+#: «на відміну від …»), or a negation / question / condition anywhere — the
+#: claim may not be about the named tyre, or not a claim (`EuClassClaimGuard`
+#: and `StudClaimGuard` ``OTHER_REFERENT``). The guard is silent then.
+_OTHER_REFERENT = re.compile(
+    r"(?<!\w)(?:чем|ніж|против|проти|вместо|замість|заместо)(?!\w)"
+    r"|альтернатив|в\s+отличие|на\s+відміну|по\s+сравнению|порівнян"
+    r"|(?<!\w)(?:как|як)\s+(?:и\s+|і\s+)?у(?!\w)|тогда\s+как|тоді\s+як"
+    r"|в\s+то\s+время|у\s+той\s+час"
+    r"|(?<!\w)(?:перв|перш|втор|трет|четв[её]рт|четверт)"
+    r"|(?<!\w)друг(?:ая|ой|ую|ий|а|у|ої)(?!\w)"
+    r"|(?<!\w)п'?ят(?:а|у|ий|ая|ую|ый|ой)(?!\w)"
+    r"|последн|останн|предыдущ|попередн|остальн|(?<!\w)решт"
+    r"|(?<!\w)(?:других|інших|другой|іншої|другим|іншим)(?!\w)"
+    r"|(?<!\w)(?:обе|обеих|обидв\w*|обох)(?!\w)"
+    r"|(?<!\w)(?:чи|ли|якщо|если|хіба|разве)(?!\w)",
+    re.IGNORECASE,
+)
+#: A negation anywhere in the EU sentence («не має класу A») — silent.
+_EU_NEGATION = re.compile(r"(?<!\w)(?:не|ни|ні|нет|немає|нема|без)(?!\w)", re.IGNORECASE)
+
+#: The axes of the label, ``eu_label`` key → ua/ru word roots.
+_EU_AXES: dict[str, re.Pattern[str]] = {
+    "wet": re.compile(r"мокр|сцеплен|зчеплен|тормож|гальм", re.IGNORECASE),
+    "fuel": re.compile(
+        rf"эконом|економ|расход|витрат|топлив|пальн|паливн|энергоэфф|енергоефект"
+        rf"|сопротивлен{_L}*\s+качен|опір{_L}*\s+кочен",
+        re.IGNORECASE,
+    ),
+    # The label carries no noise *class*, only ``noise_db``: a noise letter
+    # is backed by nothing.
+    "noise": re.compile(r"(?<!\w)шум|шумн|гучн", re.IGNORECASE),
+}
+#: A class letter, Latin, standalone and upper case: «клас C», «(C)», not «+7°C».
+_EU_LETTER = re.compile(r"(?<![^\W\d_]|[\d\-+°º])([A-G])(?![^\W_]|-)")
+#: A Cyrillic twin right after «клас / категорія»: «клас С», «категорія В».
+_EU_CYRILLIC_LETTER = re.compile(r"(?<!\w)(?:клас|категор)\w*\s+([АВСЕ])(?!\w|-)", re.IGNORECASE)
+_CYRILLIC_TO_LATIN = {"А": "A", "В": "B", "С": "C", "Е": "E"}
+#: «72 дБ», «69дБ», «71.5 dB», «71 децибел».
+_DB_VALUE = re.compile(
+    r"(?<![\d.,\-–])(\d{2}(?:[.,]\d)?)\s?(?:дб|db|децибел\w*)(?!\w)", re.IGNORECASE
+)
+#: «70–72 дБ» — a range is not checked.
+_DB_RANGE = re.compile(r"\d\s?[-–—]\s?\d{2}(?:[.,]\d)?\s?(?:дб|db|децибел)", re.IGNORECASE)
+
+
+def _eu_letters(text: str) -> set[str]:
+    letters = set(_EU_LETTER.findall(text))
+    letters.update(_CYRILLIC_TO_LATIN[c] for c in _EU_CYRILLIC_LETTER.findall(text))
+    return letters
+
+
+def rule_eu_class(sentence: str, ctx: ClaimContext) -> Refusal | None:
+    """A wet / fuel / noise class or a dB figure the named tyre's label lacks.
+
+    No ``eu_label`` (or no value on that axis) → the value said is made up.
+    A letter is refused only when it matches *none* of the axes the sentence
+    names (two axes, one letter — no guessing which one it is).
+    """
+    if sentence.rstrip().endswith("?"):
+        return None
+    subject, masked = _subject_masked(sentence, ctx)
+    if subject is None or _OTHER_REFERENT.search(masked) or _EU_NEGATION.search(masked):
+        return None
+    label = subject.get("eu_label")
+    label = label if isinstance(label, dict) else {}
+    refusal = Refusal(RULE_EU_CLASS, REPLACEMENTS[RULE_EU_CLASS])
+
+    said_db = {round(float(v.replace(",", "."))) for v in _DB_VALUE.findall(masked)}
+    if len(said_db) == 1 and not _DB_RANGE.search(masked):
+        actual = label.get("noise_db")
+        if not isinstance(actual, int | float) or round(actual) not in said_db:
+            return refusal
+
+    without_db = _DB_VALUE.sub(" ", masked)
+    letters = _eu_letters(without_db)
+    axes = [axis for axis, pattern in _EU_AXES.items() if pattern.search(without_db)]
+    if not letters or not axes:
+        return None
+    known = {str(label[axis]).strip().upper() for axis in axes if label.get(axis)}
+    if letters - known:
+        return refusal
+    return None
+
+
+#: ``studded`` of a winter item → what the sentence may say.
+_STUDS_STUDDED = "studded"
+_STUDS_STUDDABLE = "studdable"
+_STUDS_FRICTION = "friction"
+#: «під шип», «под шип», «підшип», «під ошиповку».
+_CLAIM_STUDDABLE = re.compile(
+    rf"(?<!\w)(?:под|під)[\s\-]*(?:шип(?:ы|и)?|ошиповк{_L}*)(?!\w)|(?<!\w)(?:подшип|підшип){_L}*",
+    re.IGNORECASE,
+)
+#: «без шипів», «нешипована», «шипів немає», «липучка», «фрикційна».
+_CLAIM_FRICTION = re.compile(
+    rf"(?<!\w)без\s+шип{_L}*|(?<!\w)не\s*шип{_L}*|(?<!\w)шип{_L}*\s+(?:нет|немає|нема)(?!\w)"
+    rf"|(?<!\w)(?:нет|немає|нема)\s+шип{_L}*|(?<!\w)липучк{_L}*|(?<!\w)фрикц{_L}*",
+    re.IGNORECASE,
+)
+#: «шипи», «шипы», «з шипами», «шипована», «ошипована»; not «шини».
+_CLAIM_STUDDED = re.compile(
+    rf"(?<!\w)шип(?:ы|и|ов|ів|ам|ами|ах|ован{_L}*|овк{_L}*)?(?!\w)|(?<!\w)ошипован{_L}*",
+    re.IGNORECASE,
+)
+#: A negation left after the forms above are cut — the meaning is unclear.
+_STUD_NEGATION = re.compile(r"(?<!\w)(?:не|ни|ні|нет|немає|нема|без)(?!\w)", re.IGNORECASE)
+
+
+def _stud_claim(masked: str) -> str | None:
+    """The one kind of stud claim in the sentence, or ``None`` (none, mixed)."""
+    kinds: list[str] = []
+    rest = masked
+    for kind, pattern in (
+        (_STUDS_STUDDABLE, _CLAIM_STUDDABLE),
+        (_STUDS_FRICTION, _CLAIM_FRICTION),
+        (_STUDS_STUDDED, _CLAIM_STUDDED),
+    ):
+        rest, count = pattern.subn(" ", rest)
+        if count:
+            kinds.append(kind)
+    if len(kinds) != 1 or _STUD_NEGATION.search(rest):
+        return None
+    return kinds[0]
+
+
+def rule_stud(sentence: str, ctx: ClaimContext) -> Refusal | None:
+    """«шипована / липучка / під шип» against the named tyre's ``studded``.
+
+    «Шипована» is refused unless ``studded``; «липучка / без шипів» only
+    for ``studded`` (a studdable tyre is sold without studs); «під шип»
+    unless ``studdable``. No ``studded`` (a summer tyre, unknown) — silent.
+    """
+    if "шип" not in sentence.lower() and not re.search(r"липучк|фрикц", sentence, re.IGNORECASE):
+        return None
+    if sentence.rstrip().endswith("?"):
+        return None
+    subject, masked = _subject_masked(sentence, ctx)
+    if subject is None or _OTHER_REFERENT.search(masked):
+        return None
+    actual = subject.get("studded")
+    if actual not in (_STUDS_STUDDED, _STUDS_STUDDABLE, _STUDS_FRICTION):
+        return None
+    claimed = _stud_claim(masked)
+    if claimed is None:
+        return None
+    # «Без шипів» is true of a studdable tyre too: it is sold without studs.
+    wrong = actual == _STUDS_STUDDED if claimed == _STUDS_FRICTION else claimed != actual
+    return Refusal(RULE_STUD, REPLACEMENTS[RULE_STUD]) if wrong else None
+
+
 #: The rule registry: first match wins and names the refusal. New rules
-#: (EU classes, studs) are appended here; the loops never change.
+#: are appended here; the loops never change.
 RULES: list[tuple[str, Rule]] = [
     (RULE_CHEAPEST, rule_cheapest),
     (RULE_NOVELTY, rule_novelty),
     (RULE_UNBACKED_RATING, rule_unbacked_rating),
+    (RULE_EU_CLASS, rule_eu_class),
+    (RULE_STUD, rule_stud),
 ]
 
 
