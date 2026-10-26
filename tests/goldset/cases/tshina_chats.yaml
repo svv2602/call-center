@@ -532,13 +532,16 @@
     - user: зимові 205/55 R16 шиповані, бренд будь-який
       expect:
         tool_called: [{name: search_tires, args: {studded: '^true$'}}]
+    # Paid goldset 2026-10-26: the bot rightly searched friction already on
+    # this turn; the schema has no «turn 2 or 3», so the search is asked here
+    # and turn 3 checks only that the friction tyres are offered (wave 7-S).
     - user: а що краще — шипи чи липучка для траси?
       expect:
+        tool_called: [{name: search_tires, args: {studded: '^false$'}}]
         must_contain: ['шип', 'липучк|фрикц|без шип']
         tool_not_called: [transfer_to_operator]
     - user: тоді давайте липучку
       expect:
-        tool_called: [{name: search_tires, args: {studded: '^false$'}}]
         must_contain: ['Blizzak|Laufenn|I Fit']
         tool_not_called: [transfer_to_operator]
 

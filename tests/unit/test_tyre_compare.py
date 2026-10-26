@@ -31,6 +31,8 @@ from src.agent.tyre_compare import (
     NO_LABEL,
     SHOWN,
     TyreCompare,
+    axis_phrase,
+    axis_question,
     compare_phrase,
     compare_said_note,
     is_advice_question,
@@ -772,5 +774,133 @@ def test_compare_them_sales_off_says_nothing() -> None:
 def test_compare_them_is_said_by_both_loops(run: Any) -> None:
     _, replies, systems = run([*MODEL_SEARCH, ("порівняйте їх", [], MODEL_REPLY)])
     phrase = compare_phrase(ITEMS[:SHOWN])
+    assert replies[-1] == f"{phrase} {MODEL_REPLY}"
+    assert compare_said_note(phrase) in systems[-1][0]
+
+
+# ── One label axis of the shown tyres (wave 7-S, R25) ─────────────────
+
+#: `tc_quieter_after_compare`'s result: the quietest is second, not first.
+QUIET_ITEMS: list[dict[str, Any]] = [
+    {"brand": "Bridgestone", "model": "Turanza 6", "eu_label": {"fuel": "C", "wet": "A", "noise_db": 71}},
+    {"brand": "Firestone", "model": "Roadhawk 2", "eu_label": {"fuel": "B", "wet": "A", "noise_db": 69}},
+    {"brand": "Laufenn", "model": "S Fit EQ+", "eu_label": {"fuel": "C", "wet": "B", "noise_db": 72}},
+    {"brand": "Taurus", "model": "SUMMER 3", "eu_label": {"fuel": "A", "wet": "A", "noise_db": 65}},
+]  # fmt: skip
+
+
+def _axis_order(phrase: str, items: list[dict[str, Any]]) -> list[str]:
+    """The tyres' names in the order the phrase says them."""
+    said = [_name(i) for i in items if _name(i) in phrase]
+    return sorted(said, key=phrase.index)
+
+
+@pytest.mark.parametrize(
+    ("text", "axis"),
+    [
+        ("а яка з них тихіша?", "noise_db"),
+        ("яка найтихіша", "noise_db"),
+        ("яка з них менш шумна?", "noise_db"),
+        ("какая тише?", "noise_db"),
+        ("а какая из них самая тихая", "noise_db"),
+        ("яка краще на мокрому?", "wet"),
+        ("а які з них краще гальмують на мокрій дорозі?", "wet"),
+        ("какая лучше на мокрой?", "wet"),
+        ("яка економніша?", "fuel"),
+        ("яка з них менше їсть палива", "fuel"),
+        ("какая экономичнее", "fuel"),
+    ],
+)
+def test_axis_question(text: str, axis: str) -> None:
+    assert axis_question(text) == axis
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "яка краща?",  # advice (R08), not an axis
+        "що порадите?",
+        "а є тихіші?",  # asks for other tyres, not which of these
+        "тихі шини є?",
+        "яка тихіша і економніша?",  # two axes — not one line
+        "яка гірша на мокрому?",  # the worst, not the best first
+        "яка краща на мокрому — літня чи всесезонна?",  # a choice of other things
+        "що краще — шипи чи липучка для траси?",
+        "яка тихіша, скільки коштує?",
+        "беру ту, яка тихіша",
+        "",
+    ],
+)
+def test_not_an_axis_question(text: str) -> None:
+    assert axis_question(text) is None
+
+
+def test_quieter_names_the_quietest_shown_first_with_its_db() -> None:
+    phrase = _gate(QUIET_ITEMS).plan("а яка з них тихіша?")
+    shown = QUIET_ITEMS[:SHOWN]
+    # the README's line, word for word (Taurus at 65 dB was not shown)
+    assert phrase == (
+        "Найтихіша — Firestone Roadhawk 2: 69 дБ; Bridgestone Turanza 6 — 71 дБ; "
+        "Laufenn S Fit EQ+ — 72 дБ."
+    )
+    assert _axis_order(phrase, shown) == [
+        _name(i) for i in sorted(shown, key=lambda i: i["eu_label"]["noise_db"])
+    ]
+    for item in shown:
+        assert f"{item['eu_label']['noise_db']} дБ" in phrase
+    assert "Taurus" not in phrase
+
+
+def test_wet_and_fuel_read_their_own_class() -> None:
+    shown = QUIET_ITEMS[:SHOWN]
+    wet = _gate(QUIET_ITEMS).plan("які з них краще гальмують на мокрій?")
+    assert wet == (
+        "Найкраще на мокрій дорозі — Bridgestone Turanza 6 і Firestone Roadhawk 2: клас A; "
+        "Laufenn S Fit EQ+ — B."
+    )
+    fuel = _gate(QUIET_ITEMS).plan("яка економніша?")
+    assert fuel is not None
+    best = shown[1]
+    assert fuel.startswith(f"Найекономніша — {_name(best)}: клас {best['eu_label']['fuel']};")
+    assert "дБ" not in wet + fuel
+
+
+def test_axis_with_fewer_than_two_values_is_silent() -> None:
+    items = copy.deepcopy(QUIET_ITEMS)
+    for item in items[1:]:
+        item["eu_label"].pop("noise_db")
+    assert axis_phrase(items[:SHOWN], "noise_db") == ""
+    assert _gate(items).plan("а яка з них тихіша?") is None
+    # a value only beyond the shown three does not count
+    items[SHOWN]["eu_label"]["noise_db"] = 60
+    assert _gate(items).plan("а яка з них тихіша?") is None
+    # the other axes still have their two values
+    assert _gate(items).plan("яка економніша?") is not None
+
+
+def test_axis_naming_two_tyres_is_the_comparison() -> None:
+    gate = _gate(QUIET_ITEMS)
+    said = "туранза 6 чи лауфен — яка тихіша?"
+    named = named_items(said, gate.last_items)
+    assert len(named) == 2
+    assert gate.plan(said) == compare_phrase(named)
+    # one tyre named — a claim about it, not the shown ones: silent
+    one = "а яка тихіша, туранза 6?"
+    assert axis_question(one) == "noise_db"
+    assert len(named_items(one, gate.last_items)) == 1
+    assert gate.plan(one) is None
+
+
+def test_axis_sales_off_says_nothing() -> None:
+    off = TyreCompare(sales_enabled=False)
+    off.note_search({"items": copy.deepcopy(QUIET_ITEMS)})
+    assert off.plan("а яка з них тихіша?") is None
+
+
+@LOOPS
+def test_axis_is_said_by_both_loops(run: Any) -> None:
+    _, replies, systems = run([*MODEL_SEARCH, ("яка з них краще на мокрому?", [], MODEL_REPLY)])
+    phrase = axis_phrase(ITEMS[:SHOWN], "wet")
+    assert phrase
     assert replies[-1] == f"{phrase} {MODEL_REPLY}"
     assert compare_said_note(phrase) in systems[-1][0]

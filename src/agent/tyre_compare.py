@@ -62,6 +62,21 @@ compared (``compare_phrase``) when at least two of them carry the same class
 or dB to weigh (a verdict exists), otherwise their tests (``tests_phrase``);
 neither → ``None``. Naming one tyre stays silent; naming ≥2 is the
 comparison above.
+
+One label axis asked of the shown tyres (wave 7-S, R25): «а яка з них
+тихіша?» got 69 dB right on gpt-4.1-mini and «немає інформації» from the
+knowledge base on gemini. ``axis_question`` reads the explicit forms only
+(default-deny) — a which-word («яка / які / котра / какая / какие / которая»)
+and exactly one axis: noise «тихіша / найтихіша / менш шумна / тише / самая
+тихая», wet «на мокрому / мокрій / мокрой», fuel «економніша / менше палива /
+экономичнее»; not a taking, a price, a «гірша / хуже» or an «X чи Y» choice.
+Naming no tyre, it is about the shown ones (unique models of the first
+``SHOWN``): ``axis_phrase`` — one Ukrainian line from their ``eu_label``
+values only, the best first: «Найтихіша — Firestone Roadhawk 2: 69 дБ;
+Bridgestone Turanza 6 — 71 дБ; …». Fewer than two of them with a value on the
+axis → ``None`` (the model answers as before). Naming ≥2 is the comparison
+above; naming one stays silent. «Яка краща» alone is advice (tests), not an
+axis.
 """
 
 from __future__ import annotations
@@ -121,6 +136,21 @@ _ADVICE = re.compile(
 #: it is about the shown ones). Not «яка різниця» / «X чи Y»: naming nothing,
 #: those are not a request to compare what was shown (default-deny).
 _COMPARE_SHOWN = re.compile(_B + r"(?:порівня\w*|порівнн\w*|сравн\w*)(?![\w'])")
+#: «Яка / які / какая…» — an axis question asks which of the tyres.
+_WHICH = re.compile(_B + r"(?:яка|які|котра|котрі|какая|какие|которая|которые)(?![\w'])")
+#: One EU-label axis, the explicit forms only (default-deny).
+_AXES: dict[str, re.Pattern[str]] = {
+    "noise_db": re.compile(
+        _B + r"(?:(?:най)?тихіш\w*|тише|тихее|самая\s+тихая|самые\s+тихие"
+        r"|менш\w*\s+шумн\w*|менее\s+шумн\w*)(?![\w'])"
+    ),
+    "wet": re.compile(_B + r"мокр(?:ому|ій|ої|ой|ом)(?![\w'])"),
+    "fuel": re.compile(
+        _B + r"(?:(?:най)?економніш\w*|экономичн\w*|экономне\w*|палив\w*|топлив\w*)(?![\w'])"
+    ),
+}
+#: «Яка гірша на мокрому?» asks for the worst — not the best-first line.
+_WORSE = re.compile(_B + r"(?:гірш\w*|хуже|хуж[еи]\w*)(?![\w'])")
 #: A price question is the model's (the price corridor, «а є дешевше?»).
 _PRICE = re.compile(
     _B + r"(?:скільк\w*|скольк\w*|цін[аиуіо]\w*|цен[аыуео]\w*|кошту\w*|стоит\w*|стоят\w*"
@@ -365,6 +395,22 @@ def is_advice_question(text: str | None) -> bool:
     return bool(_ADVICE.search(low))
 
 
+def axis_question(text: str | None) -> str | None:
+    """The one ``eu_label`` axis («noise_db» / «wet» / «fuel») asked of the tyres."""
+    if not text:
+        return None
+    low = _normalize(text)
+    if _TAKES.search(low) or _PRICE.search(low) or _WORSE.search(low):
+        return None
+    if not _WHICH.search(low):
+        return None
+    # «Яка краща на мокрому — літня чи всесезонна?» is a choice of other things.
+    if _OR.search(low) and not _OR_PARTICLE_BEFORE.search(low):
+        return None
+    asked = [axis for axis, pattern in _AXES.items() if pattern.search(low)]
+    return asked[0] if len(asked) == 1 else None
+
+
 def _tests(item: dict[str, Any]) -> list[dict[str, Any]]:
     tests = item.get("tests")
     if not isinstance(tests, list):
@@ -449,6 +495,32 @@ def _verdict(items: list[dict[str, Any]]) -> str:
     return "За етикеткою: " + "; ".join(parts) + "."
 
 
+#: axis → (lead for one best, lead for several, how a value is said).
+_AXIS_WORDS: dict[str, tuple[str, str, str]] = {
+    "noise_db": ("Найтихіша", "Найтихіші", "{} дБ"),
+    "wet": ("Найкраще на мокрій дорозі", "Найкраще на мокрій дорозі", "клас {}"),
+    "fuel": ("Найекономніша", "Найекономніші", "клас {}"),
+}
+
+
+def axis_phrase(items: list[dict[str, Any]], axis: str) -> str:
+    """One line on ``axis`` from the items' labels, the best first; ``""`` if <2 values."""
+    have = [(it, _label(it)[axis]) for it in items if _label(it).get(axis) not in (None, "")]
+    if len(have) < 2:
+        return ""
+    have.sort(key=lambda pair: pair[1])
+    best = have[0][1]
+    winners = [_name(it) for it, v in have if v == best]
+    one, several, said = _AXIS_WORDS[axis]
+    lead = f"{one if len(winners) == 1 else several} — {' і '.join(winners)}: {said.format(best)}"
+    rest = [
+        f"{_name(it)} — {said.format(v) if axis == 'noise_db' else v}"
+        for it, v in have
+        if v != best
+    ]
+    return "; ".join([lead, *rest]) + "."
+
+
 def compare_phrase(items: list[dict[str, Any]]) -> str:
     """The code's comparison of ``items`` — their label classes and test places."""
     body = "; ".join(_item_clause(it) for it in items)
@@ -517,6 +589,13 @@ class TyreCompare:
         if is_compare_question(user_text) and 2 <= len(named) <= MAX_COMPARED:
             phrase = compare_phrase(named)
             kind = "compare"
+        elif not named and (axis := axis_question(user_text)) is not None:
+            # «А яка з них тихіша?»: one label axis of the shown tyres.
+            named = _unique_models(self._items[:SHOWN])
+            phrase = axis_phrase(named, axis)
+            if not phrase:
+                return None
+            kind = f"axis_{axis}"
         elif (
             not named
             and is_compare_question(user_text)
