@@ -769,10 +769,61 @@ async def hold_unconfirmed_transfer_promise(
     the promise and the question survives underneath. When the promise really is
     the tail of the turn — 2 of the 14 — dropping it *would* leave silence, so
     there it is still spoken. Both outcomes are counted.
+
+    The verdict is due when the transfer's arguments are complete: on its
+    `ToolCallEnd`, or — when the provider never sends one — at the end of the
+    stream. Until 2026-10-26 it was taken on `ToolCallEnd` alone, and the production
+    agent (`openai-gpt41-mini`) streams through `OpenAIStreamParser`, which
+    emits no `ToolCallEnd` at all. So the guard was never asked: over 30 days
+    `transfer_promise_suppressed_total` had no series, `unbacked{dropped}` was 0
+    and `unbacked{spoken}` was 25 — every promise in the same round as its
+    transfer fell through to «no transfer behind it, the whole turn», blocked
+    or not, and every *successful* transfer was counted as unbacked too. The
+    caller then heard «Одну секунду, з'єдную вас з оператором.» and, one round
+    later, the question the model asked after the refusal (13 turns in
+    `call_turns`, 11 of them blocked by the guard). Taking the verdict at the
+    end of the stream costs nothing: without `ToolCallEnd` the promise was
+    already held that long.
+
+    A promise in the round *after* a refusal, with no tool call of its own, is
+    the unbacked case above: dropped when something follows it, spoken when it
+    is the whole round. A promise whose transfer the guard blocks is dropped
+    even when it is the round's only sentence — a refused tool call always gets
+    another round, so the caller is not left with silence.
     """
     held: list[BufferEvent] | None = None
     names: dict[str, str] = {}
     arguments: dict[str, str] = {}
+    judged: set[str] = set()
+
+    def unjudged_transfers() -> list[str]:
+        return [
+            tool_id
+            for tool_id, name in names.items()
+            if name == "transfer_to_operator" and tool_id not in judged
+        ]
+
+    def guard_blocks(tool_ids: list[str]) -> bool:
+        """Ask the guard about each transfer; True when any of them is refused."""
+        refused = False
+        for tool_id in tool_ids:
+            judged.add(tool_id)
+            try:
+                args = json.loads(arguments.get(tool_id) or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            if not isinstance(args, dict):
+                args = {}
+            blocked = _should_block_false_transfer(args, history, sales_enabled=sales_enabled)
+            if blocked is not None:
+                reason_label = str(args.get("reason", "unknown"))
+                transfer_promise_suppressed_total.labels(reason=reason_label).inc()
+                logger.warning(
+                    "Withholding transfer promise — guard blocks reason=%s",
+                    reason_label,
+                )
+                refused = True
+        return refused
 
     def resolve(*, drop_promise: bool) -> list[BufferEvent]:
         nonlocal held
@@ -802,29 +853,19 @@ async def hold_unconfirmed_transfer_promise(
             held.append(event)
 
             if isinstance(event, ToolCallEnd) and names.get(event.id) == "transfer_to_operator":
-                try:
-                    args = json.loads(arguments.get(event.id) or "{}")
-                except json.JSONDecodeError:
-                    args = {}
-                if not isinstance(args, dict):
-                    args = {}
-                blocked = _should_block_false_transfer(
-                    args, history, sales_enabled=sales_enabled
-                )
-                if blocked is not None:
-                    reason_label = str(args.get("reason", "unknown"))
-                    transfer_promise_suppressed_total.labels(reason=reason_label).inc()
-                    logger.warning(
-                        "Withholding transfer promise — guard blocks reason=%s",
-                        reason_label,
-                    )
-                for queued in resolve(drop_promise=blocked is not None):
+                for queued in resolve(drop_promise=guard_blocks([event.id])):
                     yield queued
                 continue
 
             continue
 
         yield event
+
+    if held is not None and (pending := unjudged_transfers()):
+        # OpenAI-compatible providers send no ToolCallEnd: the arguments of a
+        # transfer are complete once the stream is over, so judge it here.
+        for queued in resolve(drop_promise=guard_blocks(pending)):
+            yield queued
 
     drop_unbacked = False
     if held is not None:
