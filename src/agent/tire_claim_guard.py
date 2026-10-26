@@ -38,9 +38,25 @@ Rules (`RULES`, first match names the refusal):
 or two named, another tyre or a comparison in the sentence («ніж у …», «у
 першої»), a question or condition, a negation not part of a form.
 
-``novelty`` and ``unbacked_rating`` are silent in a turn that consulted the
-knowledge base: its articles do say «один із лідерів тестів ADAC», and that
-is a backed claim the guard cannot tell apart.
+- ``restated_verdict`` (wave 8-U) — the model says again the label verdict
+  the code has just spoken this turn (`tyre_compare`, «Найкраще на мокрій
+  дорозі — Bridgestone Turanza 6 і Firestone Roadhawk 2: клас A; …» followed
+  by «Найкраще на мокрій дорозі гальмують Bridgestone Turanza 6…»). The loops
+  hand the phrase over with `TireClaimState.note_code_phrase` right where they
+  write `compare_said_note`; `begin_turn` forgets it. A restatement is a
+  superlative / comparative on an axis the code's phrase covers (wet
+  «найкращ / краще» + «мокр / гальм», noise «найтихіш / тихіша», fuel
+  «найекономн / економніш», or «клас A» when the phrase has one axis) that
+  names a tyre the phrase names. Silent: no phrase this turn, no such word,
+  no axis in common (a tests phrase), no tyre of the phrase, a price,
+  availability or advice in the sentence («за 3700 гривень», «є в
+  наявності», «раджу»), a negation or a question.
+
+``novelty`` and ``unbacked_rating`` are silent in a turn whose knowledge
+base result itself backs the claim: an article that says «новинка / нова
+модель / з'явилась» backs novelty, one that says «тест / рейтинг / ADAC»
+backs a test or rating claim (it does say «один із лідерів тестів ADAC»).
+A knowledge base result without those words backs nothing.
 
 Negations and questions pass («не найдешевша», «чи є новіші?»): a negation,
 question or condition word before the claim, or a sentence ending in «?».
@@ -50,6 +66,11 @@ an emptied turn is not silence here). ``novelty`` in a cause clause («…, бо
 вона щойно з'явилась») loses only that clause; otherwise every rule speaks its
 neutral sentence, which carries no new fact. A rule's fixed sentence is said
 once per filter — a second copy is dropped.
+
+The one exception is ``restated_verdict``: its sentence is *dropped*, with
+no replacement. The rule fires only when the code's phrase was spoken this
+turn, so the turn is never empty — the caller has already heard the very
+fact the dropped sentence repeats; a replacement would be a third copy.
 
 More rules join `RULES` without touching the loops. The code's own
 comparison phrase (`tyre_compare`) never passes the guard: it is spoken
@@ -62,6 +83,7 @@ Sales scope only: the loops note results and wrap the stream only under
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -90,8 +112,10 @@ RULE_NOVELTY = "novelty"
 RULE_UNBACKED_RATING = "unbacked_rating"
 RULE_EU_CLASS = "eu_class"
 RULE_STUD = "stud"
+RULE_RESTATED_VERDICT = "restated_verdict"
 
-#: Neutral sentences — no fact the code has not checked.
+#: Neutral sentences — no fact the code has not checked. ``restated_verdict``
+#: has none: its sentence is dropped (the code's phrase was already said).
 REPLACEMENTS: dict[str, str] = {
     RULE_CHEAPEST: "Ціни у варіантів різні, можу назвати кожну.",
     RULE_NOVELTY: "Даних про те, коли модель з'явилась, у мене немає.",
@@ -138,8 +162,19 @@ _NOVELTY = re.compile(
     rf"|(?:появил|з'явил|вышл|вийшл){_L}*\s+(?:на\s+(?:рынке|ринку|рынок|ринок)\s+)?"
     r"(?:недавно|нещодавно)"
     rf"|(?<!\w)нов(?:а|ая|ий|ый|у|ую)\s+модел{_L}*\s+"
-    r"(?:сезону|сезона|цього\s+року|этого\s+года|\d{4}\s+(?:року|года))",
+    r"(?:сезону|сезона|цього\s+року|этого\s+года|\d{4}\s+(?:року|года))"
+    # «це новіша модель», «новейшая модель», «нова модель» (wave 8-U): a
+    # «новіша» about a batch or a date («новіша партія») is not a model's age.
+    rf"|(?<!\w)новіш{_L}*+(?!\s+(?:парті|виробн|дат|рок|dot))"
+    rf"|(?<!\w)новейш{_L}*\s+модел{_L}*"
+    rf"|(?<!\w)нов(?:а|ая|ий|ый|у|ую|ої|ой)\s+модел{_L}*",
     re.IGNORECASE,
+)
+#: A knowledge base result that itself says a model is new.
+_KB_NOVELTY = re.compile(rf"новинк|нов{_L}*\s+модел|з'явил|появил", re.IGNORECASE)
+#: A knowledge base result that itself speaks of tests or ratings.
+_KB_RATING = re.compile(
+    r"тест|рейтинг|переможц|победител|лідер|лидер|adac|auto\s*bild|оцінк|оценк", re.IGNORECASE
 )
 #: The novelty given as a reason: only that clause goes.
 _NOVELTY_CAUSE = re.compile(
@@ -239,13 +274,19 @@ def _key(item: dict[str, Any]) -> tuple[str, str]:
 class TireClaimState:
     """The call's last ``search_tires`` result, whole, and this turn's tools.
 
-    One per loop (one loop per call). `begin_turn` clears the per-turn part.
+    One per loop (one loop per call). `begin_turn` clears the per-turn part:
+    the knowledge base flags and the code's phrase of the turn.
     """
 
     def __init__(self, *, sales_enabled: bool) -> None:
         self._sales_enabled = sales_enabled
         self._items: list[dict[str, Any]] = []
         self.knowledge_used = False
+        #: This turn's knowledge base result says a model is new / speaks of tests.
+        self.knowledge_novelty = False
+        self.knowledge_rating = False
+        #: The code's comparison phrase spoken this turn (`tyre_compare`).
+        self.code_phrase: str | None = None
 
     @property
     def items(self) -> list[dict[str, Any]]:
@@ -253,6 +294,15 @@ class TireClaimState:
 
     def begin_turn(self) -> None:
         self.knowledge_used = False
+        self.knowledge_novelty = False
+        self.knowledge_rating = False
+        self.code_phrase = None
+
+    def note_code_phrase(self, phrase: str | None) -> None:
+        """The code's own comparison phrase, said this turn before the model."""
+        if not self._sales_enabled or not phrase:
+            return
+        self.code_phrase = phrase
 
     def note(self, tool: str, raw: Any) -> None:
         """A tool result of this turn (forced or the model's); others are ignored."""
@@ -260,6 +310,9 @@ class TireClaimState:
             return
         if tool == KNOWLEDGE_TOOL:
             self.knowledge_used = True
+            text = _normalize(raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False))
+            self.knowledge_novelty = self.knowledge_novelty or bool(_KB_NOVELTY.search(text))
+            self.knowledge_rating = self.knowledge_rating or bool(_KB_RATING.search(text))
             return
         if tool != SEARCH_TOOL:
             return
@@ -288,7 +341,11 @@ class ClaimContext:
 
     items: list[dict[str, Any]]
     user_text: str
-    knowledge_used: bool = False
+    #: This turn's knowledge base result backs a novelty / a test or rating claim.
+    knowledge_novelty: bool = False
+    knowledge_rating: bool = False
+    #: The code's comparison phrase spoken this turn, if any.
+    code_phrase: str | None = None
     #: The one model the previous sentence named («Вона …» refers to it).
     previous: dict[str, Any] | None = None
     #: Sentences of this reply already judged (for rules that need them).
@@ -339,7 +396,7 @@ def rule_cheapest(sentence: str, ctx: ClaimContext) -> Refusal | None:
 
 
 def rule_novelty(sentence: str, ctx: ClaimContext) -> Refusal | None:
-    if ctx.knowledge_used or _ASKED_NEW.search(_normalize(ctx.user_text)):
+    if ctx.knowledge_novelty or _ASKED_NEW.search(_normalize(ctx.user_text)):
         return None
     if _claim_at(_NOVELTY, sentence) is None:
         return None
@@ -363,7 +420,7 @@ def _rating_backed(value: float, items: list[dict[str, Any]]) -> bool:
 
 
 def rule_unbacked_rating(sentence: str, ctx: ClaimContext) -> Refusal | None:
-    if ctx.knowledge_used:
+    if ctx.knowledge_rating:
         return None
     refusal = Refusal(RULE_UNBACKED_RATING, REPLACEMENTS[RULE_UNBACKED_RATING])
     if _claim_at(_TEST_CLAIM, sentence) is not None and not any(i.get("tests") for i in ctx.items):
@@ -548,6 +605,75 @@ def rule_stud(sentence: str, ctx: ClaimContext) -> Refusal | None:
     return Refusal(RULE_STUD, REPLACEMENTS[RULE_STUD]) if wrong else None
 
 
+#: The label axes of a verdict, as the code's phrase and the model word them.
+_VERDICT_AXIS_WORDS: dict[str, re.Pattern[str]] = {
+    "wet": re.compile(r"мокр|гальм|тормоз|тормож|зчеплен|сцеплен", re.IGNORECASE),
+    "fuel": re.compile(r"економ|эконом|палив|пальн|топлив|витрат|расход", re.IGNORECASE),
+    "noise": re.compile(
+        r"(?<!\w)шум|шумн|(?<!\w)тих(?=[іиоа])|(?<!\w)тиш|(?<!\w)дб(?!\w)|децибел", re.IGNORECASE
+    ),
+}
+#: Words that are a verdict on one axis by themselves.
+_VERDICT_OWN_AXIS: dict[str, re.Pattern[str]] = {
+    "noise": re.compile(
+        rf"(?<!\w)(?:найтих|тихіш|тиш(?:е|ий|ая|ое|і)|самая\s+тих|сам{_L}*\s+тих)"
+        rf"|(?<!\w)(?:менш|менее|найменш|наименее)\s+шумн",
+        re.IGNORECASE,
+    ),
+    "fuel": re.compile(
+        rf"(?<!\w)(?:найекономн|економніш|экономичне|наиболее\s+экономичн|сам{_L}*\s+экономичн)",
+        re.IGNORECASE,
+    ),
+}
+#: «найкраще / краще / лучше» — a verdict on whichever axis the sentence names.
+_VERDICT_GENERAL = re.compile(rf"(?<!\w)(?:найкращ|кращ|лучш|наилучш){_L}*", re.IGNORECASE)
+#: «клас A» — a verdict on the one axis of the code's phrase.
+_VERDICT_CLASS = re.compile(
+    r"(?<!\w)(?:клас|класс|категор)\w*\s+(?-i:[A-GАВСЕ])(?!\w)", re.IGNORECASE
+)
+#: A price, availability or advice: the sentence says more than the verdict.
+_VERDICT_MORE = re.compile(
+    r"\d{3,}|(?<!\w)(?:грн|гривн\w*|гривень|гривні|гривня)(?!\w)|₴"
+    r"|наявн|наличи|в\s+наличии|склад|дешев|дорожч|дороже|найдорож|ціна|ціну|цін[іи]|цена|цену|стоит|коштує"
+    r"|раджу|рекоменд|совету|пропоную|предлагаю|оформ|замов|заказ",
+    re.IGNORECASE,
+)
+
+
+def _axes(text: str) -> set[str]:
+    return {axis for axis, pattern in _VERDICT_AXIS_WORDS.items() if pattern.search(text)}
+
+
+def _verdict_axes(sentence: str, phrase_axes: set[str]) -> set[str]:
+    """The axes ``sentence`` gives a verdict on (affirmed, not a question)."""
+    axes = {axis for axis, pattern in _VERDICT_OWN_AXIS.items() if _claim_at(pattern, sentence)}
+    if _claim_at(_VERDICT_GENERAL, sentence) is not None:
+        axes |= _axes(sentence)
+    if _claim_at(_VERDICT_CLASS, sentence) is not None:
+        named_axes = _axes(sentence)
+        axes |= named_axes or (phrase_axes if len(phrase_axes) == 1 else set())
+    return axes
+
+
+def rule_restated_verdict(sentence: str, ctx: ClaimContext) -> Refusal | None:
+    """The code's label verdict of this turn, said again by the model — dropped.
+
+    The one rule whose refusal has no replacement: it fires only when
+    ``ctx.code_phrase`` (spoken this turn, before the model) exists, so the
+    turn still says the fact. Without the phrase it is silent.
+    """
+    phrase = ctx.code_phrase
+    if not phrase or sentence.rstrip().endswith("?") or _VERDICT_MORE.search(sentence):
+        return None
+    phrase_axes = _axes(_normalize(phrase))
+    if not phrase_axes or not (_verdict_axes(sentence, phrase_axes) & phrase_axes):
+        return None
+    said = {_key(i) for i in named_items(_normalize(phrase), ctx.items)}
+    if not any(_key(i) in said for i in named_items(sentence, ctx.items)):
+        return None
+    return Refusal(RULE_RESTATED_VERDICT, "", fixed=False)
+
+
 #: The rule registry: first match wins and names the refusal. New rules
 #: are appended here; the loops never change.
 RULES: list[tuple[str, Rule]] = [
@@ -556,6 +682,7 @@ RULES: list[tuple[str, Rule]] = [
     (RULE_UNBACKED_RATING, rule_unbacked_rating),
     (RULE_EU_CLASS, rule_eu_class),
     (RULE_STUD, rule_stud),
+    (RULE_RESTATED_VERDICT, rule_restated_verdict),
 ]
 
 
@@ -591,9 +718,17 @@ def _refused(refusal: Refusal, call_id: str, site: str, text: str) -> None:
 
 
 def _context(state: TireClaimState, user_text: str | None) -> ClaimContext:
-    return ClaimContext(
-        items=state.items, user_text=user_text or "", knowledge_used=state.knowledge_used
-    )
+    ctx = ClaimContext(items=state.items, user_text=user_text or "")
+    _refresh(ctx, state)
+    return ctx
+
+
+def _refresh(ctx: ClaimContext, state: TireClaimState) -> None:
+    """The state's current result, knowledge base flags and code phrase."""
+    ctx.items = state.items
+    ctx.knowledge_novelty = state.knowledge_novelty
+    ctx.knowledge_rating = state.knowledge_rating
+    ctx.code_phrase = state.code_phrase
 
 
 # ── The text path ───────────────────────────────────────────────────────
@@ -621,6 +756,9 @@ def guard_tire_claims_text(
             continue
         changed = True
         _refused(refusal, call_id, site, sentence)
+        # ``restated_verdict``: dropped, the code's phrase already said it.
+        if not refusal.replacement:
+            continue
         if refusal.fixed and refusal.replacement in spoken:
             continue
         spoken.add(refusal.replacement)
@@ -661,14 +799,16 @@ async def guard_tire_claims(
         if ctx is None:
             ctx = _context(state, user_text)
         else:
-            ctx.items = state.items
-            ctx.knowledge_used = state.knowledge_used
+            _refresh(ctx, state)
         text = " ".join(e.text for e in queued).strip()
         refusal = check_sentence(text, ctx)
         _advance(text, ctx)
         if refusal is None:
             return queued
         _refused(refusal, call_id, "stream", text)
+        # ``restated_verdict``: dropped, the code's phrase already said it.
+        if not refusal.replacement:
+            return []
         if refusal.fixed and refusal.replacement in spoken:
             return []
         spoken.add(refusal.replacement)

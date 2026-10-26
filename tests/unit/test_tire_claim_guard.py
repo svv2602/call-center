@@ -29,6 +29,7 @@ from src.agent.tire_claim_guard import (
     REPLACEMENTS,
     RULE_CHEAPEST,
     RULE_NOVELTY,
+    RULE_RESTATED_VERDICT,
     RULE_UNBACKED_RATING,
     RULES,
     TireClaimState,
@@ -78,6 +79,24 @@ ITEMS = [
 RESULT = {"total": len(ITEMS), "items": ITEMS}
 
 ASKED = "зимові шини 235/55 R18 на Тігуан"
+#: Knowledge base results in the `main._search_knowledge` shape.
+KB_PLAIN = {
+    "total": 1,
+    "articles": [{"title": "Як обрати зимові шини", "content": "Зверніть увагу на протектор."}],
+}
+KB_NEW = {
+    "total": 1,
+    "articles": [{"title": "Firestone WinterHawk 4", "content": "Новинка сезону від Firestone."}],
+}
+KB_TESTS = {
+    "total": 1,
+    "articles": [{"title": "Continental", "content": "Один із лідерів тестів ADAC."}],
+}
+#: The tvoya-shina rerun of 2026-10-26 (`tc_no_invented_novelty`).
+TS_NEWER = (
+    "Про Firestone WinterHawk 4 мало відгуків, можливо, через те, що це новіша модель "
+    "або спеціалізований зимовий варіант."
+)
 CHEAP_LIE = "CrossWind Grip Peak Winter — найдешевша серед показаних."
 OFFER = "Є Bridgestone Blizzak 6 за 8625 гривень."
 
@@ -212,13 +231,49 @@ class TestNovelty:
     def test_negation_and_question_pass(self, sentence: str) -> None:
         assert _judge(sentence) == sentence
 
-    def test_knowledge_base_turn_is_silent(self) -> None:
+    def test_knowledge_base_article_saying_new_backs_it(self) -> None:
         state = _state()
-        state.note("search_knowledge_base", {"articles": []})
+        state.note("search_knowledge_base", KB_NEW)
         sentence = "Firestone WinterHawk 4 — новинка сезону."
+        assert _fired(sentence, state=state) == set()
         assert _judge(sentence, state=state) == sentence
         state.begin_turn()
         assert _judge(sentence, state=state) == REPLACEMENTS[RULE_NOVELTY]
+
+    @pytest.mark.parametrize("kb", [KB_PLAIN, {"articles": []}, {"total": 0}])
+    def test_knowledge_base_without_novelty_backs_nothing(self, kb: dict[str, Any]) -> None:
+        state = _state()
+        state.note("search_knowledge_base", kb)
+        assert _fired(TS_NEWER, state=state) == {RULE_NOVELTY}
+        assert _judge(TS_NEWER, state=state).startswith(REPLACEMENTS[RULE_NOVELTY])
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            "Можливо, це новіша модель.",
+            "Firestone WinterHawk 4 — новіша модель.",
+            "Це нова модель Firestone.",
+            "Это новейшая модель бренда.",
+        ],
+    )
+    def test_newer_model_is_a_claim(self, sentence: str) -> None:
+        assert _fired(sentence) == {RULE_NOVELTY}
+        assert _judge(sentence) == REPLACEMENTS[RULE_NOVELTY]
+
+    def test_ts_rerun_text_is_replaced(self) -> None:
+        # The tvoya-shina rerun of 2026-10-26, after a knowledge base call.
+        state = _state()
+        state.note("search_knowledge_base", KB_PLAIN)
+        said = _judge(TS_NEWER + " Порівняти з іншими моделями?", state=state)
+        assert "новіша" not in said
+        assert said == REPLACEMENTS[RULE_NOVELTY] + " Порівняти з іншими моделями?"
+
+    @pytest.mark.parametrize(
+        "sentence",
+        ["Ця партія новіша партія.", "Ці шини новіші виробництва.", "Доставимо Новою поштою."],
+    )
+    def test_newer_batch_and_nova_poshta_pass(self, sentence: str) -> None:
+        assert _fired(sentence) == set()
 
 
 # ── unbacked rating ──────────────────────────────────────────────────────
@@ -253,12 +308,19 @@ class TestUnbackedRating:
         sentence = "Рейтинг цієї шини 4.7 з 5."
         assert _judge(sentence, state=_state({"items": items})) == sentence
 
-    def test_knowledge_base_turn_is_silent(self) -> None:
+    def test_knowledge_base_article_with_tests_backs_it(self) -> None:
         # «Один із лідерів тестів ADAC» is in the brand articles: backed.
         state = _state()
-        state.note("search_knowledge_base", {"articles": []})
+        state.note("search_knowledge_base", KB_TESTS)
         sentence = "Continental — один із лідерів тестів ADAC."
+        assert _fired(sentence, state=state) == set()
         assert _judge(sentence, state=state) == sentence
+
+    def test_knowledge_base_without_tests_backs_nothing(self) -> None:
+        state = _state()
+        state.note("search_knowledge_base", KB_PLAIN)
+        sentence = "Continental — один із лідерів тестів ADAC."
+        assert _fired(sentence, state=state) == {RULE_UNBACKED_RATING}
 
     @pytest.mark.parametrize("sentence", ["Вона не переможець тестів.", "Чи є дані тестів?"])
     def test_negation_and_question_pass(self, sentence: str) -> None:
@@ -391,6 +453,8 @@ def _router() -> ToolRouter:
     for name in _TOOL_NAMES:
 
         async def _run(_name: str = name, **_: Any) -> dict[str, Any]:
+            if _name == "search_knowledge_base":
+                return copy.deepcopy(KB_NEW)
             return copy.deepcopy(RESULT) if _name == "search_tires" else {"items": []}
 
         router.register(name, _run)
@@ -566,3 +630,189 @@ def test_text_knowledge_base_silence_lasts_one_turn() -> None:
     second, _ = asyncio.run(agent.process_message("а ще що скажете?", history))
     assert first == NOVELTY
     assert second == REPLACEMENTS[RULE_NOVELTY]
+
+
+# ── restated_verdict: the code's own label verdict said again (wave 8-U) ──
+
+#: `tc_wet_leader_from_label`: three summer tyres with their EU labels.
+WET_ITEMS = [
+    _item(
+        "s1", "Bridgestone", "Turanza 6", 3700, eu_label={"fuel": "C", "wet": "A", "noise_db": 71}
+    ),
+    _item(
+        "s2", "Firestone", "Roadhawk 2", 3100, eu_label={"fuel": "B", "wet": "A", "noise_db": 70}
+    ),
+    _item("s3", "Laufenn", "S Fit EQ+", 2400, eu_label={"fuel": "C", "wet": "B", "noise_db": 72}),
+]
+WET_RESULT = {"total": len(WET_ITEMS), "items": WET_ITEMS}
+WET_ASK = "а які з них краще гальмують на мокрій дорозі?"
+#: The code's phrase for WET_ASK (`tyre_compare.axis_phrase`, wet).
+WET_PHRASE = (
+    "Найкраще на мокрій дорозі — Bridgestone Turanza 6 і Firestone Roadhawk 2: клас A; "
+    "Laufenn S Fit EQ+ — B."
+)
+NOISE_PHRASE = (
+    "Найтихіша — Firestone Roadhawk 2: 70 дБ; Bridgestone Turanza 6 — 71 дБ; "
+    "Laufenn S Fit EQ+ — 72 дБ."
+)
+TESTS_PHRASE = "Bridgestone Turanza 6: у тесті ADAC — 2 місце."
+#: What the model said after WET_PHRASE in the rerun (both networks).
+RESTATED = "Найкраще на мокрій дорозі гальмують Bridgestone Turanza 6 і Firestone Roadhawk 2."
+WET_OFFER = "Bridgestone Turanza 6 коштує 3700 гривень."
+
+
+def _wet_state(phrase: str | None = WET_PHRASE, *, sales: bool = True) -> TireClaimState:
+    state = TireClaimState(sales_enabled=sales)
+    state.note("search_tires", copy.deepcopy(WET_RESULT))
+    state.begin_turn()
+    state.note_code_phrase(phrase)
+    return state
+
+
+class TestRestatedVerdict:
+    @pytest.mark.parametrize(
+        ("phrase", "sentence"),
+        [
+            (WET_PHRASE, RESTATED),
+            (WET_PHRASE, "Найкраще на мокрій дорозі гальмує Bridgestone Turanza 6."),
+            (WET_PHRASE, "Bridgestone Turanza 6 і Firestone Roadhawk 2 мають клас A."),
+            (WET_PHRASE, "Firestone Roadhawk 2 краще тримає мокру дорогу."),
+            (NOISE_PHRASE, "Firestone Roadhawk 2 — найтихіша."),
+            (NOISE_PHRASE, "Найменш шумна з них Firestone Roadhawk 2."),
+        ],
+    )
+    def test_restatement_is_dropped(self, phrase: str, sentence: str) -> None:
+        state = _wet_state(phrase)
+        assert _fired(sentence, WET_ASK, state) == {RULE_RESTATED_VERDICT}
+        assert _judge(sentence, WET_ASK, state) == ""
+
+    def test_the_rest_of_the_reply_stays(self) -> None:
+        state = _wet_state()
+        assert _judge(f"{RESTATED} Яку оберете?", WET_ASK, state) == "Яку оберете?"
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            WET_OFFER,
+            "Bridgestone Turanza 6 є в наявності.",
+            "Раджу Bridgestone Turanza 6 — найкраще на мокрій дорозі.",
+            "Bridgestone Turanza 6 найкраще на мокрій, і вона за 3700 гривень.",
+            "Чи Bridgestone Turanza 6 краще на мокрій дорозі?",
+            "Bridgestone Turanza 6 не краще на мокрій дорозі.",
+            # No axis: «найкраще» is advice, «тих» is «those».
+            "З тих шин найкраще Bridgestone Turanza 6.",
+            # No tyre of the phrase named.
+            "Найкраще на мокрій дорозі — ці дві моделі.",
+        ],
+    )
+    def test_other_sentences_about_the_tyres_pass(self, sentence: str) -> None:
+        state = _wet_state()
+        assert _fired(sentence, WET_ASK, state) == set()
+        assert _judge(sentence, WET_ASK, state) == sentence
+
+    @pytest.mark.parametrize(
+        "sentence", ["Bridgestone Turanza 6 не найтихіша.", "Чи Firestone Roadhawk 2 тихіша?"]
+    )
+    def test_negated_or_asked_noise_verdict_passes(self, sentence: str) -> None:
+        state = _wet_state(NOISE_PHRASE)
+        assert _fired(sentence, WET_ASK, state) == set()
+        assert _judge(sentence, WET_ASK, state) == sentence
+
+    def test_without_the_code_phrase_the_rule_is_silent(self) -> None:
+        state = _wet_state(None)
+        assert _fired(RESTATED, WET_ASK, state) == set()
+        assert _judge(RESTATED, WET_ASK, state) == RESTATED
+
+    def test_begin_turn_forgets_the_phrase(self) -> None:
+        state = _wet_state()
+        state.begin_turn()
+        assert _fired(RESTATED, WET_ASK, state) == set()
+
+    @pytest.mark.parametrize("phrase", [NOISE_PHRASE, TESTS_PHRASE])
+    def test_another_axis_is_not_a_restatement(self, phrase: str) -> None:
+        state = _wet_state(phrase)
+        assert _fired(RESTATED, WET_ASK, state) == set()
+
+    def test_sales_off_notes_no_phrase(self) -> None:
+        state = _wet_state(sales=False)
+        assert state.code_phrase is None
+
+    def test_stream_drops_the_sentence(self) -> None:
+        events = [SentenceReady(RESTATED), SentenceReady(WET_OFFER)]
+        assert asyncio.run(_collect(events, _wet_state(), WET_ASK)) == [WET_OFFER]
+
+
+# ── wiring: both loops hand the code's phrase to the guard ───────────────
+
+
+def _wet_router() -> ToolRouter:
+    router = ToolRouter()
+    for name in _TOOL_NAMES:
+
+        async def _run(_name: str = name, **_: Any) -> dict[str, Any]:
+            return copy.deepcopy(WET_RESULT) if _name == "search_tires" else {"items": []}
+
+        router.register(name, _run)
+    return router
+
+
+_WET_ARGS = {"width": 205, "profile": 55, "diameter": 16, "season": "summer"}
+_WET_SEARCH_ROUND = [
+    ToolCallStart(id="s0", name="search_tires"),
+    ToolCallDelta(id="s0", arguments_chunk=json.dumps(_WET_ARGS)),
+    ToolCallEnd(id="s0"),
+    StreamDone(stop_reason="tool_use", usage=Usage(1, 1)),
+]
+_WET_FIRST = "літні 205/55 R16, бренд будь-який"
+
+
+def test_stream_drops_the_restated_verdict() -> None:
+    loop = StreamingAgentLoop(
+        llm_router=MockLLMRouter([_WET_SEARCH_ROUND, _end("Є три варіанти.")]),
+        tool_router=_wet_router(),
+        tts=MockTTSEngine(),
+        conn=MockAudioSocketConnection(),
+        barge_in_event=asyncio.Event(),
+        tools=_TOOLS,
+        system_prompt="Test system prompt",
+        network_policy=_policy(True),
+    )
+    asyncio.run(loop.run_turn(_WET_FIRST, []))
+    before = _count(RULE_RESTATED_VERDICT)
+    loop._llm_router = MockLLMRouter([_end(f"{RESTATED} {WET_OFFER}")])
+    said = asyncio.run(loop.run_turn(WET_ASK, [])).spoken_text
+    assert WET_PHRASE in said
+    assert RESTATED not in said
+    assert WET_OFFER in said
+    assert _count(RULE_RESTATED_VERDICT) == before + 1
+
+
+def test_text_drops_the_restated_verdict() -> None:
+    search = ToolCall(id="t0", name="search_tires", arguments=_WET_ARGS)
+    llm_router = create_autospec(LLMRouter, instance=True)
+    llm_router.complete.side_effect = [
+        LLMResponse(
+            text="",
+            tool_calls=[search],
+            stop_reason="tool_use",
+            usage=Usage(1, 1),
+            provider="test",
+        ),
+        _reply("Є три варіанти."),
+        _reply(f"{RESTATED} {WET_OFFER}"),
+    ]
+    agent = LLMAgent(
+        api_key="test-key",
+        system_prompt="base",
+        llm_router=llm_router,
+        tool_router=_wet_router(),
+        tools=_TOOLS,
+        network_policy=_policy(True),
+    )
+    _, history = asyncio.run(agent.process_message(_WET_FIRST, []))
+    before = _count(RULE_RESTATED_VERDICT)
+    said, _ = asyncio.run(agent.process_message(WET_ASK, history))
+    assert said.startswith(WET_PHRASE)
+    assert RESTATED not in said
+    assert WET_OFFER in said
+    assert _count(RULE_RESTATED_VERDICT) == before + 1

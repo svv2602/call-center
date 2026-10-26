@@ -2008,6 +2008,7 @@ class StreamingAgentLoop:
         if compare_phrase is not None and await self._speak_code_phrase(compare_phrase):
             spoken_parts.append(compare_phrase)
             system += compare_said_note(compare_phrase)
+            self._tire_claims.note_code_phrase(compare_phrase)
 
         # A wheel consultation: the code searches the knowledge base
         # (category wheels) before the first round.

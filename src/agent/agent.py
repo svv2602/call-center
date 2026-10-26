@@ -472,6 +472,7 @@ class LLMAgent:
         compared = [compare] if compare is not None else []
         if compare is not None:
             system += compare_said_note(compare)
+            self._tire_claims.note_code_phrase(compare)
         # Text-path twin of the spoken first question of a tyre pick
         # (`vague_tyre_buy`): the code's question is the whole reply, no round.
         vague_phrase = self._vague_gate.plan(
