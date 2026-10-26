@@ -70,6 +70,7 @@ from src.agent.time_detect import (
     lists_alternative_times,
     reslices_the_pinned_hour,
 )
+from src.agent.tire_claim_guard import TireClaimState, guard_tire_claims
 from src.agent.tire_search_gate import (
     SEARCH_TOOL,
     ForcedTireSearch,
@@ -1656,6 +1657,9 @@ class StreamingAgentLoop:
         # The call's last `search_tires` result, all of it — the tyres a
         # compare question may name (`tyre_compare`, sales scope only).
         self._tyre_compare = TyreCompare(sales_enabled=self._sales_enabled)
+        # The same result whole, and this turn's knowledge-base use — what the
+        # model's «найдешевша / новинка / №1» is judged against (sales only).
+        self._tire_claims = TireClaimState(sales_enabled=self._sales_enabled)
 
     @property
     def _tts(self) -> TTSEngine:
@@ -1956,6 +1960,7 @@ class StreamingAgentLoop:
         # Fit verdicts of this turn's `search_disks` results (sales scope):
         # every one `cannot_confirm` → the model's «підходять» is dropped.
         disk_fit_state = DiskFitClaimState()
+        self._tire_claims.begin_turn()
 
         # The network facts the caller asked about (delivery, payment,
         # warranty…) are the first thing heard, said by the code before the
@@ -2060,6 +2065,7 @@ class StreamingAgentLoop:
                 forced_args, self._tool_router.execute, timeout=_TOOL_TIMEOUT_SEC
             )
             self._tyre_compare.note_search(forced_raw)
+            self._tire_claims.note(SEARCH_TOOL, forced_raw)
             if isinstance(forced_raw, dict) and forced_raw.get("error") is True:
                 refused_this_turn[SEARCH_TOOL + ":" + json.dumps(forced_args, sort_keys=True)] = str(
                     forced_raw.get("reason") or forced_raw.get("action_required") or "unspecified"
@@ -2138,6 +2144,11 @@ class StreamingAgentLoop:
                     # Studs exist only on winter tyres: out of season the
                     # model's «шиповані чи липучка?» goes (`vehicle_lookup_gate`).
                     judged = drop_stud_questions(judged, tire_progress, _current_call_id())
+                    # «найдешевша / новинка / переможець тестів» the shown tyres
+                    # do not back is replaced (`tire_claim_guard`).
+                    judged = guard_tire_claims(
+                        judged, self._tire_claims, user_text, _current_call_id()
+                    )
                 buffered = drop_repeated_sentences(
                     guard_network_claims(
                         judged,
@@ -2401,6 +2412,8 @@ class StreamingAgentLoop:
                     )
                 elif not (isinstance(raw, dict) and raw.get("error")):
                     done_this_turn.add(refusal_key)
+                if self._sales_enabled:
+                    self._tire_claims.note(tc.name, raw)
                 if self._sales_enabled and tc.name == "search_tires":
                     self._tyre_compare.note_search(raw)
                     phrase = tire_caveat_phrase(raw, args)

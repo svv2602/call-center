@@ -178,6 +178,13 @@ network_claim_blocked_total = Counter(
     ["rule"],  # free_delivery / extended_warranty / service_offer / order_confirmed
 )
 
+tire_claim_refused_total = Counter(
+    "callcenter_tire_claim_refused_total",
+    "Sentences replaced before TTS because they claimed about the offered tyres what "
+    "the call's search_tires result does not back (sales scope, `tire_claim_guard`)",
+    ["rule"],  # cheapest / novelty / unbacked_rating
+)
+
 krok8_confabulation_total = Counter(
     "callcenter_krok8_confabulation_total",
     "Bot produced «Перевіримо: …, Підтверджуєте?» while a checklist "

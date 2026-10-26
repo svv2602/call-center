@@ -37,6 +37,7 @@ from src.agent.prompts import (
     build_system_prompt_with_context,
     detect_scenario_from_text,
 )
+from src.agent.tire_claim_guard import TireClaimState, guard_tire_claims_text
 from src.agent.tire_search_gate import (
     SEARCH_TOOL,
     ForcedTireSearch,
@@ -280,6 +281,11 @@ class LLMAgent:
         self._tyre_compare = TyreCompare(
             sales_enabled=bool(network_policy is not None and network_policy.sales_enabled)
         )
+        # The same result whole, and this turn's knowledge-base use — what the
+        # model's «найдешевша / новинка / №1» is judged against (sales only).
+        self._tire_claims = TireClaimState(
+            sales_enabled=bool(network_policy is not None and network_policy.sales_enabled)
+        )
         # Accumulated usage from last process_message call (all LLM rounds)
         self.last_input_tokens: int = 0
         self.last_output_tokens: int = 0
@@ -451,6 +457,7 @@ class LLMAgent:
         )
         # Fit verdicts of this turn's `search_disks` results (sales scope).
         disk_fit_state = DiskFitClaimState()
+        self._tire_claims.begin_turn()
         tool_call_count = 0
         # Text-path twin of the spoken network facts (`network_facts`): the
         # code's phrases open the reply, and the model is told they were said.
@@ -538,6 +545,7 @@ class LLMAgent:
             )
             self._call_tools.add(SEARCH_TOOL)
             self._tyre_compare.note_search(forced_raw)
+            self._tire_claims.note(SEARCH_TOOL, forced_raw)
             forced_phrase = tire_caveat_phrase(forced_raw, forced_args)
             if forced_phrase:
                 caveats.append(forced_phrase)
@@ -736,6 +744,8 @@ class LLMAgent:
                     raw = {"error": "Сервіс тимчасово не відповідає, спробуйте ще раз"}
                 if not (isinstance(raw, dict) and raw.get("error")):
                     done_this_turn.add(repeat_key)
+                if sales_enabled:
+                    self._tire_claims.note(tu["name"], raw)
                 if sales_enabled and tu["name"] == "search_tires":
                     self._tyre_compare.note_search(raw)
                     phrase = tire_caveat_phrase(raw, args)
@@ -797,6 +807,11 @@ class LLMAgent:
             # «шиповані чи липучка?» goes (`vehicle_lookup_gate`).
             response_text = drop_stud_questions_text(
                 response_text, self._tire_query, llm_call_id_var.get(None) or "unknown"
+            )
+            # «найдешевша / новинка / переможець тестів» the shown tyres do not
+            # back is replaced (`tire_claim_guard`).
+            response_text = guard_tire_claims_text(
+                response_text, self._tire_claims, user_text, llm_call_id_var.get(None) or "unknown"
             )
 
         # The network facts and a relaxed tyre search's caveat come first, said
