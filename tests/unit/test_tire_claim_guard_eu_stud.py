@@ -343,6 +343,8 @@ class TestStud:
             # «під шип» about a tyre that is not studdable.
             "Bridgestone Blizzak 6 іде під шип.",
             "Nokian Hakkapeliitta 10 — під шип.",
+            # Two tyres, one group (wave 9-W; was silent): Blizzak is friction.
+            "Bridgestone Blizzak 6 і Nokian Hakkapeliitta 10 мають шипи.",
         ],
     )
     def test_wrong_stud_claim_is_replaced(self, sentence: str) -> None:
@@ -383,7 +385,6 @@ class TestStud:
             "Bridgestone Blizzak 6 не має шипів.",
             # No tyre, two tyres, another tyre.
             "Шиповані шини краще тримають на льоду.",
-            "Bridgestone Blizzak 6 і Nokian Hakkapeliitta 10 мають шипи.",
             "Bridgestone Blizzak 6 — хороша альтернатива шипованим.",
             # «шини», «шиномонтаж» — not «шип».
             "Bridgestone Blizzak 6 — хороші шини для зими.",
@@ -397,6 +398,125 @@ class TestStud:
         sentence = "Michelin Primacy 4 — шипована шина."
         assert _fired(sentence) == set()
         assert _judge(sentence) == sentence
+
+
+# ── stud: a list of tyres (wave 9-W) ─────────────────────────────────────
+
+GROUP_ITEMS = [
+    _item("g1", "Bridgestone", "Blizzak 6", 5200, studded="friction"),
+    _item("g2", "Nokian", "Nordman 8", 4300, studded="studded"),
+    _item("g3", "Firestone", "WinterHawk 4", 4100, studded="studdable"),
+    _item("g4", "Firestone", "Ice Cruiser 7", 4500, studded="studded"),
+    _item("g5", "Michelin", "Primacy 4", 4800, season="summer"),
+]
+
+#: The goldset 3 reply (PK, 2026-10-26): WinterHawk 4 is studdable.
+GROUP_LIE = (
+    "Шиповані — Nokian Nordman 8 і Firestone WinterHawk 4 (шиповані можна додатково "
+    "ставити), а Bridgestone Blizzak 6 — без шипів."
+)
+
+
+def _group_state() -> TireClaimState:
+    state = TireClaimState(sales_enabled=True)
+    state.note("search_tires", {"total": len(GROUP_ITEMS), "items": copy.deepcopy(GROUP_ITEMS)})
+    return state
+
+
+class TestStudGroups:
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            GROUP_LIE,
+            # The aside in brackets is dropped: alone it would make WinterHawk right.
+            "Шиповані — Firestone WinterHawk 4 і Nokian Nordman 8 (під шип можна ставити).",
+            "Nordman 8 і Blizzak 6 шиповані.",
+            "Nokian Nordman 8 та Bridgestone Blizzak 6 мають шипи.",
+            "Без шипів — Blizzak 6, а WinterHawk 4 шипована.",
+            # The wrong tyre is last of the list, not first.
+            "Шиповані — Nordman 8, Ice Cruiser 7 та Blizzak 6.",
+            "Шиповані — Nordman 8 і Blizzak 6, а Primacy 4 — літня.",
+            # The first group is right, the second (after «але» / «тоді як») is not.
+            "Nordman 8 і Ice Cruiser 7 шиповані, але Nordman 8 — липучка.",
+            "Blizzak 6 — липучка, тоді як WinterHawk 4 і Ice Cruiser 7 — під шип.",
+            "Під шип — Nordman 8 і WinterHawk 4.",
+            # «, а також» goes on with the list: Blizzak 6 is in it.
+            "Шиповані — Nordman 8, а також Blizzak 6.",
+            "Шиповані — Bridgestone Blizzak 6 і Michelin Primacy 4.",
+        ],
+    )
+    def test_wrong_kind_of_any_tyre_in_a_group_is_replaced(self, sentence: str) -> None:
+        state = _group_state()
+        assert _fired(sentence, state) == {RULE_STUD}
+        assert _judge(sentence, _group_state()) == REPLACEMENTS[RULE_STUD]
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            # The same reply, WinterHawk 4 put where it belongs.
+            "Шиповані — Nokian Nordman 8, а Firestone WinterHawk 4 — під шип (шиповані "
+            "можна додатково ставити), а Bridgestone Blizzak 6 — без шипів.",
+            "Шиповані — Nokian Nordman 8 і Firestone Ice Cruiser 7.",
+            "Без шипів — Blizzak 6, а Nordman 8 шипована.",
+            "Nordman 8 і Ice Cruiser 7 шиповані, тоді як Blizzak 6 — липучка.",
+            "Без шипів продаються Blizzak 6 і WinterHawk 4.",
+            "Під шип — WinterHawk 4, а Nordman 8 і Ice Cruiser 7 вже з шипами.",
+            # A tyre without ``studded`` (summer) in the group is not judged.
+            "Шиповані — Nokian Nordman 8 і Michelin Primacy 4.",
+            # «, а також» goes on with the list.
+            "Шиповані — Nordman 8, а також Ice Cruiser 7.",
+            # A tyre named only in the brackets is not judged.
+            "Шиповані — Nordman 8 і Ice Cruiser 7 (Blizzak 6 — ні).",
+        ],
+    )
+    def test_right_kind_of_every_tyre_passes(self, sentence: str) -> None:
+        assert _fired(sentence, _group_state()) == set()
+        assert _judge(sentence, _group_state()) == sentence
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            # Tyres split by other words — which ones are «шипована»?
+            "Nordman 8 шипована, також є Blizzak 6 і WinterHawk 4.",
+            "Nordman 8 і Ice Cruiser 7 мають шипи, на відміну від Blizzak 6.",
+            # A kind with no tyres of its own.
+            "Nordman 8 і Blizzak 6, а шиповані — ні.",
+            # ... beside a group that would be judged on its own.
+            "Без шипів — Blizzak 6 і Nordman 8, а шиповані — ні.",
+            # Two kinds in one group.
+            "Nordman 8 і Blizzak 6 шиповані чи липучки.",
+            "Nordman 8 і Blizzak 6 — шиповані і липучки.",
+            # A comparison.
+            "Шиповані шини краще за Nordman 8 і Blizzak 6.",
+            # A question, a negation not part of a form, a condition.
+            "Nordman 8 і Blizzak 6 шиповані?",
+            "Nordman 8 і Blizzak 6 не мають шипів.",
+            "Якщо треба шиповані — Nordman 8 і Blizzak 6.",
+            # Brands alone: which models are meant is a guess.
+            "Шиповані — Nokian і Bridgestone.",
+            # «обидві» — `_OTHER_REFERENT`, as for one tyre.
+            "Nordman 8 і Blizzak 6 — обидві шиповані.",
+        ],
+    )
+    def test_sentence_that_does_not_cut_cleanly_is_left_alone(self, sentence: str) -> None:
+        assert _fired(sentence, _group_state()) == set()
+        assert _judge(sentence, _group_state()) == sentence
+
+    def test_one_named_tyre_keeps_the_old_path(self) -> None:
+        state = _group_state()
+        assert _fired("Bridgestone Blizzak 6 — шипована модель.", state) == {RULE_STUD}
+        assert _fired("Nokian Nordman 8 — шипована модель.", _group_state()) == set()
+        # One tyre is never handed to the group branch (`_rule_stud_groups` needs two).
+        assert _fired("Firestone WinterHawk 4 — під шип.", _group_state()) == set()
+
+    def test_rest_of_the_reply_is_kept(self) -> None:
+        text = f"{GROUP_LIE} Ціна від 4100 гривень."
+        assert _judge(text, _group_state()) == f"{REPLACEMENTS[RULE_STUD]} Ціна від 4100 гривень."
+
+    def test_sales_off_judges_no_group(self) -> None:
+        state = TireClaimState(sales_enabled=False)
+        state.note("search_tires", {"items": copy.deepcopy(GROUP_ITEMS)})
+        assert _fired(GROUP_LIE, state) == set()
 
 
 # ── the switch, sales scope, the stream ──────────────────────────────────

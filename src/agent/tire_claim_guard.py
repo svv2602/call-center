@@ -33,6 +33,12 @@ Rules (`RULES`, first match names the refusal):
   ``studded`` (summer, unknown) is never judged. «Під шип» is cut out before
   «шип» is looked for; two kinds in one sentence («шиповані чи липучка») —
   silent. Stud *questions* out of season are `drop_stud_questions`' job.
+  Two or more tyres named (wave 9-W): the sentence is cut into groups at a
+  contrast («, а / , але / тоді як»), an aside in brackets is dropped, and
+  each group — one kind and one unbroken list of tyres («Шиповані — X і Y»,
+  «X та Y шиповані») — is judged tyre by tyre. Silent when it does not cut
+  cleanly: a kind with no tyres, tyres split by other words, two kinds, a
+  comparison. A tyre named only inside the brackets is not judged.
 
 ``eu_class`` and ``stud`` are silent on any ambiguity, as in tshina: no tyre
 or two named, another tyre or a comparison in the sentence («ніж у …», «у
@@ -592,7 +598,9 @@ def rule_stud(sentence: str, ctx: ClaimContext) -> Refusal | None:
     if sentence.rstrip().endswith("?"):
         return None
     subject, masked = _subject_masked(sentence, ctx)
-    if subject is None or _OTHER_REFERENT.search(masked):
+    if subject is None:
+        return _rule_stud_groups(sentence, ctx)
+    if _OTHER_REFERENT.search(masked):
         return None
     actual = subject.get("studded")
     if actual not in (_STUDS_STUDDED, _STUDS_STUDDABLE, _STUDS_FRICTION):
@@ -600,9 +608,109 @@ def rule_stud(sentence: str, ctx: ClaimContext) -> Refusal | None:
     claimed = _stud_claim(masked)
     if claimed is None:
         return None
+    return Refusal(RULE_STUD, REPLACEMENTS[RULE_STUD]) if _stud_wrong(actual, claimed) else None
+
+
+def _stud_wrong(actual: str, claimed: str) -> bool:
+    """The claimed kind is false of a tyre whose ``studded`` is ``actual``."""
     # «Без шипів» is true of a studdable tyre too: it is sold without studs.
-    wrong = actual == _STUDS_STUDDED if claimed == _STUDS_FRICTION else claimed != actual
-    return Refusal(RULE_STUD, REPLACEMENTS[RULE_STUD]) if wrong else None
+    return actual == _STUDS_STUDDED if claimed == _STUDS_FRICTION else claimed != actual
+
+
+#: Where a contrast starts a new group: «, а …», «, але …», «тоді як …», «;».
+#: «, а також / а ще» goes on with the same list.
+_STUD_CONTRAST = re.compile(
+    r"\s*[,;]\s*(?:а(?!\s+(?:також|ще|еще|ещё|также)(?!\w))|але|но|проте|однак)(?!\w)"
+    r"|\s*,?\s*(?:тоді\s+як|тогда\s+как)(?!\w)|\s*;\s*",
+    re.IGNORECASE,
+)
+#: An aside in brackets: «(шиповані можна додатково ставити)» is not a claim.
+_STUD_ASIDE = re.compile(r"\([^()]*\)")
+#: A tyre's words, blanked to one mark; a run of marks is one name.
+_TYRE_MARK = "§"
+_MARK_RUN = re.compile(rf"{_TYRE_MARK}(?:[\s\-‐–]*{_TYRE_MARK})+")
+#: One list of names: «§ і §», «§, § та §», «§, і §», «§, а також §».
+_MARK_LIST = re.compile(
+    rf"{_TYRE_MARK}(?:\s*(?:,\s*)?(?:(?:і|й|та|и|а\s+(?:також|ще|также))\s+)?{_TYRE_MARK})+"
+)
+#: A comparison inside a group: the kind may be about something else.
+_GROUP_COMPARE = re.compile(
+    r"(?<!\w)(?:кращ|гірш|лучш|хуж|більш|менш|больш|меньш|порівн|сравн|відмін|отлич|аналог)",
+    re.IGNORECASE,
+)
+
+
+def _mark_tyres(text: str, items: list[dict[str, Any]]) -> str:
+    """``text`` with every brand and model word of ``items`` blanked to a mark."""
+    words: set[str] = set()
+    for item in items:
+        words.update(
+            w
+            for w in re.split(r"[\s\-‐–]+", f"{item.get('brand') or ''} {item.get('model') or ''}")
+            if w
+        )
+    for word in sorted(words, key=len, reverse=True):
+        text = re.sub(
+            rf"(?<![\w]){re.escape(word)}(?![\w])", f" {_TYRE_MARK} ", text, flags=re.IGNORECASE
+        )
+    return _MARK_RUN.sub(_TYRE_MARK, text)
+
+
+def _model_said(item: dict[str, Any], text: str) -> bool:
+    """The model's first word is in ``text`` (a brand alone names no tyre here)."""
+    words = [w for w in re.split(r"[\s\-‐–]+", str(item.get("model") or "")) if w]
+    return bool(words) and bool(
+        re.search(rf"(?<![\w]){re.escape(words[0])}(?![\w])", text, re.IGNORECASE)
+    )
+
+
+def _stud_groups(sentence: str, ctx: ClaimContext) -> list[tuple[str, list[dict[str, Any]]]] | None:
+    """(kind, tyres) of each group, or ``None`` when the sentence does not cut cleanly."""
+    # A tyre named only in the aside is not judged: the claim is the outer one.
+    text = _STUD_ASIDE.sub(" ", sentence)
+    groups: list[tuple[str, list[dict[str, Any]]]] = []
+    for clause in _STUD_CONTRAST.split(text):
+        named = named_items(clause, ctx.items)
+        if not all(_model_said(item, clause) for item in named):
+            return None
+        marked = _mark_tyres(clause, named)
+        rest, lists = _MARK_LIST.subn(" ", marked)
+        # One list of tyres («§ і §») or one tyre alone, nothing else marked.
+        clean = (lists == 1 and _TYRE_MARK not in rest) or marked.count(_TYRE_MARK) == 1
+        rest = rest.replace(_TYRE_MARK, " ")
+        if _OTHER_REFERENT.search(rest) or _GROUP_COMPARE.search(rest):
+            return None
+        claimed = _stud_claim(rest)
+        has_claim = claimed is not None or bool(re.search(r"шип|липучк|фрикц", rest, re.I))
+        if not named:
+            if has_claim:
+                # A kind with no tyres of its own («…, а шиповані — ні»).
+                return None
+            continue
+        if not has_claim:
+            # Tyres with nothing said of their studs here.
+            continue
+        if claimed is None or not clean:
+            return None
+        groups.append((claimed, named))
+    return groups
+
+
+def _rule_stud_groups(sentence: str, ctx: ClaimContext) -> Refusal | None:
+    """Two or more tyres named: each group's kind against each of its tyres."""
+    if len(named_items(sentence, ctx.items)) < 2:
+        return None
+    groups = _stud_groups(sentence, ctx)
+    if not groups:
+        return None
+    for claimed, tyres in groups:
+        for tyre in tyres:
+            actual = tyre.get("studded")
+            if actual not in (_STUDS_STUDDED, _STUDS_STUDDABLE, _STUDS_FRICTION):
+                continue
+            if _stud_wrong(actual, claimed):
+                return Refusal(RULE_STUD, REPLACEMENTS[RULE_STUD])
+    return None
 
 
 #: The label axes of a verdict, as the code's phrase and the model word them.
