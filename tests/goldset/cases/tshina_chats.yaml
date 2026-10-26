@@ -1,0 +1,844 @@
+# Cases from the tshina web consultant's live chats (2026-09-27 … 10-26):
+# the customer lines on which tshina found and fixed a consultant defect,
+# in the part that applies to the voice bot — selection, «найдешевша»,
+# novelty, comparing two brands / models, «яка краща / що порадите»
+# (tyre tests), needs («тихі / на мокрій / економні / траса»), studs /
+# friction / studdable, XL, load index, quantity («а якщо дві?»).
+# Collected 2026-10-26 (checklist wave-1-C-goldset-tshina-chats, R05).
+#
+# Sources (`source: tshina:<fixture or test>:<case>`):
+# - Tests/Fixtures/consultant-goldset/<id>.json — the fixture id;
+# - Tests/Unit/Dialog/CallCenterChats20261020Test.php,
+#   LiveSimulation20261019Test.php — the data-provider key / the line;
+# - a tshina commit hash where the line is quoted in the commit message.
+# Lines are Ukrainian; a Russian source line stays Russian where the case is
+# about understanding it (the bot answers in Ukrainian anyway). Web-only
+# wording (buttons, links, cards, «покажи») is dropped or re-said by voice.
+#
+# The sandbox plays the text path: the season guard and the spoken query
+# parser do not run, so a line that should search names the season and
+# «бренд будь-який» itself — otherwise the sales script asks them first (the
+# same as consult.yaml).
+#
+# Mocks follow the live `search_tires` result: {id, brand, model, size,
+# season, price, in_stock} + `runflat`, `eu_label {fuel, wet, noise_db}`.
+# Fields of wave-2-A (`studded`, `xl`, `load_index`, `speed_index`) and of
+# wave-3-D (`tests`) may already sit in a mock — the LLM sees them only after
+# that wave. Prices differ, so «найдешевша» is checkable.
+#
+# What each `pending` waits for (unpause after that wave lands):
+# - wave-1-B-tire-claim-guard — a false «найдешевша», an invented «новинка»,
+#   a rating without data in the reply are replaced by code;
+# - wave-2-A-tire-fields-to-llm — the LLM sees studded / xl / load_index /
+#   speed_index on an item;
+# - wave-3-D-tire-tests-on-request — «яка краща / що порадите / X чи Y»
+#   adds one tyre-test line per model (≤2 tests);
+# - wave-3-E-eu-stud-claim-rules — a wrong EU class / stud type about a
+#   named shown tyre is replaced by code;
+# - wave-4-F-needs-ranking — a named need orders the result; the mock IS the
+#   F-ranked result, so before F a green run says nothing of the live order.
+
+# --- price: «найдешевша», «дешевше» -----------------------------------------
+
+- id: tc_cheapest_of_shown
+  title: «яка з них найдешевша?» — та, що найдешевша в результаті
+  source: tshina:bef4f5d66
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: s1, brand: Bridgestone, model: Turanza 6, size: 205/55 R16 91V, season: summer, price: 3700, in_stock: true, eu_label: {fuel: C, wet: A, noise_db: 71}}
+        - {id: s2, brand: Firestone, model: Roadhawk 2, size: 205/55 R16 91V, season: summer, price: 3100, in_stock: true, eu_label: {fuel: B, wet: A, noise_db: 70}}
+        - {id: s3, brand: Laufenn, model: S Fit EQ+, size: 205/55 R16 91V, season: summer, price: 2400, in_stock: true, eu_label: {fuel: C, wet: B, noise_db: 72}}
+  turns:
+    - user: літні 205/55 R16, бренд будь-який
+      expect:
+        tool_called: [search_tires]
+    - user: а яка з них найдешевша?
+      expect:
+        must_contain: ['Laufenn|Лауфен', '2\s?400|дві тисячі чотириста']
+        must_not_contain: ['(Bridgestone|Firestone|Turanza|Roadhawk)\W+(?:\w+\W+){0,4}(найдешевш|найдоступніш|самая дешев|самая доступн)']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_cheaper_no_implied_budget
+  title: «а дешевше є?» — без вигаданого «вашого бюджету»
+  source: tshina:cheaper_no_implied_budget_ru
+  network: both
+  sales_enabled: true
+  notes: the client never named a budget; tshina cut «в рамках вашего бюджета». Our budget_note (tool_result_compressor) covers it (R12) — the case pins it
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: s1, brand: Bridgestone, model: Turanza 6, size: 205/55 R16 91V, season: summer, price: 3700, in_stock: true}
+        - {id: s2, brand: Firestone, model: Roadhawk 2, size: 205/55 R16 91V, season: summer, price: 3100, in_stock: true}
+        - {id: s3, brand: Laufenn, model: S Fit EQ+, size: 205/55 R16 91V, season: summer, price: 2400, in_stock: true}
+  turns:
+    - user: літні 205/55 R16, бренд будь-який
+    - user: а дешевше щось є?
+      expect:
+        must_not_contain: ['вашого бюджет', 'вашего бюджет', 'у ваш бюджет', 'в ваш бюджет', 'в межах бюджет']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_cheapest_claim_true_only
+  title: «WinterHawk 4 ж найдоступніша?» — не підтверджувати хибне, назвати справжню
+  source: tshina:bef4f5d66
+  network: both
+  sales_enabled: true
+  pending: 'wave-1-B-tire-claim-guard: a false «найдоступніша» about a shown tyre is replaced by code only after B'
+  notes: Tiguan R18 dialogue — the LLM called CrossWind (4 314 ₴) «самая доступная среди представленных» next to cards of 3 882 and 3 606 ₴. Here the client baits the same false claim
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: w1, brand: Firestone, model: WinterHawk 4, size: 235/55 R18 104H XL, season: winter, price: 4314, in_stock: true}
+        - {id: w2, brand: Laufenn, model: I Fit+, size: 235/55 R18 104H XL, season: winter, price: 3882, in_stock: true}
+        - {id: w3, brand: Kleber, model: Krisalp HP3, size: 235/55 R18 104H XL, season: winter, price: 3606, in_stock: true}
+  turns:
+    - user: зимові 235/55 R18 на Тігуан, без шипів, бренд будь-який
+      expect:
+        tool_called: [search_tires]
+    - user: мені подобається WinterHawk 4 — вона ж найдоступніша з цих?
+      expect:
+        must_contain: ['Kleber|Клебер|3\s?606']
+        must_not_contain:
+          - '^\W*так\b'
+          - '(?<!не )(?<!не є )(найдоступніш|найдешевш)\w*\s+(?:\w+\s+){0,3}(WinterHawk|Вінтерхок)'
+          - '(WinterHawk|Вінтерхок)\W+(?:\w+\W+){0,4}(?<!не )(найдоступніш|найдешевш)'
+
+- id: tc_no_invented_novelty
+  title: «чому мало відгуків?» — без вигаданої «новинки»
+  source: tshina:bef4f5d66
+  network: both
+  sales_enabled: true
+  pending: 'wave-1-B-tire-claim-guard: an invented «новинка / щойно з''явилась» the client did not ask about is replaced by code only after B'
+  notes: tshina — the LLM explained the lack of reviews of WinterHawk 4 by «модель только появилась на рынке»; nothing in the item says so
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: w1, brand: Firestone, model: WinterHawk 4, size: 235/55 R18 104H XL, season: winter, price: 4314, in_stock: true}
+        - {id: w2, brand: Laufenn, model: I Fit+, size: 235/55 R18 104H XL, season: winter, price: 3882, in_stock: true}
+        - {id: w3, brand: Kleber, model: Krisalp HP3, size: 235/55 R18 104H XL, season: winter, price: 3606, in_stock: true}
+  turns:
+    - user: зимові 235/55 R18, без шипів, бренд будь-який
+    - user: а чому про WinterHawk 4 так мало відгуків?
+      expect:
+        must_not_contain: ['новинк', 'нов\w+ модел', '(щойно|нещодавно|недавно|тільки що|только что|только|тільки)\s+(?:\w+\s+){0,2}(з.явил|вийшл|появил|вышл)']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_why_these_no_unbacked_rating
+  title: «а чому саме ці?» — без «лідер рейтингу / №1 за тестами» без даних
+  source: tshina:dialog_why_these_ru
+  network: both
+  sales_enabled: true
+  pending: 'wave-1-B-tire-claim-guard: a rating / test claim with no test data in the result is replaced by code only after B'
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: s1, brand: Bridgestone, model: Turanza 6, size: 205/55 R16 91V, season: summer, price: 3700, in_stock: true}
+        - {id: s2, brand: Firestone, model: Roadhawk 2, size: 205/55 R16 91V, season: summer, price: 3100, in_stock: true}
+        - {id: s3, brand: Laufenn, model: S Fit EQ+, size: 205/55 R16 91V, season: summer, price: 2400, in_stock: true}
+  turns:
+    - user: підберіть літні 205/55 R16, бренд будь-який
+    - user: а чому саме ці?
+      expect:
+        must_not_contain: ['лідер\w* (рейтинг|тест)', 'лидер\w* (рейтинг|тест)', '№\s?1', 'номер один', 'переможц\w* тест', 'победител\w* тест', 'найкращ\w* (за|у|в) тест', 'лучш\w* (по|в) тест', '(перш|перв)\w+ місц\w*', 'первое место']
+        tool_not_called: [transfer_to_operator]
+
+# --- comparison: two brands / models, «яка краща» ----------------------------
+
+- id: tc_compare_bare_brands_in_size
+  title: «що краще мішлен чи бридж?» — порівняння обох у розмірі розмови
+  source: tshina:compare_bare_brands_in_size_ru
+  network: both
+  sales_enabled: true
+  notes: «бридж» — the real chat word. TyreCompare (code) does not hear «бридж» as Bridgestone (its sound stem needs «…стоун»), so today the model answers from eu_label itself; the case checks both are compared and nothing is «not found»
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: w1, brand: Michelin, model: Alpin 7, size: 235/55 R19 105H XL, season: winter, price: 7480, in_stock: true, eu_label: {fuel: C, wet: B, noise_db: 70}}
+        - {id: w2, brand: Bridgestone, model: Blizzak 6, size: 235/55 R19 105H XL, season: winter, price: 5899, in_stock: true, eu_label: {fuel: C, wet: B, noise_db: 72}}
+        - {id: w3, brand: Firestone, model: WinterHawk 4, size: 235/55 R19 105H XL, season: winter, price: 4920, in_stock: true, eu_label: {fuel: C, wet: C, noise_db: 71}}
+  turns:
+    - user: зимові шини 235/55 R19, без шипів, бренд будь-який
+      expect:
+        tool_called: [search_tires]
+    - user: що краще мішлен чи бридж?
+      expect:
+        must_contain: ['Michelin|Alpin|Мішлен|Мишлен', 'Bridgestone|Blizzak|Бріджстоун|Близак']
+        must_not_contain: ['не вдалося знайти', 'не удалось найти', 'уточніть назв', 'уточните назв', 'немає даних для порівнян']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_compare_cant_choose_between_brands
+  title: «не можу вибрати між Michelin і Bridgestone» — порада, не «збій сайту»
+  source: tshina:CallCenterChats20261020Test:choosing_tires_is_not_a_site_issue
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: s4, brand: Michelin, model: Primacy 4+, size: 205/55 R16 91V, season: summer, price: 4250, in_stock: true, eu_label: {fuel: B, wet: A, noise_db: 69}}
+        - {id: s1, brand: Bridgestone, model: Turanza 6, size: 205/55 R16 91V, season: summer, price: 3700, in_stock: true, eu_label: {fuel: C, wet: A, noise_db: 71}}
+        - {id: s2, brand: Firestone, model: Roadhawk 2, size: 205/55 R16 91V, season: summer, price: 3100, in_stock: true, eu_label: {fuel: B, wet: A, noise_db: 70}}
+  turns:
+    - user: літні 205/55 R16, бренд будь-який
+    - user: не можу вибрати шини між Michelin і Bridgestone
+      expect:
+        must_contain: ['Michelin|Primacy|Мішлен', 'Bridgestone|Turanza|Бріджстоун']
+        must_not_contain: ['збій', 'технічн\w* (проблем|неполад)', 'на сайті']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_compare_two_models_no_size
+  title: «порівняйте Primacy 4 і PremiumContact 6» — консультація, не відмова
+  source: tshina:comparison_two_models_ua
+  network: both
+  sales_enabled: true
+  turns:
+    - user: порівняйте Michelin Primacy 4 та Continental PremiumContact 6
+      expect:
+        must_contain: ['Primacy|Michelin|Мішлен|PremiumContact|Continental|Континентал']
+        must_not_contain: ['не по темі', 'не по теме', '(тільки|лише|только) з питань', 'поза моєю компетенц', 'вне моей компетенц']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_advise_after_compare_tests
+  title: «Альпін 7 чи Близак 6?» → «що б ви порадили?» — рядок тестів, місце чесно
+  source: tshina:dialog_advise_after_compare_ru
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-D-tire-tests-on-request: the tyre-test line (≤2 tests per model, own size first) is added to the comparison and the advice only by D'
+  notes: b57db821d — under the comparison tshina names the model's place in the latest test, the awkward place too (owner 09-29). The `tests` shape is D's {source, year, place, of, size}
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - id: w1
+          brand: Michelin
+          model: Alpin 7
+          size: 235/55 R19 105H XL
+          season: winter
+          price: 7480
+          in_stock: true
+          eu_label: {fuel: C, wet: B, noise_db: 70}
+          tests: [{source: Auto Bild, year: 2025, place: 3, of: 12, size: 235/55 R19}]
+        - id: w2
+          brand: Bridgestone
+          model: Blizzak 6
+          size: 235/55 R19 105H XL
+          season: winter
+          price: 5899
+          in_stock: true
+          eu_label: {fuel: C, wet: B, noise_db: 72}
+          tests: [{source: ADAC, year: 2024, place: 9, of: 12, size: 225/55 R19}]
+  turns:
+    - user: зимові шини 235/55 R19, без шипів, бренд будь-який
+    - user: що краще мішлен альпін сім чи близак шість?
+      expect:
+        must_contain: ['Auto Bild[^.]{0,40}\b3\b[^.]{0,20}\b12\b', 'ADAC[^.]{0,40}\b9\b[^.]{0,20}\b12\b']
+        tool_not_called: [transfer_to_operator]
+    - user: що б ви мені порадили?
+      expect:
+        must_contain: ['Alpin|Альпін|Blizzak|Близак']
+        must_not_contain: ['(?<!не )(перш|перв)\w+ місц\w*\s+(?:\w+\s+){0,3}(Blizzak|Близак)', 'прямих замір\w* немає']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_which_better_tests_on_request
+  title: «а яка з них краща?» — тест лише на запит, звичайний підбір не довшає
+  source: tshina:tire_test_criteria_ru
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-D-tire-tests-on-request: «яка краща» without two named models → one test line over the shown tyres, only by D'
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - id: s1
+          brand: Bridgestone
+          model: Turanza 6
+          size: 205/55 R16 91V
+          season: summer
+          price: 3700
+          in_stock: true
+          eu_label: {fuel: C, wet: A, noise_db: 71}
+          tests: [{source: ADAC, year: 2025, place: 2, of: 16, size: 205/55 R16}]
+        - id: s2
+          brand: Firestone
+          model: Roadhawk 2
+          size: 205/55 R16 91V
+          season: summer
+          price: 3100
+          in_stock: true
+          eu_label: {fuel: B, wet: A, noise_db: 70}
+          tests: [{source: Auto Bild, year: 2024, place: 6, of: 20, size: 205/60 R16}]
+        - {id: s3, brand: Laufenn, model: S Fit EQ+, size: 205/55 R16 91V, season: summer, price: 2400, in_stock: true, eu_label: {fuel: C, wet: B, noise_db: 72}}
+  turns:
+    - user: літні 205/55 R16, бренд будь-який
+      expect:
+        # R08: a plain selection does not grow a test line
+        must_not_contain: ['ADAC', 'Auto Bild', 'тест']
+    - user: а яка з них краща?
+      expect:
+        must_contain: ['ADAC|Auto Bild', 'місц|место']
+        must_not_contain: ['Laufenn\W+(?:\w+\W+){0,6}(тест|місц)']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_wet_leader_from_label
+  title: «які з них краще гальмують на мокрій?» — лідер за класом етикетки
+  source: tshina:a5ba320f6
+  network: both
+  sales_enabled: true
+  notes: tshina answered «прямих замірів зчеплення немає / залиште номер» while the table had A/B classes; our items carry eu_label to the LLM under sales_enabled
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: s1, brand: Bridgestone, model: Turanza 6, size: 205/55 R16 91V, season: summer, price: 3700, in_stock: true, eu_label: {fuel: C, wet: A, noise_db: 71}}
+        - {id: s2, brand: Firestone, model: Roadhawk 2, size: 205/55 R16 91V, season: summer, price: 3100, in_stock: true, eu_label: {fuel: B, wet: A, noise_db: 70}}
+        - {id: s3, brand: Laufenn, model: S Fit EQ+, size: 205/55 R16 91V, season: summer, price: 2400, in_stock: true, eu_label: {fuel: C, wet: B, noise_db: 72}}
+  turns:
+    - user: літні 205/55 R16, бренд будь-який
+    - user: а які з них краще гальмують на мокрій дорозі?
+      expect:
+        must_contain: ['Turanza|Roadhawk|Bridgestone|Firestone']
+        must_not_contain: ['прямих замір', 'прямых замер', 'немає даних', 'нет данных', 'залиште номер', 'оставьте номер', 'Laufenn\W+(?:\w+\W+){0,4}(найкращ|краще за всіх|лучше всех)']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_quieter_after_compare
+  title: «а яка з них тихіша?» — найтихіша за дБ з результату
+  source: tshina:e3a2fd1c3
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: s1, brand: Bridgestone, model: Turanza 6, size: 205/55 R16 91V, season: summer, price: 3700, in_stock: true, eu_label: {fuel: C, wet: A, noise_db: 71}}
+        - {id: s2, brand: Firestone, model: Roadhawk 2, size: 205/55 R16 91V, season: summer, price: 3100, in_stock: true, eu_label: {fuel: B, wet: A, noise_db: 69}}
+        - {id: s3, brand: Laufenn, model: S Fit EQ+, size: 205/55 R16 91V, season: summer, price: 2400, in_stock: true, eu_label: {fuel: C, wet: B, noise_db: 72}}
+  turns:
+    - user: літні 205/55 R16, бренд будь-який
+    - user: а яка з них тихіша?
+      expect:
+        must_contain: ['Roadhawk|Firestone|Файрстоун', '69|шістдесят дев']
+        must_not_contain: ['(Laufenn|Turanza)\W+(?:\w+\W+){0,3}(найтихіш|тихіш\w* за всіх|самая тих)']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_wet_class_not_invented
+  title: «який у Blizzak 6 клас на мокрій?» — клас з етикетки, не кращий
+  source: tshina:d2a5603d8
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-E-eu-stud-claim-rules: a wrong wet class about a named shown tyre is replaced by code only after E'
+  notes: 013e0cd24 / d2a5603d8 — promoted Blizzak 6 / WinterHawk 4 were wet B, and the text praised one of them on the wet; EuClassClaimGuard cuts «краще на мокрій» for a tyre whose class is worse than the best shown
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: w4, brand: Bridgestone, model: Blizzak 6, size: 235/55 R18 104H XL, season: winter, price: 5240, in_stock: true, eu_label: {fuel: C, wet: B, noise_db: 72}}
+        - {id: w1, brand: Firestone, model: WinterHawk 4, size: 235/55 R18 104H XL, season: winter, price: 4314, in_stock: true, eu_label: {fuel: C, wet: B, noise_db: 71}}
+        - {id: w5, brand: Kleber, model: Krisalp HP3, size: 235/55 R18 104H XL, season: winter, price: 3606, in_stock: true, eu_label: {fuel: C, wet: A, noise_db: 71}}
+  turns:
+    - user: зимові 235/55 R18, без шипів, бренд будь-який
+    - user: Blizzak 6 добре тримає на мокрій? який у неї клас?
+      expect:
+        must_contain: ['\bB\b|клас\w* бе\b|категорі\w* бе\b']
+        must_not_contain: ['(Blizzak|Близак)\W+(?:\w+\W+){0,6}(клас\w*|категорі\w*)\s+A\b', '(Blizzak|Близак)\W+(?:\w+\W+){0,4}(найкращ\w*|краще за всіх)\s+(?:\w+\s+){0,2}мокр']
+        tool_not_called: [transfer_to_operator]
+
+# --- needs: тихі / мокра / економні / траса ---------------------------------
+
+- id: tc_needs_quiet
+  title: «щоб були тихі» — першою найтихіша за дБ
+  source: tshina:needs_quiet_ru
+  network: both
+  sales_enabled: true
+  pending: 'wave-4-F-needs-ranking: the mock is the F-ranked result (quietest first); before F the live store orders by brand priority'
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: s2, brand: Firestone, model: Roadhawk 2, size: 205/55 R16 91V, season: summer, price: 3100, in_stock: true, eu_label: {fuel: B, wet: A, noise_db: 68}}
+        - {id: s1, brand: Bridgestone, model: Turanza 6, size: 205/55 R16 91V, season: summer, price: 3700, in_stock: true, eu_label: {fuel: C, wet: A, noise_db: 71}}
+        - {id: s3, brand: Laufenn, model: S Fit EQ+, size: 205/55 R16 91V, season: summer, price: 2400, in_stock: true, eu_label: {fuel: C, wet: B, noise_db: 73}}
+  turns:
+    - user: літні 205/55 R16, щоб були тихі, бренд будь-який
+      expect:
+        tool_called: [{name: search_tires, args: {width: '^205$', profile: '^55$', diameter: '^16$'}}]
+        must_contain: ['Roadhawk|Firestone']
+        must_not_contain: ['Laufenn\W+(?:\w+\W+){0,6}(тих|малошумн)']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_needs_wet
+  title: «для мокрої дороги, без аквапланування» — першою з класом A на мокрій
+  source: tshina:needs_wet_road_ru
+  network: both
+  sales_enabled: true
+  pending: 'wave-4-F-needs-ranking: the mock is the F-ranked result (wet A first, brand only breaks ties); before F the live store puts the promoted tyre first'
+  notes: 013e0cd24 (owner 2026-10-26) — the promoted Blizzak/WinterHawk (wet B) led while the text recommended the wet-A tyre
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: m1, brand: Firestone, model: Roadhawk 2, size: 195/65 R15 91H, season: summer, price: 2750, in_stock: true, eu_label: {fuel: B, wet: A, noise_db: 70}}
+        - {id: m2, brand: Bridgestone, model: Turanza 6, size: 195/65 R15 91H, season: summer, price: 3350, in_stock: true, eu_label: {fuel: C, wet: B, noise_db: 70}}
+        - {id: m3, brand: Laufenn, model: G Fit EQ+, size: 195/65 R15 91H, season: summer, price: 2100, in_stock: true, eu_label: {fuel: C, wet: C, noise_db: 71}}
+  turns:
+    - user: літні 195/65 R15 для мокрої дороги, щоб не було аквапланування, бренд будь-який
+      expect:
+        tool_called: [{name: search_tires, args: {width: '^195$', profile: '^65$', diameter: '^15$'}}]
+        must_contain: ['Roadhawk|Firestone']
+        must_not_contain: ['(Laufenn|Turanza)\W+(?:\w+\W+){0,6}(найкращ|краще)\w*\s+(?:\w+\s+){0,2}мокр']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_needs_fuel
+  title: «економні, щоб менше витрачало пального» — першою з класом A по паливу
+  source: tshina:needs_fuel_economy_ua
+  network: both
+  sales_enabled: true
+  pending: 'wave-4-F-needs-ranking: the mock is the F-ranked result (fuel A first); before F the live store orders by brand priority'
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: f1, brand: Laufenn, model: S Fit EQ+, size: 205/55 R16 91V, season: summer, price: 2400, in_stock: true, eu_label: {fuel: A, wet: B, noise_db: 71}}
+        - {id: f2, brand: Firestone, model: Roadhawk 2, size: 205/55 R16 91V, season: summer, price: 3100, in_stock: true, eu_label: {fuel: B, wet: A, noise_db: 70}}
+        - {id: f3, brand: Bridgestone, model: Turanza 6, size: 205/55 R16 91V, season: summer, price: 3700, in_stock: true, eu_label: {fuel: C, wet: A, noise_db: 71}}
+  turns:
+    - user: літні 205/55 R16 економні, щоб менше витрачало пального, бренд будь-який
+      expect:
+        tool_called: [{name: search_tires, args: {width: '^205$', profile: '^55$', diameter: '^16$'}}]
+        must_contain: ['Laufenn|Лауфен']
+        must_not_contain: ['(Turanza|Bridgestone)\W+(?:\w+\W+){0,6}(найекономніш|економніш\w* за всіх|самая экономн)']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_needs_highway_speed
+  title: «багато їжджу трасою на швидкості» — першою з вищим індексом швидкості
+  source: tshina:needs_highway_ua
+  network: both
+  sales_enabled: true
+  pending: 'wave-4-F-needs-ranking: «траса» ranks by speed_index (put on the item by wave-2-A); the mock is that F-ranked result'
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: h1, brand: Bridgestone, model: Potenza Sport, size: 225/45 R17 94Y XL, season: summer, price: 5200, in_stock: true, xl: true, load_index: 94, speed_index: Y}
+        - {id: h2, brand: Firestone, model: Roadhawk 2, size: 225/45 R17 94W XL, season: summer, price: 3900, in_stock: true, xl: true, load_index: 94, speed_index: W}
+        - {id: h3, brand: Laufenn, model: S Fit EQ+, size: 225/45 R17 91V, season: summer, price: 3000, in_stock: true, load_index: 91, speed_index: V}
+  turns:
+    - user: літні 225/45 R17, багато їжджу трасою на швидкості, бренд будь-який
+      expect:
+        tool_called: [{name: search_tires, args: {width: '^225$', profile: '^45$', diameter: '^17$'}}]
+        must_contain: ['Potenza|Bridgestone']
+        must_not_contain: ['Laufenn\W+(?:\w+\W+){0,6}(для траси|для швидк|найшвидш)']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_needs_chip_after_search
+  title: «важливіша тиша» після видачі — найтихіша з показаних
+  source: tshina:dialog_needs_chip_reorders_ru
+  network: both
+  sales_enabled: true
+  notes: the need arrives after the result; the label classes are on the items already, so the model names the quietest without F (F reorders a new search — not checked here)
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: q1, brand: Bridgestone, model: Potenza Sport, size: 225/45 R17 94Y XL, season: summer, price: 5200, in_stock: true, eu_label: {fuel: C, wet: A, noise_db: 72}}
+        - {id: q2, brand: Firestone, model: Roadhawk 2, size: 225/45 R17 94W XL, season: summer, price: 3900, in_stock: true, eu_label: {fuel: B, wet: A, noise_db: 68}}
+        - {id: q3, brand: Laufenn, model: S Fit EQ+, size: 225/45 R17 91V, season: summer, price: 3000, in_stock: true, eu_label: {fuel: C, wet: B, noise_db: 71}}
+  turns:
+    - user: літні 225/45 R17, бренд будь-який
+    - user: для мене важливіша тиша
+      expect:
+        must_contain: ['Roadhawk|Firestone']
+        must_not_contain: ['(Potenza|Laufenn)\W+(?:\w+\W+){0,4}(найтихіш|тихіш\w* за всіх)', 'оператор']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_needs_quiet_city_asks_size
+  title: «порадьте тихі зимові для міста» без розміру — спершу розмір чи авто
+  source: tshina:needs_quiet_city_no_size_ru
+  network: both
+  sales_enabled: true
+  turns:
+    - user: порадьте тихі зимові шини для міста
+      expect:
+        must_contain: ['розмір|размер|авто|машин|марк']
+        must_not_contain: ['не знайш', 'немає в наявності', 'нічого не знайдено']
+        tool_not_called: [search_tires, transfer_to_operator]
+
+# --- studs: шипи / липучка / під шип ------------------------------------------
+
+- id: tc_studded_implies_winter
+  title: «шиповані 195/65 R15» — шипи означають зиму, сезон не перепитуємо
+  source: tshina:studded_implies_winter_ru
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: k1, brand: Nokian, model: Nordman 8, size: 195/65 R15 95T XL, season: winter, price: 3150, in_stock: true, studded: studded}
+        - {id: k2, brand: Firestone, model: Ice Cruiser 7, size: 195/65 R15 91T, season: winter, price: 2780, in_stock: true, studded: studded}
+  turns:
+    - user: шиповані 195/65 R15, бренд будь-який
+      expect:
+        tool_called: [{name: search_tires, args: {width: '^195$', profile: '^65$', diameter: '^15$', studded: '^true$'}}]
+        must_not_contain: ['який сезон', 'какой сезон', 'літні чи зимові', 'летние или зимние']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_with_studs_after_search
+  title: «а з шипами є?» після видачі липучки — новий пошук із шипами
+  source: tshina:629051a5d
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: f1, brand: Bridgestone, model: Blizzak 6, size: 205/55 R16 94H XL, season: winter, price: 4150, in_stock: true, studded: friction}
+        - {id: f2, brand: Laufenn, model: I Fit+, size: 205/55 R16 91T, season: winter, price: 2650, in_stock: true, studded: friction}
+      when_args:
+        - args: {studded: '^true$'}
+          result:
+            total: 2
+            items:
+              - {id: k3, brand: Nokian, model: Nordman 8, size: 205/55 R16 94T XL, season: winter, price: 3600, in_stock: true, studded: studded}
+              - {id: k4, brand: Firestone, model: Ice Cruiser 7, size: 205/55 R16 91T, season: winter, price: 3050, in_stock: true, studded: studded}
+  turns:
+    - user: зимові 205/55 R16, липучка, бренд будь-який
+      expect:
+        tool_called: [{name: search_tires, args: {studded: '^false$'}}]
+    - user: а з шипами є?
+      expect:
+        tool_called: [{name: search_tires, args: {studded: '^true$'}}]
+        must_contain: ['Nordman|Nokian|Ice Cruiser']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_friction_after_studded
+  title: шиповані → «шипи чи липучка для траси?» → «тоді липучку» — довідка, потім пошук
+  source: tshina:f685e3008
+  network: both
+  sales_enabled: true
+  notes: tshina — the stud question after winter cards gave a table of the shown tyres instead of advice; «тоді покажіть фрикційні» gave «немає інформації» instead of a new search («покажіть» dropped — voice)
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: k3, brand: Nokian, model: Nordman 8, size: 205/55 R16 94T XL, season: winter, price: 3600, in_stock: true, studded: studded}
+        - {id: k4, brand: Firestone, model: Ice Cruiser 7, size: 205/55 R16 91T, season: winter, price: 3050, in_stock: true, studded: studded}
+      when_args:
+        - args: {studded: '^false$'}
+          result:
+            total: 2
+            items:
+              - {id: f1, brand: Bridgestone, model: Blizzak 6, size: 205/55 R16 94H XL, season: winter, price: 4150, in_stock: true, studded: friction}
+              - {id: f2, brand: Laufenn, model: I Fit+, size: 205/55 R16 91T, season: winter, price: 2650, in_stock: true, studded: friction}
+  turns:
+    - user: зимові 205/55 R16 шиповані, бренд будь-який
+      expect:
+        tool_called: [{name: search_tires, args: {studded: '^true$'}}]
+    - user: а що краще — шипи чи липучка для траси?
+      expect:
+        must_contain: ['шип', 'липучк|фрикц|без шип']
+        tool_not_called: [transfer_to_operator]
+    - user: тоді давайте липучку
+      expect:
+        tool_called: [{name: search_tires, args: {studded: '^false$'}}]
+        must_contain: ['Blizzak|Laufenn|I Fit']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_studs_vs_friction_consult
+  title: «що краще — шипи чи липучка?» без розміру — консультація, не пошук і не переведення
+  source: tshina:f685e3008
+  network: both
+  sales_enabled: true
+  turns:
+    - user: що краще взимку — шипи чи липучка, якщо їжджу і по місту, і трасою?
+      expect:
+        must_contain: ['шип', 'липучк|фрикц|без шип']
+        must_not_contain: ['не по темі', 'не можу допомогти']
+        tool_not_called: [search_tires, transfer_to_operator]
+
+- id: tc_stud_type_not_misnamed
+  title: «а які з них шиповані?» — шиповані, під шип і липучка не плутаються
+  source: tshina:c70fe4f7f
+  network: both
+  sales_enabled: true
+  pending: 'wave-3-E-eu-stud-claim-rules: the LLM sees `studded` from wave-2-A, and a wrong stud word about a named shown tyre is replaced by code only after E'
+  notes: tshina Citroen C3 dialogue — no tyre marked «Шип», only «Під шип» / «Не шип», and the LLM said «підібрав шиповані»
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: f1, brand: Bridgestone, model: Blizzak 6, size: 205/55 R16 94H XL, season: winter, price: 4150, in_stock: true, studded: friction}
+        - {id: d1, brand: Firestone, model: WinterHawk 4, size: 205/55 R16 91T, season: winter, price: 3300, in_stock: true, studded: studdable}
+        - {id: k3, brand: Nokian, model: Nordman 8, size: 205/55 R16 94T XL, season: winter, price: 3600, in_stock: true, studded: studded}
+  turns:
+    - user: зимові 205/55 R16, шипи чи ні — без різниці, бренд будь-який
+    - user: а які з них шиповані?
+      expect:
+        must_contain: ['Nordman|Nokian']
+        must_not_contain:
+          - '(Blizzak|Близак)\W+(?:\w+\W+){0,4}(?<!не )(?<!без )(шипован|з шипами)'
+          - '(WinterHawk|Вінтерхок)\W+(?:\w+\W+){0,4}(?<!не )(?<!під )(?<!без )(шипован|з шипами)'
+          - '(Nordman|Nokian)\W+(?:\w+\W+){0,4}(липучк|фрикційн|без шип)'
+        tool_not_called: [transfer_to_operator]
+
+# --- XL and load index --------------------------------------------------------
+
+- id: tc_xl_requested
+  title: «потрібні посилені XL» — пошук з xl
+  source: tshina:6301f1933
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: x1, brand: Bridgestone, model: Turanza 6, size: 225/45 R17 94W XL, season: summer, price: 4400, in_stock: true, xl: true}
+        - {id: x2, brand: Firestone, model: Roadhawk 2, size: 225/45 R17 94W XL, season: summer, price: 3900, in_stock: true, xl: true}
+  turns:
+    - user: потрібні посилені шини XL 225/45 R17 літні, бренд будь-який
+      expect:
+        tool_called: [{name: search_tires, args: {width: '^225$', profile: '^45$', diameter: '^17$', xl: '^true$'}}]
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_xl_which_of_shown
+  title: «а яка з них посилена, XL?» — лише та, що XL
+  source: tshina:d2a5603d8
+  network: both
+  sales_enabled: true
+  pending: 'wave-2-A-tire-fields-to-llm: `xl` reaches the LLM on an item only after A'
+  notes: the size string here carries no «XL» on purpose — the fact is the item field
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: x3, brand: Bridgestone, model: Turanza 6, size: 225/45 R17, season: summer, price: 4400, in_stock: true, xl: true, load_index: 94, speed_index: W}
+        - {id: x4, brand: Firestone, model: Roadhawk 2, size: 225/45 R17, season: summer, price: 3900, in_stock: true, load_index: 91, speed_index: W}
+        - {id: x5, brand: Laufenn, model: S Fit EQ+, size: 225/45 R17, season: summer, price: 3000, in_stock: true, load_index: 91, speed_index: V}
+  turns:
+    - user: літні 225/45 R17, бренд будь-який
+    - user: а яка з них посилена, XL?
+      expect:
+        must_contain: ['Turanza|Bridgestone']
+        must_not_contain: ['(Roadhawk|Laufenn|S Fit)\W+(?:\w+\W+){0,4}(?<!не )(посилен|XL|екстра)']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_load_index_range_not_met
+  title: «205/65 R16, індекс 102-105?» — у показаних нижчий індекс, не «підходять»
+  source: tshina:6301f1933
+  network: both
+  sales_enabled: true
+  pending: 'wave-2-A-tire-fields-to-llm: `load_index` reaches the LLM on an item only after A'
+  notes: tshina tester 20.10 п.12 — the index was not read and 95–99 were shown silently; the size string has no index on purpose, the fact is the item field
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: l1, brand: Bridgestone, model: Turanza 6, size: 205/65 R16, season: summer, price: 3900, in_stock: true, load_index: 95, speed_index: H}
+        - {id: l2, brand: Firestone, model: Roadhawk 2, size: 205/65 R16, season: summer, price: 3300, in_stock: true, load_index: 99, speed_index: H, xl: true}
+  turns:
+    - user: гума 205/65 R16 літня, індекс навантаження 102-105, бренд будь-який
+      expect:
+        must_contain: ['95|99|дев.яносто|нижч|менш|немає|нема']
+        must_not_contain: ['(?<!не )(підходять|підійдуть|відповідають)\s+(?:\w+\s+){0,4}(індекс|навантаж)', '(індекс\w*|навантаж\w*)\s+(10[2-5])\s+(є|в наявності)']
+        tool_not_called: [transfer_to_operator]
+
+# --- quantity and price per tyre ---------------------------------------------
+
+- id: tc_quantity_two_after_price
+  title: «а якщо дві?» — сума за дві шини
+  source: tshina:CallCenterChats20261020Test:simulation_short_replies_and_quantities
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 1
+      items:
+        - {id: s2, brand: Firestone, model: Roadhawk 2, size: 205/55 R16 91V, season: summer, price: 3100, in_stock: true}
+  turns:
+    - user: скільки коштує літня Firestone Roadhawk 2 205/55 R16?
+      expect:
+        must_contain: ['3\s?100|три тисячі сто']
+    - user: а якщо дві?
+      expect:
+        must_contain: ['6\s?200|шість тисяч двісті']
+        must_not_contain: ['(лише|тільки) комплект', 'мінімум (чотири|4)', '12\s?400']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_price_for_one_wheel
+  title: «ціна за одне колесо WinterHawk 4 скільки?» — одна штука, не чотири з назви
+  source: tshina:CallCenterChats20261020Test:simulation_short_replies_and_quantities
+  network: both
+  sales_enabled: true
+  notes: tshina read «4» of the model name as 4 pieces
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: w6, brand: Firestone, model: WinterHawk 4, size: 205/55 R16 91H, season: winter, price: 3300, in_stock: true}
+        - {id: w7, brand: Laufenn, model: I Fit+, size: 205/55 R16 91T, season: winter, price: 2650, in_stock: true}
+  turns:
+    - user: зимові 205/55 R16, без шипів, бренд будь-який
+    - user: ціна за одне колесо Firestone WinterHawk 4 скільки?
+      expect:
+        must_contain: ['3\s?300|три тисячі триста']
+        must_not_contain: ['13\s?200', 'тринадцять тисяч']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_price_per_tyre_question
+  title: «ціна вказана за одну шину?» — так, за штуку, без «на сайті»
+  source: tshina:CallCenterChats20261020Test:shop_policy_topics_from_chats
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: s1, brand: Bridgestone, model: Turanza 6, size: 205/55 R16 91V, season: summer, price: 3700, in_stock: true}
+        - {id: s2, brand: Firestone, model: Roadhawk 2, size: 205/55 R16 91V, season: summer, price: 3100, in_stock: true}
+  turns:
+    - user: літні 205/55 R16, бренд будь-який
+    - user: доброго дня, ціна вказана за одну шину?
+      expect:
+        must_contain: ['за (одну |1 )?шину|за штуку|за шт|за одиницю|за одне колесо']
+        must_not_contain: ['на сайті', 'https?://']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_set_enough_stock
+  title: «а на комплект вистачить?» — без вигаданої кількості штук
+  source: tshina:LiveSimulation20261019Test:stock_quantity_question
+  network: both
+  sales_enabled: true
+  notes: the search item has in_stock only, no count — a number of pieces in the reply is invented
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: s1, brand: Bridgestone, model: Turanza 6, size: 205/55 R16 91V, season: summer, price: 3700, in_stock: true}
+        - {id: s2, brand: Firestone, model: Roadhawk 2, size: 205/55 R16 91V, season: summer, price: 3100, in_stock: true}
+  turns:
+    - user: літні 205/55 R16, бренд будь-який
+    - user: Roadhawk 2 підходить. а на комплект вистачить?
+      expect:
+        must_not_contain: ['(є|в наявності|залишилось|лишилось)\s+(\d{1,3}|п.ять|шість|сім|вісім|дев.ять|десять)\s+(шт|штук|шин)']
+        tool_not_called: [transfer_to_operator]
+
+# --- tyres, not disks ---------------------------------------------------------
+
+- id: tc_tyres_not_disks_runflat
+  title: «мені не диски, а резина — літні RunFlat 255/50 R19» — пошук шин RunFlat
+  source: tshina:LiveSimulation20261019Test:tiresNotDisks
+  network: both
+  sales_enabled: true
+  notes: the original line is Russian («мне не диски нужны! Летние ШИНЫ RunFlat 255/50 R19 есть?») and stays Russian — the bot must understand it and answer in Ukrainian
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: r3, brand: Bridgestone, model: Alenza 001 RFT, size: 255/50 R19 107W XL, season: summer, price: 8900, in_stock: true, runflat: true}
+        - {id: r4, brand: Pirelli, model: P Zero RFT, size: 255/50 R19 107W XL, season: summer, price: 9650, in_stock: true, runflat: true}
+  turns:
+    - user: Да что ж такое, мне не диски нужны! Летние шины RunFlat 255/50 R19 есть? Бренд любой
+      expect:
+        tool_called: [{name: search_tires, args: {width: '^255$', profile: '^50$', diameter: '^19$', runflat: '^true$'}}]
+        tool_not_called: [search_disks, transfer_to_operator]
+
+- id: tc_tyres_only_not_disks_r15
+  title: «тільки шини, диски не треба. Які є літні на R15?» — розмова про шини
+  source: tshina:CallCenterChats20261020Test:simulation_short_replies_and_quantities
+  network: both
+  sales_enabled: true
+  turns:
+    - user: Мені потрібні тільки шини, диски не треба. Які є літні на R15?
+      expect:
+        must_contain: ['ширин|профіл|розмір|размер|авто|машин']
+        must_not_contain: ['диск\w*\s+(?:\w+\s+){0,2}(в наявності|є такі|підібрав)']
+        tool_not_called: [search_disks, transfer_to_operator]
+
+# --- dialogue: named model, brand in the same size, season switch -------------
+
+- id: tc_named_model_recall
+  title: «я спрашивал про зимние Michelin Pilot Alpin 5» — пошук цієї моделі
+  source: tshina:named_model_tiguan_pilot_alpin_ru
+  network: both
+  sales_enabled: true
+  notes: Russian line kept — the bot understands and answers in Ukrainian
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: t1, brand: Bridgestone, model: Blizzak 6, size: 235/55 R18 104H XL, season: winter, price: 5240, in_stock: true}
+        - {id: t2, brand: Firestone, model: WinterHawk 4, size: 235/55 R18 104H XL, season: winter, price: 4314, in_stock: true}
+      when_args:
+        - args: {brand: 'michelin|мішлен|мишлен'}
+          result:
+            total: 1
+            items:
+              - {id: t3, brand: Michelin, model: Pilot Alpin 5 SUV, size: 235/55 R18 104H XL, season: winter, price: 7120, in_stock: true}
+  turns:
+    - user: зимние 235/55 R18 на Тигуан, без шипов, бренд любой
+    - user: я спрашивал про зимние шины Michelin Pilot Alpin 5
+      expect:
+        tool_called: [{name: search_tires, args: {brand: 'michelin|мішлен|мишлен'}}]
+        must_contain: ['Alpin|Альпін']
+        must_not_contain: ['під замовлення', 'под заказ', 'немає в наявності']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_brand_in_same_size
+  title: «а в Мішелін є в цьому розмірі?» — марка в розмірі й сезоні розмови
+  source: tshina:4ee180a77
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 1
+      items:
+        - {id: p1, brand: Continental, model: PremiumContact 6, size: 285/45 R20 112Y XL, season: summer, price: 9800, in_stock: true}
+      when_args:
+        - args: {brand: 'michelin|мішлен|мишлен'}
+          result:
+            total: 1
+            items:
+              - {id: p2, brand: Michelin, model: Pilot Sport 4 SUV, size: 285/45 R20 112Y XL, season: summer, price: 10450, in_stock: true}
+  turns:
+    - user: літні Continental PremiumContact 6 285/45 R20
+    - user: а в Мішелін є в цьому розмірі?
+      expect:
+        tool_called: [{name: search_tires, args: {brand: 'michelin|мішлен|мишлен', width: '^285$', profile: '^45$', diameter: '^20$', season: '^summer$'}}]
+        must_contain: ['Pilot Sport|Michelin|Мішлен']
+        must_not_contain: ['немає інформації', 'не маю інформації']
+        tool_not_called: [transfer_to_operator]
+
+- id: tc_season_switch_mid_dialog
+  title: зимові → «а давайте краще літні» — той самий розмір, сезон змінено
+  source: tshina:season_switch_mid_dialog_ua
+  network: both
+  sales_enabled: true
+  notes: the original «покажи тільки літні» re-said for voice
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: f1, brand: Bridgestone, model: Blizzak 6, size: 205/55 R16 94H XL, season: winter, price: 4150, in_stock: true}
+        - {id: f2, brand: Laufenn, model: I Fit+, size: 205/55 R16 91T, season: winter, price: 2650, in_stock: true}
+      when_args:
+        - args: {season: '^summer$'}
+          result:
+            total: 2
+            items:
+              - {id: s1, brand: Bridgestone, model: Turanza 6, size: 205/55 R16 91V, season: summer, price: 3700, in_stock: true}
+              - {id: s2, brand: Firestone, model: Roadhawk 2, size: 205/55 R16 91V, season: summer, price: 3100, in_stock: true}
+  turns:
+    - user: зимові 205/55 R16, без шипів, бренд будь-який
+    - user: а давайте краще літні
+      expect:
+        tool_called: [{name: search_tires, args: {season: '^summer$', width: '^205$', profile: '^55$', diameter: '^16$'}}]
+        must_contain: ['Turanza|Roadhawk']
+        must_not_contain: ['нічого не знайдено', 'нічого не знайшл', 'Blizzak']
+        tool_not_called: [transfer_to_operator]
