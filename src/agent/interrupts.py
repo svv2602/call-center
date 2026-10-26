@@ -64,6 +64,7 @@ from src.agent.fitting_fsm import (
     STATES,
     FsmState,
 )
+from src.agent.parsers.tire_query import extract_tire_brands, parse_budget, parse_tire_size
 
 if TYPE_CHECKING:
     from src.core.call_session import CallSession
@@ -405,6 +406,100 @@ def _whole_word(lowered: str, marker: str) -> bool:
     """True when `marker` occurs as a complete word."""
     pattern = rf"(?<![{_WORD_CHARS}]){re.escape(marker)}(?![{_WORD_CHARS}])"
     return re.search(pattern, lowered) is not None
+
+
+# --- Tyre price vs fitting price (sales scope) ------------------------------
+
+#: The caller is asking what a *service* costs. Any of these and the question
+#: stays with the fitting-price handler: the service words win over every tyre
+#: cue below, so «скільки коштує шиномонтаж 205/55 R16» is still a fitting
+#: price. «монтаж» is a substring on purpose — it covers «шиномонтаж»,
+#: «демонтаж» and every case ending.
+_SERVICE_SUBSTRINGS: tuple[str, ...] = ("монтаж",)
+#: Word-start roots, UA then RU: «перевзути», «переобуть», «балансування»,
+#: «балансировка», «сервіс», «ремонт», «вулканізація», «розвал», «зберігання»,
+#: «хранение», «послуги», «услуги».
+_SERVICE_ROOTS: tuple[str, ...] = (
+    "перевзу",
+    "переобу",
+    "перебортув",
+    "баланс",
+    "сервіс",
+    "сервис",
+    "ремонт",
+    "вулкан",
+    "розвал",
+    "зберіган",
+    "хранени",
+    "послуг",
+    "услуг",
+)
+#: «заміна коліс», «поміняти шини», «замена резины» — swapping the wheels is
+#: the fitting service even though a tyre noun is in the phrase.
+_SERVICE_SWAP_RE = re.compile(
+    rf"(?<![{_WORD_CHARS}])(?:замін|замен|помін|помен|змін)\S*\s+(?:\S+\s+)?"
+    r"(?:коліс|колес|шин|гум|резин)"
+)
+#: Nouns that make a price question about the goods: «ціна цих шин», «стоимость
+#: этой резины», «скільки коштує ця модель», «почому покришки».
+_TYRE_NOUN_ROOTS: tuple[str, ...] = (
+    "шин",
+    "резин",
+    "гум",
+    "покришк",
+    "покрышк",
+    "модел",
+)
+
+
+def _mentions_service(lowered: str) -> bool:
+    if any(marker in lowered for marker in _SERVICE_SUBSTRINGS):
+        return True
+    if any(_starts_word(lowered, root) for root in _SERVICE_ROOTS):
+        return True
+    return _SERVICE_SWAP_RE.search(lowered) is not None
+
+
+def is_tyre_price_question(text: str, *, tyre_search_underway: bool = False) -> bool:
+    """True when a price question is about the tyres, not the fitting service.
+
+    Sales scope only — the caller (`CallPipeline._maybe_handle_intent`) checks
+    `sales_enabled`; with sales off this predicate is never consulted and the
+    price sub-flow opens exactly as before.
+
+    Measurement H (2026-10-26): «а ціною до 6000 ще є варіанти?» matched
+    `_mentions_price` (root «цін»), took the fast path into the fitting-price
+    handler, which asked for the city and closed the turn — so the 6000 budget
+    never reached `session.tire_query`. Port of the meaning of tshina
+    `762168d31` («ценой до N» is a budget, not «how much does it cost»).
+
+    Default-deny in both directions:
+
+    * no price words (`_mentions_price`) → False: the sub-flow would not open
+      anyway, nothing to keep it from;
+    * service words («монтаж», «перевзути», «балансування», «заміна коліс»,
+      RU forms too) → False: the fitting-price handler keeps the question;
+    * otherwise True only on a tyre cue: a budget cap or scope («до 6000», «не
+      дороже 4000», «3000 за шину»), a full tyre size, a tyre brand, a tyre
+      noun («цих шин», «этой резины», «ця модель»), or a tyre search already
+      under way (`tyre_search_underway`). A bare «R16» is not a cue — it is
+      just as much a fitting question, and when unsure the old path wins.
+    """
+    lowered = _norm(text)
+    if not lowered or not _mentions_price(lowered):
+        return False
+    if _mentions_service(lowered):
+        return False
+    if tyre_search_underway:
+        return True
+    budget = parse_budget(lowered)
+    if budget is not None and (budget.is_cap or budget.scope is not None):
+        return True
+    if any(size.width is not None for size in parse_tire_size(lowered) or ()):
+        return True
+    if extract_tire_brands(lowered):
+        return True
+    return any(_starts_word(lowered, root) for root in _TYRE_NOUN_ROOTS)
 
 
 def _yes_no(text: str) -> str:

@@ -36,6 +36,7 @@ from src.agent.interrupts import (
     classify_interrupt_text,
     handle_cancel_interrupt,
     handle_price_interrupt,
+    is_tyre_price_question,
 )
 from src.core.call_session import CallSession
 
@@ -1013,3 +1014,77 @@ class TestPriceAsksForTheCityFirst:
         result = await handle_price_interrupt("вартість у Харкові", session, router)
 
         assert "372" in result.reply_to_customer
+
+
+# --- Wave 3-I: tyre price vs fitting price (sales scope) --------------------
+
+
+class TestIsTyrePriceQuestion:
+    """Measurement H (2026-10-26), tshina `762168d31`: «ціною до N» is a budget."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            # a budget cap — the measured shape, UA and RU, digits and words
+            "а ціною до 6000 ще є варіанти?",
+            "а ціною до шести тисяч є щось?",
+            "ок, а ценой до 6000 грн еще есть варианты?",
+            "по цене не дороже 4000",
+            "ціна в межах п'яти тисяч",
+            "вартість 3000 за шину нормальна?",
+            # a tyre brand
+            "скільки коштує Michelin 205/55 R16?",
+            "сколько стоит этот мишлен",
+            # a full size
+            "яка ціна на 205/55 R16?",
+            # a tyre noun, in its cases
+            "яка ціна цих шин?",
+            "стоимость этих шин",
+            "почому ця резина?",
+            "ціна цієї моделі",
+            "сколько стоят покрышки",
+        ],
+    )
+    def test_a_tyre_price(self, text: str) -> None:
+        assert _mentions_price(text), "precondition: the old path would take this turn"
+        assert is_tyre_price_question(text) is True
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "скільки коштує шиномонтаж?",
+            "скільки коштує шиномонтаж 205/55 R16",
+            "а перевзути на мішлен скільки буде коштувати?",
+            "сколько стоит переобуть 205/55 R16",
+            "ціна балансування коліс",
+            "сколько стоит балансировка",
+            "ціна заміни коліс",
+            "сколько стоит поменять резину",
+            "скільки коштує зберігання шин",
+            "стоимость хранения шин",
+            "скільки коштує ремонт шини",
+            "яка ціна цих шин з монтажем?",
+        ],
+    )
+    def test_service_words_win(self, text: str) -> None:
+        assert _mentions_price(text), "precondition: the old path would take this turn"
+        assert is_tyre_price_question(text) is False
+        assert is_tyre_price_question(text, tyre_search_underway=True) is False
+
+    @pytest.mark.parametrize("text", ["яка ціна?", "скільки коштує R16?", "сколько стоит?"])
+    def test_no_tyre_cue_is_the_old_path_until_a_search_is_under_way(self, text: str) -> None:
+        assert is_tyre_price_question(text) is False
+        assert is_tyre_price_question(text, tyre_search_underway=True) is True
+
+    @pytest.mark.parametrize(
+        "text",
+        ["до 6000 є варіанти?", "мене не цікавить ціна шин", "Київ", ""],
+    )
+    def test_no_price_question_is_never_a_tyre_price(self, text: str) -> None:
+        # Without price words the sub-flow does not open; nothing to keep it from.
+        assert is_tyre_price_question(text, tyre_search_underway=True) is False
+
+    def test_the_sales_off_markers_are_untouched(self) -> None:
+        # The predicate is additive: the old classification of the measured
+        # turn is what sales-off calls keep.
+        assert classify_interrupt_text("а ціною до 6000 ще є варіанти?") == "price"

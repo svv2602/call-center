@@ -27,7 +27,7 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, create_autospec, patch
 
 import pytest
 
@@ -4808,3 +4808,243 @@ def test_the_preload_answer_is_recorded_for_the_guards() -> None:
         {"success": True, "data": [{"ID": "000006652", "Number": "00000110727"}]},
     )
     assert session.storage_contracts_found == ["00000110727"]
+
+
+# ---------------------------------------------------------------------------
+# Wave 3-I (2026-10-26): a tyre price under sales is not the fitting price
+# ---------------------------------------------------------------------------
+
+
+#: Tyre price questions, UA and RU, from measurement H and the README of 3-I.
+#: Each one opens the fitting-price sub-flow by markers today.
+TYRE_PRICE_TEXTS = (
+    "а ціною до 6000 ще є варіанти?",
+    "по цене не дороже 4000",
+    "скільки коштує Michelin 205/55 R16?",
+    "яка ціна цих шин?",
+    "сколько стоит этот мишлен",
+)
+
+#: A tyre price with a request for a human beside it — the only shape that
+#: still waits on the classifier, so the only one that reaches its verdict.
+TYRE_PRICE_WITH_HUMAN_TEXT = "скільки коштує Michelin 205/55 R16, чи краще з оператором"
+
+
+def _tyre_price_harness(*, sales: bool, tire_query: dict[str, Any] | None = None) -> Harness:
+    from src.agent.network_policy import NetworkPolicy
+
+    h = Harness()
+    h.streaming_loop._network_policy = NetworkPolicy(sales_enabled=sales)
+    # A tyre search under way: the 6000 budget is then collected by
+    # `_run_tire_query_step` — when the turn reaches it.
+    h.session.tire_query = dict(tire_query if tire_query is not None else {"sizes": ["205/55 R16"]})
+    return h
+
+
+def _spec_price_handler(reply: str = "Монтаж R16 коштує 400 гривень.") -> Any:
+    from src.agent.interrupts import handle_price_interrupt
+
+    return create_autospec(handle_price_interrupt, return_value=interrupt(reply=reply))
+
+
+def _spec_classifier(verdict: IntentResult) -> Any:
+    from src.agent.intent_classifier import classify_intent
+
+    return create_autospec(classify_intent, return_value=verdict)
+
+
+class TestTyrePriceUnderSales:
+    """«а ціною до 6000 ще є варіанти?» went to the fitting-price handler,
+    which asked for the city and closed the turn — the budget was lost."""
+
+    @pytest.mark.parametrize("text", TYRE_PRICE_TEXTS)
+    async def test_sales_on_the_fast_path_leaves_it_to_the_llm(self, text: str) -> None:
+        h = _tyre_price_harness(sales=True)
+        price = _spec_price_handler()
+        classify = _spec_classifier(intent("PRICE"))
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch("src.agent.intent_classifier.classify_intent", classify),
+            patch("src.agent.interrupts.handle_price_interrupt", price),
+        ):
+            await h.run(text)
+
+        price.assert_not_called()
+        classify.assert_not_called()  # no 1.2 s wait for a verdict that cannot win
+        # One LLM turn (the text as entity normalization left it: «мишлен» →
+        # «Michelin»).
+        assert len(h.llm_turns) == 1
+        # Nothing orphaned, no interrupt budget spent on a tyre question.
+        assert h.session.pending_price_interrupt_needs_city is False
+        assert h.session.pending_price_interrupt_needs_diameter is False
+        assert h.session.interrupt_counts.get(_PIPELINE_DISPATCH_TOTAL_KEY, 0) == 0
+
+    @pytest.mark.parametrize("text", TYRE_PRICE_TEXTS)
+    async def test_sales_off_the_same_words_open_the_sub_flow_as_before(self, text: str) -> None:
+        h = _tyre_price_harness(sales=False)
+        price = _spec_price_handler()
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                _spec_classifier(intent("BOOK")),
+            ),
+            patch("src.agent.interrupts.handle_price_interrupt", price),
+        ):
+            await h.run(text)
+
+        price.assert_awaited_once()
+        assert h.llm_turns == []
+
+    async def test_the_budget_reaches_the_tyre_query(self) -> None:
+        h = _tyre_price_harness(sales=True)
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                _spec_classifier(intent("PRICE")),
+            ),
+            patch("src.agent.interrupts.handle_price_interrupt", _spec_price_handler()),
+        ):
+            await h.run("а ціною до 6000 ще є варіанти?")
+
+        assert h.session.tire_query["budget"] == {"amount": 6000, "scope": None, "is_cap": True}
+        assert h.llm_kwargs[-1]["tire_progress"]["budget"]["amount"] == 6000
+
+    async def test_a_bare_price_question_during_a_tyre_search_is_the_tyres(self) -> None:
+        h = _tyre_price_harness(sales=True)
+        price = _spec_price_handler()
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                _spec_classifier(intent("PRICE")),
+            ),
+            patch("src.agent.interrupts.handle_price_interrupt", price),
+        ):
+            await h.run("а яка ціна?")
+
+        price.assert_not_called()
+        assert h.llm_turns == ["а яка ціна?"]
+
+    async def test_a_bare_price_question_without_a_tyre_search_is_the_old_path(self) -> None:
+        h = _tyre_price_harness(sales=True, tire_query={})
+        price = _spec_price_handler()
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                _spec_classifier(intent("BOOK")),
+            ),
+            patch("src.agent.interrupts.handle_price_interrupt", price),
+        ):
+            await h.run("а яка ціна?")
+
+        price.assert_awaited_once()
+
+    @pytest.mark.parametrize("sales", [True, False])
+    async def test_a_fitting_price_on_the_fast_path_stays_with_the_handler(
+        self, sales: bool
+    ) -> None:
+        h = _tyre_price_harness(sales=sales)
+        price = _spec_price_handler()
+        classify = _spec_classifier(intent("BOOK"))
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch("src.agent.intent_classifier.classify_intent", classify),
+            patch("src.agent.interrupts.handle_price_interrupt", price),
+        ):
+            await h.run("скільки коштує шиномонтаж?")
+
+        price.assert_awaited_once()
+        classify.assert_not_called()
+        assert h.llm_turns == []
+
+    @pytest.mark.parametrize("sales", [True, False])
+    async def test_a_fitting_price_by_the_classifier_stays_with_the_handler(
+        self, sales: bool
+    ) -> None:
+        # «перевзути … скільки» carries no price marker: the classifier decides.
+        h = _tyre_price_harness(sales=sales)
+        price = _spec_price_handler()
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                _spec_classifier(intent("PRICE")),
+            ),
+            patch("src.agent.interrupts.handle_price_interrupt", price),
+        ):
+            await h.run("а перевзути R16 скільки?")
+
+        price.assert_awaited_once()
+
+    async def test_sales_on_a_classifier_price_verdict_is_refused(self) -> None:
+        h = _tyre_price_harness(sales=True)
+        price = _spec_price_handler()
+        classify = _spec_classifier(intent("PRICE"))
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch("src.agent.intent_classifier.classify_intent", classify),
+            patch("src.agent.interrupts.handle_price_interrupt", price),
+        ):
+            await h.run(TYRE_PRICE_WITH_HUMAN_TEXT)
+
+        classify.assert_awaited_once()
+        price.assert_not_called()
+        assert h.llm_turns == [TYRE_PRICE_WITH_HUMAN_TEXT]
+        assert h.session.interrupt_counts.get(_PIPELINE_DISPATCH_TOTAL_KEY, 0) == 0
+
+    async def test_sales_off_a_classifier_price_verdict_dispatches_as_before(self) -> None:
+        h = _tyre_price_harness(sales=False)
+        price = _spec_price_handler()
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                _spec_classifier(intent("PRICE")),
+            ),
+            patch("src.agent.interrupts.handle_price_interrupt", price),
+        ):
+            await h.run(TYRE_PRICE_WITH_HUMAN_TEXT)
+
+        price.assert_awaited_once()
+
+    async def test_a_human_still_wins_over_a_tyre_price(self) -> None:
+        h = _tyre_price_harness(sales=True)
+        price = _spec_price_handler()
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                _spec_classifier(intent("TRANSFER")),
+            ),
+            patch("src.agent.interrupts.handle_price_interrupt", price),
+        ):
+            await h.run(TYRE_PRICE_WITH_HUMAN_TEXT)
+
+        price.assert_not_called()
+        executed = [c.args[0] for c in h.tool_router.execute.await_args_list]
+        assert "transfer_to_operator" in executed
+
+    @pytest.mark.parametrize("text", ["Київ", "у Києві, а ціна цих шин яка?"])
+    async def test_an_open_price_sub_flow_keeps_its_answer(
+        self, text: str, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        h = _tyre_price_harness(sales=True)
+        h.session.pending_price_interrupt_needs_city = True
+        price = _spec_price_handler(reply="У Києві монтаж R16 коштує 400 гривень.")
+        with (
+            caplog.at_level(logging.INFO, logger="src.core.pipeline"),
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                _spec_classifier(intent("BOOK")),
+            ),
+            patch("src.agent.interrupts.handle_price_interrupt", price),
+        ):
+            await h.run(text)
+
+        price.assert_awaited_once()
+        assert h.llm_turns == []
+        assert "tyre price under sales" not in caplog.text

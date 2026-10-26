@@ -2754,7 +2754,7 @@ class CallPipeline:
             classify_intent,
             verdict_cannot_matter,
         )
-        from src.agent.interrupts import classify_interrupt_text
+        from src.agent.interrupts import classify_interrupt_text, is_tyre_price_question
 
         session_context = {
             "fsm_state": self._session.fsm_state,
@@ -2787,20 +2787,54 @@ class CallPipeline:
         #   the classifier's guard caps a TRANSFER without the caller's own
         #   evidence below the floor — so without that evidence it cannot win.
         has_transfer_words = _has_transfer_evidence(transcript.text)
+        # Under sales a price question about the tyres is the goods' price,
+        # not the fitting price: «а ціною до 6000 ще є варіанти?» is a budget,
+        # and the fitting-price handler would ask for the city and close the
+        # turn before `_run_tire_query_step` records it (measurement H,
+        # 2026-10-26). An open sub-flow is never this: «Київ» answering the
+        # handler's city question is a continuation. Sales off → always False,
+        # and every branch below is the one it was.
+        tyre_price = (
+            continuation is None
+            and self._sales_enabled()
+            and is_tyre_price_question(
+                transcript.text,
+                tyre_search_underway=bool(
+                    self._session.tire_query
+                    or "search_tires" in (self._session.tools_called or set())
+                ),
+            )
+        )
+        if tyre_price:
+            logger.info(
+                "FSM live mode: tyre price under sales for call=%s — not the "
+                "fitting-price sub-flow, LLM turn",
+                self._session.channel_uuid,
+                extra={"call_id": str(self._session.channel_uuid)},
+            )
         fast_intent: str | None = None
         if (
             continuation is None
             and not has_transfer_words
+            and not tyre_price
             and classify_interrupt_text(transcript.text) == "price"
         ):
             fast_intent = "PRICE"
-        skip_classifier = fast_intent is not None or (
-            continuation is not None and not has_transfer_words
+        # A tyre price needs no verdict either: PRICE would be refused below,
+        # and only a request for a human could still change the turn.
+        skip_classifier = (
+            fast_intent is not None
+            or (tyre_price and not has_transfer_words)
+            or (continuation is not None and not has_transfer_words)
         )
         if skip_classifier:
             logger.info(
                 "FSM live mode: %s for call=%s — intent classification skipped",
-                "price markers" if fast_intent else f"{continuation} sub-flow continues",
+                "price markers"
+                if fast_intent
+                else "tyre price"
+                if tyre_price
+                else f"{continuation} sub-flow continues",
                 self._session.channel_uuid,
             )
 
@@ -2865,6 +2899,18 @@ class CallPipeline:
                 result.confidence,
                 FSM_INTERRUPT_CONFIDENCE_FLOOR,
                 self._session.channel_uuid,
+            )
+            self._note_pipeline_interrupt_dispatch(dispatched=False)
+            return False
+        elif tyre_price and result.primary_intent == "PRICE":
+            # The classifier is reached on a tyre price only beside a request
+            # for a human; TRANSFER already won above, and a PRICE verdict is
+            # the same fitting-price misroute the fast path avoids.
+            logger.info(
+                "FSM live mode: intent=PRICE on a tyre price under sales for call=%s "
+                "— using the normal LLM turn",
+                self._session.channel_uuid,
+                extra={"call_id": str(self._session.channel_uuid)},
             )
             self._note_pipeline_interrupt_dispatch(dispatched=False)
             return False
