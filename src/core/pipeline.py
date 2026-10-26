@@ -1229,6 +1229,30 @@ class CallPipeline:
         policy = getattr(holder, "_network_policy", None)
         return bool(policy is not None and getattr(policy, "sales_enabled", False) is True)
 
+    def _is_tyre_price_turn(self, text: str) -> bool:
+        """A price question about the tyres under sales — not the fitting price.
+
+        The one definition the FSM seam and `_maybe_handle_intent` share: the
+        seam must not charge a turn the live path hands to the LLM, and the two
+        used to disagree (wave 5-L). Pure and synchronous — session reads and
+        regex only — so it is legal in `_run_fsm_deterministic_step`, shadow
+        mode included. An open sub-flow is never this: «Київ» answering the
+        price handler's city question is a continuation. Sales off → False.
+        """
+        from src.agent.interrupts import is_tyre_price_question
+
+        return (
+            self._open_interrupt_kind() is None
+            and self._sales_enabled()
+            and is_tyre_price_question(
+                text,
+                tyre_search_underway=bool(
+                    self._session.tire_query
+                    or "search_tires" in (self._session.tools_called or set())
+                ),
+            )
+        )
+
     def _last_bot_text(self) -> str:
         for turn in reversed(self._session.dialog_history):
             if turn.speaker == "assistant" and turn.content:
@@ -1868,7 +1892,31 @@ class CallPipeline:
                     # and `_maybe_handle_intent` must agree on what an
                     # interrupt is instead of keeping two definitions.
                     interrupt_kind = classify_interrupt_text(transcript.text)
-                    if interrupt_kind is not None:
+                    if self._is_tyre_price_turn(transcript.text):
+                        # Under sales «а ціною до 6000 ще є?» is a budget for
+                        # the tyres, not the fitting price: `_maybe_handle_intent`
+                        # asks this same helper and hands the turn to the LLM.
+                        # Charging it as an interrupt walked the caller to
+                        # `escalate_target` after `max_interrupt_turns` budget
+                        # questions (wave 5-L). Ahead of the interrupt branch
+                        # because the live path lets it win over the markers
+                        # too; «скільки коштує шиномонтаж» is not this
+                        # (`_mentions_service`) and still goes below.
+                        #
+                        # Unbounded on purpose, unlike the confirmation
+                        # exemption: the machine does not move, the LLM answers
+                        # the turn, and nothing escalates — a caller choosing
+                        # tyres by price for ten turns is shopping, not stuck.
+                        # The state's own question still charges on the next
+                        # non-price turn.
+                        logger.info(
+                            "fsm_parser_null_excused call=%s state=%s field=%s reason=tyre_price",
+                            self._session.channel_uuid,
+                            state_before.value,
+                            own_field,
+                            extra={"call_id": str(self._session.channel_uuid)},
+                        )
+                    elif interrupt_kind is not None:
                         state_after = engine.on_interrupt_turn(
                             interrupt_kind,
                             transcript.text,
@@ -2764,7 +2812,7 @@ class CallPipeline:
             classify_intent,
             verdict_cannot_matter,
         )
-        from src.agent.interrupts import classify_interrupt_text, is_tyre_price_question
+        from src.agent.interrupts import classify_interrupt_text
 
         session_context = {
             "fsm_state": self._session.fsm_state,
@@ -2803,18 +2851,9 @@ class CallPipeline:
         # turn before `_run_tire_query_step` records it (measurement H,
         # 2026-10-26). An open sub-flow is never this: «Київ» answering the
         # handler's city question is a continuation. Sales off → always False,
-        # and every branch below is the one it was.
-        tyre_price = (
-            continuation is None
-            and self._sales_enabled()
-            and is_tyre_price_question(
-                transcript.text,
-                tyre_search_underway=bool(
-                    self._session.tire_query
-                    or "search_tires" in (self._session.tools_called or set())
-                ),
-            )
-        )
+        # and every branch below is the one it was. The FSM seam asks the same
+        # helper, so a turn handed to the LLM here is not charged there.
+        tyre_price = self._is_tyre_price_turn(transcript.text)
         if tyre_price:
             logger.info(
                 "FSM live mode: tyre price under sales for call=%s — not the "

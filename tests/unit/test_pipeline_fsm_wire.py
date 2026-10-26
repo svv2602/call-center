@@ -5048,3 +5048,175 @@ class TestTyrePriceUnderSales:
         price.assert_awaited_once()
         assert h.llm_turns == []
         assert "tyre price under sales" not in caplog.text
+
+
+# ---------------------------------------------------------------------------
+# Wave 5-L (2026-10-26): the FSM seam agrees with `_maybe_handle_intent`
+# ---------------------------------------------------------------------------
+
+
+#: The budget question from measurement H, asked again and again while the
+#: FSM waits for a city.
+TYRE_BUDGET_TEXT = "а ціною до 6000 ще є?"
+
+
+def _seam_harness(
+    *, sales: bool, tire_query: dict[str, Any] | None = None, tools: set[str] | None = None
+) -> Harness:
+    """Booking parked in CITY, the bot re-asking the city, a tyre search on."""
+    from src.agent.network_policy import NetworkPolicy
+
+    h = Harness(booking_in_progress(FsmState.CITY))
+    h.streaming_loop._network_policy = NetworkPolicy(sales_enabled=sales)
+    h.session.tire_query = dict(tire_query if tire_query is not None else {"sizes": ["205/55 R16"]})
+    h.session.tools_called = set(tools or ())
+    bot_keeps_asking(h, STATES[FsmState.CITY].question_template)
+    return h
+
+
+@contextlib.contextmanager
+def _engine_spies():
+    """Real engine methods behind autospec'd spies: the counts stay real."""
+    with (
+        patch.object(
+            FsmEngine,
+            "on_interrupt_turn",
+            autospec=True,
+            side_effect=FsmEngine.on_interrupt_turn,
+        ) as on_interrupt,
+        patch.object(
+            FsmEngine,
+            "on_parser_null",
+            autospec=True,
+            side_effect=FsmEngine.on_parser_null,
+        ) as on_null,
+    ):
+        yield on_interrupt, on_null
+
+
+class TestSeamTyrePriceUnderSales:
+    """Wave 3-I took the tyre price out of `_maybe_handle_intent`, but the seam
+    still charged it as a PRICE interrupt: after `max_interrupt_turns` budget
+    questions CITY escalated while the LLM was answering every one."""
+
+    @pytest.mark.parametrize("shadow_mode", [False, True])
+    async def test_five_budget_questions_charge_nothing_and_never_escalate(
+        self, shadow_mode: bool, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        h = _seam_harness(sales=True)
+        turns = STATES[FsmState.CITY].max_interrupt_turns + 1
+        price = _spec_price_handler()
+        classify = _spec_classifier(intent("PRICE"))
+        with (
+            caplog.at_level(logging.INFO, logger="src.core.pipeline"),
+            fsm_flags(enabled=True, shadow_mode=shadow_mode),
+            patch("src.agent.intent_classifier.classify_intent", classify),
+            patch("src.agent.interrupts.handle_price_interrupt", price),
+            _engine_spies() as (on_interrupt, on_null),
+        ):
+            await h.run(*[TYRE_BUDGET_TEXT] * turns)
+
+        on_interrupt.assert_not_called()
+        on_null.assert_not_called()
+        price.assert_not_called()
+        classify.assert_not_called()
+        assert h.session.fsm_state == FsmState.CITY.value
+        assert h.session.fsm_interrupt_turn_counts.get(FsmState.CITY.value) in (None, 0)
+        assert h.session.fsm_parser_null_counts.get(FsmState.CITY.value) in (None, 0)
+        assert len(h.llm_turns) == turns
+        excused = [
+            r.getMessage()
+            for r in caplog.records
+            if r.getMessage().startswith("fsm_parser_null_excused")
+        ]
+        assert len(excused) == turns
+        assert all("reason=tyre_price" in line for line in excused)
+
+    @pytest.mark.parametrize("shadow_mode", [False, True])
+    async def test_a_fitting_price_under_sales_is_still_an_interrupt(
+        self, shadow_mode: bool
+    ) -> None:
+        h = _seam_harness(sales=True)
+        with (
+            fsm_flags(enabled=True, shadow_mode=shadow_mode),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                _spec_classifier(intent("BOOK")),
+            ),
+            patch("src.agent.interrupts.handle_price_interrupt", _spec_price_handler()),
+            _engine_spies() as (on_interrupt, _on_null),
+        ):
+            await h.run("скільки коштує шиномонтаж?")
+
+        on_interrupt.assert_called_once()
+        assert on_interrupt.call_args.args[1] == "price"
+        assert on_interrupt.call_args.kwargs["advance"] is (not shadow_mode)
+
+    async def test_sales_off_the_budget_question_is_an_interrupt_as_before(self) -> None:
+        h = _seam_harness(sales=False)
+        turns = STATES[FsmState.CITY].max_interrupt_turns
+        with (
+            fsm_flags(enabled=True, shadow_mode=True),
+            _engine_spies() as (on_interrupt, on_null),
+        ):
+            await h.run(*[TYRE_BUDGET_TEXT] * turns)
+
+        assert on_interrupt.call_count == turns
+        on_null.assert_not_called()
+        assert h.session.fsm_interrupt_turn_counts[FsmState.CITY.value] == turns
+
+    async def test_sales_off_live_the_budget_question_reaches_the_seam_interrupt(
+        self,
+    ) -> None:
+        h = _seam_harness(sales=False)
+        price = _spec_price_handler()
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                _spec_classifier(intent("BOOK")),
+            ),
+            patch("src.agent.interrupts.handle_price_interrupt", price),
+            _engine_spies() as (on_interrupt, _on_null),
+        ):
+            await h.run(TYRE_BUDGET_TEXT)
+
+        on_interrupt.assert_called_once()
+        price.assert_awaited_once()
+
+    async def test_a_search_tires_call_alone_makes_a_bare_price_the_tyres_in_both(
+        self,
+    ) -> None:
+        """`tyre_search_underway` is one computation: the seam and the live
+        path must both read `tools_called`, not only `tire_query`."""
+        h = _seam_harness(sales=True, tire_query={}, tools={"search_tires"})
+        price = _spec_price_handler()
+        with (
+            fsm_flags(enabled=True, shadow_mode=False),
+            patch(
+                "src.agent.intent_classifier.classify_intent",
+                _spec_classifier(intent("BOOK")),
+            ),
+            patch("src.agent.interrupts.handle_price_interrupt", price),
+            _engine_spies() as (on_interrupt, on_null),
+        ):
+            await h.run("а яка ціна?")
+
+        on_interrupt.assert_not_called()
+        on_null.assert_not_called()
+        price.assert_not_called()
+        assert h.llm_turns == ["а яка ціна?"]
+
+    async def test_without_a_tyre_search_a_bare_price_is_the_old_interrupt(self) -> None:
+        h = _seam_harness(sales=True, tire_query={})
+        with (
+            fsm_flags(enabled=True, shadow_mode=True),
+            _engine_spies() as (on_interrupt, _on_null),
+        ):
+            await h.run("а яка ціна?")
+
+        on_interrupt.assert_called_once()
+
+    def test_the_shared_helper_is_synchronous(self) -> None:
+        assert not inspect.iscoroutinefunction(CallPipeline._is_tyre_price_turn)
+        assert not inspect.iscoroutinefunction(CallPipeline._run_fsm_deterministic_step)
