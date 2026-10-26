@@ -213,13 +213,18 @@ def _compress_search_tires(
 ) -> str:
     """Limit to top 3 results, keep only essential fields.
 
-    Drops id (SKU), season (already known from query context).
+    Drops id (SKU), and season (already known from query context) when sales are off.
 
     ``sales_enabled``: the relaxation marks (``relaxed``, ``caveat_key``), the
     rear axle of a staggered pair (``rear_size``/``rear_price``, never
     ``rear_id``) and the caveat the loop has already spoken stay, so the model
     neither repeats the caveat nor presents a friction tyre as the studded one
-    asked for; the EU label (``eu_label``) stays too. Off — byte-identical.
+    asked for; the EU label (``eu_label``) stays too, and so do the facts of
+    each offered tyre (``season``, ``studded`` of a winter tyre, ``xl``,
+    ``load_index`` / ``speed_index`` — ``StoreClient._tire_item``), so the
+    model reads them instead of guessing studs from the model name (a
+    friction tyre voiced as studded, code review 2026-10-26). Off —
+    byte-identical.
     """
     items = result.get("items", [])
     essential_keys: tuple[str, ...] = ("brand", "model", "size", "price", "in_stock")
@@ -227,6 +232,15 @@ def _compress_search_tires(
         # ``eu_label`` (``tire_eu_labels``): the classes the model may quote
         # when asked to compare — never characteristics beyond them.
         essential_keys = (*essential_keys, "rear_size", "rear_price", "runflat", "eu_label")
+        # Present only when true / known (``tire_attributes``, regex fallback).
+        essential_keys = (
+            *essential_keys,
+            "season",
+            "studded",
+            "xl",
+            "load_index",
+            "speed_index",
+        )
     compressed = [{k: v for k, v in item.items() if k in essential_keys} for item in items[:3]]
     out: dict[str, Any] = {"total": result.get("total", len(items))}
     out["items"] = compressed

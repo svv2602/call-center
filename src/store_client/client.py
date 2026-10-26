@@ -31,9 +31,11 @@ logger = logging.getLogger(__name__)
 # ``description``: «… [99T] Шип» (studded) vs «… Під шип» / «Под шип»
 # (studdable, sold without studs). Model names like «WinSpike» / «Stud»
 # are sold unstudded, so only the standalone word «шип» counts.
+_STUD_WORD_RE = r"(^|[^а-яёіїєґa-z])шип([^а-яёіїєґa-z]|$)"
+_STUDDABLE_RE = r"(под|під)\s+шип"
 _STUDDED_SQL = (
-    r"(COALESCE(p.description, '') ~* '(^|[^а-яёіїєґa-z])шип([^а-яёіїєґa-z]|$)'"
-    r" AND COALESCE(p.description, '') !~* '(под|під)\s+шип')"
+    f"(COALESCE(p.description, '') ~* '{_STUD_WORD_RE}'"
+    f" AND COALESCE(p.description, '') !~* '{_STUDDABLE_RE}')"
 )
 # RunFlat: 1034 of 60578 passenger SKU, markers RunFlat / Run Flat / ZP /
 # SSR / ROF / RFT in ``description``.
@@ -45,7 +47,26 @@ _RUNFLAT_COLUMN_SQL = f"(p.description ~* '{_RUNFLAT_RE}') IS TRUE"
 # XL (reinforced): ``load_rating`` holds only the index (no «XL» on any of
 # 68814 rows, prod 2026-09-28); 1C writes the fact into ``description`` —
 # «… Pilot Alpin 5 XL NF0 [103V]» (3876 rows). ``commercial`` is a column.
-_XL_SQL = r"COALESCE(p.description, '') ~* '(^|[^a-z])xl([^a-z]|$)|extra\s*load|reinforced'"
+_XL_RE = r"(^|[^a-z])xl([^a-z]|$)|extra\s*load|reinforced"
+_XL_SQL = f"COALESCE(p.description, '') ~* '{_XL_RE}'"
+#: Per-row fallback facts of the offer (``studded`` / ``xl`` on the item),
+#: written apart from the filter expressions as ``_RUNFLAT_COLUMN_SQL`` is,
+#: so a filter stays absent from an unfiltered query. «Під шип» also
+#: contains the word «шип»: ``_tire_item`` reads ``desc_studdable`` first.
+_STUD_WORD_COLUMN_SQL = f"(p.description ~* '{_STUD_WORD_RE}') IS TRUE"
+_STUDDABLE_COLUMN_SQL = f"(p.description ~* '{_STUDDABLE_RE}') IS TRUE"
+_XL_COLUMN_SQL = f"(p.description ~* '{_XL_RE}') IS TRUE"
+
+# ── Tyre attributes from tshina (``tire_attributes``, migration 066) ────
+# ``GET /api/v1/tire-attributes`` of the tshina Data API (1C attribute 26
+# for studs, canonical per tshina's answer of 2026-10-26), LEFT JOINed by
+# SKU. An attribute, when the row has one, wins over the ``description``
+# regexes above; those stay the fallback for a SKU the sync has not
+# reached. ``studded`` NULL means «not applicable», not «non-studded».
+_ATTR_STUDS: dict[str, str] = {"ship": "studded", "pod_ship": "studdable", "no_ship": "friction"}
+#: ``tire_models.seasonality`` of a winter tyre (the 1C sync normalises to
+#: ``winter``; the search filter also accepts the 1C spelling).
+_WINTER_SEASONS = frozenset({"winter", "зимова", "зимняя"})
 
 #: Rows the offer ranking chooses from (in-stock passenger SKU of one size
 #: and season: at most ~110 on prod 2026-09-28).
@@ -1563,11 +1584,17 @@ class StoreClient:
                    COALESCE(s.stock_quantity, 0) AS stock_quantity,
                    {_RUNFLAT_COLUMN_SQL} AS runflat,
                    l.energy_class AS eu_fuel, l.wet_grip_class AS eu_wet,
-                   l.noise_db AS eu_noise_db
+                   l.noise_db AS eu_noise_db,
+                   a.studded AS attr_studded, a.is_xl AS attr_xl,
+                   a.load_index AS load_index, a.speed_index AS speed_index,
+                   {_STUD_WORD_COLUMN_SQL} AS desc_studded,
+                   {_STUDDABLE_COLUMN_SQL} AS desc_studdable,
+                   {_XL_COLUMN_SQL} AS desc_xl
             FROM tire_products p
             JOIN tire_models m ON p.model_id = m.id
             LEFT JOIN tire_stock s ON p.sku = s.sku AND s.trading_network = :network
             LEFT JOIN tire_eu_labels l ON l.sku = p.sku
+            LEFT JOIN tire_attributes a ON a.sku = p.sku
             WHERE {where_clause}
             ORDER BY {order}
             LIMIT :result_limit
@@ -1591,10 +1618,48 @@ class StoreClient:
         }
         if row.get("runflat") is True:
             item["runflat"] = True
+        studs = StoreClient._studs(row)
+        if studs:
+            item["studded"] = studs
+        if StoreClient._is_xl(row):
+            item["xl"] = True
+        for key in ("load_index", "speed_index"):
+            value = row.get(key)
+            if value is not None and str(value).strip():
+                item[key] = str(value).strip()
         label = StoreClient._eu_label(row)
         if label:
             item["eu_label"] = label
         return item
+
+    @staticmethod
+    def _studs(row: Any) -> str | None:
+        """``"studded"`` / ``"studdable"`` / ``"friction"`` of a winter row.
+
+        The tshina attribute (``attr_studded``) wins; a row without one falls
+        back to the ``description`` regexes (``desc_studdable`` before
+        ``desc_studded`` — «під шип» contains «шип»). Not a winter tyre, or a
+        row without the columns (another query) → ``None``, so the item
+        carries no ``studded`` key at all.
+        """
+        if str(row.get("season") or "").strip().lower() not in _WINTER_SEASONS:
+            return None
+        attr = _ATTR_STUDS.get(str(row.get("attr_studded") or ""))
+        if attr:
+            return attr
+        if row.get("desc_studded") is None:
+            return None
+        if row.get("desc_studdable") is True:
+            return "studdable"
+        return "studded" if row.get("desc_studded") is True else "friction"
+
+    @staticmethod
+    def _is_xl(row: Any) -> bool:
+        """XL of a row: the tshina ``is_xl`` when set, else the ``description`` regex."""
+        attr = row.get("attr_xl")
+        if attr is not None:
+            return attr is True
+        return row.get("desc_xl") is True
 
     @staticmethod
     def _eu_label(row: Any) -> dict[str, Any]:

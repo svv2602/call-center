@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+import json
+from typing import Any
+
 from src.agent.tool_result_compressor import compress_tool_result
+from src.store_client.client import StoreClient
 
 
 class TestCompressToolResult:
@@ -298,3 +302,100 @@ class TestCompressToolResult:
         result = compress_tool_result("book_fitting", data)
         assert '"booking_id":"b-1"' in result
         assert '"status":"confirmed"' in result
+
+
+# ── Season, studs, XL and indices of each offered tyre (sales only) ──────
+
+
+def _catalog_row(**over: Any) -> dict[str, Any]:
+    """A row as ``StoreClient._query_tire_rows`` selects it."""
+    row: dict[str, Any] = {
+        "id": "0101",
+        "brand": "Nokian",
+        "model": "Hakkapeliitta R5",
+        "size": "205/55 R16",
+        "season": "winter",
+        "price": 5120,
+        "stock_quantity": 8,
+        "runflat": False,
+        "eu_fuel": None,
+        "eu_wet": None,
+        "eu_noise_db": None,
+        "attr_studded": None,
+        "attr_xl": None,
+        "load_index": None,
+        "speed_index": None,
+        "desc_studded": False,
+        "desc_studdable": False,
+        "desc_xl": False,
+    }
+    row.update(over)
+    return row
+
+
+def _tyre_fixture() -> dict[str, Any]:
+    """A ``search_tires`` result built by ``_tire_item`` from catalogue rows."""
+    rows = [
+        _catalog_row(attr_studded="ship", attr_xl=True, load_index="94", speed_index="T"),
+        _catalog_row(
+            id="0102",
+            brand="Michelin",
+            model="X-Ice North 4",
+            price=6400,
+            attr_studded="pod_ship",
+            load_index="91",
+            speed_index="T",
+            desc_studded=True,
+        ),
+        _catalog_row(id="0103", brand="Kumho", model="WinterCraft WI51", price=3300),
+        _catalog_row(id="0104", brand="Hankook", model="W330", price=3000, desc_studded=True),
+    ]
+    items = [StoreClient._tire_item(row) for row in rows]
+    return {"total": len(items), "items": items}
+
+
+#: ``compress_tool_result("search_tires", _tyre_fixture())`` on HEAD ``4ad037e``
+#: (before the fields reached the model) — sales off must not move a byte.
+_SALES_OFF_HEAD = (
+    '{"total":4,"items":['
+    '{"brand":"Nokian","model":"Hakkapeliitta R5","size":"205/55 R16","price":5120,'
+    '"in_stock":true},'
+    '{"brand":"Michelin","model":"X-Ice North 4","size":"205/55 R16","price":6400,'
+    '"in_stock":true},'
+    '{"brand":"Kumho","model":"WinterCraft WI51","size":"205/55 R16","price":3300,'
+    '"in_stock":true}]}'
+)
+
+
+def test_sales_off_output_is_byte_identical() -> None:
+    assert compress_tool_result("search_tires", _tyre_fixture()) == _SALES_OFF_HEAD
+    assert (
+        compress_tool_result("search_tires", _tyre_fixture(), sales_enabled=False)
+        == _SALES_OFF_HEAD
+    )
+
+
+def test_sales_on_keeps_the_facts_of_each_shown_tyre() -> None:
+    out = json.loads(compress_tool_result("search_tires", _tyre_fixture(), sales_enabled=True))
+    items = out["items"]
+    assert len(items) == 3
+    assert [i.get("studded") for i in items] == ["studded", "studdable", "friction"]
+    assert [i.get("season") for i in items] == ["winter"] * 3
+    assert items[0]["xl"] is True
+    assert "xl" not in items[1]
+    assert "xl" not in items[2]
+    assert [(i.get("load_index"), i.get("speed_index")) for i in items] == [
+        ("94", "T"),
+        ("91", "T"),
+        (None, None),
+    ]
+    assert "load_index" not in items[2]
+    assert "id" not in items[0]
+
+
+def test_sales_on_summer_tyre_carries_no_studs_key() -> None:
+    row = _catalog_row(season="summer", attr_studded="no_ship", desc_studded=True)
+    result = {"total": 1, "items": [StoreClient._tire_item(row)]}
+    item = json.loads(compress_tool_result("search_tires", result, sales_enabled=True))["items"][0]
+    assert item["season"] == "summer"
+    assert "studded" not in item
