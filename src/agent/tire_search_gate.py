@@ -23,10 +23,17 @@ Loop-breakers — a forced call must tell a new request from a repeat:
 
 - once per turn (`ForcedTireSearch`);
 - the caller's utterance of this turn must itself say something about the
-  tyres (size, season, studs, brand, RunFlat/XL/C) — a delivery question asked
-  while a complete request sits unsearched is not a search request;
+  tyres (size, season, studs, brand, RunFlat/XL/C, a need, a load index) — a
+  delivery question asked while a complete request sits unsearched is not a
+  search request;
 - not when the arguments are already covered by the last ``search_tires`` of
-  the history (the same request was searched — «уже шукали»);
+  the history AND this utterance names no need / load index that was not in
+  force at that search («уже шукали»). Needs and the load index are not
+  ``search_tires`` arguments — the handler takes them from the session — so
+  «для мене важливіша тиша» after a shown offer repeats the arguments of the
+  last search and is still a new request (wave 8-T, R26): the offer is ranked
+  anew by it. The same need said again is in the history before that search
+  and searches nothing;
 - not on a fitting request (``_FITTING_REQUEST_RE``) or a wheel request.
 
 Sales scope only: with ``sales_enabled`` off nothing is armed.
@@ -60,7 +67,22 @@ _TECH_FLAGS = frozenset({"runflat", "xl", "commercial"})
 #: What an utterance must say (in ``merge_tire_query`` terms) to be a request.
 #: ``diameter`` — the answer to «Який діаметр?»: with the car's one factory
 #: size of it (`vehicle_lookup_gate`) it completes the request.
-_REQUEST_KEYS = ("sizes", "rear_size", "season", "nail", "brands", "tech", "diameter")
+#: ``needs`` / ``load_index_min`` (wave 8-T) — «для мене важливіша тиша»,
+#: «індекс навантаження від 102»: they reorder / filter the offer.
+_REQUEST_KEYS = (
+    "sizes",
+    "rear_size",
+    "season",
+    "nail",
+    "brands",
+    "tech",
+    "diameter",
+    "needs",
+    "load_index_min",
+)
+#: What the session carries about the offer but ``search_tires`` takes no
+#: argument for — the handler reads them from ``session.tire_query``.
+_NEED_KEYS = ("needs", "load_index_min")
 
 
 def _size(text: Any) -> tuple[int, int, int] | None:
@@ -122,9 +144,10 @@ def _norm(value: Any) -> Any:
     return value
 
 
-def last_search_args(history: list[dict[str, Any]]) -> dict[str, Any] | None:
-    """The arguments of the last ``search_tires`` call in the history, or ``None``."""
-    for msg in reversed(history):
+def _last_search(history: list[dict[str, Any]]) -> tuple[int, dict[str, Any]] | None:
+    """Index of the message with the last ``search_tires`` call and its arguments."""
+    for i in range(len(history) - 1, -1, -1):
+        msg = history[i]
         if msg.get("role") != "assistant" or not isinstance(msg.get("content"), list):
             continue
         for block in reversed(msg["content"]):
@@ -134,8 +157,14 @@ def last_search_args(history: list[dict[str, Any]]) -> dict[str, Any] | None:
                 and block.get("name") == SEARCH_TOOL
             ):
                 args = block.get("input")
-                return args if isinstance(args, dict) else {}
+                return i, args if isinstance(args, dict) else {}
     return None
+
+
+def last_search_args(history: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The arguments of the last ``search_tires`` call in the history, or ``None``."""
+    last = _last_search(history)
+    return None if last is None else last[1]
 
 
 def already_searched(args: dict[str, Any], history: list[dict[str, Any]]) -> bool:
@@ -149,6 +178,53 @@ def already_searched(args: dict[str, Any], history: list[dict[str, Any]]) -> boo
     if last is None:
         return False
     return all(_norm(last.get(k)) == _norm(v) for k, v in args.items())
+
+
+def _caller_text(msg: dict[str, Any]) -> str:
+    """The caller's words of a history message ('' for the bot and tool results)."""
+    if msg.get("role") != "user":
+        return ""
+    content = msg.get("content")
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        return " ".join(
+            str(b.get("text", ""))
+            for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        ).strip()
+    return ""
+
+
+def needs_already_searched(user_text: str, history: list[dict[str, Any]]) -> bool:
+    """True when the needs / load index this utterance names were in force at the last search.
+
+    Replays ``merge_tire_query`` (its needs and load-index keys only, refusals
+    included) over the caller's lines BEFORE the last ``search_tires`` of the
+    history: that is what the handler ranked and filtered that search by. An
+    utterance that names neither is covered — the arguments decide. No search
+    yet → not covered.
+    """
+    from src.core.pipeline import merge_tire_query
+
+    said = merge_tire_query({}, user_text or "", consult_started=True)
+    wanted = list(said.get("needs") or [])
+    load = said.get("load_index_min")
+    if not wanted and load is None:
+        return True
+    last = _last_search(history)
+    if last is None:
+        return False
+    state: dict[str, Any] = {}
+    for msg in history[: last[0]]:
+        text = _caller_text(msg)
+        if text:
+            merged = merge_tire_query(state, text, consult_started=True)
+            state = {k: merged[k] for k in _NEED_KEYS if k in merged}
+    in_force = state.get("needs") or []
+    if any(n not in in_force for n in wanted):
+        return False
+    return load is None or load == state.get("load_index_min")
 
 
 def last_assistant_text(history: list[dict[str, Any]]) -> str:
@@ -226,7 +302,7 @@ class ForcedTireSearch:
             # «225/45 R17 замість 205/55 R16?» names a size the specialist
             # picks — the code must not search it by itself.
             return None
-        if already_searched(args, history):
+        if already_searched(args, history) and needs_already_searched(user_text, history):
             return None
         self._fired = True
         logger.info(

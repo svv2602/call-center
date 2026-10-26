@@ -28,6 +28,7 @@ from src.agent.streaming_loop import StreamingAgentLoop
 from src.agent.tire_search_gate import (
     ForcedTireSearch,
     already_searched,
+    needs_already_searched,
     search_args_from_query,
     turn_names_the_tyres,
 )
@@ -312,6 +313,72 @@ def test_once_per_turn_and_the_model_may_still_search(run: Any) -> None:
     assert rec.ran[1] == other
 
 
+# ── Wave 8-T: a need named after a shown offer searches again ─────────
+
+_SUMMER = {"width": 205, "profile": 55, "diameter": 16, "season": "summer"}
+_SHOWN = ("літні 205/55 R16", [], "Є Firestone, Michelin і Hankook.")
+
+
+@LOOPS
+@pytest.mark.parametrize("need", ["для мене важливіша тиша", "щоб тихі були", "важливо на мокрому"])
+def test_a_need_after_the_offer_searches_again(run: Any, need: str) -> None:
+    rec, _, seen = run([_SHOWN, (need, [], "Найтихіша з них — Michelin.")])
+    # turn 1 forced; turn 2 the same arguments again — the handler ranks by the need
+    assert rec.ran == [_SUMMER, _SUMMER]
+    assert rec.audited[1] == ("search_tires", _SUMMER)
+    assert _has_tool_result(seen[1][0][-2:])  # before round 1 of turn 2
+
+
+@LOOPS
+def test_the_same_need_again_is_not_searched_again(run: Any) -> None:
+    need = "для мене важливіша тиша"
+    rec, _, _ = run(
+        [_SHOWN, (need, [], "Найтихіша — Michelin."), (need, [], "Так, Michelin найтихіша.")]
+    )
+    assert rec.ran == [_SUMMER, _SUMMER]  # turn 3 repeats turn 2: no search
+
+
+@LOOPS
+def test_a_new_need_after_a_need_searches_again(run: Any) -> None:
+    rec, _, _ = run(
+        [
+            _SHOWN,
+            ("для мене важливіша тиша", [], "Найтихіша — Michelin."),
+            ("а ще важливо на мокрому", [], "На мокрому — Michelin."),
+        ]
+    )
+    assert rec.ran == [_SUMMER, _SUMMER, _SUMMER]
+
+
+@LOOPS
+def test_a_load_index_after_the_offer_searches_again(run: Any) -> None:
+    rec, _, _ = run(
+        [
+            _SHOWN,
+            ("індекс навантаження від 94", [], "Усі три — 94 і вище."),
+            ("індекс навантаження від 94", [], "Так, від 94."),
+            ("індекс навантаження від 96", [], "Від 96 — Michelin."),
+        ]
+    )
+    assert rec.ran == [_SUMMER, _SUMMER, _SUMMER]  # turn 3 repeats turn 2
+
+
+@LOOPS
+def test_a_bare_need_without_a_size_searches_nothing(run: Any) -> None:
+    rec, _, _ = run([("для мене важливіша тиша", [], "Який у вас розмір?")])
+    assert rec.ran == []
+
+
+@LOOPS
+def test_a_need_with_sales_off_searches_nothing(run: Any) -> None:
+    rec, _, _ = run(
+        [("для мене важливіша тиша", [], "Michelin.")],
+        sales=False,
+        query={"sizes": ["205/55 R16"], "season": "summer"},
+    )
+    assert rec.ran == []
+
+
 @LOOPS
 def test_sales_off_forces_nothing(run: Any) -> None:
     rec, replies, seen = run([(BUDGET, [], "Уточніть авто.")], sales=False)
@@ -434,8 +501,60 @@ class TestAlreadySearched:
         assert not already_searched(_WINTER_ARGS, [{"role": "user", "content": "x"}])
 
 
+class TestNeedsAlreadySearched:
+    QUIET = "для мене важливіша тиша"
+
+    def test_no_need_named_is_covered(self) -> None:
+        assert needs_already_searched("так, літні 205/55 R16", _searched(_WINTER_ARGS))
+
+    def test_no_search_yet(self) -> None:
+        assert not needs_already_searched(self.QUIET, [{"role": "user", "content": self.QUIET}])
+
+    def test_a_need_said_before_the_last_search_is_covered(self) -> None:
+        hist = [{"role": "user", "content": self.QUIET}, *_searched(_WINTER_ARGS)]
+        assert needs_already_searched(self.QUIET, [*hist, {"role": "user", "content": self.QUIET}])
+
+    def test_a_need_said_after_the_last_search_is_new(self) -> None:
+        hist = [*_searched(_WINTER_ARGS), {"role": "user", "content": self.QUIET}]
+        assert not needs_already_searched(self.QUIET, hist)
+
+    def test_one_new_need_among_known_ones_is_new(self) -> None:
+        hist = [{"role": "user", "content": self.QUIET}, *_searched(_WINTER_ARGS)]
+        assert not needs_already_searched("тихі і щоб на мокрому тримали", hist)
+
+    def test_a_need_refused_before_the_last_search_is_new(self) -> None:
+        hist = [
+            {"role": "user", "content": self.QUIET},
+            {"role": "user", "content": "шум не важливий"},
+            *_searched(_WINTER_ARGS),
+        ]
+        assert not needs_already_searched(self.QUIET, hist)
+
+    def test_the_load_index_value_counts(self) -> None:
+        hist = [{"role": "user", "content": "індекс навантаження від 94"}, *_searched(_WINTER_ARGS)]
+        assert needs_already_searched("індекс навантаження від 94", hist)
+        assert not needs_already_searched("індекс навантаження від 96", hist)
+
+    def test_text_blocks_are_the_callers_words(self) -> None:
+        hist = [
+            {"role": "user", "content": [{"type": "text", "text": self.QUIET}]},
+            *_searched(_WINTER_ARGS),
+        ]
+        assert needs_already_searched(self.QUIET, hist)
+
+
 class TestTurnNamesTheTyres:
-    @pytest.mark.parametrize("text", [STUDDED, BUDGET, "а є Michelin?", "а зимові є?"])
+    @pytest.mark.parametrize(
+        "text",
+        [
+            STUDDED,
+            BUDGET,
+            "а є Michelin?",
+            "а зимові є?",
+            "для мене важливіша тиша",
+            "індекс навантаження від 102",
+        ],
+    )
     def test_yes(self, text: str) -> None:
         assert turn_names_the_tyres(text)
 
@@ -470,6 +589,21 @@ class TestForcedTireSearch:
         assert (
             ForcedTireSearch(sales_enabled=True, tools=no_tool).plan(self._Q, BUDGET, hist) is None
         )
+
+    def test_a_new_need_over_covered_args_is_planned(self) -> None:
+        quiet = "для мене важливіша тиша"
+        query = {**self._Q, "needs": ["quiet"]}
+        summer = search_args_from_query(self._Q)
+        assert summer is not None
+        new = [*_searched(summer), {"role": "user", "content": quiet}]
+        gate = ForcedTireSearch(sales_enabled=True, tools=_TOOLS)
+        assert gate.plan(query, quiet, new) == summer
+        assert gate.plan(query, quiet, new) is None  # once per turn
+        # the need said before the last search, then again: «уже шукали»
+        repeat = [{"role": "user", "content": quiet}, *_searched(summer)]
+        repeat.append({"role": "user", "content": quiet})
+        again = ForcedTireSearch(sales_enabled=True, tools=_TOOLS)
+        assert again.plan(query, quiet, repeat) is None
 
     def test_a_non_stock_size_question_is_not_searched(self) -> None:
         # «225/45 R17 замість 205/55 R16?» — the specialist picks it
