@@ -21,9 +21,10 @@ Rules (`RULES`, first match names the refusal):
   checklist) and no shown ``rating`` equals the number said.
 
 - ``eu_class`` (`Dialog/EuClassClaimGuard.php`) — «клас A по мокрій /
-  категорія B економії палива / 71 дБ» about the one named tyre, against its
-  ``eu_label`` (``wet`` / ``fuel`` / ``noise_db``). Unlike tshina, a tyre
-  without the value is not a reason for silence: the class said is made up.
+  категорія B економії палива / клас шуму B / 71 дБ» about the one named
+  tyre, against its ``eu_label`` (``wet`` / ``fuel`` / ``noise_class`` /
+  ``noise_db``). Unlike tshina, a tyre without the value is not a reason for
+  silence: the class said is made up.
   Silent: no axis named with the letter («має клас C»), a dB range, two
   axes and the letter matches either.
 - ``stud`` (`Dialog/StudClaimGuard.php`) — «шипована / з шипами» unless
@@ -425,9 +426,9 @@ _EU_AXES: dict[str, re.Pattern[str]] = {
         rf"|сопротивлен{_L}*\s+качен|опір{_L}*\s+кочен",
         re.IGNORECASE,
     ),
-    # The label carries no noise *class*, only ``noise_db``: a noise letter
-    # is backed by nothing.
-    "noise": re.compile(r"(?<!\w)шум|шумн|гучн", re.IGNORECASE),
+    # The noise letter (A/B/C) is checked against ``noise_class``
+    # (``tire_eu_labels.noise_class``); a label without it backs no letter.
+    "noise_class": re.compile(r"(?<!\w)шум|шумн|гучн", re.IGNORECASE),
 }
 #: A class letter, Latin, standalone and upper case: «клас C», «(C)», not «+7°C».
 _EU_LETTER = re.compile(r"(?<![^\W\d_]|[\d\-+°º])([A-G])(?![^\W_]|-)")

@@ -52,7 +52,7 @@ ITEMS = [
         "Blizzak 6",
         5200,
         studded="friction",
-        eu_label={"fuel": "C", "wet": "B", "noise_db": 71},
+        eu_label={"fuel": "C", "wet": "B", "noise_db": 71, "noise_class": "B"},
     ),
     _item(
         "2",
@@ -69,7 +69,7 @@ ITEMS = [
         "A702",
         2950,
         studded="friction",
-        eu_label={"fuel": "C", "wet": "C", "noise_db": 70},
+        eu_label={"fuel": "C", "wet": "C", "noise_db": 70, "noise_class": "A"},
     ),
     _item(
         "5",
@@ -192,9 +192,100 @@ class TestEuClass:
         assert _fired(sentence) == {RULE_EU_CLASS}
         assert _judge(sentence) == REPLACEMENTS[RULE_EU_CLASS]
 
-    def test_noise_class_letter_is_backed_by_nothing(self) -> None:
-        # The label carries ``noise_db``, no noise class.
-        assert _fired("Bridgestone Blizzak 6 має клас шуму B.") == {RULE_EU_CLASS}
+    # ── noise class (``eu_label.noise_class`` = tire_eu_labels.noise_class) ──
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            "Bridgestone Blizzak 6 має клас шуму B.",
+            # Cyrillic twin after «класу».
+            "Bridgestone Blizzak 6 має шум класу В.",
+            "У Bridgestone Blizzak 6 класс шума B.",
+            "Aplus A702 — клас шуму A, 70 дБ.",
+            # Two axes, one letter matching either: wet B / noise B, fuel C / noise B.
+            "Bridgestone Blizzak 6 має клас B по мокрій і за шумом.",
+            "Bridgestone Blizzak 6 має клас C за економією та шумом.",
+        ],
+    )
+    def test_right_noise_class_passes(self, sentence: str) -> None:
+        assert _fired(sentence) == set()
+        assert _judge(sentence) == sentence
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            "Bridgestone Blizzak 6 має клас шуму A.",
+            # C is Blizzak's fuel letter, B its wet one — noise is checked
+            # against ``noise_class`` alone.
+            "Bridgestone Blizzak 6 має клас шуму C.",
+            # Aplus: fuel C, wet C, noise A.
+            "Aplus A702 — клас шуму C.",
+            "Aplus A702 має клас шуму B.",
+        ],
+    )
+    def test_wrong_noise_class_is_replaced(self, sentence: str) -> None:
+        assert _fired(sentence) == {RULE_EU_CLASS}
+        assert _judge(sentence) == REPLACEMENTS[RULE_EU_CLASS]
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            # Hakkapeliitta: fuel D, wet C, noise_db 72, no ``noise_class``.
+            "Nokian Hakkapeliitta 10 має клас шуму C.",
+            "Nokian Hakkapeliitta 10 має клас шуму D.",
+            # No label at all.
+            "Firestone WinterHawk 4 має клас шуму A.",
+        ],
+    )
+    def test_noise_class_without_the_value_is_made_up(self, sentence: str) -> None:
+        assert _fired(sentence) == {RULE_EU_CLASS}
+
+    def test_right_noise_class_does_not_excuse_a_wrong_db(self) -> None:
+        assert _fired("Bridgestone Blizzak 6 — клас шуму B, 72 дБ.") == {RULE_EU_CLASS}
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            "Чи має Bridgestone Blizzak 6 клас шуму A?",
+            "Bridgestone Blizzak 6 не має класу шуму A.",
+            "Bridgestone Blizzak 6 тихіша, ніж модель з класом шуму C.",
+        ],
+    )
+    def test_ambiguous_noise_class_sentence_is_left_alone(self, sentence: str) -> None:
+        assert _fired(sentence) == set()
+
+    @pytest.mark.parametrize(
+        ("column", "fired"),
+        [("B", set()), (" b ", set()), ("A", {RULE_EU_CLASS}), (None, {RULE_EU_CLASS})],
+    )
+    def test_noise_class_from_a_catalogue_row(self, column: str | None, fired: set[str]) -> None:
+        """The item is ``StoreClient._tire_item`` over a row shaped like the SELECT."""
+        from src.store_client.client import StoreClient
+
+        row = {
+            "id": "1",
+            "brand": "Bridgestone",
+            "model": "Blizzak 6",
+            "size": "215/55 R16",
+            "season": "winter",
+            "price": 5200,
+            "stock_quantity": 4,
+            "runflat": False,
+            "eu_fuel": "C",
+            "eu_wet": "B",
+            "eu_noise_db": 71,
+            "eu_noise_class": column,
+            "attr_studded": "no_ship",
+            "attr_xl": None,
+            "load_index": None,
+            "speed_index": None,
+            "desc_studded": False,
+            "desc_studdable": False,
+            "desc_xl": False,
+        }
+        state = TireClaimState(sales_enabled=True)
+        state.note("search_tires", {"total": 1, "items": [StoreClient._tire_item(row)]})
+        assert _fired("Bridgestone Blizzak 6 має клас шуму B.", state) == fired
 
     def test_she_refers_to_the_tyre_named_before(self) -> None:
         text = "Раджу Bridgestone Blizzak 6. Вона має клас A по мокрій."

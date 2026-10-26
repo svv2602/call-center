@@ -1634,7 +1634,7 @@ class StoreClient:
                    COALESCE(s.stock_quantity, 0) AS stock_quantity,
                    {_RUNFLAT_COLUMN_SQL} AS runflat,
                    l.energy_class AS eu_fuel, l.wet_grip_class AS eu_wet,
-                   l.noise_db AS eu_noise_db,
+                   l.noise_db AS eu_noise_db, l.noise_class AS eu_noise_class,
                    a.studded AS attr_studded, a.is_xl AS attr_xl,
                    a.load_index AS load_index, a.speed_index AS speed_index,
                    {_STUD_WORD_COLUMN_SQL} AS desc_studded,
@@ -1715,9 +1715,10 @@ class StoreClient:
     def _eu_label(row: Any) -> dict[str, Any]:
         """The EU label of a catalogue row (``tire_eu_labels``, LEFT JOIN).
 
-        ``{"fuel": "C", "wet": "B", "noise_db": 71}`` — only the fields the
-        label has; no label row (or a row without the columns) → ``{}``, so
-        the item carries no ``eu_label`` key at all.
+        ``{"fuel": "C", "wet": "B", "noise_db": 71, "noise_class": "B"}`` —
+        only the fields the label has; no label row (or a row without the
+        columns) → ``{}``, so the item carries no ``eu_label`` key at all.
+        ``noise_class`` is the EU noise letter A/B/C; anything else → no key.
         """
         label: dict[str, Any] = {}
         for key, column in (("fuel", "eu_fuel"), ("wet", "eu_wet")):
@@ -1727,6 +1728,9 @@ class StoreClient:
         noise = row.get("eu_noise_db")
         if noise is not None:
             label["noise_db"] = int(noise)
+        noise_class = str(row.get("eu_noise_class") or "").strip().upper()
+        if noise_class in ("A", "B", "C"):
+            label["noise_class"] = noise_class
         return label
 
     async def _search_tires_db(self, network: str = "", **params: Any) -> dict[str, Any]:

@@ -33,6 +33,7 @@ WINTER = {
     "eu_fuel": None,
     "eu_wet": None,
     "eu_noise_db": None,
+    "eu_noise_class": None,
     "attr_studded": None,
     "attr_xl": None,
     "load_index": None,
@@ -111,6 +112,20 @@ def test_query_left_joins_the_attributes_by_sku() -> None:
         assert column in sql
     # a plain JOIN would drop every tyre the sync has not reached yet
     assert "JOIN tire_attributes" not in sql.replace("LEFT JOIN tire_attributes", "")
+
+
+def test_query_selects_the_eu_label_with_the_noise_class() -> None:
+    client, engine = _client([])
+    asyncio.run(client._query_tire_rows("ProKoleso", {"width": 205}))
+    sql = _squash(engine.queries[0])
+    assert "LEFT JOIN tire_eu_labels l ON l.sku = p.sku" in sql
+    for column in (
+        "l.energy_class AS eu_fuel",
+        "l.wet_grip_class AS eu_wet",
+        "l.noise_db AS eu_noise_db",
+        "l.noise_class AS eu_noise_class",
+    ):
+        assert column in sql
 
 
 def test_fallback_columns_are_the_description_regexes() -> None:
@@ -241,6 +256,32 @@ def test_empty_index_has_no_key(value: str | None) -> None:
     assert "speed_index" not in item
 
 
+# ── EU noise class ───────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(("value", "expected"), [("B", "B"), (" a ", "A"), ("c", "C")])
+def test_noise_class_goes_on_the_label(value: str, expected: str) -> None:
+    row = {**SUMMER, "eu_fuel": "C", "eu_wet": "B", "eu_noise_db": 71, "eu_noise_class": value}
+    label = StoreClient._tire_item(row)["eu_label"]
+    assert label == {"fuel": "C", "wet": "B", "noise_db": 71, "noise_class": expected}
+
+
+@pytest.mark.parametrize("value", [None, "", "  ", "D", "X", "AB", 1])
+def test_missing_or_bad_noise_class_has_no_key(value: Any) -> None:
+    row = {**SUMMER, "eu_fuel": "C", "eu_noise_db": 71, "eu_noise_class": value}
+    label = StoreClient._tire_item(row)["eu_label"]
+    assert label == {"fuel": "C", "noise_db": 71}
+
+
+def test_noise_class_alone_makes_a_label() -> None:
+    item = StoreClient._tire_item({**SUMMER, "eu_noise_class": "A"})
+    assert item["eu_label"] == {"noise_class": "A"}
+
+
+def test_no_label_columns_no_eu_label() -> None:
+    assert "eu_label" not in StoreClient._tire_item(SUMMER)
+
+
 # ── through the search ───────────────────────────────────────────────────
 
 
@@ -321,7 +362,9 @@ CREATE TABLE tire_products (
     diameter INTEGER, description TEXT, commercial BOOLEAN
 );
 CREATE TABLE tire_stock (sku TEXT, trading_network TEXT, price REAL, stock_quantity INTEGER);
-CREATE TABLE tire_eu_labels (sku TEXT, energy_class TEXT, wet_grip_class TEXT, noise_db INTEGER);
+CREATE TABLE tire_eu_labels (
+    sku TEXT, energy_class TEXT, wet_grip_class TEXT, noise_db INTEGER, noise_class TEXT
+);
 CREATE TABLE tire_attributes (
     sku TEXT PRIMARY KEY, studded TEXT, is_xl BOOLEAN, load_index TEXT, speed_index TEXT
 );
@@ -345,6 +388,13 @@ _CATALOGUE: list[tuple[str, str, str, tuple[str | None, bool | None] | None]] = 
     ("x-null-desc-xl", "summer", "Hankook K135 XL [99Y]", (None, None)),
     ("x-norow-desc-xl", "summer", "Kumho PS71 Extra Load [99Y]", None),
     ("s-norow-plain", "summer", "Continental PC7 [95Y]", None),
+]
+
+
+#: ``tire_eu_labels`` rows: ``(sku, energy_class, wet_grip_class, noise_db, noise_class)``.
+_LABELS: list[tuple[str, str, str, int, str | None]] = [
+    ("s-norow-plain", "C", "B", 71, "B"),
+    ("x-null-desc-xl", "B", "A", 69, None),
 ]
 
 
@@ -417,6 +467,8 @@ class _SqliteEngine:
                 self.db.execute(
                     "INSERT INTO tire_attributes VALUES (?, ?, ?, NULL, NULL)", (sku, *attr)
                 )
+        for label in _LABELS:
+            self.db.execute("INSERT INTO tire_eu_labels VALUES (?, ?, ?, ?, ?)", label)
 
     def connect(self) -> _SqliteConn:
         return _SqliteConn(self)
@@ -438,6 +490,19 @@ def test_sqlite_stand_reads_the_whole_catalogue() -> None:
     assert items["w-null-desc-podship"]["studded"] == "studdable"
     assert items["x-attr-true"]["xl"] is True
     assert "xl" not in items["x-attr-false-desc-xl"]
+
+
+def test_sqlite_stand_carries_the_noise_class() -> None:
+    """The real SELECT over ``tire_eu_labels``: the class when set, no key when NULL."""
+    items = _items({})
+    assert items["s-norow-plain"]["eu_label"] == {
+        "fuel": "C",
+        "wet": "B",
+        "noise_db": 71,
+        "noise_class": "B",
+    }
+    assert items["x-null-desc-xl"]["eu_label"] == {"fuel": "B", "wet": "A", "noise_db": 69}
+    assert "eu_label" not in items["w-noship-desc-ship"]
 
 
 @pytest.mark.parametrize(
