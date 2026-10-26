@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import json
 import uuid
-from typing import Any
+from typing import Any, ClassVar
 from unittest.mock import create_autospec, patch
 
 import pytest
@@ -313,6 +313,148 @@ class TestMergeTireQuery:
     )
     def test_ua_and_ru_forms(self, text: str, season: str) -> None:
         assert parse_tire_season(text) == season
+
+
+def _talk(*lines: str, state: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    """``session.tire_query`` after each caller line, merged turn by turn."""
+    states: list[dict[str, Any]] = []
+    current = dict(state or {})
+    for line in lines:
+        current = merge_tire_query(current, line)
+        states.append(current)
+    return states
+
+
+class TestBrandQuestionIsNotAFilter:
+    """Talk b1e72568 (tshina `0cb563847`): a question or «аналоги X» is not a choice of X."""
+
+    def test_the_talk(self) -> None:
+        states = _talk(
+            "зимові 235/55 R18",
+            "розкажіть детальніше про матадор",
+            "а аналоги матадора є?",
+            "а ціною до 6000 ще є варіанти?",
+        )
+        assert [s.get("brands") for s in states] == [None, None, None, None]
+        assert states[-1] == {
+            "sizes": ["235/55 R18"],
+            "season": "winter",
+            "budget": {"amount": 6000, "scope": None, "is_cap": True},
+        }
+
+    def test_analogs_drop_the_brand_chosen_before(self) -> None:
+        states = _talk("зимові 235/55 R18", "хочу матадор", "а аналоги матадора є?")
+        assert states[1]["brands"] == ["matador"]
+        assert "brands" not in states[2]
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "подробнее про матадор",
+            "расскажите о матадоре",
+            "что за Матадор?",
+            "розкажіть про мішлен",
+            "що скажете про Michelin?",
+        ],
+    )
+    def test_a_question_keeps_the_brands_collected(self, line: str) -> None:
+        start = {"sizes": ["235/55 R18"], "season": "winter", "brands": ["nokian"]}
+        assert _talk(line, state=start)[-1]["brands"] == ["nokian"]
+
+    @pytest.mark.parametrize(
+        ("line", "slug"),
+        [
+            ("хочу Matador", "matador"),
+            ("давайте Michelin", "michelin"),
+            ("Nokian є?", "nokian"),
+            ("а давайте мішлен", "michelin"),
+            ("возьму Мишлен", "michelin"),
+            ("хочу матадор, розкажіть про нього", "matador"),
+        ],
+    )
+    def test_a_choice_is_written_as_before(self, line: str, slug: str) -> None:
+        states = _talk("зимові 235/55 R18", line)
+        assert states[-1]["brands"] == [slug]
+
+    def test_bare_brand_answering_the_brand_question(self) -> None:
+        state = merge_tire_query(
+            {"sizes": ["235/55 R18"], "season": "winter"},
+            "Michelin",
+            last_bot_text="Яку марку розглядаєте?",
+        )
+        assert state["brands"] == ["michelin"]
+
+    def test_analogs_of_one_of_two(self) -> None:
+        start = {"sizes": ["235/55 R18"], "season": "winter"}
+        states = _talk("Матадор або Мішлен", "аналоги Matador", state=start)
+        assert states[0]["brands"] == ["matador", "michelin"]
+        assert states[1]["brands"] == ["michelin"]
+
+    @pytest.mark.parametrize(
+        "line",
+        [
+            "не матадор",
+            "без матадора",
+            "крім матадора",
+            "щось схоже на матадор",
+            "кроме матадора",
+            "вместо матадора",
+            "матадора не хочу",
+            "похожие на матадор есть?",
+        ],
+    )
+    def test_negation_and_ru_forms_drop_the_brand(self, line: str) -> None:
+        start = {"sizes": ["235/55 R18"], "season": "winter", "brands": ["matador"]}
+        assert "brands" not in _talk(line, state=start)[-1]
+
+    def test_instead_of_x_picks_y(self) -> None:
+        start = {"sizes": ["235/55 R18"], "season": "winter", "brands": ["matador"]}
+        assert _talk("давайте мішлен замість матадора", state=start)[-1]["brands"] == ["michelin"]
+
+
+class TestForcedSearchAfterAnalogs:
+    """``tire_search_gate`` reads the same merge: «аналоги матадора» searches no Matador."""
+
+    _TOOLS: ClassVar[list[dict[str, Any]]] = [{"name": "search_tires"}]
+
+    def _plan(self, *lines: str) -> dict[str, Any] | None:
+        from src.agent.tire_search_gate import ForcedTireSearch, accumulate_query
+
+        query: dict[str, Any] = {}
+        history: list[dict[str, Any]] = []
+        for line in lines:
+            query = accumulate_query(query, line, history, ())
+            history.append({"role": "user", "content": line})
+        return ForcedTireSearch(sales_enabled=True, tools=self._TOOLS).plan(
+            query, lines[-1], history
+        )
+
+    def test_control_a_chosen_brand_is_searched(self) -> None:
+        args = self._plan("зимові шиповані 235/55 R18", "хочу матадор")
+        assert args is not None and args["brand"] == "matador"
+
+    @pytest.mark.parametrize(
+        "lines",
+        [
+            ("зимові шиповані 235/55 R18", "хочу матадор", "а аналоги матадора, шиповані?"),
+            (
+                "зимові шиповані 235/55 R18",
+                "розкажіть про матадор",
+                "а аналоги матадора, шиповані?",
+            ),
+            ("зимові шиповані 235/55 R18", "хочу матадор", "а аналоги матадора є?"),
+        ],
+    )
+    def test_no_brand_after_analogs(self, lines: tuple[str, ...]) -> None:
+        args = self._plan(*lines)
+        assert args is None or "brand" not in args
+
+    def test_analogs_with_a_tyre_word_search_without_the_brand(self) -> None:
+        args = self._plan(
+            "зимові шиповані 235/55 R18", "хочу матадор", "а аналоги матадора, шиповані?"
+        )
+        assert args is not None
+        assert "brand" not in args
 
 
 class TestSessionRoundTrip:

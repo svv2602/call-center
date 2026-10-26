@@ -869,10 +869,17 @@ def merge_tire_query(
     ``consult_started``) every later utterance is read. A newer value
     overwrites an older one — the caller corrected themselves. Empty values
     are never stored (an empty list passes the progress-block filter).
+
+    Brands are a choice only: a question about a tyre («розкажіть про
+    матадор», `is_tire_question`) writes none, and a brand named as not wanted
+    («аналоги / замість / не матадор», `excluded_tire_brands`) is dropped from
+    what was collected — the last one leaves no ``brands`` key.
     """
     from src.agent.intent_classifier import sales_intents
     from src.agent.parsers.tire_query import (
+        excluded_tire_brands,
         extract_tire_brands,
+        is_tire_question,
         parse_budget,
         parse_nail_type,
         parse_quantity,
@@ -920,7 +927,12 @@ def merge_tire_query(
     if budget is not None:
         out["budget"] = {"amount": budget.amount, "scope": budget.scope, "is_cap": budget.is_cap}
     if brands:
-        out["brands"] = list(brands)
+        # Talk b1e72568 (tshina `0cb563847`): «розкажіть про матадор» put
+        # Matador into the filters and «аналоги матадора?» then searched Matador
+        # only. A question names no choice; «аналоги / замість / не X» drops X.
+        dropped = excluded_tire_brands(text) or []
+        chosen = [] if is_tire_question(text) else [b for b in brands if b not in dropped]
+        out["brands"] = chosen or [b for b in out.get("brands") or [] if b not in dropped]
     tech = parse_tech_requirements(text)
     if tech:
         out["tech"] = list(tech)

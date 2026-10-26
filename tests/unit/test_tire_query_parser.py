@@ -14,7 +14,9 @@ from src.agent.parsers.tire_query import (
     Budget,
     QuantityParse,
     TireSize,
+    excluded_tire_brands,
     extract_tire_brands,
+    is_tire_question,
     normalize_spoken_numbers,
     normalize_tire_brand,
     parse_budget,
@@ -416,6 +418,81 @@ def test_brand_none(text: str) -> None:
 
 def test_brands_in_order_without_duplicates() -> None:
     assert extract_tire_brands("мішлен чи конті, або знову мішлен") == ["michelin", "continental"]
+
+
+# Talk b1e72568 (tshina `0cb563847`): a question about a tyre and a brand
+# named as not wanted are not a choice of brand.
+@pytest.mark.parametrize(
+    "text",
+    [
+        "розкажіть детальніше про матадор",
+        "докладніше про Мішлен",
+        "що за шина Matador?",
+        "а як вам мішлен?",
+        "подробнее про мишлен",
+        "расскажите о матадоре",
+        "что за Нокиан?",
+        "что скажете про Мишлен",
+    ],
+)
+def test_tire_question(text: str) -> None:
+    assert is_tire_question(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "хочу Matador",
+        "давайте Michelin",
+        "Nokian є?",
+        "Michelin",
+        "покажіть матадор",
+        "хочу матадор, розкажіть про нього",
+        "возьму мишлен, что за модель?",
+        "",
+    ],
+)
+def test_not_a_tire_question(text: str) -> None:
+    assert not is_tire_question(text)
+
+
+@pytest.mark.parametrize(
+    ("text", "slugs"),
+    [
+        ("а аналоги матадора є?", ["matador"]),
+        ("аналоги для матадора", ["matador"]),
+        ("щось схоже на матадор", ["matador"]),
+        ("інші замість матадора", ["matador"]),
+        ("крім матадора", ["matador"]),
+        ("окрім мішлену", ["michelin"]),
+        ("у матадора є аналоги?", ["matador"]),
+        ("не матадор", ["matador"]),
+        ("без матадора", ["matador"]),
+        ("Мишлена не хочу", ["michelin"]),
+        ("кроме Мишлена", ["michelin"]),
+        ("вместо мишлена", ["michelin"]),
+        ("похожие на матадор есть?", ["matador"]),
+        ("давайте мішлен замість матадора", ["matador"]),
+    ],
+)
+def test_excluded_brands(text: str, slugs: list[str]) -> None:
+    assert excluded_tire_brands(text) == slugs
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "хочу Matador",
+        "замість мішлена хочу матадор",
+        "не знаю, може матадор",
+        "хочу не дорогий матадор",
+        "розкажіть про матадор",
+        "аналоги є?",
+        "",
+    ],
+)
+def test_brand_not_excluded(text: str) -> None:
+    assert "matador" not in (excluded_tire_brands(text) or [])
 
 
 # ═══════════════════════════════════════════════════════════

@@ -42,7 +42,9 @@ __all__ = [
     "QuantityParse",
     "TechRequirement",
     "TireSize",
+    "excluded_tire_brands",
     "extract_tire_brands",
+    "is_tire_question",
     "normalize_spoken_numbers",
     "normalize_tire_brand",
     "parse_budget",
@@ -745,6 +747,92 @@ def normalize_tire_brand(text: str) -> str | None:
     """The first tyre brand named, as a `brands.slug` («мішлена» → ``michelin``)."""
     brands = extract_tire_brands(text)
     return brands[0] if brands else None
+
+
+#: «Розкажіть детальніше про …», «що за …», «подробнее о …» — the caller asks
+#: about a tyre, they do not pick its brand (tshina `0cb563847` `DETAILS_ASKED`).
+_TIRE_QUESTION_RE = re.compile(
+    r"(?<![\w'])(?:"
+    r"розкаж\w*|детальн\w*|докладн\w*|більше\s+про|що\s+(?:за|скажете|скажеш)"  # ua
+    r"|а\s+як\s+вам"  # ua
+    r"|расскаж\w*|подробн\w*|больше\s+(?:о|об|про)|что\s+(?:за|скажете|скажешь)"  # ru
+    r"|а\s+как\s+вам"  # ru
+    r")(?![\w'])"
+)
+#: A choice in the same breath outranks the question: «хочу матадор, розкажіть
+#: про нього» picks the brand — when in doubt the brand is written, as before.
+_BRAND_CHOICE_RE = re.compile(
+    r"(?<![\w'])(?:"
+    r"хочу|хочемо|давайте|давай|беру|беремо|візьму|візьмемо|тільки|лише|замов\w*"  # ua
+    r"|хотим|возьму|возьмем|берем|только|лишь|закаж\w*|оформ\w*"  # ru
+    r")(?![\w'])"
+)
+#: «Аналоги матадора», «щось схоже на матадор», «замість / крім матадора»: the
+#: brand right after is the one NOT wanted. Up to two words between, from a
+#: closed list only — «замість мішлена хочу матадор» still wants Matador.
+_EXCLUDE_WORD = (
+    r"(?:аналог\w*|альтернатив\w*|замін\w*|замен\w*|схож\w*|подібн\w*|похож\w*"
+    r"|замість|вместо|крім|окрім|кроме)"
+)
+_EXCLUDE_FILLER = (
+    r"(?:на|для|до|від|от|к|цей|цього|цих|оцей|этот|этого|этих|ці|ваш\w*"
+    r"|шин\w*|резин\w*|модел\w*|марк\w*|бренд\w*|фірм\w*|фирм\w*)"
+)
+_EXCLUDE_BEFORE_RE = re.compile(rf"(?<![\w']){_EXCLUDE_WORD}(?:\s+{_EXCLUDE_FILLER}){{0,2}}\s+$")
+#: «Матадора аналоги є?», «у матадора є аналоги?» — the brand named first.
+_EXCLUDE_AFTER_RE = re.compile(
+    r"^\s+(?:(?:є|есть|ще|еще|якісь|какие-то|какие|які)\s+){0,2}"
+    r"(?:аналог\w*|альтернатив\w*|замін\w*|замен\w*)"
+)
+
+
+def _brand_mentions(text: str) -> tuple[str, list[tuple[int, int, str]]]:
+    """``(lowered text, [(start, end, slug)])`` — the spans `extract_tire_brands` reads."""
+    latinised, _ = normalize_brand_names(text.translate(_APOSTROPHES))
+    low = latinised.lower()
+    spans = [
+        (m.start(), m.end(), _CYRILLIC_BRANDS[m.group(1)]) for m in _CYRILLIC_BRAND_RE.finditer(low)
+    ]
+    spans += [(m.start(), m.end(), m.group(1)) for m in _LATIN_BRAND_RE.finditer(low)]
+    return low, sorted(spans)
+
+
+def is_tire_question(text: str) -> bool:
+    """True when ``text`` asks about a tyre rather than picking a brand.
+
+    Talk b1e72568 (tshina `0cb563847`, 2026-10-26): «розкажіть детальніше про
+    матадор» after the variants put Matador into the conversation's brands,
+    and «аналоги?» / «до 6000 ще?» then searched Matador only. Silent (False)
+    on a choice word in the same utterance — «хочу матадор, що за модель?».
+    """
+    if not text:
+        return False
+    low = text.translate(_APOSTROPHES).lower()
+    return bool(_TIRE_QUESTION_RE.search(low)) and not _BRAND_CHOICE_RE.search(low)
+
+
+def excluded_tire_brands(text: str) -> list[str] | None:
+    """Brands the caller names as NOT wanted, in order, or ``None``.
+
+    «Аналоги матадора», «щось схоже на матадор», «замість / крім / окрім /
+    кроме матадора», «не матадор», «без матадора», «матадор не хочу» (tshina
+    `0cb563847`: «аналоги X» searches without X). Same spans and case forms as
+    `extract_tire_brands`; silent on a brand with no such word next to it.
+    """
+    if not text:
+        return None
+    low, spans = _brand_mentions(text)
+    slugs: list[str] = []
+    for start, end, slug in spans:
+        before, after = low[:start], low[end:]
+        if (
+            _EXCLUDE_BEFORE_RE.search(before)
+            or _NEG_BEFORE_RE.search(before)
+            or _EXCLUDE_AFTER_RE.search(after)
+            or _NEG_AFTER_RE.search(after)
+        ) and slug not in slugs:
+            slugs.append(slug)
+    return slugs or None
 
 
 # ═══════════════════════════════════════════════════════════
