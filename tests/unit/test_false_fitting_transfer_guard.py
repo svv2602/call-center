@@ -393,3 +393,120 @@ class TestBlockedTransferIsAudited:
 
 def test_fitting_intents_are_the_four_fitting_scenarios() -> None:
     assert frozenset({"BOOK", "PRICE", "CANCEL", "RESCHEDULE"}) == sl._FITTING_INTENTS
+
+
+# ---------------------------------------------------------------------------
+# Repair, buying, opening hours, storage pickup (call review 2026-10-26)
+# ---------------------------------------------------------------------------
+
+#: Caller turns of the `non_fitting_scope` transfers the guard blocked over
+#: 30 days although the caller wanted something the bot does not do (verbatim,
+#: the last caller turns as logged with the block).
+OCT_WRONGLY_BLOCKED: dict[str, list[str]] = {
+    "081601cb": ["приобрести колеса"],
+    "e08fa3cf": ["обожаю забрать резину сохранение"],
+    "bc2f898d": ["уточнити за вулканізацію шин"],
+    "2b0e76de": ["записатися на колесо відремонтувати", "от"],
+    "5ce79275": ["а кому это телефон выходные", "доброты"],
+}
+
+
+class TestRepairPurchaseScheduleStorage:
+    @pytest.mark.parametrize("call_id", sorted(OCT_WRONGLY_BLOCKED))
+    def test_live_off_topic_turns_transfer(self, call_id: str) -> None:
+        assert _guard("non_fitting_scope", _hist(OCT_WRONGLY_BLOCKED[call_id])) is None
+
+    @pytest.mark.parametrize(
+        "turn", ["записатися на колесо відремонтувати", "запис на монтаж, прокол"]
+    )
+    def test_repair_is_not_vetoed_by_a_booking_stem(self, turn: str) -> None:
+        """«запис» in the same turn vetoes buying/hours — not repair: the bot
+        gives the station's phone for repair, it does not book it."""
+        assert "BOOK" in sl._triggered_intents(turn)
+        assert _guard("non_fitting_scope", _hist([turn])) is None
+
+    def test_repair_said_after_the_opening_turns_transfers(self) -> None:
+        turns = ["Алло", "Олександр", "записатися на колесо відремонтувати"]
+        assert _guard("non_fitting_scope", _hist(turns)) is None
+
+    def test_repair_older_than_three_turns_does_not_open_the_transfer(self) -> None:
+        turns = ["у меня пробито колесо", "так", "Київ", "Оболонь", "так"]
+        msg = _guard("non_fitting_scope", _hist(turns))
+        assert msg is not None and _GUARD_MARKER in msg
+
+    def test_hours_next_to_a_booking_stem_stay_vetoed(self) -> None:
+        msg = _guard("non_fitting_scope", _hist(["запишіть мене на вихідні"]))
+        assert msg is not None and _GUARD_MARKER in msg
+
+    @pytest.mark.parametrize(
+        "turns",
+        [
+            ["записатися на шиномонтаж", "шини на зберіганні"],
+            # 3d351121 — the booking was confirmed later in the call
+            ["Toyota RAV4", "підтверджую", "резина у вас шини у вас на хранение"],
+            # pickup and storage in different turns are not a pickup request
+            ["коли можна забрати", "шини на зберіганні"],
+        ],
+    )
+    @pytest.mark.parametrize("reason", ["non_fitting_scope", "repair_request"])
+    def test_storage_as_a_booking_answer_stays_blocked(self, turns: list[str], reason: str) -> None:
+        msg = _guard(reason, _hist(turns))
+        assert msg is not None and _GUARD_MARKER in msg
+        assert _FITTING_HOLD_MARKER not in msg
+
+    def test_storage_pickup_turns_off_the_hold(self) -> None:
+        turns = ["забрати резину зі зберігання", "хочу записатися на монтаж", "Олексій"]
+        assert _guard("cannot_help", _hist(turns, {-1: 2})) is None
+
+    def test_bare_storage_keeps_the_hold(self) -> None:
+        turns = ["хочу записатися на монтаж", "шини на зберіганні", "Олексій"]
+        msg = _guard("cannot_help", _hist(turns, {-1: 2}))
+        assert msg is not None and _FITTING_HOLD_MARKER in msg
+
+    def test_repair_turns_off_the_hold(self) -> None:
+        turns = ["у меня пробито колесо", "хочу записатися на монтаж", "Олексій"]
+        assert _guard("cannot_help", _hist(turns, {-1: 2})) is None
+
+    def test_purchase_is_the_bots_topic_under_sales(self) -> None:
+        msg = _guard("non_fitting_scope", _hist(["приобрести колеса"]), sales_enabled=True)
+        assert msg is not None and _GUARD_MARKER in msg
+
+    @pytest.mark.parametrize("call_id", ["bc2f898d", "2b0e76de", "e08fa3cf", "5ce79275"])
+    def test_repair_hours_storage_transfer_under_sales_too(self, call_id: str) -> None:
+        turns = OCT_WRONGLY_BLOCKED[call_id]
+        assert _guard("non_fitting_scope", _hist(turns), sales_enabled=True) is None
+
+    def test_purchase_stem_is_in_both_lists(self) -> None:
+        assert "приобрест" in sl._OUT_OF_SCOPE_KEYWORDS
+        assert "приобрест" in sl._SALES_SCOPE_KEYWORDS
+
+
+#: 3d351121 turn 17 verbatim — the booking was confirmed later in the call.
+REBEAD_NOT_REPAIR = (
+    "мне не ремонт нужен мне нужен перебортировать шины а шины находятся на берег они у вас"
+)
+
+
+class TestTyreChangeIsNotRepair:
+    """R04/R09: перебортовка is fitting — a turn naming it is not a repair turn."""
+
+    @pytest.mark.parametrize(
+        "turns",
+        [[REBEAD_NOT_REPAIR], ["и сделать переборки", REBEAD_NOT_REPAIR, "Олексій"]],
+    )
+    @pytest.mark.parametrize("reason", ["non_fitting_scope", "repair_request"])
+    @pytest.mark.parametrize("sales", [False, True])
+    def test_rebead_turn_does_not_open_a_repair_transfer(
+        self, turns: list[str], reason: str, sales: bool
+    ) -> None:
+        msg = _guard(reason, _hist(turns), sales_enabled=sales)
+        assert msg is not None and _GUARD_MARKER in msg
+        assert _FITTING_HOLD_MARKER not in msg
+
+    def test_rebead_turn_keeps_the_hold(self) -> None:
+        turns = ["хочу записатися на монтаж", REBEAD_NOT_REPAIR, "Олексій"]
+        msg = _guard("cannot_help", _hist(turns, {-1: 2}))
+        assert msg is not None and _FITTING_HOLD_MARKER in msg
+
+    def test_repair_booking_wording_still_transfers(self) -> None:
+        assert _guard("non_fitting_scope", _hist(["записатися на колесо відремонтувати"])) is None

@@ -1021,3 +1021,31 @@ class TestVerdictCannotMatter:
         from src.agent.intent_classifier import verdict_cannot_matter
 
         assert verdict_cannot_matter("17", {"fsm_state": state}) is False
+
+
+class TestTyreChangeIsBooking:
+    """Перебортовка / перевзування — шиномонтаж (R04, разбор звонков 2026-10-26).
+
+    Реплики — дословно из `customer-turns-90d` (3d351121 и запись «перевзути»).
+    """
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "мне не ремонт нужен мне нужен перебортировать шины а шины находятся на берег они у вас",
+            "и сделать переборки",
+            "потрібна перебортовка",
+            "добрий день мені треба перевзути колеса на лук'яненка",
+            "17 хочу перевзутися на перемозі",
+            "хочу переобуться у вас",
+        ],
+    )
+    def test_tyre_change_forms_trigger_book(self, text: str) -> None:
+        from src.agent.intent_classifier import _triggered_intents
+
+        assert "BOOK" in _triggered_intents(text)
+
+    def test_overdoing_is_not_a_tyre_change(self) -> None:
+        from src.agent.intent_classifier import _triggered_intents
+
+        assert "BOOK" not in _triggered_intents("ви переборщили з ціною")

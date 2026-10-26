@@ -37,7 +37,7 @@ from src.agent.disk_intent import (
     run_disk_substitution_raw,
 )
 from src.agent.history_compressor import summarize_old_messages
-from src.agent.intent_classifier import _triggered_intents, sales_intents
+from src.agent.intent_classifier import _TYRE_CHANGE_STEMS, _triggered_intents, sales_intents
 from src.agent.network_claim_guard import guard_network_claims, guard_text
 from src.agent.network_facts import already_said_note, turn_facts
 from src.agent.network_policy import NetworkPolicy, render_network_block
@@ -262,14 +262,58 @@ _ESCALATION_KEYWORDS = (
 # for a transfer, get blocked with «продовжуй чекліст», and ask a caller who
 # wanted the accounts desk for their name and city. Over 40 days these stems
 # occur in 3 customer turns, all three off-topic, none in a booking call.
+#
+# Repair, buying («приобрести»), opening hours and storage pickup were missing
+# until 2026-10-26: «записатися на колесо відремонтувати» (2b0e76de), «уточнити
+# за вулканізацію шин» (bc2f898d), «приобрести колеса» (081601cb), «а кому это
+# телефон выходные» (5ce79275), «обожаю забрать резину сохранение» (e08fa3cf) —
+# 9 of the 22 guard blocks over 30 days, 5 of 15 blocked calls. Over 90 days the
+# new stems occur in 10 of 4496 customer turns, and in 1 of 2065 turns of calls
+# with a confirmed booking (3d351121, «мне не ремонт нужен мне нужен
+# перебортировать» — a fitting request, see `_is_repair_turn`).
 _OUT_OF_SCOPE_KEYWORDS = (
     "кредит", "розстрочк", "рассрочк",
-    "купити", "купить", "куплю", "придбат",
+    "купити", "купить", "куплю", "придбат", "приобрест",
     "замовл", "заказ", "доставк",
     "гаранті", "гаранти", "поверн", "возврат", "рекламац",
     "оплат", "сплат", "платіж", "платеж", "рахун",
     "виписк", "выписк", "товар", "наявн", "наличи",
+    "выходн", "вихідн", "график", "графік",
 )
+
+# Repair is out of scope in both modes, and is kept apart from the list above
+# for two reasons. The bot gives the station's phone for repair (prompt) and
+# does not book it, so a repair turn lets the transfer through even next to
+# «запис» («записатися на колесо відремонтувати», 2b0e76de) — the fitting veto
+# does not cover it. And a turn that names a tyre change is NOT repair, whatever
+# else it says: «мне не ремонт нужен мне нужен перебортировать шины» (3d351121,
+# booking confirmed later) is a fitting request (R04). «відремонтувати» is
+# caught by «ремонт».
+_REPAIR_KEYWORDS = ("ремонт", "вулканіз", "вулканиз", "прокол", "пробит", "пробив")
+
+
+def _is_repair_turn(turn: str) -> bool:
+    """One caller turn asks for repair and names no tyre change."""
+    low = turn.lower()
+    return _has_any(low, _REPAIR_KEYWORDS) and not _has_any(low, _TYRE_CHANGE_STEMS)
+
+
+# Storage is out of scope only as a PICKUP: «забрать резину с хранения» is a
+# trip to the warehouse, while bare «шини на зберіганні» answers Krok 2 of the
+# booking checklist (48 of 4496 customer turns carry a bare storage word, nearly
+# all of them that answer). Both halves must sit in ONE caller turn — across
+# turns «заберу» and a Krok 2 answer would meet by accident. 90 days: 1 turn
+# matches (e08fa3cf, STT for «хочу забрать резину с хранения»), 0 in booking
+# calls.
+_STORAGE_PICKUP_RE = re.compile(r"забра|забер|забир")
+_STORAGE_WORD_RE = re.compile(r"хранен|зберіган|сохранен|сберег|збережен")
+
+
+def _wants_storage_pickup(turn: str) -> bool:
+    """One caller turn asks to collect tyres from storage."""
+    low = turn.lower()
+    return bool(_STORAGE_PICKUP_RE.search(low) and _STORAGE_WORD_RE.search(low))
+
 
 # Sales scope (tenants.config.sales_enabled): buying, ordering, delivery,
 # payment, warranty and stock are what the bot now serves, so these stems stop
@@ -278,7 +322,7 @@ _OUT_OF_SCOPE_KEYWORDS = (
 # («рахун», «виписк», «сплат») and returns/claims stay out of scope.
 _SALES_SCOPE_KEYWORDS = (
     "кредит", "розстрочк", "рассрочк",
-    "купити", "купить", "куплю", "придбат",
+    "купити", "купить", "куплю", "придбат", "приобрест",
     "замовл", "заказ", "доставк",
     "гаранті", "гаранти",
     "оплат", "платіж", "платеж",
@@ -343,6 +387,8 @@ def _fitting_hold_applies(user_turns: list[str]) -> bool:
     joined = " ".join(user_turns)
     return not (
         _has_any(joined, _OUT_OF_SCOPE_KEYWORDS)
+        or any(_wants_storage_pickup(t) for t in user_turns)
+        or any(_is_repair_turn(t) for t in user_turns)
         or _has_any(joined, _ESCALATION_KEYWORDS)
         # A request for a person: the TRANSFER stems cover every
         # `_OPERATOR_KEYWORDS` entry and add «з'єднайте», «соедините», «перекл».
@@ -517,7 +563,15 @@ def _false_transfer_verdict(
             # releases whether or not the veto fired.
             and not any(kw in recent_3 for kw in _OPERATOR_KEYWORDS)
         )
-        if not fitting_veto and any(kw in recent_3 for kw in out_of_scope):
+        off_topic = any(kw in recent_3 for kw in out_of_scope) or any(
+            _wants_storage_pickup(t) for t in user_turns[-3:]
+        )
+        if not fitting_veto and off_topic:
+            return None
+        # Repair is not a fitting booking even when the caller says «записатися»
+        # («записатися на колесо відремонтувати», 2b0e76de): the veto does not
+        # cover it, in either scope. A tyre-change turn is not repair at all.
+        if any(_is_repair_turn(t) for t in user_turns[-3:]):
             return None
         if any(kw in recent_3 for kw in _ESCALATION_KEYWORDS):
             return None
