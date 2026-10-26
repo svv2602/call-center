@@ -846,7 +846,11 @@ def compound_parse(customer_text: str) -> CompoundParseResult:
     if diameter is not None:
         result._put("diameter", diameter, _diameter_confidence(masked))
 
-    color = detect_color(low)
+    # `masked`, not `low`: month and weekday words share colour roots («на 17
+    # жовтня» → жовтий, «на середу» → сірий). Two October bookings went to 1C
+    # as «жовтий» that way (2026-10). `color_detect` also lists those words as
+    # false positives; the mask closes the path for any form the list misses.
+    color = detect_color(masked)
     if color:
         # Pattern-based: `color_detect` matches an inflected root, and its
         # false-positive filter (Черкаси, Біла Церква, Сергій…) already ran.

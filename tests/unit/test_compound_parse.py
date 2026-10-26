@@ -479,6 +479,57 @@ class TestDiameterTimeDateArbitration:
         assert result.fields_confidence["time_hint"] < APPLY_THRESHOLD
 
 
+class TestColourIsReadFromTheMaskedText:
+    """Date and time words share colour roots: «жовтня» → жовтий, «середу» →
+    сірий. A colour here skips the COLOR step, and two October bookings went to
+    1C as «жовтий» that way. `color_detect._FALSE_POSITIVE_WORDS` lists those
+    words too, so the mask tests empty that list — otherwise they would pass on
+    the dictionary alone and prove nothing about the mask.
+    """
+
+    @pytest.fixture
+    def no_false_positive_list(self, monkeypatch):
+        from src.agent import color_detect
+
+        monkeypatch.setattr(color_detect, "_FALSE_POSITIVE_WORDS", frozenset())
+        return color_detect
+
+    @pytest.mark.parametrize(
+        "text, date_hint",
+        [
+            ("на 17 жовтня", "17 жовтня"),
+            ("на 3 серпня", "3 серпня"),
+            ("на середу", "середа"),
+        ],
+    )
+    def test_a_date_word_is_not_a_colour_even_without_the_list(
+        self, no_false_positive_list, text, date_hint
+    ):
+        # The input does carry a colour root — without the mask it is one.
+        assert no_false_positive_list.detect_color(text) is not None
+        result = parse(text)
+        assert result.fields.get("date_hint") == date_hint
+        assert "color" not in result.fields
+
+    @pytest.mark.parametrize(
+        "text, colour",
+        [
+            ("жовтий, на 17 жовтня", "жовтий"),
+            ("білий Toyota в понеділок о 10", "білий"),
+            ("сіра машина, на середу", "сірий"),
+        ],
+    )
+    def test_a_colour_beside_a_date_survives_the_mask(self, text, colour):
+        result = parse(text)
+        assert "date_hint" in result.fields
+        assert result.fields["color"] == colour
+
+    def test_a_colour_beside_a_date_survives_without_the_list(self, no_false_positive_list):
+        result = parse("жовтий, на 17 жовтня")
+        assert result.fields["date_hint"] == "17 жовтня"
+        assert result.fields["color"] == "жовтий"
+
+
 class TestDigitHourForms:
     """Wave 6-G — the digit forms of the hours the word forms already resolve.
 
