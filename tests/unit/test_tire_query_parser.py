@@ -16,7 +16,9 @@ from src.agent.parsers.tire_query import (
     TireSize,
     excluded_tire_brands,
     extract_tire_brands,
+    is_analog_request,
     is_tire_question,
+    mentions_tyre_noun,
     normalize_spoken_numbers,
     normalize_tire_brand,
     parse_budget,
@@ -493,6 +495,66 @@ def test_excluded_brands(text: str, slugs: list[str]) -> None:
 )
 def test_brand_not_excluded(text: str) -> None:
     assert "matador" not in (excluded_tire_brands(text) or [])
+
+
+# «Аналоги?» after an offer → price_mode="similar" in the search_tires handler.
+@pytest.mark.parametrize(
+    "text",
+    [
+        "а аналоги є?",
+        "аналоги матадора?",
+        "а аналог є",
+        "аналогів немає?",
+        "щось схоже по ціні",
+        "а схожі є?",
+        "а подібні є?",
+        "замінник якийсь підберете?",
+        "а альтернатива є?",
+        "аналоги в тій же ціні",
+        "а є щось в тій же ціні?",
+        "что-то похожее",
+        "похожие есть?",
+        "аналоги в той же цене",
+        "а подобные есть?",
+        "Аналоги Матадора?",
+    ],
+)
+def test_analog_request(text: str) -> None:
+    assert is_analog_request(text) is True
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "а дешевше?",
+        "а дешевле есть?",
+        "аналоги дешевше є?",
+        "схоже, мені зимові",
+        "похоже, нужны зимние",
+        "аналоги не потрібні",
+        "без аналогів",
+        "не надо похожих",
+        "розкажіть про матадор",
+        "хочу матадор",
+        "заміна коліс",
+        "добре",
+        "",
+    ],
+)
+def test_not_an_analog_request(text: str) -> None:
+    assert is_analog_request(text) is False
+
+
+@pytest.mark.parametrize(
+    "text", ["а є шини до 6000?", "резину до 5000", "гуму літню", "покришки", "колеса", "покрышки"]
+)
+def test_tyre_noun(text: str) -> None:
+    assert mentions_tyre_noun(text) is True
+
+
+@pytest.mark.parametrize("text", ["до 6000", "ціною до 6000", "запис до 12", "машина", ""])
+def test_no_tyre_noun(text: str) -> None:
+    assert mentions_tyre_noun(text) is False
 
 
 # ═══════════════════════════════════════════════════════════

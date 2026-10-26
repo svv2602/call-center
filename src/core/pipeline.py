@@ -864,8 +864,9 @@ def merge_tire_query(
     """``state`` updated with what ``text`` says about the tyres wanted.
 
     Pure: returns a new dict. Collection starts on a full size, a nail type,
-    a tyre brand, or a sales word (``sales_intents``) in an utterance that is
-    not a fitting request; once started (``state`` non-empty or
+    a tyre brand, a sales word (``sales_intents``) or a budget cap / scope
+    with a tyre word («шини до 6000») in an utterance that is not a fitting
+    request; once started (``state`` non-empty or
     ``consult_started``) every later utterance is read. A newer value
     overwrites an older one — the caller corrected themselves. Empty values
     are never stored (an empty list passes the progress-block filter).
@@ -880,6 +881,7 @@ def merge_tire_query(
         excluded_tire_brands,
         extract_tire_brands,
         is_tire_question,
+        mentions_tyre_noun,
         parse_budget,
         parse_nail_type,
         parse_need_refusals,
@@ -896,8 +898,20 @@ def merge_tire_query(
     brands = extract_tire_brands(text)
     started = bool(state) or consult_started
     if not started:
+        # «А є шини до 6000?» as the first line is a budget too (tshina
+        # `762168d31`, R18): a cap or a per-tyre/per-set scope WITH a tyre
+        # word. A bare «до 6000» may be about the time or the booking.
+        first_budget = parse_budget(text)
         started = bool(full or nail or brands) or bool(
-            sales_intents(text) and not _FITTING_REQUEST_RE.search(text.lower())
+            (
+                sales_intents(text)
+                or (
+                    first_budget is not None
+                    and (first_budget.is_cap or first_budget.scope is not None)
+                    and mentions_tyre_noun(text)
+                )
+            )
+            and not _FITTING_REQUEST_RE.search(text.lower())
         )
     if not started:
         return dict(state)

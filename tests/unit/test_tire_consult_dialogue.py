@@ -277,6 +277,50 @@ class TestMergeTireQuery:
     def test_fitting_request_does_not_start_a_consultation(self) -> None:
         assert merge_tire_query({}, "хочу записатись на шиномонтаж, зимову резину") == {}
 
+    @pytest.mark.parametrize(
+        ("text", "budget"),
+        [
+            ("а є гума до шести тисяч", {"amount": 6000, "scope": None, "is_cap": True}),
+            ("гуму до 6000", {"amount": 6000, "scope": None, "is_cap": True}),
+            ("коліс до 5000 гривень", {"amount": 5000, "scope": None, "is_cap": True}),
+            ("колеса до 5000 за комплект", {"amount": 5000, "scope": "per_set", "is_cap": True}),
+            ("колеса 3000 за колесо", {"amount": 3000, "scope": "per_tire", "is_cap": False}),
+        ],
+    )
+    def test_first_line_budget_with_a_tyre_word_starts(
+        self, text: str, budget: dict[str, Any]
+    ) -> None:
+        # R18 (tshina `762168d31`): «ціною до N» is a budget, even as the first
+        # line. These carry no sales word — only the budget start reads them.
+        from src.agent.intent_classifier import sales_intents
+
+        assert sales_intents(text) == ()
+        assert merge_tire_query({}, text)["budget"] == budget
+
+    def test_first_line_tyres_up_to_n_control(self) -> None:
+        # «шини» is already a sales word: started before this change too.
+        assert merge_tire_query({}, "а є шини до 6000?") == {
+            "budget": {"amount": 6000, "scope": None, "is_cap": True}
+        }
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "до 6000",
+            "ціною до 6000",
+            "а є до 6000?",
+            "шиномонтаж до 600 гривень",
+            "запис до 12",
+            "гума 6000",
+            "колеса до 12",
+            "колеса за 600",
+        ],
+    )
+    def test_first_line_without_a_tyre_word_and_a_capped_budget_does_not_start(
+        self, text: str
+    ) -> None:
+        assert merge_tire_query({}, text) == {}
+
     def test_every_field(self) -> None:
         state = merge_tire_query({}, "мені мішлен комплект до шести тисяч за шину ранфлет літні")
         assert state["season"] == "summer"

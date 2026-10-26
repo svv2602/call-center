@@ -47,7 +47,9 @@ __all__ = [
     "TireSize",
     "excluded_tire_brands",
     "extract_tire_brands",
+    "is_analog_request",
     "is_tire_question",
+    "mentions_tyre_noun",
     "normalize_spoken_numbers",
     "normalize_tire_brand",
     "parse_budget",
@@ -838,6 +840,59 @@ def excluded_tire_brands(text: str) -> list[str] | None:
         ) and slug not in slugs:
             slugs.append(slug)
     return slugs or None
+
+
+#: «Аналоги?», «щось схоже», «а подібні є?», «замінник», «что-то похожее»,
+#: «в тій же ціні» — UA and RU, the oblique cases too. Bare «схоже» /
+#: «похоже» is «it seems» («схоже, мені зимові»): only with «щось / что-то»
+#: before it or a price phrase after it.
+_ANALOG_REQUEST_RE = re.compile(
+    r"(?<![\w'])(?:"
+    r"аналог\w*|альтернатив\w*|замінник\w*|заменител\w*"
+    r"|подібн\w*|подобн\w*"
+    r"|схож(?:і|их|ий|у|а|ого|им|ими|ій)|похож(?:ие|их|ий|ую|ая|ее|его|ими|ей)"
+    r"|(?:щось|що-небудь|что-то|что-нибудь)\s+(?:таке\s+|такое\s+)?(?:схоже|похоже)"
+    r"|(?:схоже|похоже)\s+(?:по|за)\s+(?:ціні|ціною|цене|ценой)"
+    r"|(?:в|у)\s+(?:тій\s+же|той\s+же|тій\s+самій|той\s+самой)\s+(?:ціні|цене|ціновій|ценовой)"
+    r")(?![\w'])"
+)
+#: «А дешевше?» is ``price_mode="cheaper"``, not analogs: a cheaper word in the
+#: same breath leaves the choice to the model.
+_CHEAPER_WORD_RE = re.compile(r"дешевш\w*|дешевл\w*|бюджетніш\w*|бюджетне\w*")
+#: «Аналоги не потрібні», «без аналогів», «не надо похожих».
+_ANALOG_REFUSED_RE = re.compile(
+    r"(?<![\w'])(?:не\s+(?:треба|потрібн\w*|надо|нужн\w*|хочу)|без)\s+"
+    r"(?:\w+\s+)?(?:аналог|альтернатив|подібн|схож|похож|замінник|заменител)"
+    r"|(?:аналог\w*|альтернатив\w*|подібн\w*|схож\w*|похож\w*)\s+не\s+"
+    r"(?:треба|потрібн\w*|надо|нужн\w*|цікав\w*|интерес\w*)"
+)
+
+
+def is_analog_request(text: str) -> bool:
+    """True when the caller asks for analogs of the tyres shown.
+
+    tshina `0cb563847` (R17): «аналоги матадора?», «щось схоже», «а подібні
+    є?», «что-то похожее» — a search in the price corridor of the last offer
+    (`search_tires(price_mode="similar")`), without the brand named. Silent on
+    «а дешевше?» (that is ``cheaper``) and on a refusal («аналоги не
+    потрібні»). Wiring lives in the ``search_tires`` handler (sales only).
+    """
+    if not text:
+        return False
+    low = text.translate(_APOSTROPHES).lower()
+    if not _ANALOG_REQUEST_RE.search(low):
+        return False
+    return not (_CHEAPER_WORD_RE.search(low) or _ANALOG_REFUSED_RE.search(low))
+
+
+#: A tyre noun at a word start: «шини», «резину», «гуму», «покришки», «колеса»
+#: (the roots of `interrupts.is_tyre_price_question`, plus «колес / коліс»).
+_TYRE_NOUN_RE = re.compile(r"(?<![\w'])(?:шин|резин|гум|покришк|покрышк|колес|коліс)\w*")
+
+
+def mentions_tyre_noun(text: str) -> bool:
+    """True when ``text`` names tyres («шини», «резина», «покришки», «колеса»)."""
+    return bool(text) and bool(_TYRE_NOUN_RE.search(text.translate(_APOSTROPHES).lower()))
 
 
 # ═══════════════════════════════════════════════════════════

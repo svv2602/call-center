@@ -410,6 +410,117 @@ class TestBudgetSource:
         assert "budget_source" not in result
 
 
+# ── «аналоги?» → similar, by code (wave 6-M, R17) ─────────────────────────
+
+
+async def _turn(router: Any, session: CallSession, line: str, args: dict[str, Any]) -> Any:
+    """The streaming path: the caller's line is in the session before the tool runs."""
+    session.add_user_turn(line)
+    return await _run(router, args)
+
+
+class TestAnalogsByCode:
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "line",
+        ["а аналоги є?", "щось схоже по ціні", "аналоги матадора?", "что-то похожее"],
+    )
+    async def test_analogs_after_an_offer_search_the_corridor(self, line: str) -> None:
+        router, session, _ = _setup()
+        first = await _turn(router, session, "зимові 205/55 R16", dict(_SIZE))
+        shown = sorted(_prices(first))
+        median = shown[len(shown) // 2]
+        result = await _turn(router, session, line, {})
+        assert result["price_mode"] == "similar"
+        assert result["items"]
+        step = PRICE_CORRIDOR_STEPS[0]
+        assert all(median * (1 - step) <= p <= median * (1 + step) for p in _prices(result))
+        assert not {i["id"] for i in result["items"]} & {i["id"] for i in first["items"]}
+
+    @pytest.mark.asyncio
+    async def test_the_models_price_mode_wins(self) -> None:
+        router, session, _ = _setup()
+        first = await _turn(router, session, "205/55 R16", dict(_SIZE))
+        result = await _turn(router, session, "а аналоги є?", {"price_mode": "cheaper"})
+        assert result["price_mode"] == "cheaper"
+        assert all(p < min(_prices(first)) for p in _prices(result))
+
+    @pytest.mark.asyncio
+    async def test_cheaper_line_is_not_analogs(self) -> None:
+        router, session, engine = _setup()
+        await _turn(router, session, "205/55 R16", dict(_SIZE))
+        result = await _turn(router, session, "а дешевше?", dict(_SIZE))
+        assert "price_mode" not in result
+        assert all("price_from" not in p for p in engine.tire_params())
+
+    @pytest.mark.asyncio
+    async def test_no_shown_offer_is_a_plain_search(self, caplog: pytest.LogCaptureFixture) -> None:
+        router, session, engine = _setup()
+        with caplog.at_level("INFO", logger="src.main"):
+            result = await _turn(router, session, "а аналоги матадора є?", dict(_SIZE))
+        assert result["items"]
+        assert "price_mode" not in result
+        assert all("price_from" not in p for p in engine.tire_params())
+        # The search would fall back by itself; the log must not claim a switch.
+        assert not any("by code" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_last_turn_is_the_bots_nothing_is_read(self) -> None:
+        # The blocking path adds the caller's line after the LLM: the last
+        # turn is then the bot's, and a line of an earlier turn is not this one.
+        router, session, engine = _setup()
+        await _turn(router, session, "а аналоги є?", dict(_SIZE))
+        session.add_assistant_turn("Є Michelin за 5200 гривень.")
+        result = await _run(router, dict(_SIZE))
+        assert "price_mode" not in result
+        assert all("price_from" not in p for p in engine.tire_params())
+
+    @pytest.mark.asyncio
+    async def test_the_bots_own_analog_words_are_not_the_callers(self) -> None:
+        # Only the caller's line asks for analogs: the bot offering «аналоги»
+        # in the last turn is not a request (blocking path, speaker check).
+        router, session, engine = _setup()
+        await _turn(router, session, "205/55 R16", dict(_SIZE))
+        session.add_assistant_turn("Можу підібрати аналоги Michelin, схожі за ціною.")
+        result = await _run(router, dict(_SIZE))
+        assert "price_mode" not in result
+        assert all("price_from" not in p for p in engine.tire_params())
+
+    @pytest.mark.asyncio
+    async def test_analogs_of_x_search_without_x(self) -> None:
+        router, session, engine = _setup()
+        await _turn(router, session, "205/55 R16", dict(_SIZE))
+        await _turn(router, session, "аналоги матадора?", {"brand": "Matador"})
+        assert "brand" not in engine.tire_params()[-1]
+
+    @pytest.mark.asyncio
+    async def test_a_brand_not_excluded_is_kept(self) -> None:
+        router, session, engine = _setup()
+        await _turn(router, session, "205/55 R16", dict(_SIZE))
+        await _turn(router, session, "аналоги матадора?", {"brand": "Michelin"})
+        assert engine.tire_params()[-1]["brand"] == "Michelin"
+
+    @pytest.mark.asyncio
+    async def test_logged(self, caplog: pytest.LogCaptureFixture) -> None:
+        router, session, _ = _setup()
+        await _turn(router, session, "205/55 R16", dict(_SIZE))
+        with caplog.at_level("INFO", logger="src.main"):
+            await _turn(router, session, "а подібні є?", {})
+        assert any("price_mode=similar by code" in r.getMessage() for r in caplog.records)
+
+    @pytest.mark.asyncio
+    async def test_sales_off_reads_no_line(self) -> None:
+        router, session, engine = _setup(sales=False)
+        await _turn(router, session, "205/55 R16", dict(_SIZE))
+        session.last_tire_offer = {"prices": [5000.0], "ids": ["x"], "params": {}}
+        result = await _turn(
+            router, session, "а аналоги матадора є?", {**_SIZE, "brand": "Matador"}
+        )
+        assert "price_mode" not in result
+        assert all("price_from" not in p for p in engine.tire_params())
+        assert engine.tire_params()[-1]["brand"] == "Matador"
+
+
 # ── sales off: nothing of this ───────────────────────────────────────────
 
 

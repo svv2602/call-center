@@ -1790,6 +1790,34 @@ def _build_tool_router(
         if network_policy is None or not network_policy.sales_enabled:
             return await client.search_tires(network=network, **params)
 
+        # «Аналоги?», «щось схоже», «что-то похожее» after an offer → the price
+        # corridor of that offer, by code, not by a prompt line (tshina
+        # `0cb563847`, R17). The caller's line of THIS turn only: on the
+        # streaming path it is the last turn of `dialog_history` when the tool
+        # runs; on the blocking path it is added after the LLM, so the last
+        # turn is the bot's and nothing is read. The model's own price_mode wins.
+        from src.agent.parsers.tire_query import (
+            excluded_tire_brands,
+            is_analog_request,
+            normalize_tire_brand,
+        )
+
+        history = session.dialog_history
+        caller_line = history[-1].content or "" if history and history[-1].speaker == "user" else ""
+        if (
+            not price_mode
+            and (session.last_tire_offer or {}).get("prices")
+            and is_analog_request(caller_line)
+        ):
+            price_mode = PRICE_MODE_SIMILAR
+            logger.info(
+                "search_tires: analogs asked for call %s — price_mode=similar by code",
+                session.channel_uuid,
+            )
+        # «Аналоги матадора» searches without Matador, whatever brand the model passed.
+        dropped = excluded_tire_brands(caller_line) or []
+        if dropped and normalize_tire_brand(str(params.get("brand") or "")) in dropped:
+            params.pop("brand", None)
         needs = session.tire_query.get("needs")
         if needs:
             params["needs"] = list(needs)
