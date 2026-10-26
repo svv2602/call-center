@@ -66,6 +66,15 @@ _XL_COLUMN_SQL = f"(p.description ~* '{_XL_RE}') IS TRUE"
 # regexes above; those stay the fallback for a SKU the sync has not
 # reached. ``studded`` NULL means «not applicable», not «non-studded».
 _ATTR_STUDS: dict[str, str] = {"ship": "studded", "pod_ship": "studdable", "no_ship": "friction"}
+#: The search filters on the same footing as the item label (``_studs`` /
+#: ``_is_xl``): the attribute when the row has one, else the regex. The
+#: ``a.`` alias is the LEFT JOIN of ``_query_tire_rows``. «Під шип»
+#: (``pod_ship``) is sold without studs, so it is the unstudded side.
+_STUDDED_FILTER_SQL = f"(a.studded = 'ship' OR (a.studded IS NULL AND {_STUDDED_SQL}))"
+_UNSTUDDED_FILTER_SQL = (
+    f"(a.studded IN ('pod_ship', 'no_ship') OR (a.studded IS NULL AND NOT {_STUDDED_SQL}))"
+)
+_XL_FILTER_SQL = f"COALESCE(a.is_xl, {_XL_SQL})"
 #: ``tire_models.seasonality`` of a winter tyre (the 1C sync normalises to
 #: ``winter``; the search filter also accepts the 1C spelling).
 _WINTER_SEASONS = frozenset({"winter", "зимова", "зимняя"})
@@ -1569,9 +1578,9 @@ class StoreClient:
         # Only a real bool filters; None / anything else = "not asked".
         studded = params.get("studded")
         if studded is True:
-            conditions.append(_STUDDED_SQL)
+            conditions.append(_STUDDED_FILTER_SQL)
         elif studded is False:
-            conditions.append(f"NOT {_STUDDED_SQL}")
+            conditions.append(_UNSTUDDED_FILTER_SQL)
         runflat = params.get("runflat")
         if runflat is True:
             conditions.append(_RUNFLAT_SQL)
@@ -1579,9 +1588,9 @@ class StoreClient:
             conditions.append(f"NOT ({_RUNFLAT_SQL})")
         xl = params.get("xl")
         if xl is True:
-            conditions.append(_XL_SQL)
+            conditions.append(_XL_FILTER_SQL)
         elif xl is False:
-            conditions.append(f"NOT ({_XL_SQL})")
+            conditions.append(f"NOT {_XL_FILTER_SQL}")
         commercial = params.get("commercial")
         if commercial is True:
             conditions.append("p.commercial IS TRUE")

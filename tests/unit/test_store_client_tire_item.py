@@ -301,3 +301,201 @@ def test_http_fallback_items_carry_no_new_keys() -> None:
     item = StoreClient._format_tire_results(data)["items"][0]
     for key in ("studded", "xl", "load_index", "speed_index"):
         assert key not in item
+
+
+# ── filter = label: the real query over a small catalogue ───────────────
+#
+# The search filters (``studded`` / ``xl``) and the item label read the same
+# facts: the tshina attribute when the row has one, the description regex
+# otherwise. In-memory SQLite runs the very SQL ``_query_tire_rows`` builds;
+# only PostgreSQL ``~*`` / ``!~*`` are spelled as SQLite ``REGEXP`` (Python
+# ``re``, case-insensitive — the patterns are plain enough for both, see
+# ``test_fallback_regexes_read_the_1c_description``).
+
+_SCHEMA = """
+CREATE TABLE tire_models (
+    id INTEGER PRIMARY KEY, manufacturer TEXT, name TEXT, seasonality TEXT, type_id TEXT
+);
+CREATE TABLE tire_products (
+    sku TEXT PRIMARY KEY, model_id INTEGER, size TEXT, width INTEGER, profile INTEGER,
+    diameter INTEGER, description TEXT, commercial BOOLEAN
+);
+CREATE TABLE tire_stock (sku TEXT, trading_network TEXT, price REAL, stock_quantity INTEGER);
+CREATE TABLE tire_eu_labels (sku TEXT, energy_class TEXT, wet_grip_class TEXT, noise_db INTEGER);
+CREATE TABLE tire_attributes (
+    sku TEXT PRIMARY KEY, studded TEXT, is_xl BOOLEAN, load_index TEXT, speed_index TEXT
+);
+"""
+
+#: ``(sku, season, description, (studded, is_xl) of tire_attributes or None)``
+#: — None = a SKU the attribute sync has not reached (no row at all).
+_CATALOGUE: list[tuple[str, str, str, tuple[str | None, bool | None] | None]] = [
+    # attribute vs description disagree → the attribute decides
+    ("w-noship-desc-ship", "winter", "Nokian Hakka R5 [94T] Шип", ("no_ship", None)),
+    ("w-ship-desc-none", "winter", "Nokian Hakka 10 [94T]", ("ship", None)),
+    ("w-podship-desc-ship", "winter", "Michelin X-Ice North 4 [94T] Шип", ("pod_ship", None)),
+    # no attribute value / no attribute row → the description regex, as before
+    ("w-null-desc-ship", "winter", "Nokian Hakka 9 [91T] Шип", (None, None)),
+    ("w-null-desc-podship", "winter", "Kumho WI51 [91T] Під шип", (None, None)),
+    ("w-norow-desc-ship", "winter", "Nordman 8 [91T] Шип", None),
+    ("w-norow-desc-none", "winter", "Matador Sibir Ice 2 WinSpike [91T]", None),
+    # XL: attribute true with no «XL» text (most R18 winter tyres on prod)
+    ("x-attr-true", "winter", "Pirelli Ice Zero 2 [103H]", ("no_ship", True)),
+    ("x-attr-false-desc-xl", "summer", "Michelin Pilot Sport 4 XL [99Y]", (None, False)),
+    ("x-null-desc-xl", "summer", "Hankook K135 XL [99Y]", (None, None)),
+    ("x-norow-desc-xl", "summer", "Kumho PS71 Extra Load [99Y]", None),
+    ("s-norow-plain", "summer", "Continental PC7 [95Y]", None),
+]
+
+
+def _regexp(pattern: str, value: str | None) -> bool | None:
+    if value is None:
+        return None
+    return re.search(pattern, value, re.I) is not None
+
+
+class _SqliteResult:
+    #: Columns PostgreSQL hands back as booleans (SQLite gives 0/1).
+    _BOOLS = ("runflat", "attr_xl", "desc_studded", "desc_studdable", "desc_xl")
+
+    def __init__(self, cursor: Any) -> None:
+        names = [c[0] for c in cursor.description]
+        self._rows = []
+        for values in cursor.fetchall():
+            row = dict(zip(names, values, strict=True))
+            for key in self._BOOLS:
+                if row.get(key) is not None:
+                    row[key] = bool(row[key])
+            self._rows.append(row)
+
+    def mappings(self) -> _SqliteResult:
+        return self
+
+    def all(self) -> list[dict[str, Any]]:
+        return self._rows
+
+
+class _SqliteConn:
+    def __init__(self, engine: _SqliteEngine) -> None:
+        self._engine = engine
+
+    async def __aenter__(self) -> _SqliteConn:
+        return self
+
+    async def __aexit__(self, *_: Any) -> bool:
+        return False
+
+    async def execute(self, query: Any, params: dict[str, Any]) -> _SqliteResult:
+        sql = str(query)
+        self._engine.queries.append(sql)
+        sql = sql.replace("!~*", " NOT REGEXP ").replace("~*", " REGEXP ")
+        return _SqliteResult(self._engine.db.execute(sql, params))
+
+
+class _SqliteEngine:
+    def __init__(self) -> None:
+        import sqlite3
+
+        from src.store_client.catalog_types import TIRE_SEARCH_TYPES
+
+        self.queries: list[str] = []
+        self.db = sqlite3.connect(":memory:")
+        self.db.create_function("regexp", 2, _regexp, deterministic=True)
+        self.db.executescript(_SCHEMA)
+        type_id = sorted(TIRE_SEARCH_TYPES)[0]
+        for i, (sku, season, description, attr) in enumerate(_CATALOGUE):
+            self.db.execute(
+                "INSERT INTO tire_models VALUES (?, ?, ?, ?, ?)",
+                (i, description.split()[0], sku, season, type_id),
+            )
+            self.db.execute(
+                "INSERT INTO tire_products VALUES (?, ?, '225/45 R18', 225, 45, 18, ?, 0)",
+                (sku, i, description),
+            )
+            self.db.execute("INSERT INTO tire_stock VALUES (?, 'ProKoleso', ?, 4)", (sku, 3000 + i))
+            if attr is not None:
+                self.db.execute(
+                    "INSERT INTO tire_attributes VALUES (?, ?, ?, NULL, NULL)", (sku, *attr)
+                )
+
+    def connect(self) -> _SqliteConn:
+        return _SqliteConn(self)
+
+
+def _items(params: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    engine = _SqliteEngine()
+    client = StoreClient(base_url="http://localhost", api_key="k", db_engine=engine)
+    rows = asyncio.run(client._query_tire_rows("ProKoleso", {"width": 225, **params}))
+    return {row["id"]: StoreClient._tire_item(row) for row in rows}
+
+
+def test_sqlite_stand_reads_the_whole_catalogue() -> None:
+    """Sanity of the stand: no filter → every SKU, labelled as before."""
+    items = _items({})
+    assert set(items) == {sku for sku, *_ in _CATALOGUE}
+    assert items["w-noship-desc-ship"]["studded"] == "friction"
+    assert items["w-null-desc-ship"]["studded"] == "studded"
+    assert items["w-null-desc-podship"]["studded"] == "studdable"
+    assert items["x-attr-true"]["xl"] is True
+    assert "xl" not in items["x-attr-false-desc-xl"]
+
+
+@pytest.mark.parametrize(
+    ("studded", "labels"),
+    [(True, {"studded"}), (False, {"studdable", "friction"})],
+)
+def test_studs_filter_agrees_with_the_label(studded: bool, labels: set[str]) -> None:
+    every = _items({})
+    winter = {sku for sku, item in every.items() if "studded" in item}
+    expected = {sku for sku in winter if every[sku]["studded"] in labels}
+    found = _items({"studded": studded})
+    assert set(found) & winter == expected
+    for sku in found.keys() & winter:
+        assert found[sku]["studded"] in labels
+
+
+def test_studded_filter_follows_the_attribute_then_the_regex() -> None:
+    found = set(_items({"studded": True}))
+    # 1C «Шип» in the description, tshina says non-studded / stud-ready → out
+    assert "w-noship-desc-ship" not in found
+    assert "w-podship-desc-ship" not in found
+    # tshina says studded with no «Шип» in the text → in
+    assert "w-ship-desc-none" in found
+    # no attribute (NULL value or no row) → the regex, exactly as before
+    assert {"w-null-desc-ship", "w-norow-desc-ship"} <= found
+    assert not {"w-null-desc-podship", "w-norow-desc-none"} & found
+
+
+def test_unstudded_filter_takes_pod_ship_and_no_ship() -> None:
+    found = set(_items({"studded": False}))
+    assert {"w-noship-desc-ship", "w-podship-desc-ship", "x-attr-true"} <= found
+    assert {"w-null-desc-podship", "w-norow-desc-none"} <= found
+    assert not {"w-ship-desc-none", "w-null-desc-ship", "w-norow-desc-ship"} & found
+    # summer: ``studded`` NULL = not applicable → the regex (no «шип») keeps them
+    assert "s-norow-plain" in found
+
+
+@pytest.mark.parametrize("xl", [True, False])
+def test_xl_filter_agrees_with_the_label(xl: bool) -> None:
+    every = _items({})
+    expected = {sku for sku, item in every.items() if ("xl" in item) is xl}
+    found = _items({"xl": xl})
+    assert set(found) == expected
+    assert all(("xl" in item) is xl for item in found.values())
+
+
+def test_xl_filter_follows_the_attribute_then_the_regex() -> None:
+    found = set(_items({"xl": True}))
+    assert "x-attr-true" in found  # tshina XL, no «XL» in the text
+    assert "x-attr-false-desc-xl" not in found  # tshina says not XL
+    assert {"x-null-desc-xl", "x-norow-desc-xl"} <= found  # regex fallback
+    assert "s-norow-plain" not in found
+
+
+def test_no_filter_value_adds_no_attribute_condition() -> None:
+    engine = _SqliteEngine()
+    client = StoreClient(base_url="http://localhost", api_key="k", db_engine=engine)
+    asyncio.run(client._query_tire_rows("ProKoleso", {"width": 225, "studded": None, "xl": None}))
+    where = _squash(engine.queries[0]).split(" WHERE ", 1)[1]
+    assert "a.studded" not in where
+    assert "a.is_xl" not in where

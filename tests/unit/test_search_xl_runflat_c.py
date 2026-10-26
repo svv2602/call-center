@@ -131,9 +131,12 @@ class TestFilters:
     async def test_xl(self, value: Any, present: bool, negated: bool) -> None:
         client, engine = _client(lambda sql, p: list(_MARKET))
         await client.search_tires(network="ProKoleso", xl=value, **_SIZE)
-        sql = _tire_sql(engine)[0]
-        assert (client_mod._XL_SQL in sql) is present
-        assert (f"NOT ({client_mod._XL_SQL})" in sql) is negated
+        where = _tire_sql(engine)[0].split("WHERE", 1)[1]
+        # The tshina ``is_xl`` first, the description regex as the fallback.
+        assert (client_mod._XL_FILTER_SQL in where) is present
+        assert (f"NOT {client_mod._XL_FILTER_SQL}" in where) is negated
+        assert ("a.is_xl" in where) is present
+        assert (client_mod._XL_SQL in where) is present
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -186,7 +189,7 @@ class TestLadder:
 
     @pytest.mark.asyncio
     async def test_no_xl_in_size_offers_regular_with_marker(self) -> None:
-        client, engine = _client(_only_without(client_mod._XL_SQL))
+        client, engine = _client(_only_without(client_mod._XL_FILTER_SQL))
         result = await client.search_tires(network="ProKoleso", xl=True, **_SIZE)
         assert result["items"], "no XL in the size must not end in an empty answer"
         assert result["relaxed"] == ["xl"]
@@ -209,7 +212,7 @@ class TestLadder:
             if "FROM tire_products" not in sql:
                 return []
             where = sql.split("WHERE", 1)[1]
-            if client_mod._XL_SQL in where or client_mod._RUNFLAT_SQL in where:
+            if client_mod._XL_FILTER_SQL in where or client_mod._RUNFLAT_SQL in where:
                 return []
             return list(_MARKET)
 

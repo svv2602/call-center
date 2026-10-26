@@ -196,9 +196,13 @@ class TestFilters:
     async def test_studded(self, value: Any, positive: bool, negative: bool) -> None:
         client, engine = _client(lambda sql, p: [_row("Nokian", "Hakka", 3000)])
         await client.search_tires(network="ProKoleso", studded=value, width=205)
-        sql = _tire_sql_calls(engine)[0][0]
-        assert (f"NOT {client_mod._STUDDED_SQL}" in sql) is negative
-        assert (client_mod._STUDDED_SQL in sql) is (positive or negative)
+        where = _tire_sql_calls(engine)[0][0].split("WHERE", 1)[1]
+        # The attribute-first condition (tshina ``tire_attributes``), not the
+        # bare description regex: the regex sits inside it as the fallback.
+        assert (client_mod._STUDDED_FILTER_SQL in where) is positive
+        assert (client_mod._UNSTUDDED_FILTER_SQL in where) is negative
+        assert ("a.studded" in where) is (positive or negative)
+        assert (client_mod._STUDDED_SQL in where) is (positive or negative)
 
     @pytest.mark.asyncio
     @pytest.mark.parametrize(
@@ -216,7 +220,9 @@ class TestFilters:
     async def test_non_bool_studded_does_not_filter(self) -> None:
         client, engine = _client(lambda sql, p: [_row("Nokian", "Hakka", 3000)])
         await client.search_tires(network="ProKoleso", studded="yes", width=205)
-        assert client_mod._STUDDED_SQL not in _tire_sql_calls(engine)[0][0]
+        where = _tire_sql_calls(engine)[0][0].split("WHERE", 1)[1]
+        assert client_mod._STUDDED_SQL not in where
+        assert "a.studded" not in where
 
     def test_schema_has_optional_filters(self) -> None:
         from src.agent.tools import ALL_TOOLS
@@ -359,9 +365,9 @@ def _catalog(studded_rows: list[dict[str, Any]], friction_rows: list[dict[str, A
     def responder(sql: str, p: dict[str, Any]) -> list[dict[str, Any]]:
         if "FROM tire_products" not in sql:
             return []
-        if f"NOT {client_mod._STUDDED_SQL}" in sql:
+        if client_mod._UNSTUDDED_FILTER_SQL in sql:
             rows = friction_rows
-        elif client_mod._STUDDED_SQL in sql:
+        elif client_mod._STUDDED_FILTER_SQL in sql:
             rows = studded_rows
         else:
             rows = studded_rows + friction_rows
