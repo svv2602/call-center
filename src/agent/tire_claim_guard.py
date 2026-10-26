@@ -39,6 +39,15 @@ Rules (`RULES`, first match names the refusal):
   «X та Y шиповані») — is judged tyre by tyre. Silent when it does not cut
   cleanly: a kind with no tyres, tyres split by other words, two kinds, a
   comparison. A tyre named only inside the brackets is not judged.
+  One tyre (wave 10-X): an aside in brackets is not the claim either —
+  «WinterHawk 4 (шиповані можна додатково ставити)» says nothing; a negation
+  inside it — silent.
+  The replacement is the truth (wave 10-X, «правильну фразу»): the kind of
+  every tyre the sentence names, from ``studded`` — «Шиповані — X. Під шип —
+  Y. Без шипів — Z.», names as ``brand model``. None of them has ``studded``,
+  or one name has two — the neutral sentence. The same truth twice in one
+  filter: the second false sentence is dropped, not replaced (the text path
+  has no `drop_repeated_sentences`).
 
 ``eu_class`` and ``stud`` are silent on any ambiguity, as in tshina: no tyre
 or two named, another tyre or a comparison in the sentence («ніж у …», «у
@@ -74,7 +83,7 @@ neutral sentence, which carries no new fact. A rule's fixed sentence is said
 once per filter — a second copy is dropped.
 
 The one exception is ``restated_verdict``: its sentence is *dropped*, with
-no replacement. The rule fires only when the code's phrase was spoken this
+no replacement (as is ``stud`` repeating a truth it has said). The rule fires only when the code's phrase was spoken this
 turn, so the turn is never empty — the caller has already heard the very
 fact the dropped sentence repeats; a replacement would be a third copy.
 
@@ -356,6 +365,8 @@ class ClaimContext:
     previous: dict[str, Any] | None = None
     #: Sentences of this reply already judged (for rules that need them).
     seen: list[str] = field(default_factory=list)
+    #: The stud truths already said in place of a refused sentence.
+    stud_said: set[str] = field(default_factory=set)
 
 
 Rule = Callable[[str, ClaimContext], Refusal | None]
@@ -605,10 +616,59 @@ def rule_stud(sentence: str, ctx: ClaimContext) -> Refusal | None:
     actual = subject.get("studded")
     if actual not in (_STUDS_STUDDED, _STUDS_STUDDABLE, _STUDS_FRICTION):
         return None
-    claimed = _stud_claim(masked)
-    if claimed is None:
+    # The aside in brackets is not the claim; a negation in it — unclear.
+    if any(_STUD_NEGATION.search(aside) for aside in _STUD_ASIDE.findall(masked)):
         return None
-    return Refusal(RULE_STUD, REPLACEMENTS[RULE_STUD]) if _stud_wrong(actual, claimed) else None
+    claimed = _stud_claim(_STUD_ASIDE.sub(" ", masked))
+    if claimed is None or not _stud_wrong(actual, claimed):
+        return None
+    return _stud_refusal([subject], ctx)
+
+
+#: The truth's groups, in the order said, and their words.
+_STUD_TRUTH_LABELS = (
+    (_STUDS_STUDDED, "Шиповані"),
+    (_STUDS_STUDDABLE, "Під шип"),
+    (_STUDS_FRICTION, "Без шипів"),
+)
+
+
+def _tyre_name(item: dict[str, Any]) -> str:
+    """``brand model``, as the code's phrases name a tyre (`tyre_compare._name`)."""
+    return " ".join(str(item.get(k) or "").strip() for k in ("brand", "model") if item.get(k))
+
+
+def _stud_truth(tyres: list[dict[str, Any]]) -> str | None:
+    """«Шиповані — X і Y. Під шип — Z.» from ``studded``; ``None`` — nothing known."""
+    kinds: dict[str, str] = {}
+    for tyre in tyres:
+        actual = tyre.get("studded")
+        if actual not in (_STUDS_STUDDED, _STUDS_STUDDABLE, _STUDS_FRICTION):
+            continue
+        # One name, two kinds (sizes differ) — which one is true is a guess.
+        if kinds.setdefault(_tyre_name(tyre), actual) != actual:
+            return None
+    parts: list[str] = []
+    for kind, label in _STUD_TRUTH_LABELS:
+        names = [name for name, k in kinds.items() if k == kind]
+        if names:
+            listed = names[0] if len(names) == 1 else f"{', '.join(names[:-1])} і {names[-1]}"
+            parts.append(f"{label} — {listed}.")
+    return " ".join(parts) or None
+
+
+def _stud_refusal(tyres: list[dict[str, Any]], ctx: ClaimContext) -> Refusal:
+    """The truth about ``tyres`` in place of the refused sentence, said once."""
+    # `named_items` keeps one item per model; every size of it must agree.
+    keys = {_key(tyre) for tyre in tyres}
+    truth = _stud_truth([item for item in ctx.items if _key(item) in keys])
+    if truth is None:
+        return Refusal(RULE_STUD, REPLACEMENTS[RULE_STUD])
+    if truth in ctx.stud_said:
+        # Said already in this filter: the false sentence goes, nothing in its place.
+        return Refusal(RULE_STUD, "", fixed=False)
+    ctx.stud_said.add(truth)
+    return Refusal(RULE_STUD, truth, fixed=False)
 
 
 def _stud_wrong(actual: str, claimed: str) -> bool:
@@ -709,7 +769,7 @@ def _rule_stud_groups(sentence: str, ctx: ClaimContext) -> Refusal | None:
             if actual not in (_STUDS_STUDDED, _STUDS_STUDDABLE, _STUDS_FRICTION):
                 continue
             if _stud_wrong(actual, claimed):
-                return Refusal(RULE_STUD, REPLACEMENTS[RULE_STUD])
+                return _stud_refusal(named_items(sentence, ctx.items), ctx)
     return None
 
 

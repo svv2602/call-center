@@ -324,32 +324,42 @@ class TestEuClass:
 # ── stud ─────────────────────────────────────────────────────────────────
 
 
+#: The truth said in place of a refused sentence (wave 10-X), from ``studded``.
+BLIZZAK_TRUTH = "Без шипів — Bridgestone Blizzak 6."
+HAKKA_TRUTH = "Шиповані — Nokian Hakkapeliitta 10."
+WINTERHAWK_TRUTH = "Під шип — Firestone WinterHawk 4."
+
+
 class TestStud:
     @pytest.mark.parametrize(
-        "sentence",
+        ("sentence", "truth"),
         [
             # friction said studded.
-            STUD_LIE,
-            "Bridgestone Blizzak 6 має шипи і добре тримає лід.",
-            "У Bridgestone Blizzak 6 есть шипы.",
-            "Bridgestone Blizzak 6 з шипами впевнено тримає на льоду.",
+            (STUD_LIE, BLIZZAK_TRUTH),
+            ("Bridgestone Blizzak 6 має шипи і добре тримає лід.", BLIZZAK_TRUTH),
+            ("У Bridgestone Blizzak 6 есть шипы.", BLIZZAK_TRUTH),
+            ("Bridgestone Blizzak 6 з шипами впевнено тримає на льоду.", BLIZZAK_TRUTH),
             # studdable said studded.
-            "Firestone WinterHawk 4 — шипована шина.",
+            ("Firestone WinterHawk 4 — шипована шина.", WINTERHAWK_TRUTH),
             # studded said friction.
-            "Nokian Hakkapeliitta 10 — це липучка для міста.",
-            "Nokian Hakkapeliitta 10 продається без шипів.",
-            "Nokian Hakkapeliitta 10 — фрикційна модель.",
-            "Nokian Hakkapeliitta 10 — нешипована шина.",
+            ("Nokian Hakkapeliitta 10 — це липучка для міста.", HAKKA_TRUTH),
+            ("Nokian Hakkapeliitta 10 продається без шипів.", HAKKA_TRUTH),
+            ("Nokian Hakkapeliitta 10 — фрикційна модель.", HAKKA_TRUTH),
+            ("Nokian Hakkapeliitta 10 — нешипована шина.", HAKKA_TRUTH),
             # «під шип» about a tyre that is not studdable.
-            "Bridgestone Blizzak 6 іде під шип.",
-            "Nokian Hakkapeliitta 10 — під шип.",
+            ("Bridgestone Blizzak 6 іде під шип.", BLIZZAK_TRUTH),
+            ("Nokian Hakkapeliitta 10 — під шип.", HAKKA_TRUTH),
             # Two tyres, one group (wave 9-W; was silent): Blizzak is friction.
-            "Bridgestone Blizzak 6 і Nokian Hakkapeliitta 10 мають шипи.",
+            # The truth names both, studded first.
+            (
+                "Bridgestone Blizzak 6 і Nokian Hakkapeliitta 10 мають шипи.",
+                f"{HAKKA_TRUTH} {BLIZZAK_TRUTH}",
+            ),
         ],
     )
-    def test_wrong_stud_claim_is_replaced(self, sentence: str) -> None:
+    def test_wrong_stud_claim_is_replaced_by_the_truth(self, sentence: str, truth: str) -> None:
         assert _fired(sentence) == {RULE_STUD}
-        assert _judge(sentence) == REPLACEMENTS[RULE_STUD]
+        assert _judge(sentence) == truth
 
     @pytest.mark.parametrize(
         "sentence",
@@ -372,7 +382,7 @@ class TestStud:
 
     def test_she_refers_to_the_tyre_named_before(self) -> None:
         text = "Раджу Bridgestone Blizzak 6. Вона шипована."
-        assert _judge(text) == f"Раджу Bridgestone Blizzak 6. {REPLACEMENTS[RULE_STUD]}"
+        assert _judge(text) == f"Раджу Bridgestone Blizzak 6. {BLIZZAK_TRUTH}"
 
     @pytest.mark.parametrize(
         "sentence",
@@ -423,32 +433,70 @@ def _group_state() -> TireClaimState:
     return state
 
 
+NORDMAN = "Nokian Nordman 8"
+ICE = "Firestone Ice Cruiser 7"
+WINTERHAWK = "Firestone WinterHawk 4"
+BLIZZAK = "Bridgestone Blizzak 6"
+#: The goldset 4 truth (10-26): every tyre GROUP_LIE names, studded first.
+GROUP_TRUTH = f"Шиповані — {NORDMAN}. Під шип — {WINTERHAWK}. Без шипів — {BLIZZAK}."
+
+
 class TestStudGroups:
     @pytest.mark.parametrize(
-        "sentence",
+        ("sentence", "truth"),
         [
-            GROUP_LIE,
+            (GROUP_LIE, GROUP_TRUTH),
             # The aside in brackets is dropped: alone it would make WinterHawk right.
-            "Шиповані — Firestone WinterHawk 4 і Nokian Nordman 8 (під шип можна ставити).",
-            "Nordman 8 і Blizzak 6 шиповані.",
-            "Nokian Nordman 8 та Bridgestone Blizzak 6 мають шипи.",
-            "Без шипів — Blizzak 6, а WinterHawk 4 шипована.",
-            # The wrong tyre is last of the list, not first.
-            "Шиповані — Nordman 8, Ice Cruiser 7 та Blizzak 6.",
-            "Шиповані — Nordman 8 і Blizzak 6, а Primacy 4 — літня.",
+            (
+                "Шиповані — Firestone WinterHawk 4 і Nokian Nordman 8 (під шип можна ставити).",
+                f"Шиповані — {NORDMAN}. Під шип — {WINTERHAWK}.",
+            ),
+            ("Nordman 8 і Blizzak 6 шиповані.", f"Шиповані — {NORDMAN}. Без шипів — {BLIZZAK}."),
+            (
+                "Nokian Nordman 8 та Bridgestone Blizzak 6 мають шипи.",
+                f"Шиповані — {NORDMAN}. Без шипів — {BLIZZAK}.",
+            ),
+            (
+                "Без шипів — Blizzak 6, а WinterHawk 4 шипована.",
+                f"Під шип — {WINTERHAWK}. Без шипів — {BLIZZAK}.",
+            ),
+            # The wrong tyre is last of the list, not first; two of a kind are listed.
+            (
+                "Шиповані — Nordman 8, Ice Cruiser 7 та Blizzak 6.",
+                f"Шиповані — {NORDMAN} і {ICE}. Без шипів — {BLIZZAK}.",
+            ),
+            # Primacy 4 has no ``studded``: not in the truth.
+            (
+                "Шиповані — Nordman 8 і Blizzak 6, а Primacy 4 — літня.",
+                f"Шиповані — {NORDMAN}. Без шипів — {BLIZZAK}.",
+            ),
             # The first group is right, the second (after «але» / «тоді як») is not.
-            "Nordman 8 і Ice Cruiser 7 шиповані, але Nordman 8 — липучка.",
-            "Blizzak 6 — липучка, тоді як WinterHawk 4 і Ice Cruiser 7 — під шип.",
-            "Під шип — Nordman 8 і WinterHawk 4.",
+            (
+                "Nordman 8 і Ice Cruiser 7 шиповані, але Nordman 8 — липучка.",
+                f"Шиповані — {NORDMAN} і {ICE}.",
+            ),
+            (
+                "Blizzak 6 — липучка, тоді як WinterHawk 4 і Ice Cruiser 7 — під шип.",
+                f"Шиповані — {ICE}. Під шип — {WINTERHAWK}. Без шипів — {BLIZZAK}.",
+            ),
+            (
+                "Під шип — Nordman 8 і WinterHawk 4.",
+                f"Шиповані — {NORDMAN}. Під шип — {WINTERHAWK}.",
+            ),
             # «, а також» goes on with the list: Blizzak 6 is in it.
-            "Шиповані — Nordman 8, а також Blizzak 6.",
-            "Шиповані — Bridgestone Blizzak 6 і Michelin Primacy 4.",
+            (
+                "Шиповані — Nordman 8, а також Blizzak 6.",
+                f"Шиповані — {NORDMAN}. Без шипів — {BLIZZAK}.",
+            ),
+            ("Шиповані — Bridgestone Blizzak 6 і Michelin Primacy 4.", f"Без шипів — {BLIZZAK}."),
         ],
     )
-    def test_wrong_kind_of_any_tyre_in_a_group_is_replaced(self, sentence: str) -> None:
+    def test_wrong_kind_of_any_tyre_in_a_group_is_replaced_by_the_truth(
+        self, sentence: str, truth: str
+    ) -> None:
         state = _group_state()
         assert _fired(sentence, state) == {RULE_STUD}
-        assert _judge(sentence, _group_state()) == REPLACEMENTS[RULE_STUD]
+        assert _judge(sentence, _group_state()) == truth
 
     @pytest.mark.parametrize(
         "sentence",
@@ -511,7 +559,7 @@ class TestStudGroups:
 
     def test_rest_of_the_reply_is_kept(self) -> None:
         text = f"{GROUP_LIE} Ціна від 4100 гривень."
-        assert _judge(text, _group_state()) == f"{REPLACEMENTS[RULE_STUD]} Ціна від 4100 гривень."
+        assert _judge(text, _group_state()) == f"{GROUP_TRUTH} Ціна від 4100 гривень."
 
     def test_sales_off_judges_no_group(self) -> None:
         state = TireClaimState(sales_enabled=False)
@@ -537,9 +585,7 @@ def test_sales_off_judges_nothing() -> None:
 
 def test_both_rules_in_one_reply_keep_the_rest() -> None:
     text = f"{EU_LIE} {STUD_LIE} Ціна 5200 гривень."
-    assert _judge(text) == (
-        f"{REPLACEMENTS[RULE_EU_CLASS]} {REPLACEMENTS[RULE_STUD]} Ціна 5200 гривень."
-    )
+    assert _judge(text) == f"{REPLACEMENTS[RULE_EU_CLASS]} {BLIZZAK_TRUTH} Ціна 5200 гривень."
 
 
 def test_stream_replaces_the_sentence() -> None:
@@ -550,4 +596,93 @@ def test_stream_replaces_the_sentence() -> None:
     async def _run() -> list[str]:
         return [e.text async for e in guard_tire_claims(_gen(), _state(), ASKED)]
 
-    assert asyncio.run(_run()) == [REPLACEMENTS[RULE_STUD], "Ціна 5200."]
+    assert asyncio.run(_run()) == [BLIZZAK_TRUTH, "Ціна 5200."]
+
+
+def test_stream_says_the_same_truth_once() -> None:
+    async def _gen():
+        for text in [STUD_LIE, "Ціна 5200.", "Bridgestone Blizzak 6 має шипи."]:
+            yield SentenceReady(text=text)
+
+    async def _run() -> list[str]:
+        return [e.text async for e in guard_tire_claims(_gen(), _state(), ASKED)]
+
+    before = _count(RULE_STUD)
+    assert asyncio.run(_run()) == [BLIZZAK_TRUTH, "Ціна 5200."]
+    assert _count(RULE_STUD) == before + 2
+
+
+# ── stud: the truth in place of the lie (wave 10-X) ──────────────────────
+
+
+class TestStudTruth:
+    def test_goldset_reply_gets_the_truth_about_all_three(self) -> None:
+        assert _fired(GROUP_LIE, _group_state()) == {RULE_STUD}
+        truth = _judge(GROUP_LIE, _group_state())
+        assert truth == GROUP_TRUTH
+        # Only names and kinds: no price, no advice, nothing in Russian.
+        assert REPLACEMENTS[RULE_STUD] not in truth
+        assert not any(w in truth for w in ("грн", "раджу", "рекоменд", "шипы", "без шипов"))
+
+    def test_one_tyre_lie_gets_its_kind(self) -> None:
+        sentence = "Firestone WinterHawk 4 шипована."
+        assert _fired(sentence, _group_state()) == {RULE_STUD}
+        assert _judge(sentence, _group_state()) == WINTERHAWK_TRUTH
+
+    def test_one_name_with_two_kinds_falls_back_to_the_neutral_sentence(self) -> None:
+        # Two sizes of one model, the result says studded for one, friction for
+        # the other: which is true of «Nordman 8» is a guess.
+        items = [*copy.deepcopy(GROUP_ITEMS), _item("g6", "Nokian", "Nordman 8", 4400)]
+        items[-1]["size"] = "205/55 R16"
+        items[-1]["studded"] = "friction"
+        state = TireClaimState(sales_enabled=True)
+        state.note("search_tires", {"items": items})
+        sentence = "Nokian Nordman 8 — липучка."
+        assert _judge(sentence, state) == REPLACEMENTS[RULE_STUD]
+
+    def test_neutral_sentence_is_said_once(self) -> None:
+        items = [*copy.deepcopy(GROUP_ITEMS), _item("g6", "Nokian", "Nordman 8", 4400)]
+        items[-1]["studded"] = "friction"
+        state = TireClaimState(sales_enabled=True)
+        state.note("search_tires", {"items": items})
+        text = "Nokian Nordman 8 — липучка. Nokian Nordman 8 продається без шипів."
+        assert _judge(text, state) == REPLACEMENTS[RULE_STUD]
+
+    def test_same_truth_is_said_once_in_the_text_path(self) -> None:
+        # The text path has no `drop_repeated_sentences`: the rule itself
+        # drops the second lie, the truth was already said.
+        text = f"{STUD_LIE} Ціна 5200 гривень. Bridgestone Blizzak 6 має шипи."
+        before = _count(RULE_STUD)
+        assert _judge(text) == f"{BLIZZAK_TRUTH} Ціна 5200 гривень."
+        assert _count(RULE_STUD) == before + 2
+
+    def test_different_truths_are_both_said(self) -> None:
+        text = f"{STUD_LIE} Firestone WinterHawk 4 — шипована шина."
+        assert _judge(text) == f"{BLIZZAK_TRUTH} {WINTERHAWK_TRUTH}"
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            # The aside is the only stud word: nothing claimed (was refused).
+            "Firestone WinterHawk 4 (шиповані можна додатково ставити).",
+            "Firestone WinterHawk 4 — під шип (шиповані можна додатково ставити).",
+            # A negation inside the aside — unclear, silent.
+            "Firestone WinterHawk 4 шипована (не всі розміри).",
+            "Firestone WinterHawk 4 шипована (без шипів теж є).",
+        ],
+    )
+    def test_one_tyre_aside_is_not_the_claim(self, sentence: str) -> None:
+        assert _fired(sentence, _group_state()) == set()
+        assert _judge(sentence, _group_state()) == sentence
+
+    def test_one_tyre_claim_outside_the_aside_is_judged(self) -> None:
+        sentence = "Firestone WinterHawk 4 шипована (під шип)."
+        assert _fired(sentence, _group_state()) == {RULE_STUD}
+        assert _judge(sentence, _group_state()) == WINTERHAWK_TRUTH
+
+    def test_sales_off_says_no_truth(self) -> None:
+        state = TireClaimState(sales_enabled=False)
+        state.note("search_tires", {"items": copy.deepcopy(GROUP_ITEMS)})
+        sentence = "Firestone WinterHawk 4 шипована (під шип)."
+        assert _fired(sentence, state) == set()
+        assert _judge(sentence, state) == sentence
