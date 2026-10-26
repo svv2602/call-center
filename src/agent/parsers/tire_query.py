@@ -29,12 +29,15 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from src.agent.parsers.base import ParseContext
 from src.agent.parsers.diameter_parser import DiameterParser
 from src.stt.entity_normalizer import normalize_brand_names
 from src.stt.numeral_parser import _lookup as _numeral_value
+
+if TYPE_CHECKING:
+    from src.agent.tire_needs import Need
 
 __all__ = [
     "Budget",
@@ -49,6 +52,8 @@ __all__ = [
     "normalize_tire_brand",
     "parse_budget",
     "parse_nail_type",
+    "parse_need_refusals",
+    "parse_needs",
     "parse_quantity",
     "parse_tech_refusals",
     "parse_tech_requirements",
@@ -919,4 +924,141 @@ def parse_tech_refusals(text: str) -> list[TechRequirement] | None:
     utterance counts as asked for.
     """
     _, refused = _tech_mentions(text)
+    return refused or None
+
+
+# ═══════════════════════════════════════════════════════════
+#  Needs («тихі», «на мокрому», «економні», «для траси»)
+# ═══════════════════════════════════════════════════════════
+
+#: Port of tshina `PRIORITY_KEYWORDS` / `DRIVING_CONDITIONS_KEYWORDS['highway']`
+#: for the needs `src.agent.tire_needs` can score — word stems, UA + RU, the
+#: oblique cases included («тиху», «на мокрой», «для трассы»). A one-language
+#: table reads the other language as silence. Bare «тих» is left out: in UA
+#: it is «those» («з тих, що ви назвали»).
+_QUIET_WORD = (
+    r"тих(?:ий|а|е|і|у|о|ої|ою|им|ими|их|ому|ого|ие|ую|ая|ое|ше|іш\w*|еньк\w*)"
+    r"|тиш\w*|безшумн\w*|бесшумн\w*|малошумн\w*|шумоізол\w*|шумоизол\w*"
+)
+_NEED_PATTERNS: tuple[tuple[Need, re.Pattern[str]], ...] = (
+    (
+        "quiet",
+        re.compile(
+            rf"(?<![\w'])(?:{_QUIET_WORD}"
+            r"|не\s+(?:дуже\s+|очень\s+|сильно\s+|так\s+)?шум[ілненя]\w*"
+            r"|(?:менш|меньш|низьк|низк)\w*\s+шум\w*|шум\w*\s+(?:менш|меньш)\w*)(?![\w'])"
+        ),
+    ),
+    (
+        "wet_grip",
+        re.compile(
+            r"(?<![\w'])(?:мокр\w*|зчепл\w*|сцепл\w*|аквапла\w*|гальмуван\w*|гальмівн\w*"
+            r"|торможен\w*|тормозн\w*|дощов\w*|дождлив\w*"
+            r"|(?:в|у|під|под)\s+(?:дощ|дожд|злив|ливен|ливн)\w*"
+            r"|(?:трима|держа)\w*\s+(?:\w+\s+)?дорог\w*)(?![\w'])"
+        ),
+    ),
+    (
+        "fuel",
+        re.compile(
+            r"(?<![\w'])(?:палив\w*|пальн\w*|топлив\w*|економн\w*|економічн\w*|экономичн\w*"
+            r"|экономн\w*|енергоефект\w*|энергоэффект\w*"
+            r"|(?:витрат|расход|економ|эконом)\w*\s+(?:на\s+)?бензин\w*)(?![\w'])"
+        ),
+    ),
+    (
+        "highway",
+        re.compile(
+            r"(?<![\w'])(?:трас\w*|магістрал\w*|магистрал\w*|автобан\w*|міжміськ\w*"
+            r"|междугор\w*|(?:висок|высок)\w*\s+(?:швидк|скорост)\w*"
+            r"|(?:швидк|быстр)\w*\s+(?:їзд|езд|ізд)\w*)(?![\w'])"
+        ),
+    ),
+)
+
+#: The topic of a need, said with or without wanting it: «шум не важливий»
+#: names the noise without asking for quiet.
+_NEED_TOPICS: dict[Need, str] = {
+    "quiet": rf"{_QUIET_WORD}|шум\w*",
+    "wet_grip": (
+        r"мокр\w*|зчепл\w*|сцепл\w*|аквапла\w*|гальм\w*|тормоз\w*|торможен\w*|дощ\w*|дожд\w*"
+    ),
+    "fuel": r"палив\w*|пальн\w*|топлив\w*|економ\w*|эконом\w*|витрат\w*|расход\w*|бензин\w*",
+    "highway": r"трас\w*|швидк\w*|скорост\w*|магістрал\w*|магистрал\w*",
+}
+#: «не важливо / все одно / без різниці» — the caller does not care. Not «не
+#: треба»: «шумні не треба» asks for quiet.
+_INDIFFERENT = (
+    r"(?:не\s+важлив\w*|неважлив\w*|не\s+важн\w*|неважн\w*|не\s+має\s+значення"
+    r"|не\s+имеет\s+значения|без\s+різниці|без\s+разниц\w*|все\s+одно|всё\s+равно"
+    r"|все\s+равно|байдуже|не\s+головн\w*|не\s+главн\w*|не\s+принципов\w*"
+    r"|не\s+принципіальн\w*|не\s+критичн\w*|не\s+обов'?язков\w*|не\s+обязательн\w*"
+    r"|пофіг|пофиг|не\s+цікав\w*|не\s+интересу\w*|не\s+турбує|не\s+волну\w*)"
+)
+#: One word may stand between the topic and the verdict («шум мені не
+#: важливий», «по пальному взагалі все одно») — never a conjunction: «тихі, а
+#: бренд все одно» wants quiet.
+_GAP_WORD = r"(?:\s+(?!(?:а|і|й|и|та|але|но|да|або|или|чи|бренд\w*|ціна|цена)(?![\w']))[\w']+)?"
+#: «по трасі майже не їжджу».
+_NOT_DRIVING = (
+    r"(?:майже\s+|почти\s+|взагалі\s+|вообще\s+|рідко\s+)?"
+    r"не\s+(?:їжджу|їздимо|їзжу|ездим|езжу|катаюсь|катаємось)"
+)
+#: «неважно, как шумят», «все одно по пальному» — a comma only before «як / как …»:
+#: «все одно, тихі» stays unread rather than read as a refusal.
+_INDIFFERENT_BEFORE_FILLER = (
+    r"(?:,?\s+(?:як|как|чи|ли|наскільки|насколько|які|какие)|\s+(?:по|на))?"
+)
+
+
+def _need_refusal_re(need: Need, topic: str) -> re.Pattern[str]:
+    parts = [
+        rf"(?<![\w'])(?:{topic}){_GAP_WORD}\s+{_INDIFFERENT}(?![\w'])",
+        rf"(?<![\w']){_INDIFFERENT}{_INDIFFERENT_BEFORE_FILLER}\s+(?:{topic})(?![\w'])",
+    ]
+    if need == "highway":
+        # «не по трасі, по місту», «по трасі майже не їжджу».
+        parts.append(rf"(?<![\w'])(?:не|ні)\s+(?:по|на|для|в|у)\s+(?:{topic})(?![\w'])")
+        parts.append(rf"(?<![\w'])(?:{topic})\s+{_NOT_DRIVING}(?![\w'])")
+    return re.compile("|".join(parts))
+
+
+_NEED_REFUSALS: tuple[tuple[Need, re.Pattern[str]], ...] = tuple(
+    (need, _need_refusal_re(need, topic)) for need, topic in _NEED_TOPICS.items()
+)
+
+
+def _need_mentions(text: str) -> tuple[list[Need], list[Need]]:
+    """(wanted, refused) — the refused spans are blanked before needs are read."""
+    low = (text or "").lower().translate(_APOSTROPHES)
+    refused: list[Need] = []
+    for need, pattern in _NEED_REFUSALS:
+        spans = [m.span() for m in pattern.finditer(low)]
+        if spans:
+            refused.append(need)
+            low = _blank(low, spans)
+    wanted = [need for need, pattern in _NEED_PATTERNS if pattern.search(low)]
+    return wanted, [n for n in refused if n not in wanted]
+
+
+def parse_needs(text: str) -> list[Need] | None:
+    """Needs the caller named — ``quiet`` / ``wet_grip`` / ``fuel`` / ``highway`` — or ``None``.
+
+    «щоб не шуміли», «тихі», «на мокрому тримали», «економні по пальному»,
+    «для траси» (UA + RU). A need the caller does not care about («шум не
+    важливий», «неважно, как шумят») is not a need — see `parse_need_refusals`.
+    Scored by `src.agent.tire_needs.need_tier`.
+    """
+    wanted, _ = _need_mentions(text)
+    return wanted or None
+
+
+def parse_need_refusals(text: str) -> list[Need] | None:
+    """Needs the caller does not care about («шум не важливий») — or ``None``.
+
+    Separate from `parse_needs` so a caller that merges turns can drop a need
+    said earlier. A need both refused and asked for in one utterance counts as
+    asked for.
+    """
+    _, refused = _need_mentions(text)
     return refused or None

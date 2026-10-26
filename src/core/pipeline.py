@@ -882,6 +882,8 @@ def merge_tire_query(
         is_tire_question,
         parse_budget,
         parse_nail_type,
+        parse_need_refusals,
+        parse_needs,
         parse_quantity,
         parse_tech_refusals,
         parse_tech_requirements,
@@ -941,6 +943,14 @@ def merge_tire_query(
         if refused:
             # «ранфлет» then «без ранфлета»: the refusal drops what was said before.
             out["tech"] = [t for t in out.get("tech") or [] if t not in refused] or None
+    # Needs (wave 4-F, tshina `NeedsMatcher`): a new one is added after those
+    # said before; «шум не важливий» drops «тихі». They order the offer
+    # (`StoreClient._rank_tires`), they never filter it.
+    needs = parse_needs(text) or []
+    not_needed = parse_need_refusals(text) or []
+    if needs or not_needed:
+        kept = [n for n in out.get("needs") or [] if n not in not_needed]
+        out["needs"] = kept + [n for n in needs if n not in kept] or None
     return {k: v for k, v in out.items() if v not in (None, "", [], {})}
 
 

@@ -2603,6 +2603,12 @@ _TIRE_TECH_LABELS: dict[str, str] = {
     "xl": "XL (посилене навантаження)",
     "commercial": "C (комерційні, для буса)",
 }
+_TIRE_NEED_LABELS: dict[str, str] = {
+    "quiet": "тихі",
+    "wet_grip": "зчеплення на мокрій дорозі",
+    "fuel": "економія пального",
+    "highway": "для траси (високий індекс швидкості)",
+}
 
 
 def _render_tire_progress(p: dict[str, Any]) -> str:
@@ -2662,6 +2668,12 @@ def _render_tire_progress(p: dict[str, Any]) -> str:
     if tech:
         names = ", ".join(_TIRE_TECH_LABELS.get(str(t), str(t)) for t in tech)
         lines.append(f"- Особливості: ✅ {names}")
+    needs = p.get("needs") or []
+    if needs:
+        names = ", ".join(_TIRE_NEED_LABELS.get(str(n), str(n)) for n in needs)
+        lines.append(
+            f"- Потреба: ✅ {names} — search_tires вже ставить такі шини першими, не перепитуй"
+        )
 
     lines.append(
         "- Після search_tires: 2–3 варіанти, ціна за 1 шину; нештатний розмір не пропонуй "

@@ -21,6 +21,7 @@ import aiohttp
 from aiobreaker import CircuitBreaker, CircuitBreakerError
 
 from src.agent.network_policy import RECOMMEND_COUNT_MAX, RECOMMEND_COUNT_MIN
+from src.agent.tire_needs import need_score
 from src.store_client.catalog_types import TIRE_SEARCH_TYPES, WHEEL
 from src.store_client.tire_tests import attach_tire_tests
 
@@ -381,7 +382,7 @@ class StoreClient:
                 return result
 
         # Fallback: HTTP Store API (knows nothing of the network ranking)
-        for key in ("brand_priority", "recommend_count"):
+        for key in ("brand_priority", "recommend_count", "needs"):
             params.pop(key, None)
 
         if any(k in params for k in ("vehicle_make", "vehicle_model", "vehicle_year")):
@@ -1429,6 +1430,7 @@ class StoreClient:
         rows: list[Any],
         brand_priority: tuple[str, ...] | list[str] = (),
         recommend_count: int = RECOMMEND_COUNT_MAX,
+        needs: tuple[str, ...] | list[str] = (),
     ) -> list[Any]:
         """Pick what the bot offers: ``recommend_count`` (2–3) in-stock tyres.
 
@@ -1441,6 +1443,15 @@ class StoreClient:
 
         A brand the customer named is a SQL filter, so every row here is
         that brand already. Empty ``brand_priority`` → only step 3.
+
+        ``needs`` the caller named (``session.tire_query["needs"]``, sales
+        only) come before all of that — port of tshina `NeedsMatcher`
+        (``013e0cd24``): the models are split into steps by
+        `tire_needs.need_score`, best step first, and steps 2–3 run inside
+        each step, so ``brand_priority`` only breaks ties between tyres that
+        fit the need equally. A step too small for the offer is topped up from
+        the next one down — a tyre without an EU label is the bottom step,
+        never dropped. No ``needs`` → exactly the order above.
         """
         count = _clamp_recommend_count(recommend_count)
 
@@ -1452,6 +1463,30 @@ class StoreClient:
             seen_models.setdefault(key, r)
         unique = list(seen_models.values())
 
+        if not needs:
+            return StoreClient._pick_offer(unique, brand_priority, count)
+
+        steps: dict[int, list[Any]] = {}
+        for r in unique:
+            steps.setdefault(need_score(r, needs), []).append(r)
+        logger.info(
+            "rank_tires: needs=%s, models per step=%s",
+            list(needs),
+            {score: len(steps[score]) for score in sorted(steps, reverse=True)},
+        )
+        picked: list[Any] = []
+        for score in sorted(steps, reverse=True):
+            left = count - len(picked)
+            if left <= 0:
+                break
+            picked.extend(StoreClient._pick_offer(steps[score], brand_priority, left))
+        return picked
+
+    @staticmethod
+    def _pick_offer(
+        unique: list[Any], brand_priority: tuple[str, ...] | list[str], count: int
+    ) -> list[Any]:
+        """Steps 2–3 of `_rank_tires` over one-variant-per-model rows."""
         picked: list[Any] = []
         for brand in brand_priority or ():
             if len(picked) >= count:
@@ -1704,6 +1739,7 @@ class StoreClient:
 
         brand_priority = params.pop("brand_priority", None) or ()
         recommend_count = params.pop("recommend_count", None)
+        needs = params.pop("needs", None) or ()
 
         if recommend_count is None:
             if params.get("brand"):
@@ -1716,7 +1752,7 @@ class StoreClient:
             rows = await self._query_tire_rows(network, params, brand_priority)
 
         if recommend_count is not None:
-            rows = self._rank_tires(rows, brand_priority, recommend_count)
+            rows = self._rank_tires(rows, brand_priority, recommend_count, needs)
         elif not params.get("brand") and len(rows) > 5:
             # Legacy overview: budget, mid-range and premium options
             rows = self._pick_diverse_tires(rows)
@@ -1798,6 +1834,7 @@ class StoreClient:
         """Staggered axles: one model offered in the front and the rear size."""
         brand_priority = params.pop("brand_priority", None) or ()
         recommend_count = params.pop("recommend_count", None)
+        needs = params.pop("needs", None) or ()
         params = {**params, "_limit": _RANKING_WINDOW}
         front_rows = await self._query_tire_rows(network, params, brand_priority)
         # Price bounds are about the front tyre the caller heard, not the rear.
@@ -1813,7 +1850,10 @@ class StoreClient:
                 rear_by_model.setdefault(key(r), r)
         paired = [r for r in front_rows if key(r) in rear_by_model]
         ranked = self._rank_tires(
-            paired, brand_priority, recommend_count if recommend_count is not None else 3
+            paired,
+            brand_priority,
+            recommend_count if recommend_count is not None else 3,
+            needs,
         )
 
         items = []

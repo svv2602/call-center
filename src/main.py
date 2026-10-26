@@ -1777,6 +1777,9 @@ def _build_tool_router(
         # Ranking comes from the network policy, never from the LLM's args.
         params.pop("brand_priority", None)
         params.pop("recommend_count", None)
+        # The caller's needs come from their own words (`merge_tire_query`),
+        # never from the LLM's args — and only under sales (below).
+        params.pop("needs", None)
         # Price bounds come from the last offer, never from the LLM's args.
         price_mode = params.pop("price_mode", None)
         for key in PRICE_FILTER_KEYS:
@@ -1787,6 +1790,9 @@ def _build_tool_router(
         if network_policy is None or not network_policy.sales_enabled:
             return await client.search_tires(network=network, **params)
 
+        needs = session.tire_query.get("needs")
+        if needs:
+            params["needs"] = list(needs)
         result, applied_mode = await _search_by_price_mode(network, params, price_mode)
         await _mark_runflat_required(result, params)
         if isinstance(result, dict):
