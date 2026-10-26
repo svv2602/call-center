@@ -94,7 +94,7 @@ def _scope_ok(
     return True
 
 
-KEYS = {"tire_eu_labels": "sku"}
+KEYS = {"tire_eu_labels": "sku", "tire_attributes": "sku"}
 
 
 class FakeDb:
@@ -103,6 +103,7 @@ class FakeDb:
             name: {}
             for name in (
                 "tire_eu_labels",
+                "tire_attributes",
                 "tire_tests",
                 "tire_test_placements",
                 "vehicle_brands",
@@ -281,6 +282,18 @@ class FakeConn:
 
             self._effect(_lab)
             return Result()
+        if sql.startswith("INSERT INTO tire_attributes"):
+            guarded = "WHERE tire_attributes.source = 'tshina'" in sql
+
+            def _attr() -> None:
+                for r in many:
+                    cur = t["tire_attributes"].get(r["sku"])
+                    if cur and guarded and cur["source"] != "tshina":
+                        continue
+                    t["tire_attributes"][r["sku"]] = {**r, "source": "tshina"}
+
+            self._effect(_attr)
+            return Result()
         if sql.startswith("DELETE FROM tire_test_placements WHERE test_id = ANY"):
             ids = set(p["ids"])
             self._effect(
@@ -342,6 +355,28 @@ def label(sku: str, **kw: Any) -> dict[str, Any]:
     return base | kw
 
 
+def attrs(sku: str, **kw: Any) -> dict[str, Any]:
+    """The tire-attributes record tshina sent on 2026-10-26 (README contract)."""
+    base = {
+        "sku": sku,
+        "model_1c_id": "ы00020101",
+        "season": "winter",
+        "studded": "pod_ship",
+        "is_xl": True,
+        "is_runflat": False,
+        "is_snow_marker": False,
+        "vehicle_type": "passenger",
+        "reinforcement": "reinfxl",
+        "load_index": "105",
+        "speed_index": "T",
+        "country": {"ua": "Німеччина", "ru": "Германия"},
+        "year": 2024,
+        "updated_at": ST1,
+        "deleted": False,
+    }
+    return base | kw
+
+
 # ── parsing: a row is accepted whole or rejected ─────────────────────────────
 
 
@@ -358,6 +393,105 @@ def test_label_off_scale_or_wrong_type_is_rejected_whole() -> None:
         with pytest.raises(ts.RowRejectedError):
             ts.parse_label(bad)
     assert ts.parse_label(label("1", eprel_number=None))["eprel_number"] is None
+
+
+def test_tire_attributes_parse_the_contract_record() -> None:
+    assert ts.parse_tire_attributes(attrs("00000047766")) == {
+        "sku": "00000047766",
+        "model_1c_id": "ы00020101",
+        "season": "winter",
+        "studded": "pod_ship",
+        "is_xl": True,
+        "is_runflat": False,
+        "is_snow_marker": False,
+        "vehicle_type": "passenger",
+        "reinforcement": "reinfxl",
+        "load_index": "105",
+        "speed_index": "T",
+        "country": json.dumps({"ua": "Німеччина", "ru": "Германия"}, ensure_ascii=False),
+        "year": 2024,
+        "updated_at": datetime(2026, 9, 29, 2, 0, tzinfo=UTC),
+    }
+
+
+@pytest.mark.parametrize("studded", ["ship", "pod_ship", "no_ship"])
+def test_tire_attributes_accept_every_stud_value(studded: str) -> None:
+    assert ts.parse_tire_attributes(attrs("1", studded=studded))["studded"] == studded
+
+
+def test_tire_attributes_null_studs_stay_null_not_no_ship() -> None:
+    """Summer / all-season: null means «not applicable», never «non-studded»."""
+    row = ts.parse_tire_attributes(attrs("1", season="summer", studded=None))
+    assert row["studded"] is None and row["season"] == "summer"
+
+
+def test_tire_attributes_live_light_truck_shape() -> None:
+    """The 2026-10-26 prod answer: dual load index, light_truck, null reinforcement."""
+    row = ts.parse_tire_attributes(
+        attrs(
+            "00000070653",
+            load_index="109/107",
+            vehicle_type="light_truck",
+            reinforcement=None,
+            is_xl=None,
+            country=None,
+            year=None,
+        )
+    )
+    assert row["load_index"] == "109/107" and row["vehicle_type"] == "light_truck"
+    assert row["reinforcement"] is None and row["is_xl"] is None
+    assert row["country"] is None and row["year"] is None
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"studded": "spikes"},
+        {"studded": ""},
+        {"season": "spring"},
+        {"is_xl": "1"},
+        {"is_runflat": 1},
+        {"is_snow_marker": "true"},
+        {"year": 1999},
+        {"year": 2101},
+        {"year": "2024"},
+        {"load_index": 105},
+        {"speed_index": "T" * 9},
+        {"country": "Німеччина"},
+        {"updated_at": "yesterday"},
+    ],
+)
+def test_tire_attributes_off_contract_is_rejected(bad: dict[str, Any]) -> None:
+    with pytest.raises(ts.RowRejectedError):
+        ts.parse_tire_attributes(attrs("1", **bad))
+
+
+def test_tire_attributes_without_sku_are_rejected() -> None:
+    item = attrs("1")
+    del item["sku"]
+    with pytest.raises(ts.RowRejectedError):
+        ts.parse_tire_attributes(item)
+    parsed = ts.parse_page(ts.SPECS["tire-attributes"], [item, attrs("2")])
+    assert parsed.rejected == 1 and [r["sku"] for r in parsed.upserts] == ["2"]
+
+
+def test_tire_attributes_upsert_inserts_and_refreshes_every_parsed_field() -> None:
+    # The fake DB does not run SQL: a field left out of the INSERT or the
+    # ON CONFLICT update would keep a stale value («ship» after «pod_ship»).
+    sql = re.sub(r"\s+", " ", ts.ATTRIBUTES_UPSERT)
+    for key in ts.parse_tire_attributes(attrs("1")):
+        assert f":{key}" in sql, key
+        if key != "sku":
+            assert f"{key} = EXCLUDED.{key}" in sql, key
+
+
+def test_every_resource_has_a_spec() -> None:
+    from src.integrations.tshina_api import RESOURCES
+
+    assert set(ts.SPECS) == set(RESOURCES)
+    assert all(spec.name == name for name, spec in ts.SPECS.items())
+    assert "tire-attributes" in RESOURCES
+    assert "tire-attributes" not in ts.VEHICLE_RESOURCES  # depends on nothing
 
 
 def test_tire_test_with_one_bad_place_is_rejected_whole() -> None:
@@ -543,6 +677,73 @@ async def test_dry_run_writes_nothing() -> None:
     res = await _sync(db, client, "eu-labels", dry_run=True)
     assert res.status == "dry_run" and res.upserted == 1 and res.deleted == 1
     assert db.t["tire_eu_labels"] == {} and db.t["data_sync_state"] == {}
+
+
+async def test_tire_attributes_page_with_a_bad_row_applies_the_rest() -> None:
+    db = FakeDb()
+    page = [attrs("1"), attrs("2", studded="spikes"), attrs("3", studded=None, season="summer")]
+    res = await _sync(db, FakeClient({"tire-attributes": [page]}), "tire-attributes")
+    assert res.status == "ok" and res.upserted == 2 and res.rejected == 1
+    assert set(db.t["tire_attributes"]) == {"1", "3"}
+    assert db.t["tire_attributes"]["1"]["studded"] == "pod_ship"
+    assert db.t["tire_attributes"]["3"]["studded"] is None
+    assert db.t["tire_attributes"]["1"]["source"] == "tshina"
+
+
+async def test_tire_attributes_deleted_go_to_delete_only_from_tshina_rows() -> None:
+    db = FakeDb()
+    db.add("tire_attributes", sku="1", source="tshina")
+    db.add("tire_attributes", sku="2", source="manual")
+    db.add("tire_attributes", sku="3", source="tshina")
+    client = FakeClient(
+        {
+            "tire-attributes": [
+                [{"sku": "1", "deleted": True}, {"sku": "2", "deleted": True}, attrs("4")]
+            ]
+        }
+    )
+    res = await _sync(db, client, "tire-attributes")
+    assert res.deleted == 1 and res.upserted == 1
+    assert set(db.t["tire_attributes"]) == {"2", "3", "4"}
+
+
+async def test_tire_attributes_upsert_does_not_overwrite_other_sources() -> None:
+    db = FakeDb()
+    db.add("tire_attributes", sku="1", source="manual", studded="ship")
+    client = FakeClient({"tire-attributes": [[attrs("1", studded="no_ship")]]})
+    await _sync(db, client, "tire-attributes")
+    assert db.t["tire_attributes"]["1"]["studded"] == "ship"
+
+
+async def test_tire_attributes_full_sweep_and_guard() -> None:
+    db = FakeDb()
+    for i in range(10):
+        db.add("tire_attributes", sku=str(i), source="tshina")
+    db.add("tire_attributes", sku="m", source="manual")
+    client = FakeClient({"tire-attributes": [[attrs(str(i)) for i in range(9)]]})
+    res = await _sync(db, client, "tire-attributes", full=True)
+    assert res.status == "ok" and res.deleted == 1
+    assert "9" not in db.t["tire_attributes"] and "m" in db.t["tire_attributes"]
+
+    db = FakeDb()
+    for i in range(100):
+        db.add("tire_attributes", sku=str(i), source="tshina")
+    client = FakeClient({"tire-attributes": [[attrs(str(i)) for i in range(89)]]})
+    res = await _sync(db, client, "tire-attributes", full=True)
+    assert res.status == "guarded" and res.deleted == 0
+    assert len(db.t["tire_attributes"]) == 100
+
+
+async def test_full_run_walks_tire_attributes_once_in_contract_order() -> None:
+    db = FakeDb()
+    client = FakeClient({"tire-attributes": [[attrs("1")]]})
+    out = await ts.run_sync(db, client, regenerate=_noop_regen)
+    names = [c[0] for c in client.calls]
+    assert names.count("tire-attributes") == 1
+    assert names.index("tire-attributes") < names.index("vehicles/brands")
+    assert "1" in db.t["tire_attributes"]
+    attr = next(r for r in out["resources"] if r["resource"] == "tire-attributes")
+    assert attr["status"] == "ok" and attr["upserted"] == 1
 
 
 async def test_tire_test_places_rewritten_whole() -> None:

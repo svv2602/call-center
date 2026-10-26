@@ -4,6 +4,10 @@ Resources and targets:
 
 - ``eu-labels``  → ``tire_eu_labels`` (``source='tshina'``; a row with any
   value off the EU scale is rejected whole — ``scripts/import_tire_labels.parse_row``);
+- ``tire-attributes`` → ``tire_attributes`` (``source='tshina'``; studs, XL,
+  RunFlat, 3PMSF, indices, country, year, ``model_1c_id`` per SKU; an unknown
+  ``studded``/``season`` or a non-bool flag rejects the row; ``studded`` null
+  is kept as null — «not applicable», never «non-studded»);
 - ``tire-tests`` → ``tire_tests`` + ``tire_test_placements`` (places rewritten
   whole with the test; the source object kept as sent, ``higher_is_better``
   included — it is null for every source today and nothing here reads a
@@ -24,7 +28,7 @@ page.
 
 Full snapshot (weekly): everything is upserted, then rows we hold that the
 snapshot lacks are deleted — only ``tire_eu_labels.source='tshina'``, tyre
-tests and non-manual directory rows — and only when the snapshot has at
+tests, ``tire_attributes.source='tshina'`` and non-manual directory rows — and only when the snapshot has at
 least 90 % of our rows; otherwise nothing is deleted, the resource is marked
 failed and an ERROR is logged (a truncated answer must not wipe our data).
 """
@@ -56,6 +60,8 @@ SKIP_BRAND_IDS = frozenset({229, 231})
 #: A full snapshot smaller than this share of our rows deletes nothing.
 SNAPSHOT_MIN_SHARE = 0.9
 SEASONS = frozenset({"summer", "winter", "all_season", "off_road"})
+#: 1C attribute 26: studded / stud-ready / non-studded; null = not applicable
+STUDDED = frozenset({"ship", "pod_ship", "no_ship"})
 ADVISORY_LOCK_KEY = 72_409_291  # pg_try_advisory_lock: one sync at a time
 DELETE_BATCH = 5000
 VEHICLE_RESOURCES = tuple(r for r in RESOURCES if r.startswith("vehicles/"))
@@ -128,6 +134,12 @@ def _json_obj(value: Any, name: str, *, allow_str: bool = False) -> str | None:
     raise RowRejectedError(f"{name}: {value!r}")
 
 
+def _opt_bool(value: Any, name: str) -> bool | None:
+    if value is None or isinstance(value, bool):
+        return value
+    raise RowRejectedError(f"{name}: {value!r}")
+
+
 def _opt_datetime(value: Any, name: str) -> datetime | None:
     if value is None:
         return None
@@ -169,6 +181,33 @@ def parse_label(item: dict[str, Any]) -> dict[str, Any]:
     row = dict(label.__dict__)
     row["eprel_number"] = row["eprel_number"] or None
     return row
+
+
+def parse_tire_attributes(item: dict[str, Any]) -> dict[str, Any]:
+    """Structural attributes of one SKU; any value off the contract rejects the row."""
+    studded = item.get("studded")
+    if studded is not None and studded not in STUDDED:
+        raise RowRejectedError(f"studded: {studded!r}")
+    season = item.get("season")
+    if season is not None and season not in SEASONS:
+        raise RowRejectedError(f"season: {season!r}")
+    return {
+        "sku": _str(item.get("sku"), 50, "sku"),
+        "model_1c_id": _opt_str(item.get("model_1c_id"), 50, "model_1c_id"),
+        "season": season,
+        "studded": studded,  # None stays None: «not applicable», not «no_ship»
+        "is_xl": _opt_bool(item.get("is_xl"), "is_xl"),
+        "is_runflat": _opt_bool(item.get("is_runflat"), "is_runflat"),
+        "is_snow_marker": _opt_bool(item.get("is_snow_marker"), "is_snow_marker"),
+        "vehicle_type": _opt_str(item.get("vehicle_type"), 32, "vehicle_type"),
+        "reinforcement": _opt_str(item.get("reinforcement"), 32, "reinforcement"),
+        # a string: light-truck tyres carry a dual index such as "109/107"
+        "load_index": _opt_str(item.get("load_index"), 16, "load_index"),
+        "speed_index": _opt_str(item.get("speed_index"), 8, "speed_index"),
+        "country": _json_obj(item.get("country"), "country"),
+        "year": _opt_int(item.get("year"), 2000, 2100, "year"),
+        "updated_at": _opt_datetime(item.get("updated_at"), "updated_at"),
+    }
 
 
 def _placement(p: Any, test_id: int) -> dict[str, Any]:
@@ -376,6 +415,31 @@ LABEL_UPSERT = """
     WHERE tire_eu_labels.source = 'tshina'
 """
 
+ATTRIBUTES_UPSERT = """
+    INSERT INTO tire_attributes
+        (sku, model_1c_id, season, studded, is_xl, is_runflat, is_snow_marker, vehicle_type,
+         reinforcement, load_index, speed_index, country, year, source, updated_at, synced_at)
+    VALUES (:sku, :model_1c_id, :season, :studded, :is_xl, :is_runflat, :is_snow_marker,
+            :vehicle_type, :reinforcement, :load_index, :speed_index, CAST(:country AS JSONB),
+            :year, 'tshina', :updated_at, now())
+    ON CONFLICT (sku) DO UPDATE SET
+        model_1c_id = EXCLUDED.model_1c_id,
+        season = EXCLUDED.season,
+        studded = EXCLUDED.studded,
+        is_xl = EXCLUDED.is_xl,
+        is_runflat = EXCLUDED.is_runflat,
+        is_snow_marker = EXCLUDED.is_snow_marker,
+        vehicle_type = EXCLUDED.vehicle_type,
+        reinforcement = EXCLUDED.reinforcement,
+        load_index = EXCLUDED.load_index,
+        speed_index = EXCLUDED.speed_index,
+        country = EXCLUDED.country,
+        year = EXCLUDED.year,
+        updated_at = EXCLUDED.updated_at,
+        synced_at = now()
+    WHERE tire_attributes.source = 'tshina'
+"""
+
 TEST_UPSERT = """
     INSERT INTO tire_tests
         (id, source_key, source_title, source, year, season, test_date, sizes, notes,
@@ -444,6 +508,12 @@ async def _present_ids(conn: Any, table: str, column: str, ids: Iterable[int]) -
 async def apply_labels(conn: Any, rows: list[dict[str, Any]]) -> Applied:
     if rows:
         await conn.execute(text(LABEL_UPSERT), rows)
+    return Applied(upserted=len(rows))
+
+
+async def apply_tire_attributes(conn: Any, rows: list[dict[str, Any]]) -> Applied:
+    if rows:
+        await conn.execute(text(ATTRIBUTES_UPSERT), rows)
     return Applied(upserted=len(rows))
 
 
@@ -591,6 +661,14 @@ SPECS: dict[str, ResourceSpec] = {
         apply_labels,
         _deleter("tire_eu_labels", "sku", _TSHINA),
         _our_keys("tire_eu_labels", "sku", _TSHINA),
+    ),
+    "tire-attributes": ResourceSpec(
+        "tire-attributes",
+        "sku",
+        parse_tire_attributes,
+        apply_tire_attributes,
+        _deleter("tire_attributes", "sku", _TSHINA),
+        _our_keys("tire_attributes", "sku", _TSHINA),
     ),
     "tire-tests": ResourceSpec(
         "tire-tests",

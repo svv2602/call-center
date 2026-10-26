@@ -105,6 +105,21 @@ async def test_walks_cursor_pages_with_since_and_limit() -> None:
     assert api.requests[0]["path"] == "/api/v1/eu-labels"
 
 
+async def test_tire_attributes_page_with_snapshot_flag_is_accepted() -> None:
+    """The 2026-10-26 prod answer carries ``"snapshot": false``; extra keys are tolerated."""
+    item = {"sku": "00000070653", "load_index": "109/107", "vehicle_type": "light_truck"}
+    body = {"items": [item], "next_cursor": None, "server_time": ST, "snapshot": False}
+    api = Api((200, body, {}))
+    server = await _server(api)
+    try:
+        async with await _client(server, Sleeps()) as client:
+            page = await client.fetch_page("tire-attributes")
+    finally:
+        await server.close()
+    assert page.items == [item] and page.next_cursor is None and page.server_time == ST
+    assert api.requests[0]["path"] == "/api/v1/tire-attributes"
+
+
 async def test_limit_is_capped_at_contract_maximum() -> None:
     api = Api(ok())
     server = await _server(api)

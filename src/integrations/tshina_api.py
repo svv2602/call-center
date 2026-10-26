@@ -34,6 +34,7 @@ logger = logging.getLogger(__name__)
 RESOURCES: tuple[str, ...] = (
     "eu-labels",
     "tire-tests",
+    "tire-attributes",
     "vehicles/brands",
     "vehicles/models",
     "vehicles/modifications",
