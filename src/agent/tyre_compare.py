@@ -35,6 +35,25 @@ Default-deny: the phrase is said only when ALL hold —
 A tyre not in the last result is never compared — the model answers as
 before. Loop-breaker: one phrase per turn (``plan`` is called once per
 turn); a comparison is said again only when the caller asks again.
+
+Tyre tests (R08 «тільки на запит», wave 3-D): the search puts up to two
+tests of each tyre's model on the item as ``tests`` (``tire_tests.py``: the
+caller's size first, then the same diameter); the compressor never hands
+them to the model, so an ordinary offer is no longer than before. The code
+says them only here, one sentence per model —
+«<Бренд Модель>: у тесті <Джерело> <рік> — <місце> місце з <N> (<розмір>)»,
+the place as it is, an inconvenient one too («9 місце з 12»); a tyre without
+a test gets no word about tests at all (never «даних немає»):
+
+- in the comparison phrase, after the label verdict, for each compared tyre
+  that has a test;
+- on an advice question (``is_advice_question``: «яка краща / яку порадите /
+  що порадите / що б ви взяли», «какая лучше / что посоветуете / что бы вы
+  взяли» — the explicit forms only, not a taking or a price question) that
+  is not a comparison of two named tyres: the tests of the tyres it names
+  (``named_items``), or of the shown ones (the first ``SHOWN`` of the
+  result) when it names none. No test among them → ``None``, the model
+  answers as before.
 """
 
 from __future__ import annotations
@@ -49,6 +68,10 @@ logger = logging.getLogger(__name__)
 #: More tyres than this in one question → the code stays silent (the phrase
 #: would be a list nobody follows by ear).
 MAX_COMPARED = 4
+
+#: The tyres the model shows the caller (``_compress_search_tires`` keeps
+#: three): an advice question naming no tyre is about them.
+SHOWN = 3
 
 NO_LABEL = "даних етикетки ЄС немає"
 
@@ -73,6 +96,18 @@ _OR_PARTICLE_BEFORE = re.compile(
 _TAKES = re.compile(
     _B + r"(?:беру|берем\w*|беремо|візьм\w*|возьм\w*|оформ\w*|замов\w*|заказ\w*|куплю"
     r"|давайте|броню\w*|резерву\w*)"
+)
+#: «Яка краща?» / «що порадите?» / «что бы вы взяли?» — the caller asks for
+#: a recommendation. Explicit forms only (default-deny): «краща» alone
+#: («туранза краща?») is a comparison word, not an advice question.
+_ADVICE = re.compile(
+    _B + r"(?:(?:яка|яку|котра|котру|какая|какую|которая|которую|що|что)\s+"
+    r"(?:(?:з|из)\s+них\s+)?(?:кращ[аеу]|лучш[еаяу]\w*)"
+    r"|(?:що|что|яку|какую|котру|которую)\s+"
+    r"(?:(?:б|би|бы)\s+(?:ви|вы)|(?:ви|вы)\s+(?:б|би|бы))\s+"
+    r"(?:взяли|вибрали|выбрали|поставили)"
+    r"|порад(?:ите|ити|ьте|иш|ь)|посоветуе\w*|посоветуй\w*"
+    r"|рекомендує\w*|рекомендуе\w*)(?![\w'])"
 )
 #: A price question is the model's (the price corridor, «а є дешевше?»).
 _PRICE = re.compile(
@@ -100,7 +135,8 @@ _NUMBER_WORDS = {
 _BRAND_SOUNDS: dict[str, re.Pattern[str]] = {
     brand: re.compile(_B + r"(?:" + stems + r")\w*")
     for brand, stems in {
-        "bridgestone": r"бр[иі]дж[еє]?сто[уў]?н|бр[иі]дгесто[уў]?н",
+        # «бридж» — the short form callers use («мішлен чи бридж»).
+        "bridgestone": r"бр[иі]дж[еє]?сто[уў]?н|бр[иі]дгесто[уў]?н|бр[иі]дж(?![\w'])",
         "firestone": r"фа[йєе]р[еє]?сто[уў]?н",
         "michelin": r"м[иі]шл[еі]н",
         "goodyear": r"гуд[ьй]?[іиїя][еєр]?р|гуд[ьй]?[іиї]р",
@@ -307,6 +343,42 @@ def is_compare_question(text: str | None) -> bool:
     return bool(_OR.search(low)) and not _OR_PARTICLE_BEFORE.search(low)
 
 
+def is_advice_question(text: str | None) -> bool:
+    """The utterance asks which tyre to take — not taking one, not the price."""
+    if not text:
+        return False
+    low = _normalize(text)
+    if _TAKES.search(low) or _PRICE.search(low):
+        return False
+    return bool(_ADVICE.search(low))
+
+
+def _tests(item: dict[str, Any]) -> list[dict[str, Any]]:
+    tests = item.get("tests")
+    if not isinstance(tests, list):
+        return []
+    return [t for t in tests if isinstance(t, dict) and t.get("source") and t.get("place")]
+
+
+def _test_clause(test: dict[str, Any]) -> str:
+    where = " ".join(str(test[k]) for k in ("source", "year") if test.get(k))
+    place = f"{test['place']} місце"
+    if test.get("of"):
+        place += f" з {test['of']}"
+    size = f" ({test['size']})" if test.get("size") else ""
+    return f"у тесті {where} — {place}{size}"
+
+
+def tests_phrase(items: list[dict[str, Any]]) -> str:
+    """One sentence per tyre with tests; a tyre without any gets nothing."""
+    sentences = []
+    for item in items:
+        tests = _tests(item)
+        if tests:
+            sentences.append(f"{_name(item)}: " + "; ".join(_test_clause(t) for t in tests) + ".")
+    return " ".join(sentences)
+
+
 def _label(item: dict[str, Any]) -> dict[str, Any]:
     label = item.get("eu_label")
     return label if isinstance(label, dict) else {}
@@ -366,11 +438,13 @@ def _verdict(items: list[dict[str, Any]]) -> str:
 
 
 def compare_phrase(items: list[dict[str, Any]]) -> str:
-    """The code's comparison of ``items`` — their label classes and nothing else."""
+    """The code's comparison of ``items`` — their label classes and test places."""
     body = "; ".join(_item_clause(it) for it in items)
     body = body[:1].upper() + body[1:] + "."
     verdict = _verdict(items)
-    return f"{body} {verdict}" if verdict else body
+    phrase = f"{body} {verdict}" if verdict else body
+    tests = tests_phrase(items)
+    return f"{phrase} {tests}" if tests else phrase
 
 
 def compare_said_note(phrase: str | None) -> str:
@@ -379,15 +453,26 @@ def compare_said_note(phrase: str | None) -> str:
         return ""
     return (
         "\n\n## Вже сказано клієнту в цьому ході (порівняння шин)\n"
-        f"Код уже сказав клієнту порівняння за етикеткою ЄС: «{phrase}» "
+        f"Код уже сказав клієнту порівняння за етикеткою ЄС і тестами: «{phrase}» "
         "Не повторюй цього, не додавай характеристик, яких немає в даних "
-        "етикетки; відповідай далі по суті."
+        "етикетки чи тестів; відповідай далі по суті."
     )
 
 
 def _brief(item: dict[str, Any]) -> dict[str, Any]:
-    keep = ("brand", "model", "size", "price", "eu_label")
+    keep = ("brand", "model", "size", "price", "eu_label", "tests")
     return {k: item[k] for k in keep if k in item}
+
+
+def _unique_models(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for item in items:
+        key = (str(item.get("brand") or "").lower(), str(item.get("model") or "").lower())
+        if key not in seen:
+            seen.add(key)
+            out.append(item)
+    return out
 
 
 class TyreCompare:
@@ -416,14 +501,23 @@ class TyreCompare:
         # Sales off → ``note_search`` never keeps a result (the one sales check).
         if not self._items:
             return None
-        if not is_compare_question(user_text):
-            return None
         named = named_items(user_text, self._items)
-        if not 2 <= len(named) <= MAX_COMPARED:
+        if is_compare_question(user_text) and 2 <= len(named) <= MAX_COMPARED:
+            phrase = compare_phrase(named)
+            kind = "compare"
+        elif is_advice_question(user_text) and len(named) <= MAX_COMPARED:
+            # Tests only, of the tyres named — or of the shown ones.
+            picked = named or _unique_models(self._items[:SHOWN])
+            phrase = tests_phrase(picked)
+            if not phrase:
+                return None
+            named = [i for i in picked if _tests(i)]
+            kind = "advice"
+        else:
             return None
-        phrase = compare_phrase(named)
         logger.warning(
-            "tyre_compare items=%s last_customer_text=%r",
+            "tyre_compare kind=%s items=%s last_customer_text=%r",
+            kind,
             ",".join(_name(i) for i in named),
             (user_text or "")[:120],
         )

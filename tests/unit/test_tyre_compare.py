@@ -29,9 +29,11 @@ from src.agent.tool_result_compressor import compress_tool_result
 from src.agent.tyre_compare import (
     MAX_COMPARED,
     NO_LABEL,
+    SHOWN,
     TyreCompare,
     compare_phrase,
     compare_said_note,
+    is_advice_question,
     is_compare_question,
     named_items,
 )
@@ -542,3 +544,150 @@ def test_sales_off_is_untouched(run: Any) -> None:
     _, replies, systems = run(turns, sales=False)
     assert replies[-1] == MODEL_REPLY
     assert all("порівняння шин" not in s for turn in systems for s in turn)
+
+
+# ── Tyre tests (wave 3-D, R08: said only on a compare / advice question) ──
+
+#: Places in the shape ``tire_tests.attach_tire_tests`` puts on an item.
+T6_TESTS = [
+    {"source": "ADAC", "year": 2025, "place": 9, "of": 12, "size": "215/55 R17"},
+    {"source": "Auto Bild", "year": 2024, "place": 3, "of": 20, "size": "225/55 R17"},
+]
+FIRESTONE_TEST = [{"source": "ACE", "year": 2026, "place": 1, "of": 8, "size": "215/55 R17"}]
+
+
+def _test_text(test: dict[str, Any]) -> str:
+    return (
+        f"у тесті {test['source']} {test['year']} — {test['place']} місце з {test['of']} "
+        f"({test['size']})"
+    )
+
+
+def _tests_sentence(item: dict[str, Any]) -> str:
+    return f"{_name(item)}: " + "; ".join(_test_text(t) for t in item["tests"]) + "."
+
+
+def _with_tests() -> list[dict[str, Any]]:
+    items = copy.deepcopy(ITEMS)
+    for item in items:
+        if item["model"] == "Turanza 6":
+            item["tests"] = copy.deepcopy(T6_TESTS)
+    return items
+
+
+def test_compare_says_the_tests_only_of_the_tyre_that_has_them() -> None:
+    items = _with_tests()
+    t6 = next(i for i in items if i["model"] == "Turanza 6")
+    phrase = _gate(items).plan("туранза 6 чи таурус")
+    assert phrase is not None
+    label_part = compare_phrase(
+        [{k: v for k, v in t6.items() if k != "tests"}, BY_MODEL["SUMMER 3"]]
+    )
+    # the label part as before, then one sentence of the tested tyre only
+    assert phrase == f"{label_part} {_tests_sentence(t6)}"
+    # an inconvenient place is said as it is
+    assert "9 місце з 12" in phrase
+    # the tyre without tests: nothing about tests, never «немає»
+    assert phrase.count("у тесті") == len(T6_TESTS)
+    assert f"{_name(BY_MODEL['SUMMER 3'])}: у тесті" not in phrase
+
+
+def test_compare_without_tests_is_the_label_phrase_unchanged() -> None:
+    phrase = _gate().plan("туранза 6 чи таурус")
+    assert phrase is not None
+    assert "тест" not in phrase
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "яка краща?",
+        "а яка з них краща",
+        "яку порадите?",
+        "що порадите",
+        "порадьте щось",
+        "що б ви взяли?",
+        "що ви б взяли",
+        "какая лучше?",
+        "какую посоветуете",
+        "что посоветуете?",
+        "что бы вы взяли",
+        "що краще взяти?",
+    ],
+)
+def test_advice_question(text: str) -> None:
+    assert is_advice_question(text)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "скільки коштує краща?",
+        "яка краща ціна?",
+        "яку порадите дешевше?",
+        "беру, що порадите по монтажу",
+        "туранза 6 краща?",
+        "краще візьму туранзу",
+        "добре, дякую",
+        "",
+    ],
+)
+def test_not_an_advice_question(text: str) -> None:
+    assert not is_advice_question(text)
+
+
+def test_advice_says_the_tests_of_the_shown_tyres() -> None:
+    items = _with_tests()
+    t6 = next(i for i in items if i["model"] == "Turanza 6")
+    assert items.index(t6) < SHOWN
+    assert _gate(items).plan("що порадите?") == _tests_sentence(t6)
+
+
+def test_advice_without_tests_is_silent() -> None:
+    assert _gate().plan("що порадите?") is None
+    assert _gate().plan("яка краща?") is None
+
+
+def test_advice_ignores_a_tested_tyre_the_caller_was_not_shown() -> None:
+    items = copy.deepcopy(ITEMS)
+    items[SHOWN]["tests"] = copy.deepcopy(FIRESTONE_TEST)
+    assert _gate(items).plan("що порадите?") is None
+
+
+def test_advice_naming_a_brand_says_its_tests() -> None:
+    items = _with_tests()
+    items[0]["tests"] = copy.deepcopy(FIRESTONE_TEST)  # Firestone, shown first
+    t6 = next(i for i in items if i["model"] == "Turanza 6")
+    assert _gate(items).plan("що порадите з бріджстоуна?") == _tests_sentence(t6)
+    both = _gate(items).plan("що порадите?")
+    assert both == _tests_sentence(items[0]) + " " + _tests_sentence(t6)
+
+
+def test_price_or_taking_question_is_no_advice_phrase() -> None:
+    gate = _gate(_with_tests())
+    assert gate.plan("скільки коштує краща?") is None
+    assert gate.plan("беру туранзу 6") is None
+    assert gate.plan("а є дешевше?") is None
+    # no question at all — the tests stay unsaid (R08: not on an ordinary turn)
+    assert gate.plan("добре, дякую") is None
+    assert gate.plan("туранза 6 краща?") is None
+
+
+def test_advice_sales_off_says_nothing() -> None:
+    off = TyreCompare(sales_enabled=False)
+    off.note_search({"items": _with_tests()})
+    assert off.plan("що порадите?") is None
+
+
+def test_note_mentions_the_tests() -> None:
+    assert "тестами" in compare_said_note("x")
+
+
+def test_short_bridgestone_starts_the_comparison() -> None:
+    items = [
+        {"brand": "Michelin", "model": "Primacy 4", "eu_label": {"wet": "A"}},
+        {"brand": "Bridgestone", "model": "Turanza 6", "eu_label": {"wet": "B"}},
+    ]
+    for said in ("мішлен чи бридж", "мішлен чи бріджстоун"):
+        assert [i["brand"] for i in named_items(said, items)] == ["Michelin", "Bridgestone"]
+        assert _gate(items).plan(said) is not None

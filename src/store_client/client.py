@@ -22,6 +22,7 @@ from aiobreaker import CircuitBreaker, CircuitBreakerError
 
 from src.agent.network_policy import RECOMMEND_COUNT_MAX, RECOMMEND_COUNT_MIN
 from src.store_client.catalog_types import TIRE_SEARCH_TYPES, WHEEL
+from src.store_client.tire_tests import attach_tire_tests
 
 logger = logging.getLogger(__name__)
 
@@ -370,9 +371,14 @@ class StoreClient:
         # MVP: use PostgreSQL catalog if available
         if self._db_engine is not None:
             try:
-                return await self._search_tires_ladder(network=network, **params)
+                result = await self._search_tires_ladder(network=network, **params)
             except Exception:
                 logger.warning("DB tire search failed, falling back to HTTP API", exc_info=True)
+            else:
+                # Tyre test places of the found models (one query; a failure
+                # leaves the items without ``tests``). Said only on request.
+                await attach_tire_tests(self._db_engine, result)
+                return result
 
         # Fallback: HTTP Store API (knows nothing of the network ranking)
         for key in ("brand_priority", "recommend_count"):
