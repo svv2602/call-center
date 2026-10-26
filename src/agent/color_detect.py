@@ -111,12 +111,31 @@ _FALSE_POSITIVE_WORDS: frozenset[str] = frozenset(
         "серед",                          # Wednesday, among — shares "сер"
         "біля", "бiля",                   # near — shares "біл"; STT emits both i's
         "серпень", "серпня",             # August — shares "сер"
+        "серпн",                          # «у серпні» — the locative slipped past the two above
+        # Months and service words are the same story as «середу» above: they
+        # are said on the DATE step, and the broad pass harvests a colour from
+        # every turn. Measured 2026-10-26 on 4496 customer turns (90 days):
+        # «на 17 жовтня» → жовтий 4×, and two bookings went to 1C as «жовтий»
+        # with no colour ever asked. Known cost: «жовтень» is a substring of
+        # the diminutive «жовтенький», so that one now reads as no colour —
+        # 0 occurrences in the same 90 days, and a miss only means the colour
+        # question gets asked, while a false hit skips it.
+        "жовтн",                          # жовтня/жовтні/жовтневий — October
+        "жовтень",                        # October, nominative
+        "сервіс", "сервис", "сервер",     # «записатися до сервісу» → сірий 5×
+        # «сина/сину» — son (2× in the same sample). Never a bare «син»: «сині»
+        # is the plural of синій, and «синя/синю/синього» must still match.
+        "сина", "сину", "сином", "синові",
         "серпанок",                       # haze
         "сергій", "сергей", "сергеевич",  # name — shares "сер"
         "серветк",                        # napkin
         "сербія",                         # country
         "серга", "серьги",                # earring — shares "сер"
         "белка", "белок",                 # squirrel / egg white — shares "бел"
+        # 2026-10-26 sample, 3× білий: «белья», «білочка», «беляк» (STT for
+        # «біля Каравану»). «бель» covers белья/белье/бельем — no form of
+        # белый contains it.
+        "бель", "беляк", "білочк",
         "белград", "белорус",             # cities/nationality
         "біла церква",                    # city
         "біль",                           # pain
