@@ -13,8 +13,11 @@
 # article / named model, year via check_availability, alternatives when the
 # model is gone, delivery and payment terms, quantity, then consultation.
 #
-# Year and country come from check_availability (1C `year_issue`, `country`),
-# not from search_tires — the mocks follow that split.
+# Year, country and stock come with every search_tires item since 67539a3
+# (`tire_stock.year_issue/country/stock_quantity`) and from check_availability
+# for an article — the mocks follow the live shapes. The «Китай» filter itself
+# runs in the search_tires handler, which the sandbox does not run: here the
+# case checks the model reads the item's country.
 #
 # The sandbox plays the text path: the season guard and the spoken query
 # parser do not run, so a line that should search names the season itself
@@ -131,20 +134,14 @@
     search_tires:
       total: 2
       items:
-        - {id: b6, brand: Bridgestone, model: Blizzak 6, size: 225/60 R17 99H, season: winter, price: 8817, in_stock: true}
-        - {id: f4, brand: Firestone, model: Winterhawk 4, size: 225/60 R17 99H, season: winter, price: 5960, in_stock: true}
-    check_availability:
-      available: true
-      quantity: 6
-      price: 8817
-      country: Італія
-      year: 2026
+        - {id: b6, brand: Bridgestone, model: Blizzak 6, size: 225/60 R17 99H, season: winter, price: 8817, in_stock: true, quantity: 6, country: Італія, year: '2026'}
+        - {id: f4, brand: Firestone, model: Winterhawk 4, size: 225/60 R17 99H, season: winter, price: 5960, in_stock: true, quantity: 12, country: Іспанія, year: '2025'}
   turns:
     - user: зимові 225/60 R17, Bridgestone
     - user: а Blizzak якого року випуску?
       expect:
-        tool_called: [check_availability]
         must_contain: ['2026|двадцять шост']
+        must_not_contain: ['(немає|нема|нет)\s+(?:\w+\s+){0,3}(інформац|информац|даних|данных)']
         tool_not_called: [transfer_to_operator]
 
 - id: op_year_older_than_asked
@@ -156,18 +153,11 @@
     search_tires:
       total: 1
       items:
-        - {id: t5, brand: Bridgestone, model: Turanza T005, size: 205/55 R16 91V, season: summer, price: 2694, in_stock: true}
-    check_availability:
-      available: true
-      quantity: 4
-      price: 2694
-      country: Польща
-      year: 2023
+        - {id: t5, brand: Bridgestone, model: Turanza T005, size: 205/55 R16 91V, season: summer, price: 2694, in_stock: true, quantity: 4, country: Польща, year: '2023'}
   turns:
     - user: літні 205/55 R16, Bridgestone
     - user: я якщо буду брати, то тільки двадцять п'ятого року. Ця якого?
       expect:
-        tool_called: [check_availability]
         must_contain: ['2023|двадцять трет']
         must_not_contain: ['(це|вона|вони|ця)\s+(?:\w+\s+){0,2}(2025|двадцять п.ят)']
 
@@ -461,9 +451,9 @@
     search_tires:
       total: 3
       items:
-        - {id: sl, brand: Sailun, model: Ice Blazer Alpine, size: 235/60 R16 100H, season: winter, price: 3120, in_stock: true}
-        - {id: mt, brand: Matador, model: MP 93 Nordicca, size: 235/60 R16 100H, season: winter, price: 4690, in_stock: true}
-        - {id: b6, brand: Bridgestone, model: Blizzak 6, size: 235/60 R16 100H, season: winter, price: 7776, in_stock: true}
+        - {id: sl, brand: Sailun, model: Ice Blazer Alpine, size: 235/60 R16 100H, season: winter, price: 3120, in_stock: true, quantity: 8, country: Китай, year: '2025'}
+        - {id: mt, brand: Matador, model: MP 93 Nordicca, size: 235/60 R16 100H, season: winter, price: 4690, in_stock: true, quantity: 4, country: Словаччина, year: '2025'}
+        - {id: b6, brand: Bridgestone, model: Blizzak 6, size: 235/60 R16 100H, season: winter, price: 7776, in_stock: true, quantity: 6, country: Польща, year: '2026'}
   turns:
     - user: зимняя резина 235-60 на 16, бренд любой
     - user: Китай сразу отпадает. Что есть на подобие в этой ценовой политике?
