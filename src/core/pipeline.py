@@ -4523,7 +4523,9 @@ class CallPipeline:
                             selected_slot=selected_slot,
                             offered_slots=offered_slots,
                             fitting_progress=fitting_progress,
-                            booking_gate_mode=self._booking_gate_mode(),
+                            # No booking_gate_mode: the offer gate is the voice
+                            # loop's (`BookingOfferGate`); the text agent has no
+                            # such parameter (test_pipeline_agent_call_contract).
                             **multi_car_kwargs,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
