@@ -60,6 +60,7 @@ audit/
 
 # Local development checklists / scratch data
 development-checklists/
+doc_install/
 
 # GitHub (not using Actions/Dependabot)
 .github/
