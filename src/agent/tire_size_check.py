@@ -1,16 +1,24 @@
-"""A size one digit off the car's factory size is asked about before a search.
+"""A size that is not the car's is not searched (sales scope).
 
 Call 78139ffb (Про Колесо, 2026-10-27): the bot read out the Tiguan's factory
 sizes, the caller said «235/55 R18», STT wavered between 235 and 255 and
-finalized «255 55 18». The bot searched 255/55 R18 — a size neither factory
-nor acceptable for the car — and offered tyres that do not fit.
+finalized «255 55 18». The bot searched 255/55 R18 and offered tyres that do
+not fit. Call 9b3a975f: the caller named 255/50 R18 for the same Tiguan, the
+bot searched it — against the owner's rule «нештатний розмір підбирає
+спеціаліст», which the prompt states and the model did not keep.
 
-`search_tires` (sales scope) is refused when the car's sizes are known, the
-size asked is not among them, and exactly one factory size differs from it in
-one number (width, profile or diameter) — the shape of a misheard number. The
-refusal names that factory size for the bot to ask about. Loop-breaker: the
-same size passes once the caller has spoken since its refusal — they
-confirmed it, or they want a non-factory size on purpose.
+`search_tires` is refused when the car's sizes are known and the size asked
+is neither factory nor acceptable for it:
+
+- exactly one factory size differs from it in one number (width, profile or
+  diameter) — the shape of a misheard number: the bot asks about that size;
+- otherwise, or once the caller confirmed the misheard-looking size — a
+  non-stock size: the bot names the factory sizes and offers a specialist;
+  a caller who insists is offered the manager. The search never runs, so
+  there is nothing to loop on: every refusal ends in a question to the caller.
+
+An acceptable size (the catalogue's «fits, not factory») is searched as
+before: the caller has it on the car.
 """
 
 from __future__ import annotations
@@ -60,7 +68,8 @@ def near_factory_size(
     near = [
         s
         for s in stock
-        if (k := size_key(s)) is not None and sum(a != b for a, b in zip(asked, k, strict=True)) == 1
+        if (k := size_key(s)) is not None
+        and sum(a != b for a, b in zip(asked, k, strict=True)) == 1
     ]
     return near[0] if len(near) == 1 else None
 
@@ -76,29 +85,51 @@ def tire_size_refusal(
     """The size guard of `search_tires`, or ``None`` to allow.
 
     ``refused`` maps a size already refused to the caller-turn count at that
-    moment; the size passes once the caller has spoken since. The caller
-    records the refusal (``refused[size] = caller_turns``).
+    moment — the caller has spoken since when ``caller_turns`` is greater. The
+    caller records each refusal (``refused[size] = caller_turns``).
     """
     asked = args_size_key(params)
     if asked is None or not stock:
         return None
+    if asked in {size_key(s) for s in [*stock, *acceptable]}:
+        return None
     asked_text = format_size(asked)
-    if asked_text in refused and caller_turns > refused[asked_text]:
-        return None
+    answered = asked_text in refused and caller_turns > refused[asked_text]
     factory = near_factory_size(asked, stock, acceptable)
-    if factory is None:
-        return None
+    if factory is not None and not answered:
+        return {
+            "error": True,
+            "reason": "size_not_for_vehicle",
+            "action_required": "confirm_size",
+            "asked_size": asked_text,
+            "factory_size": factory,
+            "message": (
+                f"Розміру {asked_text} немає серед розмірів цього авто, а заводський "
+                f"{factory} відрізняється одним числом — схоже, розмір почули неточно. "
+                f"Шини не шукай і не називай. Коротко перепитай клієнта, чи йдеться про "
+                f"{factory}."
+            ),
+        }
+    factory_list = ", ".join(stock)
+    if answered:
+        message = (
+            f"Клієнт наполягає на нештатному розмірі {asked_text}. Шини в ньому не "
+            f"шукай і не називай. Скажи: «Нештатний розмір підбирає спеціаліст» — і "
+            f"запропонуй передати запит менеджеру (transfer_to_operator або "
+            f"create_callback_request, якщо вони є серед твоїх інструментів)."
+        )
+    else:
+        message = (
+            f"Розмір {asked_text} не заводський для цього авто (заводські: "
+            f"{factory_list}). Шини в ньому не шукай і не називай. Скажи клієнту, що "
+            f"розмір не заводський, назви заводські і спитай, чи підібрати в "
+            f"заводському, чи передати запит спеціалісту."
+        )
     return {
         "error": True,
-        "reason": "size_not_for_vehicle",
-        "action_required": "confirm_size",
+        "reason": "non_stock_size",
+        "action_required": "offer_manager" if answered else "offer_factory_size",
         "asked_size": asked_text,
-        "factory_size": factory,
-        "message": (
-            f"Розміру {asked_text} немає серед розмірів цього авто, а заводський "
-            f"{factory} відрізняється одним числом — схоже, розмір почули неточно. "
-            f"Шини не шукай і не називай. Коротко перепитай клієнта, чи йдеться про "
-            f"{factory}. Якщо клієнт підтвердить саме {asked_text} — виклич "
-            f"search_tires з ним знову."
-        ),
+        "factory_sizes": list(stock),
+        "message": message,
     }

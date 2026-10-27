@@ -2005,8 +2005,8 @@ def _build_tool_router(
                     session.channel_uuid,
                 )
                 return refusal
-            # A size one number off the car's factory size: a misheard number
-            # is asked about before tyres that do not fit are offered.
+            # A size that is not the car's: a misheard number is asked about,
+            # a non-stock size goes to a specialist (`tire_size_check`).
             from src.agent.tire_size_check import tire_size_refusal
 
             caller_turns = sum(1 for t in session.dialog_history if t.speaker == "user")
@@ -2020,10 +2020,10 @@ def _build_tool_router(
             if refusal is not None:
                 session.tire_size_refused[refusal["asked_size"]] = caller_turns
                 logger.info(
-                    "search_tires: size guard for call %s — %s asked, factory %s",
+                    "search_tires: size guard for call %s — %s %s",
                     session.channel_uuid,
+                    refusal["reason"],
                     refusal["asked_size"],
-                    refusal["factory_size"],
                 )
                 return refusal
         network = session.network_id or "ProKoleso"

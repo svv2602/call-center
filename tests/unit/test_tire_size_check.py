@@ -54,8 +54,13 @@ class TestNearFactorySize:
         p, d = rest.split(" R")
         assert _refusal({"width": int(w), "profile": int(p), "diameter": int(d)}) is None
 
-    def test_two_numbers_off_is_not_a_misheard_number(self) -> None:
-        assert _refusal({"width": 205, "profile": 55, "diameter": 16}) is None
+    def test_two_numbers_off_is_a_non_stock_size(self) -> None:
+        # Call 9b3a975f: 255/50 R18 named for a Tiguan and searched.
+        r = _refusal({"width": 255, "profile": 50, "diameter": 18})
+        assert r is not None and r["reason"] == "non_stock_size"
+        assert r["action_required"] == "offer_factory_size"
+        assert r["factory_sizes"] == STOCK
+        assert "235/55 R18" in r["message"]
 
     def test_two_factory_sizes_one_number_away_names_none(self) -> None:
         # 235/55 R19 is one number from 235/55 R17 AND 235/55 R18.
@@ -75,8 +80,19 @@ class TestLoopBreaker:
     def test_same_turn_retry_is_refused_again(self) -> None:
         assert _refusal(MISHEARD, refused={"255/55 R18": 3}, turns=3) is not None
 
-    def test_passes_after_the_caller_spoke(self) -> None:
-        assert _refusal(MISHEARD, refused={"255/55 R18": 3}, turns=4) is None
+    def test_confirmed_misheard_size_is_non_stock(self) -> None:
+        # The caller confirmed 255/55 R18: not misheard — a non-stock size.
+        r = _refusal(MISHEARD, refused={"255/55 R18": 3}, turns=4)
+        assert r is not None and r["reason"] == "non_stock_size"
+        assert r["action_required"] == "offer_manager"
+
+    def test_insisting_on_a_non_stock_size_gets_the_manager(self) -> None:
+        size = {"width": 255, "profile": 50, "diameter": 18}
+        first = _refusal(size, turns=2)
+        again = _refusal(size, refused={"255/50 R18": 2}, turns=3)
+        assert first is not None and first["action_required"] == "offer_factory_size"
+        assert again is not None and again["action_required"] == "offer_manager"
+        assert "transfer_to_operator" in again["message"]
 
 
 class TestWiring:
