@@ -25,6 +25,7 @@ the default with a ``logger.warning`` — a call never fails on bad config.
 from __future__ import annotations
 
 import logging
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -57,6 +58,17 @@ BANK_LABELS: dict[str, str] = {
 }
 
 ORDER_FINISH_MODES: tuple[str, ...] = ("request_manager_callback",)
+
+#: Carriers whose delivery cost the code can quote. The API key is never in
+#: the config: ``delivery_quote_key_env`` names the environment variable that
+#: holds it (prod env only).
+DELIVERY_QUOTE_PROVIDERS: tuple[str, ...] = ("novaposhta",)
+#: A quote is only meaningful when the customer pays the carrier's tariff.
+DELIVERY_QUOTE_MODE = "carrier_tariff"
+#: Shape of an environment variable name.
+DELIVERY_QUOTE_KEY_ENV_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
+#: Shape of a Nova Poshta API key — such a value must never sit in the config.
+API_KEY_LIKE_RE = re.compile(r"^[0-9a-fA-F]{32}$")
 
 #: Tools that serve each network service. Under sales the tools of every
 #: service a network does not offer are dropped — keyed over the whole
@@ -113,6 +125,25 @@ class NetworkPolicy:
     brand_priority: tuple[str, ...] = ()
     recommend_count: int = RECOMMEND_COUNT_MAX
     order_finish: str = "request_manager_callback"
+    #: Carrier whose delivery cost the code quotes (``DELIVERY_QUOTE_PROVIDERS``)
+    #: and the name of the env variable holding its API key. Both ``None``
+    #: unless the whole flag is valid — see ``delivery_quote_enabled``.
+    delivery_quote: str | None = None
+    delivery_quote_key_env: str | None = None
+
+    @property
+    def delivery_quote_enabled(self) -> bool:
+        """Single source of truth: may the code quote the delivery cost?
+
+        Only under sales, only for a known carrier, only for the carrier
+        tariff mode and only with a key variable named. Default-deny.
+        """
+        return (
+            self.sales_enabled
+            and self.delivery_quote in DELIVERY_QUOTE_PROVIDERS
+            and self.delivery_mode == DELIVERY_QUOTE_MODE
+            and self.delivery_quote_key_env is not None
+        )
 
     @classmethod
     def from_tenant_config(cls, cfg: Any, caller_phone: str | None = None) -> NetworkPolicy:
@@ -154,6 +185,8 @@ class NetworkPolicy:
             logger.warning("network_policy: unknown order_finish %r → default", order_finish)
             order_finish = ORDER_FINISH_MODES[0]
 
+        delivery_quote, delivery_quote_key_env = _parse_delivery_quote(raw, delivery_mode)
+
         return cls(
             sales_enabled=sales_enabled,
             sales_preview=sales_preview,
@@ -173,6 +206,8 @@ class NetworkPolicy:
             brand_priority=_parse_names(raw, "brand_priority"),
             recommend_count=_parse_recommend_count(raw),
             order_finish=order_finish,
+            delivery_quote=delivery_quote,
+            delivery_quote_key_env=delivery_quote_key_env,
         )
 
 
@@ -230,6 +265,38 @@ def _parse_bool(src: dict[str, Any], key: str) -> bool:
         return value
     logger.warning("network_policy: %s=%r is not bool → false", key, value)
     return False
+
+
+def _parse_delivery_quote(src: dict[str, Any], delivery_mode: str) -> tuple[str | None, str | None]:
+    """``(delivery_quote, delivery_quote_key_env)`` — both ``None`` unless all valid.
+
+    Values of ``delivery_quote_key_env`` are never logged: a misplaced API
+    key must not reach the logs.
+    """
+    quote = src.get("delivery_quote")
+    if quote is None:
+        return None, None
+    if quote not in DELIVERY_QUOTE_PROVIDERS:
+        shown = (
+            "<api-key-like>" if isinstance(quote, str) and API_KEY_LIKE_RE.match(quote) else quote
+        )
+        logger.warning("network_policy: unknown delivery_quote %r → off", shown)
+        return None, None
+    key_env = src.get("delivery_quote_key_env")
+    if not isinstance(key_env, str) or not DELIVERY_QUOTE_KEY_ENV_RE.match(key_env):
+        logger.warning(
+            "network_policy: delivery_quote without a valid delivery_quote_key_env (%s) → off",
+            type(key_env).__name__,
+        )
+        return None, None
+    if delivery_mode != DELIVERY_QUOTE_MODE:
+        logger.warning(
+            "network_policy: delivery_quote needs delivery_mode %r, got %r → off",
+            DELIVERY_QUOTE_MODE,
+            delivery_mode,
+        )
+        return None, None
+    return quote, key_env
 
 
 def _parse_text(src: dict[str, Any], key: str) -> str | None:

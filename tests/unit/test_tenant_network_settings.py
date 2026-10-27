@@ -523,3 +523,115 @@ class TestSandboxSeesPolicy:
         assert disk_kwargs["network"] == "Tshina"
         assert disk_kwargs["recommend_count"] == 2
         assert disk_kwargs["diameter"] == 16
+
+
+# ── Delivery quote flag (R11, R15) ────────────────────────
+
+
+_NP_KEY = "0123456789ABCDEF0123456789abcdef"  # shape of a Nova Poshta key, not a real one
+_QUOTE = {"delivery_quote": "novaposhta", "delivery_quote_key_env": "NOVAPOSHTA_API_KEY"}
+
+
+def _bad_quote_policies() -> list[tuple[str, dict[str, Any], str]]:
+    return [
+        ("provider", {**_FULL_POLICY, **_QUOTE, "delivery_quote": "ukrposhta"}, "ukrposhta"),
+        (
+            "key_env_lower",
+            {**_FULL_POLICY, **_QUOTE, "delivery_quote_key_env": "np_key"},
+            "delivery_quote_key_env must be",
+        ),
+        (
+            "key_env_type",
+            {**_FULL_POLICY, **_QUOTE, "delivery_quote_key_env": 5},
+            "delivery_quote_key_env must be",
+        ),
+        (
+            "no_key_env",
+            {**_FULL_POLICY, "delivery_quote": "novaposhta"},
+            "needs delivery_quote_key_env",
+        ),
+        (
+            "free_mode",
+            {**_FULL_POLICY, **_QUOTE, "delivery_mode": "free"},
+            "needs delivery_mode",
+        ),
+    ]
+
+
+def _send_both(client: TestClient, policy: dict[str, Any]) -> list[tuple[Any, _TenantTable]]:
+    """The policy through the form (PUT) and through raw JSON (PATCH)."""
+    form, raw = _tenant({}), _tenant({})
+    return [
+        (_put(client, form, {"sales_enabled": True, "network_policy": policy}), form),
+        (_patch(client, raw, {"config": {"network_policy": policy}}), raw),
+    ]
+
+
+class TestDeliveryQuoteValidation:
+    def test_form_saves_the_flag_and_it_parses_on(self, client: TestClient) -> None:
+        table = _tenant({})
+
+        resp = _put(
+            client, table, {"sales_enabled": True, "network_policy": {**_FULL_POLICY, **_QUOTE}}
+        )
+
+        assert resp.status_code == 200, resp.text
+        saved = _saved_config(table)
+        assert saved["network_policy"]["delivery_quote"] == "novaposhta"
+        assert saved["network_policy"]["delivery_quote_key_env"] == "NOVAPOSHTA_API_KEY"
+        assert NetworkPolicy.from_tenant_config(saved).delivery_quote_enabled is True
+
+    def test_raw_json_patch_saves_the_flag(self, client: TestClient) -> None:
+        table = _tenant({"store_api_url": "x"})
+
+        resp = _patch(client, table, {"config": {"network_policy": {**_FULL_POLICY, **_QUOTE}}})
+
+        assert resp.status_code == 200, resp.text
+
+    def test_form_resave_keeps_the_flag(self, client: TestClient) -> None:
+        """The form sends back keys it does not edit (`c59d29d`) — they must survive."""
+        table = _tenant({"network_policy": {**_FULL_POLICY, **_QUOTE}, "sales_enabled": True})
+        body = {
+            "sales_enabled": True,
+            "network_policy": {**_FULL_POLICY, **_QUOTE, "cod_fee_text": "20 грн"},
+        }
+
+        resp = _put(client, table, body)
+
+        assert resp.status_code == 200, resp.text
+        policy = _saved_config(table)["network_policy"]
+        assert {k: policy[k] for k in _QUOTE} == _QUOTE
+
+    @pytest.mark.parametrize(
+        ("policy", "needle"),
+        [(p, n) for _, p, n in _bad_quote_policies()],
+        ids=[i for i, _, _ in _bad_quote_policies()],
+    )
+    def test_bad_flag_is_rejected(
+        self, client: TestClient, policy: dict[str, Any], needle: str
+    ) -> None:
+        for resp, table in _send_both(client, policy):
+            assert resp.status_code == 422
+            assert needle in resp.json()["detail"]
+            assert table.updates == []
+
+    @pytest.mark.parametrize(
+        "policy",
+        [
+            {**_FULL_POLICY, **_QUOTE, "delivery_quote_key_env": _NP_KEY},
+            {**_FULL_POLICY, **_QUOTE, "delivery_quote": _NP_KEY},
+            {**_FULL_POLICY, "cod_fee_text": f" {_NP_KEY} "},
+            {**_FULL_POLICY, "delivery_carriers": ["Нова Пошта", _NP_KEY]},
+            {**_FULL_POLICY, "np_api_key": _NP_KEY},
+        ],
+        ids=["key_env", "quote", "text", "list_item", "unknown_key"],
+    )
+    def test_api_key_in_the_policy_is_rejected_unechoed(
+        self, client: TestClient, policy: dict[str, Any]
+    ) -> None:
+        for resp, table in _send_both(client, policy):
+            assert resp.status_code == 422
+            detail = resp.json()["detail"]
+            assert "API key" in detail
+            assert _NP_KEY.lower() not in detail.lower()
+            assert table.updates == []

@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import ast
 import asyncio
+import dataclasses
 import logging
 import pathlib
 from typing import Any
@@ -464,3 +465,115 @@ class TestCallSiteWiring:
         assert calls
         for call in calls:
             assert _is_from_tenant_config(_kw(call, "network_policy"))
+
+
+# ── Delivery quote flag (R11, R15, R17) ────────────────────────────────
+
+_NP_KEY = "0123456789abcdef0123456789abcdef"  # shape of a Nova Poshta key, not a real one
+
+
+def _pk_quote(**overrides: Any) -> dict[str, Any]:
+    """ProKoleso's real config, sales on, with the delivery quote flag set."""
+    policy = {
+        **PROKOLESO_CONFIG_PATCH["network_policy"],
+        "delivery_quote": "novaposhta",
+        "delivery_quote_key_env": "NOVAPOSHTA_API_KEY",
+        **overrides,
+    }
+    return {**_enabled(PROKOLESO_CONFIG_PATCH), "network_policy": policy}
+
+
+class TestDeliveryQuoteFlag:
+    @pytest.mark.parametrize(
+        "cfg",
+        [None, {}, _enabled(PROKOLESO_CONFIG_PATCH), _enabled(TVOYA_SHINA_CONFIG_PATCH)],
+        ids=["none", "empty", "pk_without_flag", "tsh"],
+    )
+    def test_off_by_default(self, cfg: Any) -> None:
+        policy = NetworkPolicy.from_tenant_config(cfg)
+        assert policy.delivery_quote is None
+        assert policy.delivery_quote_key_env is None
+        assert policy.delivery_quote_enabled is False
+
+    def test_tshina_policy_unchanged_by_the_new_fields(self) -> None:
+        for cfg in (TVOYA_SHINA_CONFIG_PATCH, _enabled(TVOYA_SHINA_CONFIG_PATCH)):
+            policy = NetworkPolicy.from_tenant_config(cfg)
+            assert policy == dataclasses.replace(
+                policy, delivery_quote=None, delivery_quote_key_env=None
+            )
+
+    def test_flag_with_key_env_turns_it_on(self) -> None:
+        policy = NetworkPolicy.from_tenant_config(_pk_quote())
+        assert policy.delivery_quote == "novaposhta"
+        assert policy.delivery_quote_key_env == "NOVAPOSHTA_API_KEY"
+        assert policy.delivery_quote_enabled is True
+
+    def test_sales_off_keeps_it_off(self) -> None:
+        cfg = {**_pk_quote(), "sales_enabled": False}
+        policy = NetworkPolicy.from_tenant_config(cfg)
+        assert policy.delivery_quote == "novaposhta"
+        assert policy.delivery_quote_enabled is False
+
+    def test_sales_preview_caller_gets_it(self) -> None:
+        cfg = {**_pk_quote(), "sales_enabled": False, "sales_preview_callers": ["0671234567"]}
+        assert NetworkPolicy.from_tenant_config(cfg, "+380671234567").delivery_quote_enabled
+        assert not NetworkPolicy.from_tenant_config(cfg, "+380509999999").delivery_quote_enabled
+
+    def test_without_key_env_is_off(self, caplog: pytest.LogCaptureFixture) -> None:
+        cfg = _pk_quote()
+        del cfg["network_policy"]["delivery_quote_key_env"]
+        with caplog.at_level(logging.WARNING, logger="src.agent.network_policy"):
+            policy = NetworkPolicy.from_tenant_config(cfg)
+        assert policy.delivery_quote is None
+        assert policy.delivery_quote_enabled is False
+        assert caplog.records
+
+    @pytest.mark.parametrize("key_env", [_NP_KEY, "np_key", "", 42, ["NP"]])
+    def test_bad_key_env_is_off_and_not_logged(
+        self, key_env: Any, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.DEBUG, logger="src.agent.network_policy"):
+            policy = NetworkPolicy.from_tenant_config(_pk_quote(delivery_quote_key_env=key_env))
+        assert policy.delivery_quote is None
+        assert policy.delivery_quote_key_env is None
+        assert policy.delivery_quote_enabled is False
+        assert _NP_KEY not in caplog.text
+
+    def test_free_delivery_is_off(self) -> None:
+        policy = NetworkPolicy.from_tenant_config(_pk_quote(delivery_mode="free"))
+        assert policy.delivery_quote is None
+        assert policy.delivery_quote_enabled is False
+
+    @pytest.mark.parametrize("quote", ["ukrposhta", "NovaPoshta", True, 1, _NP_KEY])
+    def test_unknown_provider_is_off(self, quote: Any, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.DEBUG, logger="src.agent.network_policy"):
+            policy = NetworkPolicy.from_tenant_config(_pk_quote(delivery_quote=quote))
+        assert policy.delivery_quote is None
+        assert policy.delivery_quote_enabled is False
+        assert _NP_KEY not in caplog.text
+
+    @pytest.mark.parametrize(
+        "fields",
+        [
+            {"delivery_quote": "novaposhta"},
+            {"delivery_quote": "novaposhta", "delivery_mode": "carrier_tariff"},
+            {"delivery_quote_key_env": "NP", "delivery_mode": "carrier_tariff"},
+            {
+                "delivery_quote": "x",
+                "delivery_quote_key_env": "NP",
+                "delivery_mode": "carrier_tariff",
+            },
+            {"delivery_quote": "novaposhta", "delivery_quote_key_env": "NP"},
+        ],
+    )
+    def test_direct_construction_is_default_deny(self, fields: dict[str, Any]) -> None:
+        assert NetworkPolicy(sales_enabled=True, **fields).delivery_quote_enabled is False
+
+    def test_direct_construction_complete_is_on(self) -> None:
+        policy = NetworkPolicy(
+            sales_enabled=True,
+            delivery_mode="carrier_tariff",
+            delivery_quote="novaposhta",
+            delivery_quote_key_env="NP",
+        )
+        assert policy.delivery_quote_enabled is True

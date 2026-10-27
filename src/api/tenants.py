@@ -18,8 +18,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from src.agent.network_policy import (
+    API_KEY_LIKE_RE,
     BANK_LABELS,
     DELIVERY_MODES,
+    DELIVERY_QUOTE_KEY_ENV_RE,
+    DELIVERY_QUOTE_MODE,
+    DELIVERY_QUOTE_PROVIDERS,
     ORDER_FINISH_MODES,
     PAYMENT_LABELS,
     RECOMMEND_COUNT_MAX,
@@ -177,6 +181,8 @@ _POLICY_KEYS: frozenset[str] = frozenset(
         "pickup_available",
         "recommend_count",
         "order_finish",
+        "delivery_quote",
+        "delivery_quote_key_env",
     }
 )
 
@@ -203,6 +209,15 @@ def _policy_errors(raw: Any) -> list[str]:
     """Every problem of a ``config.network_policy`` value (empty = valid)."""
     if not isinstance(raw, dict):
         return [f"network_policy must be an object, got {type(raw).__name__}"]
+    # An API key pasted into the policy: name the field only — the value
+    # must not travel on in an error message or a log line.
+    key_like = sorted(key for key, value in raw.items() if _holds_api_key(value))
+    if key_like:
+        return [
+            f"network_policy: {key_like} look like an API key; keep the key in the "
+            "environment and name its variable in delivery_quote_key_env"
+        ]
+
     errors: list[str] = []
 
     unknown = sorted(set(raw) - _POLICY_KEYS)
@@ -227,6 +242,8 @@ def _policy_errors(raw: Any) -> list[str]:
         if value is not None and not isinstance(value, str):
             errors.append(f"{key} must be a string or null")
 
+    errors.extend(_delivery_quote_errors(raw))
+
     if not isinstance(raw.get("pickup_available", False), bool):
         errors.append("pickup_available must be true or false")
 
@@ -240,6 +257,35 @@ def _policy_errors(raw: Any) -> list[str]:
             f"recommend_count {count!r} must be an integer "
             f"{RECOMMEND_COUNT_MIN}..{RECOMMEND_COUNT_MAX}"
         )
+    return errors
+
+
+def _holds_api_key(value: Any) -> bool:
+    """Is ``value`` (or any string inside it) shaped like an API key?"""
+    if isinstance(value, str):
+        return bool(API_KEY_LIKE_RE.match(value.strip()))
+    if isinstance(value, list | tuple):
+        return any(_holds_api_key(item) for item in value)
+    return False
+
+
+def _delivery_quote_errors(raw: dict[str, Any]) -> list[str]:
+    """``delivery_quote`` needs a known carrier, a key variable name and the tariff mode."""
+    quote = raw.get("delivery_quote")
+    key_env = raw.get("delivery_quote_key_env")
+    errors: list[str] = []
+    if key_env is not None and (
+        not isinstance(key_env, str) or not DELIVERY_QUOTE_KEY_ENV_RE.match(key_env)
+    ):
+        errors.append("delivery_quote_key_env must be an environment variable name (A-Z, 0-9, _)")
+    if quote is None:
+        return errors
+    if quote not in DELIVERY_QUOTE_PROVIDERS:
+        errors.append(f"delivery_quote {quote!r} is not one of {list(DELIVERY_QUOTE_PROVIDERS)}")
+    if key_env is None:
+        errors.append("delivery_quote needs delivery_quote_key_env")
+    if raw.get("delivery_mode", "unknown") != DELIVERY_QUOTE_MODE:
+        errors.append(f"delivery_quote needs delivery_mode {DELIVERY_QUOTE_MODE!r}")
     return errors
 
 
