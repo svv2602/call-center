@@ -1,4 +1,4 @@
-"""Goldset for the voice bot: customer lines + expectations, played in both networks.
+r"""Goldset for the voice bot: customer lines + expectations, played in both networks.
 
 A case is a short dialogue (``turns``) with expectations per turn. Every case
 is played through the real LLM loop with mock tools — the sandbox agent from
@@ -14,7 +14,9 @@ down by assertion.
 Assertions (per turn, see ``tests/goldset/schema.json``):
 
 - ``must_contain`` / ``must_not_contain`` — regex, case-insensitive; write the
-  ua and ru forms as alternation, the caller may speak either.
+  ua and ru forms as alternation, the caller may speak either. A «tyre … claim»
+  window gaps on ``[^\w.!?…;]+``, not ``\W+``: ``\W`` crosses a full stop, and
+  «Без шипів — Blizzak 6. Обираєте шиповану…» read as a stud claim on Blizzak.
 - ``tool_called`` / ``tool_not_called`` — by name, optionally with argument
   regexes: ``{name: transfer_to_operator, args: {reason: non_fitting_scope}}``.
 - ``transfer_reason`` — shorthand for ``transfer_to_operator`` with that reason.

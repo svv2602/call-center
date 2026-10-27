@@ -58,7 +58,7 @@
     - user: а яка з них найдешевша?
       expect:
         must_contain: ['Laufenn|Лауфен', '2\s?400|дві тисячі чотириста']
-        must_not_contain: ['(Bridgestone|Firestone|Turanza|Roadhawk)\W+(?:\w+\W+){0,4}(найдешевш|найдоступніш|самая дешев|самая доступн)']
+        must_not_contain: ['(Bridgestone|Firestone|Turanza|Roadhawk)[^\w.!?…;]+(?:\w+[^\w.!?…;]+){0,4}(найдешевш|найдоступніш|самая дешев|самая доступн)']
         tool_not_called: [transfer_to_operator]
 
 - id: tc_cheaper_no_implied_budget
@@ -278,7 +278,7 @@
     - user: а яка з них краща?
       expect:
         must_contain: ['ADAC|Auto Bild', 'місц|место']
-        must_not_contain: ['Laufenn\W+(?:\w+\W+){0,6}(тест|місц)']
+        must_not_contain: ['Laufenn[^\w.!?…;]+(?:\w+[^\w.!?…;]+){0,6}(тест|місц)']
         tool_not_called: [transfer_to_operator]
 
 - id: tc_wet_leader_from_label
@@ -319,7 +319,7 @@
     - user: а яка з них тихіша?
       expect:
         must_contain: ['Roadhawk|Firestone|Файрстоун', '69|шістдесят дев']
-        must_not_contain: ['(Laufenn|Turanza)\W+(?:\w+\W+){0,3}(найтихіш|тихіш\w* за всіх|самая тих)']
+        must_not_contain: ['(Laufenn|Turanza)[^\w.!?…;]+(?:\w+[^\w.!?…;]+){0,3}(найтихіш|тихіш\w* за всіх|самая тих)']
         tool_not_called: [transfer_to_operator]
 
 - id: tc_wet_class_not_invented
@@ -340,7 +340,7 @@
     - user: Blizzak 6 добре тримає на мокрій? який у неї клас?
       expect:
         must_contain: ['\bB\b|клас\w* бе\b|категорі\w* бе\b']
-        must_not_contain: ['(Blizzak|Близак)\W+(?:\w+\W+){0,6}(клас\w*|категорі\w*)\s+A\b', '(Blizzak|Близак)\W+(?:\w+\W+){0,4}(найкращ\w*|краще за всіх)\s+(?:\w+\s+){0,2}мокр']
+        must_not_contain: ['(Blizzak|Близак)[^\w.!?…;]+(?:\w+[^\w.!?…;]+){0,6}(клас\w*|категорі\w*)\s+A\b', '(Blizzak|Близак)[^\w.!?…;]+(?:\w+[^\w.!?…;]+){0,4}(найкращ\w*|краще за всіх)\s+(?:\w+\s+){0,2}мокр']
         tool_not_called: [transfer_to_operator]
 
 # --- needs: тихі / мокра / економні / траса ---------------------------------
@@ -362,7 +362,7 @@
       expect:
         tool_called: [{name: search_tires, args: {width: '^205$', profile: '^55$', diameter: '^16$'}}]
         must_contain: ['Roadhawk|Firestone']
-        must_not_contain: ['Laufenn\W+(?:\w+\W+){0,6}(тих|малошумн)']
+        must_not_contain: ['Laufenn[^\w.!?…;]+(?:\w+[^\w.!?…;]+){0,6}(тих|малошумн)']
         tool_not_called: [transfer_to_operator]
 
 - id: tc_needs_wet
@@ -383,7 +383,7 @@
       expect:
         tool_called: [{name: search_tires, args: {width: '^195$', profile: '^65$', diameter: '^15$'}}]
         must_contain: ['Roadhawk|Firestone']
-        must_not_contain: ['(Laufenn|Turanza)\W+(?:\w+\W+){0,6}(найкращ|краще)\w*\s+(?:\w+\s+){0,2}мокр']
+        must_not_contain: ['(Laufenn|Turanza)[^\w.!?…;]+(?:\w+[^\w.!?…;]+){0,6}(найкращ|краще)\w*\s+(?:\w+\s+){0,2}мокр']
         tool_not_called: [transfer_to_operator]
 
 - id: tc_needs_fuel
@@ -404,7 +404,7 @@
       expect:
         tool_called: [{name: search_tires, args: {width: '^205$', profile: '^55$', diameter: '^16$'}}]
         must_contain: ['Laufenn|Лауфен']
-        must_not_contain: ['(Turanza|Bridgestone)\W+(?:\w+\W+){0,6}(найекономніш|економніш\w* за всіх|самая экономн)']
+        must_not_contain: ['(Turanza|Bridgestone)[^\w.!?…;]+(?:\w+[^\w.!?…;]+){0,6}(найекономніш|економніш\w* за всіх|самая экономн)']
         tool_not_called: [transfer_to_operator]
 
 - id: tc_needs_highway_speed
@@ -425,7 +425,7 @@
       expect:
         tool_called: [{name: search_tires, args: {width: '^225$', profile: '^45$', diameter: '^17$'}}]
         must_contain: ['Roadhawk|Firestone|Potenza|Bridgestone']
-        must_not_contain: ['Laufenn\W+(?:\w+\W+){0,6}(для траси|для швидк|найшвидш)']
+        must_not_contain: ['Laufenn[^\w.!?…;]+(?:\w+[^\w.!?…;]+){0,6}(для траси|для швидк|найшвидш)']
         tool_not_called: [transfer_to_operator]
 
 - id: tc_needs_chip_after_search
@@ -446,7 +446,7 @@
     - user: для мене важливіша тиша
       expect:
         must_contain: ['Roadhawk|Firestone']
-        must_not_contain: ['(Potenza|Laufenn)\W+(?:\w+\W+){0,4}(найтихіш|тихіш\w* за всіх)', 'оператор']
+        must_not_contain: ['(Potenza|Laufenn)[^\w.!?…;]+(?:\w+[^\w.!?…;]+){0,4}(найтихіш|тихіш\w* за всіх)', 'оператор']
         tool_not_called: [transfer_to_operator]
 
 - id: tc_needs_quiet_city_asks_size
@@ -576,9 +576,9 @@
       expect:
         must_contain: ['Nordman|Nokian']
         must_not_contain:
-          - '(Blizzak|Близак)\W+(?:\w+\W+){0,4}(?<!не )(?<!без )(шипован|з шипами)'
-          - '(WinterHawk|Вінтерхок)\W+(?:\w+\W+){0,4}(?<!не )(?<!під )(?<!без )(шипован|з шипами)'
-          - '(Nordman|Nokian)\W+(?:\w+\W+){0,4}(липучк|фрикційн|без шип)'
+          - '(Blizzak|Близак)[^\w.!?…;]+(?:\w+[^\w.!?…;]+){0,4}(?<!не )(?<!без )(шипован|з шипами)'
+          - '(WinterHawk|Вінтерхок)[^\w.!?…;]+(?:\w+[^\w.!?…;]+){0,4}(?<!не )(?<!під )(?<!без )(шипован|з шипами)'
+          - '(Nordman|Nokian)[^\w.!?…;]+(?:\w+[^\w.!?…;]+){0,4}(липучк|фрикційн|без шип)'
         tool_not_called: [transfer_to_operator]
 
 # --- XL and load index --------------------------------------------------------
@@ -618,7 +618,7 @@
     - user: а яка з них посилена, XL?
       expect:
         must_contain: ['Turanza|Bridgestone']
-        must_not_contain: ['(Roadhawk|Laufenn|S Fit)\W+(?:\w+\W+){0,4}(?<!не )(посилен|XL|екстра)']
+        must_not_contain: ['(Roadhawk|Laufenn|S Fit)[^\w.!?…;]+(?:\w+[^\w.!?…;]+){0,4}(?<!не )(посилен|XL|екстра)']
         tool_not_called: [transfer_to_operator]
 
 - id: tc_load_index_range_not_met
