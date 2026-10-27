@@ -560,18 +560,183 @@
           tool_not_called: [get_fitting_stations, book_fitting, transfer_to_operator]
           must_not_contain: ['інш\w*\s+мереж', 'партнер']
 
+# --- several cars in one call (multi-car-booking-2026-10-27) -----------------
+# TS books the cars one after another: city, station and name are asked once,
+# the next car is offered the previous car's time while the slot is free (R03);
+# up to 3 cars, a fourth is an operator's job (R04); the bot never asks «ще
+# машину?» on its own (R05); PK has no fitting at all (R08).
+# The fitting mocks follow the live shapes (src/sandbox/agent_runner.py: 1C
+# stations, `slots` as "HH:MM" strings, book_fitting → {booking_id, status,
+# message}); book_fitting answers each car with its own 1C GUID via when_args
+# on the colour. The date is fixed (2026-11-20, a Friday) because a mock cannot
+# follow «завтра»: move it forward once that day has passed.
+# The sandbox passes no CallerID, so the caller dictates a phone — a dummy in
+# words, as in orders.yaml; the name is a dummy too.
+
 - id: op_two_cars_one_call
-  title: «записати дві машини» — ТШ записує по черзі; ПК «не надаємо»
+  title: «записати дві машини одночасно» — ТШ записує по черзі, місто/точка/ім'я один раз, друга — той самий час
   source: owner:2026-10-27-several-cars
-  network: both
+  network: [tvoya-shina]
   sales_enabled: true
-  notes: TS 4 of 51 fitting calls (batch1 call_043, call_161, call_205, call_262). The first turn only pins that TS takes the request (no refusal, no transfer); the one-after-another booking itself is not covered yet — the prompt has no multi-car rule
+  notes: >-
+    Checkable only with FF_MULTI_CAR_BOOKING=1 in the call-processor container
+    env (the runner turns it on for the run); with the flag off the first turn
+    must still take the request (no refusal, no transfer). TS 4 of 51 operator
+    fitting calls (batch1 call_043, call_161, call_205, call_262); prod a9c963b9
+    «буде три авто» got one booking. Both cars go to station 000000041 at 10:00;
+    the second car's turn must offer 10:00 again (free in the slots mock) and
+    must not call get_fitting_stations or re-ask city, station, name or phone.
+  mocks:
+    get_fitting_stations:
+      total: 2
+      stations:
+        - {id: '000000041', name: Твоя Шина Васильківська, city: Київ, address: 'вул. Велика Васильківська, 100'}
+        - {id: '000000042', name: Твоя Шина Бажана, city: Київ, address: 'просп. Бажана, 12'}
+    get_fitting_slots:
+      station_id: '000000041'
+      date: '2026-11-20'
+      slots: ['09:30', '10:00', '10:30', '11:00', '11:30']
+    book_fitting:
+      booking_id: 7f3c2a10-5b6e-11f1-9a1b-0050569e1a01
+      status: confirmed
+      message: Запис створено
+      when_args:
+        - args: {auto_number: 'біл|бел'}
+          result: {booking_id: 7f3c2a10-5b6e-11f1-9a1b-0050569e1a02, status: confirmed, message: Запис створено}
   turns:
-    - user: мені треба записати на шиномонтаж дві машини, бажано на завтра
-      expect_by_network:
-        tvoya-shina:
-          must_not_contain: ['(лише|тільки|только)\s+(?:\w+\s+){0,2}(одн\w*|1)\s+(машин|авто)', 'не можемо (записати|запис)\w*\s+дв']
-          tool_not_called: [transfer_to_operator]
-        prokoleso:
-          must_contain: ['не надає|не надаем|не пропонуєм']
-          tool_not_called: [get_fitting_stations, book_fitting]
+    - user: мені треба записати на шиномонтаж дві машини одночасно, на двадцяте листопада
+      expect:
+        must_not_contain: ['(лише|тільки|только)\s+(?:\w+\s+){0,2}(одн\w*|1)\s+(машин|авто)', 'не можемо (записати|запис)\w*\s+дв']
+        tool_not_called: [transfer_to_operator, book_fitting]
+    - user: у Києві, на Васильківській
+      expect:
+        tool_called: [{name: get_fitting_stations, args: {city: 'Ки[їє]в|Kyiv'}}]
+        tool_not_called: [transfer_to_operator, book_fitting]
+    - user: так, туди. Шини свої, привеземо з собою
+      expect:
+        tool_not_called: [transfer_to_operator, book_fitting]
+    - user: першу на десяту ранку
+      expect:
+        tool_not_called: [transfer_to_operator, book_fitting]
+    - user: перша — синій Фольксваген Пассат
+      expect:
+        tool_not_called: [transfer_to_operator, book_fitting]
+    - user: мене Олег звати, телефон нуль дев'яносто сім сто двадцять три сорок п'ять шістдесят сім
+      expect:
+        tool_not_called: [transfer_to_operator]
+    - user: так, усе вірно, записуйте
+      expect:
+        tool_called: [{name: book_fitting, args: {station_id: '^000000041$', date: '^2026-11-20$', time: '^10:00$', auto_number: 'син'}}]
+        tool_not_called: [transfer_to_operator]
+    - user: тепер друга машина — білий Рено Кангу, шини теж свої з собою
+      expect:
+        tool_not_called: [get_fitting_stations, transfer_to_operator]
+        must_contain: ['10:00|10\.00|десят']
+        must_not_contain:
+          - '(в|у)\s+(якому|якім|каком)\s+(місті|городе)'
+          - '(яку|котру|яка|какую)\s+(?:\w+\s+){0,1}(точку|станцію|станцию|адресу)'
+          - 'як\s+(вас|до вас)\s+(звати|звертатися)|ваше\s+ім.я|как\s+вас\s+зовут'
+          - '(назвіть|продиктуйте)\s+(?:\w+\s+){0,1}(номер|телефон)'
+    - user: так, на десяту, підтверджую
+      expect:
+        tool_called: [{name: book_fitting, args: {station_id: '^000000041$', date: '^2026-11-20$', time: '^10:00$', auto_number: 'біл|бел'}}]
+        tool_not_called: [get_fitting_stations, transfer_to_operator]
+        must_not_contain:
+          - '(в|у)\s+(якому|якім|каком)\s+(місті|городе)'
+          - 'як\s+(вас|до вас)\s+(звати|звертатися)|ваше\s+ім.я|как\s+вас\s+зовут'
+
+- id: op_two_cars_pk_not_provided
+  title: «двома машинками можна, да?» — Про Колесо монтажу не надає
+  source: owner:2026-10-27-several-cars
+  network: [prokoleso]
+  sales_enabled: true
+  notes: >-
+    R08 — fitting and storage are Tvoya Shina only; a second car must not open
+    a booking path at PK. Checkable with FF_MULTI_CAR_BOOKING=1 in the
+    call-processor container env (the runner turns it on) — and green with it
+    off too: the flag must not change PK.
+  turns:
+    - user: мені треба записати на шиномонтаж дві машини, двома машинками можна, да?
+      expect:
+        must_contain: ['не надає|не надаем|не пропонуєм']
+        tool_not_called: [get_fitting_stations, get_fitting_slots, book_fitting]
+        must_not_contain: ['інш\w*\s+мереж', 'партнер', 'тво[яєїюе]\w*\s+шин']
+
+- id: op_four_cars_transfer
+  title: «у нас автопарк, машин шість» — понад три машини → оператор
+  source: owner:2026-10-27-several-cars
+  network: [tvoya-shina]
+  sales_enabled: true
+  notes: >-
+    R04 — up to 3 cars per call, a fourth and more is a fleet → transfer_to_operator.
+    Checkable only with FF_MULTI_CAR_BOOKING=1 in the call-processor container env
+    (the runner turns it on). The over_cap transfer is code (wave-3-D), not a prompt
+    line: the sandbox runs agent.process_message only, so this case goes green
+    only if D's gate runs in the agent loop (like OperatorOnlyGate in agent.py),
+    not in the pipeline alone — if D lands it in the pipeline only, mark it pending.
+  turns:
+    - user: у нас автопарк, машин шість, треба всі перевзути на шиномонтажі в Києві
+      expect:
+        tool_called: [transfer_to_operator]
+        tool_not_called: [book_fitting, get_fitting_slots]
+
+- id: op_one_more_after_booking
+  title: після першої броні «ще одну машину запишіть» — друга бронь без повторних питань
+  source: owner:2026-10-27-several-cars
+  network: [tvoya-shina]
+  sales_enabled: true
+  notes: >-
+    R05 — the bot does not offer a second car on its own; the caller asks after
+    the first booking. R03 — the same station and name, the same time offered
+    first (14:00 is still free in the slots mock). Checkable only with
+    FF_MULTI_CAR_BOOKING=1 in the call-processor container env (the runner
+    turns it on); with the flag off production strips book_fitting after the
+    first booking, which the sandbox does not model.
+  mocks:
+    get_fitting_stations:
+      total: 2
+      stations:
+        - {id: '000000041', name: Твоя Шина Васильківська, city: Київ, address: 'вул. Велика Васильківська, 100'}
+        - {id: '000000042', name: Твоя Шина Бажана, city: Київ, address: 'просп. Бажана, 12'}
+    get_fitting_slots:
+      station_id: '000000042'
+      date: '2026-11-20'
+      slots: ['13:00', '13:30', '14:00', '14:30', '15:00']
+    book_fitting:
+      booking_id: 9a41d6e2-5b6f-11f1-9a1b-0050569e1b01
+      status: confirmed
+      message: Запис створено
+      when_args:
+        - args: {auto_number: 'чорн|черн'}
+          result: {booking_id: 9a41d6e2-5b6f-11f1-9a1b-0050569e1b02, status: confirmed, message: Запис створено}
+  turns:
+    - user: добрий день, хочу записатися на шиномонтаж у Києві, на Бажана, на двадцяте листопада
+      expect:
+        tool_not_called: [transfer_to_operator, book_fitting]
+    - user: шини свої, на другу годину дня
+      expect:
+        tool_not_called: [transfer_to_operator, book_fitting]
+    - user: сірий Хюндай Туссан
+      expect:
+        tool_not_called: [transfer_to_operator, book_fitting]
+    - user: мене Олег звати, телефон нуль дев'яносто сім сто двадцять три сорок п'ять шістдесят сім
+      expect:
+        tool_not_called: [transfer_to_operator]
+    - user: так, усе вірно
+      expect:
+        tool_called: [{name: book_fitting, args: {station_id: '^000000042$', date: '^2026-11-20$', time: '^14:00$', auto_number: 'сір|сер'}}]
+        tool_not_called: [transfer_to_operator]
+        must_not_contain: ['(ще|еще)\s+(одн\w*|якусь|какую)\s+(?:\w+\s+){0,1}(машин|авто)', '(друг\w*|інш\w*)\s+(машин|авто)\w*\s+(?:\w+\s+){0,2}запис']
+    - user: о, ще одну машину запишіть, будь ласка, — чорна Шкода Октавія, шини теж свої
+      expect:
+        tool_not_called: [get_fitting_stations, transfer_to_operator]
+        must_contain: ['14:00|14\.00|друг\w*\s+годин|чотирнадцят']
+        must_not_contain:
+          - '(в|у)\s+(якому|якім|каком)\s+(місті|городе)'
+          - '(яку|котру|яка|какую)\s+(?:\w+\s+){0,1}(точку|станцію|станцию|адресу)'
+          - 'як\s+(вас|до вас)\s+(звати|звертатися)|ваше\s+ім.я|как\s+вас\s+зовут'
+          - '(назвіть|продиктуйте)\s+(?:\w+\s+){0,1}(номер|телефон)'
+    - user: так, на ту ж годину, підтверджую
+      expect:
+        tool_called: [{name: book_fitting, args: {station_id: '^000000042$', date: '^2026-11-20$', time: '^14:00$', auto_number: 'чорн|черн'}}]
+        tool_not_called: [get_fitting_stations, transfer_to_operator]
