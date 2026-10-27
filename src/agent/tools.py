@@ -860,6 +860,7 @@ def filter_tools_by_state(
     *,
     order_stage: str | None = None,
     fitting_booked: bool = False,
+    next_car_pending: bool = False,
 ) -> list[dict]:  # type: ignore[type-arg]
     """Filter tool definitions based on current conversation state.
 
@@ -870,6 +871,9 @@ def filter_tools_by_state(
         tools: Full list of tool definitions (not mutated).
         order_stage: Current order stage (None, "draft", "delivery_set", "confirmed").
         fitting_booked: Whether a fitting has already been booked this call.
+        next_car_pending: `CallSession.next_car_pending` — the caller still
+            has a car to book (FF_MULTI_CAR_BOOKING, cap MAX_CARS_PER_CALL);
+            keeps the booking tools after the first booking.
 
     Returns:
         Filtered copy of the tools list.
@@ -885,7 +889,7 @@ def filter_tools_by_state(
             ("create_order_draft", "update_order_delivery", "confirm_order", SUBMIT_ORDER_TOOL)
         )
 
-    if fitting_booked:
+    if fitting_booked and not next_car_pending:
         exclude.update(("book_fitting", "get_fitting_slots", "reserve_fitting_slot"))
 
     if not exclude:

@@ -282,6 +282,13 @@ operator_only_transfer_total = Counter(
     ["intent"],
 )
 
+multi_car_booking_total = Counter(
+    "callcenter_multi_car_booking_total",
+    "Multi-car booking flow under FF_MULTI_CAR_BOOKING: next car started, "
+    "next car booked, or a car over MAX_CARS_PER_CALL sent to an operator",
+    ["event"],  # started | booked | over_cap
+)
+
 # --- TTS cache metrics ---
 
 tts_cache_hits_total = Counter(

@@ -193,6 +193,9 @@ class FeatureFlagSettings(BaseSettings):
     llm_routing_enabled: bool = False
     streaming_llm: bool = False  # FF_STREAMING_LLM
     whisper_rollout_percent: int = 0  # 0-100 gradual rollout
+    # FF_MULTI_CAR_BOOKING — several cars booked one after another in one call
+    # (owner request 2026-10-27). Off by default; rollback = remove the var.
+    multi_car_booking: bool = False
 
     model_config = {"env_prefix": "FF_"}
 

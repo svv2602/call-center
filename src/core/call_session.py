@@ -16,6 +16,9 @@ import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
+from src.agent.multi_car_detect import MAX_CARS_PER_CALL
+from src.config import FeatureFlagSettings
+
 if TYPE_CHECKING:
     from redis.asyncio import Redis
 
@@ -44,6 +47,16 @@ FSM_HISTORY_LIMIT = 20
 # AMI. 15 callers in 30 days heard it and stayed with the bot. The announcement
 # now keys off this marker, which only the executor that talks to AMI writes.
 TRANSFER_OUTCOME_INITIATED = "initiated"
+
+
+def _multi_car_flag_on() -> bool:
+    """FF_MULTI_CAR_BOOKING, read from the environment on each check.
+
+    Read here rather than snapshotted into the session: rollback is removing
+    the variable, and a session restored from Redis must not carry the old
+    value past that.
+    """
+    return FeatureFlagSettings().multi_car_booking
 
 
 def _clean_count_map(
@@ -370,6 +383,118 @@ class CallSession:
         # LLM passes to book_fitting — in `79c1d7c5` the model kept sending
         # the stale «сірий» it had already been corrected on.
         self.fitting_color_corrected: bool = False
+        # --- Multi-car booking (FF_MULTI_CAR_BOOKING, 2026-10-27) ---
+        # Bookings confirmed by 1C during this call, in order. Keys:
+        # booking_id, station_id, date, time, vehicle, color. Written by
+        # `record_fitting_booking`; the last entry is the «same time» hint for
+        # the next car (R03) — see `previous_booking_slot`.
+        self.fitting_bookings: list[dict[str, Any]] = []
+        # How many cars the caller said he wants booked (None = he did not
+        # say). Read by `next_car_pending`; capped by MAX_CARS_PER_CALL there.
+        self.cars_expected: int | None = None
+        # 1-based number of the car whose fields are being collected now.
+        # `start_next_car` moves it on only once that car is booked, so a
+        # second call in the same turn cannot wipe the next car's answers.
+        self.fitting_car_number: int = 1
+
+    # --- Multi-car booking ---
+
+    @property
+    def next_car_pending(self) -> bool:
+        """True while the caller still has a car to book in this call.
+
+        Default-deny: the flag must be on, the caller must have named a number
+        of cars, and fewer than min(cars_expected, MAX_CARS_PER_CALL) bookings
+        may exist. A fourth car is never pending (R04 — a fleet is an
+        operator's job).
+        """
+        if not _multi_car_flag_on():
+            return False
+        expected = self.cars_expected
+        if not isinstance(expected, int) or isinstance(expected, bool):
+            return False
+        return len(self.fitting_bookings) < min(expected, MAX_CARS_PER_CALL)
+
+    @property
+    def cars_over_cap(self) -> bool:
+        """The caller named more cars than one call may book (R04)."""
+        expected = self.cars_expected
+        return (
+            isinstance(expected, int)
+            and not isinstance(expected, bool)
+            and expected > MAX_CARS_PER_CALL
+        )
+
+    def record_fitting_booking(
+        self,
+        *,
+        booking_id: str,
+        station_id: str | None,
+        date: str | None,
+        time: str | None,
+        vehicle: str | None,
+        color: str | None,
+    ) -> bool:
+        """Append a confirmed booking. Returns False for a booking_id already
+        recorded (the same 1C GUID may reach several writers)."""
+        if any(b.get("booking_id") == booking_id for b in self.fitting_bookings):
+            return False
+        self.fitting_bookings.append(
+            {
+                "booking_id": booking_id,
+                "station_id": station_id,
+                "date": date,
+                "time": time,
+                "vehicle": vehicle,
+                "color": color,
+            }
+        )
+        return True
+
+    def previous_booking_slot(self) -> tuple[str | None, str | None] | None:
+        """(date, time) of the last booking this call — the slot the next car
+        is offered first (R03), or None before any booking."""
+        if not self.fitting_bookings:
+            return None
+        last = self.fitting_bookings[-1]
+        return last.get("date"), last.get("time")
+
+    def start_next_car(self) -> bool:
+        """Clear the fields of one car and its slot for the next car.
+
+        City, station, name and phone stay (R03). The slot pin is cleared —
+        kept, it would book the next car into the slot just taken without
+        asking 1C; the «same time» hint lives in `previous_booking_slot`.
+        `fitting_booked` stays: it is a fact about the call, and cancel /
+        interrupts reset it on their own. The field list and the reason for
+        each field: wave-2-C PROGRESS.md (multi-car-booking-2026-10-27).
+
+        No-op (returns False) unless a next car is pending AND the current car
+        is already booked.
+        """
+        if not self.next_car_pending:
+            return False
+        if len(self.fitting_bookings) < self.fitting_car_number:
+            return False
+        # car
+        self.fitting_plate = None
+        self.fitting_vehicle_brand = None
+        self.fitting_color_corrected = False
+        self.fitting_storage_choice = None
+        self.fitting_storage_contract = None
+        self.fitting_diameter_client = None
+        self.storage_contract_guard_triggered = False
+        # slot
+        self.selected_fitting_date = None
+        self.selected_fitting_time = None
+        self.fitting_slots_offered = []
+        self.fsm_slots_fetched = set()
+        self.fitting_requested_weekday = None
+        self.fitting_weekday_bounced_since_lookup = None
+        self.book_time_unchosen_refusals = 0
+        self.krok8_confabulation_pending = False
+        self.fitting_car_number += 1
+        return True
 
     # --- State transitions ---
 
@@ -558,6 +683,9 @@ class CallSession:
             "pending_price_interrupt_needs_city": self.pending_price_interrupt_needs_city,
             "book_time_unchosen_refusals": self.book_time_unchosen_refusals,
             "fitting_color_corrected": self.fitting_color_corrected,
+            "fitting_bookings": [dict(b) for b in self.fitting_bookings],
+            "cars_expected": self.cars_expected,
+            "fitting_car_number": self.fitting_car_number,
             "dialog_history": [
                 {
                     "speaker": t.speaker,
@@ -767,6 +895,38 @@ class CallSession:
         refusals = data.get("book_time_unchosen_refusals", 0)
         session.book_time_unchosen_refusals = refusals if isinstance(refusals, int) else 0
         session.fitting_color_corrected = bool(data.get("fitting_color_corrected", False))
+        # --- Multi-car booking --- absent in sessions written before it.
+        # A malformed value is logged, not silently defaulted: an emptied
+        # bookings list would re-open the booking tools past the cap.
+        bookings = data.get("fitting_bookings") or []
+        if isinstance(bookings, list):
+            session.fitting_bookings = [dict(b) for b in bookings if isinstance(b, dict)]
+        else:
+            logger.warning(
+                "Call %s: fitting_bookings has unexpected type %s — ignoring",
+                data.get("channel_uuid"),
+                type(bookings).__name__,
+            )
+        expected = data.get("cars_expected")
+        if expected is None or (
+            isinstance(expected, int) and not isinstance(expected, bool) and expected >= 1
+        ):
+            session.cars_expected = expected
+        else:
+            logger.warning(
+                "Call %s: cars_expected has unexpected value %r — ignoring",
+                data.get("channel_uuid"),
+                expected,
+            )
+        car_number = data.get("fitting_car_number", 1)
+        if isinstance(car_number, int) and not isinstance(car_number, bool) and car_number >= 1:
+            session.fitting_car_number = car_number
+        else:
+            logger.warning(
+                "Call %s: fitting_car_number has unexpected value %r — ignoring",
+                data.get("channel_uuid"),
+                car_number,
+            )
         session.dialog_history = [
             DialogTurn(
                 speaker=t["speaker"],
