@@ -146,3 +146,30 @@ def test_default_mode_patches_are_unchanged() -> None:
     }
     assert ct.PROKOLESO_CONFIG_PATCH["sales_enabled"] is False
     assert ct.TVOYA_SHINA_CONFIG_PATCH["sales_enabled"] is False
+
+
+def test_prokoleso_quotes_nova_poshta_delivery_with_its_own_key() -> None:
+    """R10/R08: only Про Колесо quotes delivery; its ETA is the owner's flat text."""
+    from src.agent.network_policy import NetworkPolicy
+
+    pk = ct.PROKOLESO_CONFIG_PATCH["network_policy"]
+    assert pk["delivery_quote"] == "novaposhta"
+    assert pk["delivery_quote_key_env"] == "NOVA_POSHTA_API_KEY_PROKOLESO"
+    assert pk["delivery_eta_text"] == "приблизно 3 робочі дні"
+    # The flag is valid as written: under sales the parsed policy turns it on.
+    on = NetworkPolicy.from_tenant_config({"network_policy": pk, "sales_enabled": True})
+    assert on.delivery_quote_enabled is True
+    assert on.delivery_eta_text == "приблизно 3 робочі дні"
+    off = NetworkPolicy.from_tenant_config({"network_policy": pk, "sales_enabled": False})
+    assert off.delivery_quote_enabled is False
+
+
+def test_tvoya_shina_has_no_delivery_quote() -> None:
+    """Free delivery: no quote, no key, the common ETA text stays."""
+    from src.agent.network_policy import NetworkPolicy
+
+    tsh = ct.TVOYA_SHINA_CONFIG_PATCH["network_policy"]
+    assert "delivery_quote" not in tsh and "delivery_quote_key_env" not in tsh
+    assert tsh["delivery_eta_text"] == ct._COMMON_NETWORK_POLICY["delivery_eta_text"]
+    policy = NetworkPolicy.from_tenant_config({"network_policy": tsh, "sales_enabled": True})
+    assert policy.delivery_quote_enabled is False

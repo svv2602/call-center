@@ -473,6 +473,17 @@ class TestCallSiteWiring:
 _NP_KEY = "0123456789abcdef0123456789abcdef"  # shape of a Nova Poshta key, not a real one
 
 
+def _pk_without_quote() -> dict[str, Any]:
+    """ProKoleso's real config, sales on, the delivery quote keys taken out."""
+    cfg = _enabled(PROKOLESO_CONFIG_PATCH)
+    policy = {
+        k: v
+        for k, v in cfg["network_policy"].items()
+        if k not in ("delivery_quote", "delivery_quote_key_env")
+    }
+    return {**cfg, "network_policy": policy}
+
+
 def _pk_quote(**overrides: Any) -> dict[str, Any]:
     """ProKoleso's real config, sales on, with the delivery quote flag set."""
     policy = {
@@ -487,7 +498,7 @@ def _pk_quote(**overrides: Any) -> dict[str, Any]:
 class TestDeliveryQuoteFlag:
     @pytest.mark.parametrize(
         "cfg",
-        [None, {}, _enabled(PROKOLESO_CONFIG_PATCH), _enabled(TVOYA_SHINA_CONFIG_PATCH)],
+        [None, {}, _pk_without_quote(), _enabled(TVOYA_SHINA_CONFIG_PATCH)],
         ids=["none", "empty", "pk_without_flag", "tsh"],
     )
     def test_off_by_default(self, cfg: Any) -> None:

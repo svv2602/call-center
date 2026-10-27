@@ -42,16 +42,21 @@
           must_not_contain: ['\d+\s*(грн|гривень|гривні)', 'безкоштовн']
 
 - id: delivery_eta
-  title: строк доставки — зазвичай 1–3 дні, точніше за ТТН
+  title: строк доставки — ТШ зазвичай 1–3 дні, точніше за ТТН; ПК приблизно 3 робочі дні
   source: tshina:delivery_eta_kyiv_ua
-  notes: the term comes from network_policy.delivery_eta_text (owner — «зазвичай 1–3 дні, точніше за ТТН»); unwritten, the bot must say «уточнить менеджер» and the case is red for the data
+  notes: the term comes from network_policy.delivery_eta_text — ТШ the common «зазвичай 1–3 дні, точніше за ТТН», ПК the owner's «приблизно 3 робочі дні» (2026-10-27, R10, the carrier's own ETA is not used); unwritten, the bot must say «уточнить менеджер» and the case is red for the data
   network: both
   sales_enabled: true
   turns:
     - user: як швидко доставите шини у Київ?
       expect:
-        must_contain: ['(1|один|одного)\s*(-|–|—|до)\s*(3|три|трьох)|від одного до трьох']
         must_not_contain: ['сьогодні ж', 'гарантовано завтра']
+      expect_by_network:
+        tvoya-shina:
+          must_contain: ['(1|один|одного)\s*(-|–|—|до)\s*(3|три|трьох)|від одного до трьох']
+        prokoleso:
+          must_contain: ['(3|три|трьох)\s*робоч\w*\s*(дн|дн\w+)']
+          must_not_contain: ['(1|один|одного)\s*(-|–|—|до)\s*(3|три|трьох)']
 
 - id: delivery_tracking_ttn
   title: відстеження — номер замовлення чи телефон для статусу, або ТТН
@@ -150,3 +155,138 @@
         prokoleso:
           must_contain: ['не надаєм|не надаем|не пропонуєм']
           tool_not_called: [get_fitting_stations]
+
+# ── Nova Poshta delivery quote, Про Колесо (np-delivery-quote-2026-10-27) ──
+# `get_delivery_cost` is offered when PROKOLESO_CONFIG_PATCH carries the
+# `delivery_quote` flag (the harness reads the constants, not the DB). Its
+# sandbox handler (`src.sandbox.mock_tools.DeliveryCostMock`) keeps the live
+# decision order — only products a search of this case offered are quoted,
+# a free-delivery promotion answers with its own text — and replaces Nova
+# Poshta by a fixed 810 грн / +60 грн courier; the phrase is built by
+# `src.agent.delivery_quote`, so `must_contain` checks that the model passed
+# the phrase on, not that a fixture wrote it. The prompt line telling the
+# model to quote renders only with NOVA_POSHTA_API_KEY_PROKOLESO in the env —
+# run these in the prod container where the key is set.
+# The spoken-reply guard (delivery_sum, wave 3-E) runs only in the voice
+# path and is covered by unit tests; here the model's own answer is checked.
+# Product ids t3/t4 are the order cases' (orders.yaml).
+
+- id: pk_delivery_quote_after_choice
+  title: ПК — «скільки доставка до Одеси» після вибору шин → орієнтовно 810 грн + 2% при накладеному платежі
+  source: owner:np-delivery-quote-2026-10-27
+  notes: R04 «тільки орієнтовно», R08 «орієнтовно 810 грн, при накладеному платежі ще додатково 2%», R13 the caller asked
+  network: [prokoleso]
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: t3, brand: Bridgestone, model: Turanza 6, size: 205/55 R16, season: summer, price: 3700, in_stock: true}
+        - {id: t4, brand: Firestone, model: Roadhawk 2, size: 205/55 R16, season: summer, price: 3100, in_stock: true}
+  turns:
+    - user: потрібні чотири літні шини 205/55 R16, бренд будь-який, без побажань
+    - user: беру Bridgestone Turanza, чотири штуки. А скільки буде доставка до Одеси?
+      expect:
+        tool_called:
+          - {name: get_delivery_cost, args: {city: 'Одес|Одесс'}}
+        must_contain: ['орієнтовн|ориентировочн', '810', '2\s*%|два\s+відсотк']
+        must_not_contain: ['безкоштовн', 'бесплатн', 'точн\w*\s+сум']
+
+- id: pk_delivery_quote_courier
+  title: ПК — «а кур'єром до дверей?» → доплата за кур'єра поверх орієнтовної суми
+  source: owner:np-delivery-quote-2026-10-27
+  notes: R09 «если спрашивают до двери (курьером) — называем дополнительную оплату»; the first quote turn is context
+  network: [prokoleso]
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: t3, brand: Bridgestone, model: Turanza 6, size: 205/55 R16, season: summer, price: 3700, in_stock: true}
+        - {id: t4, brand: Firestone, model: Roadhawk 2, size: 205/55 R16, season: summer, price: 3100, in_stock: true}
+  turns:
+    - user: потрібні чотири літні шини 205/55 R16, бренд будь-який, без побажань
+    - user: беру Firestone, чотири штуки. Скільки доставка до Одеси?
+      expect:
+        tool_called: [get_delivery_cost]
+        must_contain: ['орієнтовн|ориентировочн']
+        # R09: the courier surcharge only once the caller asked about the door
+        must_not_contain: ['60\s*(грн|гривень|гривні)']
+    - user: а якщо кур'єром до дверей, скільки це буде?
+      expect:
+        tool_called:
+          - {name: get_delivery_cost, args: {courier: '^true$'}}
+        must_contain: ['кур.?єр|курьер|до\s+двер', '60\s*(грн|гривень|гривні)']
+
+- id: pk_delivery_quote_no_city
+  title: ПК — шини обрано, міста немає → без суми (тариф перевізника або питання про місто)
+  source: owner:np-delivery-quote-2026-10-27
+  notes: R18 «без товару або міста — прежняя фраза про тариф»; delivery_cost_ua/ru cover the case with no product
+  network: [prokoleso]
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: t3, brand: Bridgestone, model: Turanza 6, size: 205/55 R16, season: summer, price: 3700, in_stock: true}
+        - {id: t4, brand: Firestone, model: Roadhawk 2, size: 205/55 R16, season: summer, price: 3100, in_stock: true}
+  turns:
+    - user: потрібні чотири літні шини 205/55 R16, бренд будь-який, без побажань
+    - user: беру Bridgestone, чотири штуки. А доставка скільки коштує?
+      expect:
+        must_contain: ['тариф\w*\s+перевізник|тариф\w*\s+перевозчик|як\w*\s+міст|яке\s+місто|куди\s+(?:\w+\s+){0,2}достав|в\s+яке\s+місто|какой\s+город|в\s+какой\s+город']
+        must_not_contain: ['орієнтовн\w*\s+(?:\w+\s+){0,2}\d+\s*грн', '810', 'доставк\w*[^.?!]{0,40}\d+\s*(грн|гривень|гривні)']
+
+- id: pk_delivery_quote_free_delivery_promo
+  title: ПК — акція «безкоштовна доставка» на все замовлення → текст акції, жодної суми
+  source: owner:np-delivery-quote-2026-10-27
+  notes: R07 «при акції API не викликаємо» — the tool may be called, its live handler answers the promotion's text without asking Nova Poshta (the mock keeps that order); the case checks no sum and no «орієнтовно» reach the caller. network_leak off — the promotion itself says free delivery
+  network: [prokoleso]
+  sales_enabled: true
+  promotions:
+    - title: Безкоштовна доставка всіх шин
+      bot_text: Безкоштовна доставка «Новою Поштою» по Україні на будь-яке замовлення шин.
+      valid_to: 2099-12-31
+      overrides: {free_delivery: true}
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: t3, brand: Bridgestone, model: Turanza 6, size: 205/55 R16, season: summer, price: 3700, in_stock: true}
+        - {id: t4, brand: Firestone, model: Roadhawk 2, size: 205/55 R16, season: summer, price: 3100, in_stock: true}
+  turns:
+    - user: потрібні чотири літні шини 205/55 R16, бренд будь-який, без побажань
+      expect:
+        network_leak: false
+    - user: беру Bridgestone Turanza, чотири штуки. Скільки буде доставка до Одеси?
+      expect:
+        network_leak: false
+        must_contain: ['безкоштовн|бесплатн|безплатн']
+        must_not_contain: ['орієнтовн|ориентировочн', '810', 'доставк\w*[^.?!]{0,40}\d+\s*(грн|гривень|гривні)']
+
+- id: pk_delivery_quote_not_in_order_summary
+  title: ПК — підсумок заявки без питання про доставку → суму доставки не називає, get_delivery_cost не кличе
+  source: owner:np-delivery-quote-2026-10-27
+  notes: R13 «тільки на питання» — the sum is named when the caller asked, never in the order summary. The order script of orders.yaml compressed to fewer turns
+  network: [prokoleso]
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: t3, brand: Bridgestone, model: Turanza 6, size: 205/55 R16, season: summer, price: 3700, in_stock: true}
+        - {id: t4, brand: Firestone, model: Roadhawk 2, size: 205/55 R16, season: summer, price: 3100, in_stock: true}
+    check_availability:
+      product_id: t3
+      available: true
+      quantity: 12
+  turns:
+    - user: потрібні дві літні шини 205/55 R16, бренд будь-який, без побажань
+    - user: беру Bridgestone Turanza, дві штуки, телефон нуль дев'яносто дев'ять сто двадцять три сорок п'ять шістдесят сім
+      expect:
+        tool_not_called: [get_delivery_cost]
+    - user: доставка Новою поштою в Одесу, відділення номер один, отримувач Петренко Іван, оплата при отриманні
+      expect:
+        tool_not_called: [get_delivery_cost]
+        # the order sum (2 × 3700) is a right thing to say here; a delivery sum is not
+        must_not_contain: ['орієнтовн|ориентировочн', '810']

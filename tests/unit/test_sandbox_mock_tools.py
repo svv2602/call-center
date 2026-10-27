@@ -4,7 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from src.sandbox.mock_tools import MOCK_RESPONSES, build_mock_tool_router
+from src.agent import delivery_quote as dq
+from src.sandbox.mock_tools import (
+    MOCK_DELIVERY_COST,
+    MOCK_RESPONSES,
+    DeliveryCostMock,
+    build_mock_tool_router,
+)
 
 
 class TestMockResponses:
@@ -32,6 +38,7 @@ class TestMockResponses:
             "find_storage",
             "search_knowledge_base",
             "update_customer_profile",
+            "get_delivery_cost",
         }
         assert set(MOCK_RESPONSES.keys()) == expected_tools
 
@@ -101,3 +108,73 @@ class TestBuildMockToolRouter:
         router = build_mock_tool_router()
         result = await router.execute("nonexistent_tool", {})
         assert "error" in result
+
+
+class TestDeliveryCostMock:
+    """The sandbox get_delivery_cost keeps the live decision order (main.py)."""
+
+    @staticmethod
+    async def _offered(mock: DeliveryCostMock) -> None:
+        await mock.observe("search_tires", {}, MOCK_RESPONSES["search_tires"], 0, True)
+
+    @pytest.mark.asyncio
+    async def test_default_router_answers_the_tariff_without_a_sum(self) -> None:
+        router = build_mock_tool_router()
+        out = await router.execute(
+            "get_delivery_cost",
+            {"city": "Одеса", "items": [{"product_id": "tire-001", "quantity": 4}]},
+        )
+        assert out["status"] == dq.STATUS_NEED_MORE
+        assert out["phrase"].startswith(dq.tariff_phrase(None))
+
+    @pytest.mark.asyncio
+    async def test_missing_city_is_need_more(self) -> None:
+        mock = DeliveryCostMock()
+        await self._offered(mock)
+        out = await mock(city=" ", items=[{"product_id": "tire-001", "quantity": 4}])
+        assert out == {
+            "status": dq.STATUS_NEED_MORE,
+            "phrase": f"{dq.tariff_phrase(None)} {dq.NEED_MORE_HINT}",
+            "missing": "city",
+        }
+
+    @pytest.mark.asyncio
+    async def test_quote_is_the_owner_wording(self) -> None:
+        mock = DeliveryCostMock()
+        await self._offered(mock)
+        out = await mock(city="Одеса", items=[{"product_id": "tire-002", "quantity": 4}])
+        assert out["status"] == dq.STATUS_QUOTED
+        assert out["cost"] == MOCK_DELIVERY_COST
+        assert out["phrase"].endswith(dq.COD_FEE_PHRASE)
+        assert "орієнтовно 810 грн" in out["phrase"]
+        # Only `courier is True` asks the door price: a truthy string does not.
+        door = await mock(
+            city="Одеса", items=[{"product_id": "tire-002", "quantity": 4}], courier="так"
+        )
+        assert "кур'єр" not in door["phrase"]
+
+    @pytest.mark.asyncio
+    async def test_brand_promotion_on_some_items_goes_to_the_manager(self) -> None:
+        from datetime import date
+
+        from src.agent.promotions import ActivePromotion, promo_overrides
+
+        promo = ActivePromotion(
+            title="Безкоштовна доставка Michelin",
+            bot_text="Доставка шин Michelin — безкоштовна.",
+            valid_to=date(2099, 12, 31),
+            overrides={"free_delivery": True},
+            mention_brands=("michelin",),
+        )
+        mock = DeliveryCostMock(None, promo_overrides([promo]))
+        await self._offered(mock)
+        only = await mock(city="Київ", items=[{"product_id": "tire-001", "quantity": 4}])
+        assert only == {"status": dq.STATUS_PROMO_FREE, "phrase": promo.bot_text}
+        mixed = await mock(
+            city="Київ",
+            items=[
+                {"product_id": "tire-001", "quantity": 2},
+                {"product_id": "tire-002", "quantity": 2},
+            ],
+        )
+        assert mixed == {"status": dq.STATUS_PROMO_MIXED, "phrase": dq.PROMO_MIXED_PHRASE}

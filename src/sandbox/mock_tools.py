@@ -7,10 +7,16 @@ can operate without a live Store API connection.
 from __future__ import annotations
 
 import copy
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from src.agent import delivery_quote as dq
 from src.agent.agent import ToolRouter
 from src.agent.prompts import ORDER_REQUEST_CREATED_TEXT
+from src.integrations.novaposhta import Quote
+
+if TYPE_CHECKING:
+    from src.agent.network_policy import NetworkPolicy
+    from src.agent.promotions import PromoOverrides
 
 MOCK_RESPONSES: dict[str, Any] = {
     "get_vehicle_tire_sizes": {
@@ -234,7 +240,70 @@ MOCK_RESPONSES: dict[str, Any] = {
     },
     "search_knowledge_base": "dynamic",  # handled by _search_knowledge_mock
     "update_customer_profile": {"status": "updated", "fields": ["name", "city"]},
+    dq.DELIVERY_COST_TOOL: "dynamic",  # handled by DeliveryCostMock
 }
+
+#: The fixed Nova Poshta answer of the sandbox: branch → branch and the
+#: courier's extra (owner's example sum, R08).
+MOCK_DELIVERY_COST = 810
+MOCK_DOOR_SURCHARGE = 60
+
+
+class DeliveryCostMock:
+    """Sandbox ``get_delivery_cost``: the live decision order, a fixed carrier quote.
+
+    Mirrors ``_get_delivery_cost`` in ``src/main.py``: only products a search
+    of this conversation offered are quotable (else ``need_more``), a
+    free-delivery promotion covering every item answers with its own text and
+    no quote, some items → the manager. Nova Poshta itself is replaced by
+    ``MOCK_DELIVERY_COST`` / ``MOCK_DOOR_SURCHARGE``; every phrase comes from
+    ``src.agent.delivery_quote``, never a copy.
+    """
+
+    def __init__(
+        self, policy: NetworkPolicy | None = None, promos: PromoOverrides | None = None
+    ) -> None:
+        self._policy = policy
+        self._promos = promos
+        self.offered: dict[str, dict[str, Any]] = {}
+
+    async def observe(
+        self, name: str, _args: Any, result: Any, _duration_ms: int, _success: bool
+    ) -> None:
+        """ToolRouter execute hook: remember what the searches offered."""
+        if name == "search_tires":
+            dq.remember_offered(self.offered, result, "tire")
+        elif name == "search_disks":
+            dq.remember_offered(self.offered, result, "wheel")
+
+    async def __call__(
+        self, city: Any = "", items: Any = None, courier: Any = False, **_: Any
+    ) -> dict[str, Any]:
+        tariff = dq.tariff_phrase(self._policy)
+        city_name = city.strip() if isinstance(city, str) else ""
+        lines = dq.resolve_items(items, self.offered)
+        if not city_name or lines is None:
+            return {
+                "status": dq.STATUS_NEED_MORE,
+                "phrase": f"{tariff} {dq.NEED_MORE_HINT}",
+                "missing": "city" if not city_name else "items",
+            }
+        covered, promo_text = dq.free_delivery_cover(lines, self._promos)
+        if covered and covered == len(lines) and promo_text:
+            return {"status": dq.STATUS_PROMO_FREE, "phrase": promo_text}
+        if covered:
+            return {"status": dq.STATUS_PROMO_MIXED, "phrase": dq.PROMO_MIXED_PHRASE}
+        door = courier is True
+        quote = Quote(
+            cost=MOCK_DELIVERY_COST,
+            door_cost=MOCK_DELIVERY_COST + MOCK_DOOR_SURCHARGE if door else None,
+            cod_fee=0.0,
+        )
+        return {
+            "status": dq.STATUS_QUOTED,
+            "phrase": dq.quote_phrase(quote, door),
+            "cost": dq.quoted_sums(quote, door)[0],
+        }
 
 
 _KNOWLEDGE_BRAND_RESPONSES: dict[str, dict[str, Any]] = {
@@ -372,5 +441,8 @@ def build_mock_tool_router() -> ToolRouter:
 
     # Register dynamic handlers
     router.register("search_knowledge_base", _search_knowledge_mock)
+    # No policy, no searches: answers «за тарифами перевізника». The sandbox
+    # agent replaces it with one that sees the network and its searches.
+    router.register(dq.DELIVERY_COST_TOOL, DeliveryCostMock())
 
     return router

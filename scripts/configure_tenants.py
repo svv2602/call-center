@@ -107,6 +107,12 @@ PROKOLESO_CONFIG_PATCH: dict[str, Any] = {
     "network_policy": {
         **_COMMON_NETWORK_POLICY,
         "delivery_mode": "carrier_tariff",
+        # Nova Poshta delivery quote (owner 2026-10-27): the sum is quoted
+        # only with the key in this env variable; the carrier's own ETA is not
+        # used — the owner's flat «about 3 working days» instead.
+        "delivery_quote": "novaposhta",
+        "delivery_quote_key_env": "NOVA_POSHTA_API_KEY_PROKOLESO",
+        "delivery_eta_text": "приблизно 3 робочі дні",
         "services": [],
         "extended_warranty_brands": [],
     },

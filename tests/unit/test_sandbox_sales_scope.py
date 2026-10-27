@@ -8,6 +8,7 @@ case with sales on was graded against a bot that was told to transfer.
 
 from __future__ import annotations
 
+import re
 from contextlib import asynccontextmanager
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -159,3 +160,125 @@ def test_live_call_applies_the_sales_core_to_the_tenant_list() -> None:
         if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
     }
     assert "sales_tenant_allowlist" in calls
+
+
+# ── get_delivery_cost (np-delivery-quote wave 4-F) ───────────────────────────
+# As handle_call: offered only under the network's quote flag (Про Колесо with
+# sales on), cut everywhere else; the sandbox handler is the mock, which keeps
+# the live decision order and the phrases of src.agent.delivery_quote.
+
+_DELIVERY = "get_delivery_cost"
+
+
+async def _agent_with_promos(config: dict[str, Any], promos: list[Any]) -> Any:
+    from src.sandbox.agent_runner import create_sandbox_agent
+
+    engine = MagicMock(spec=["begin"])
+    conn = MagicMock(spec=["execute"])
+    empty = MagicMock(spec=["first", "__iter__", "scalar"])
+    empty.first.return_value = None
+    empty.__iter__.return_value = iter([])
+    conn.execute = AsyncMock(return_value=empty)
+
+    @asynccontextmanager
+    async def _begin() -> Any:
+        yield conn
+
+    engine.begin = _begin
+    tenant = {"network_id": "ProKoleso", "enabled_tools": [], "config": config}
+    with patch("src.sandbox.agent_runner.get_settings") as settings:
+        settings.return_value = MagicMock(
+            anthropic=MagicMock(api_key="k", model="claude-sonnet-4-5-20250929"),
+        )
+        return await create_sandbox_agent(
+            engine,
+            tool_mode="mock",
+            tenant=tenant,
+            tenant_id="00000000-0000-0000-0000-000000000001",
+            promotions_override=promos,
+        )
+
+
+_PK_SALES = {**PROKOLESO_CONFIG_PATCH, "sales_enabled": True}
+_TIRE_ITEMS = [{"product_id": "tire-001", "quantity": 4}]
+
+
+@pytest.mark.asyncio
+async def test_prokoleso_sales_offers_the_delivery_quote() -> None:
+    assert _DELIVERY in _tool_names(await _agent(_PK_SALES))
+    # A prod tenant list predating the tool gets it too, as handle_call.
+    assert _DELIVERY in _tool_names(await _agent_with_list(_PK_SALES, _PK_PROD_TOOLS))
+
+
+@pytest.mark.asyncio
+async def test_no_flag_no_delivery_quote() -> None:
+    assert _DELIVERY not in _tool_names(await _agent(dict(PROKOLESO_CONFIG_PATCH)))
+    assert _DELIVERY not in _tool_names(
+        await _agent_with_list(dict(PROKOLESO_CONFIG_PATCH), _PK_PROD_TOOLS)
+    )
+    assert _DELIVERY not in _tool_names(
+        await _agent({**TVOYA_SHINA_CONFIG_PATCH, "sales_enabled": True})
+    )
+
+
+@pytest.mark.asyncio
+async def test_quote_needs_a_product_this_conversation_offered() -> None:
+    from src.agent import delivery_quote as dq
+
+    agent = await _agent(_PK_SALES)
+    router = agent.tool_router
+    before = await router.execute(_DELIVERY, {"city": "Одеса", "items": _TIRE_ITEMS})
+    assert before["status"] == dq.STATUS_NEED_MORE
+    assert dq.NEED_MORE_HINT in before["phrase"]
+    assert not re.search(r"\d+\s*грн", before["phrase"])
+
+    await router.execute("search_tires", {"width": 205, "profile": 55, "diameter": 16})
+    quoted = await router.execute(_DELIVERY, {"city": "Одеса", "items": _TIRE_ITEMS})
+    assert quoted["status"] == dq.STATUS_QUOTED
+    assert "орієнтовно 810 грн" in quoted["phrase"]
+    assert dq.COD_FEE_PHRASE in quoted["phrase"]
+    assert "кур'єр" not in quoted["phrase"]
+
+    door = await router.execute(_DELIVERY, {"city": "Одеса", "items": _TIRE_ITEMS, "courier": True})
+    assert "кур'єром до дверей — ще 60 грн" in door["phrase"]
+
+
+@pytest.mark.asyncio
+async def test_case_mock_search_results_are_quotable() -> None:
+    """A goldset case registers its own search_tires after the agent is built."""
+    from src.agent import delivery_quote as dq
+
+    agent = await _agent(_PK_SALES)
+
+    async def _case_search(**_kw: Any) -> dict[str, Any]:
+        return {"items": [{"id": "case-7", "brand": "Kumho", "size": "195/65 R15", "price": 2100}]}
+
+    agent.tool_router.register("search_tires", _case_search)
+    await agent.tool_router.execute("search_tires", {})
+    out = await agent.tool_router.execute(
+        _DELIVERY, {"city": "Львів", "items": [{"product_id": "case-7", "quantity": 2}]}
+    )
+    assert out["status"] == dq.STATUS_QUOTED
+
+
+@pytest.mark.asyncio
+async def test_free_delivery_promotion_answers_without_a_quote() -> None:
+    """R07: a promotion covering every item → its own text, no sum."""
+    from datetime import date
+
+    from src.agent import delivery_quote as dq
+    from src.agent.promotions import ActivePromotion
+
+    promo = ActivePromotion(
+        title="Безкоштовна доставка",
+        bot_text="Доставка будь-якого замовлення шин — безкоштовна.",
+        valid_to=date(2099, 12, 31),
+        overrides={"free_delivery": True},
+        mention_brands=(),
+    )
+    agent = await _agent_with_promos(_PK_SALES, [promo])
+    await agent.tool_router.execute("search_tires", {})
+    out = await agent.tool_router.execute(_DELIVERY, {"city": "Одеса", "items": _TIRE_ITEMS})
+    assert out["status"] == dq.STATUS_PROMO_FREE
+    assert out["phrase"] == promo.bot_text
+    assert "cost" not in out

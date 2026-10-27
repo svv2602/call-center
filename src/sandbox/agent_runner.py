@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from src.agent.agent import LLMAgent
+from src.agent.delivery_quote import DELIVERY_COST_TOOL
 from src.agent.network_policy import NetworkPolicy, unoffered_service_tools
 from src.agent.parsers.date_parser import resolve_tool_date
 from src.agent.promotions import (
@@ -45,7 +46,7 @@ from src.agent.tools import (
     swap_order_chain_for_submit,
 )
 from src.config import get_settings
-from src.sandbox.mock_tools import MOCK_RESPONSES, build_mock_tool_router
+from src.sandbox.mock_tools import MOCK_RESPONSES, DeliveryCostMock, build_mock_tool_router
 
 if TYPE_CHECKING:
     from uuid import UUID
@@ -523,6 +524,7 @@ async def create_sandbox_agent(
 
     # Modular prompt assembly for sandbox: skip pronunciation (text mode, no TTS)
     policy = NetworkPolicy.from_tenant_config((tenant or {}).get("config"))
+    delivery_quote_on = policy.delivery_quote_enabled
     # Sales on: the prompt is module-assembled, as on a live call, so the
     # agent may add the fitting module on demand (wave 2-D). Sales off keeps
     # the sandbox's incumbent, non-expanding prompt.
@@ -588,11 +590,23 @@ async def create_sandbox_agent(
         if tenant.get("enabled_tools"):
             allowed = set(tenant["enabled_tools"])
             if policy.sales_enabled:
-                allowed = sales_tenant_allowlist(allowed)
+                allowed = sales_tenant_allowlist(allowed, delivery_quote=delivery_quote_on)
             if tools:
                 tools = [t for t in tools if t["name"] in allowed]
         if tenant.get("prompt_suffix") and system_prompt:
             system_prompt = system_prompt + "\n\n" + tenant["prompt_suffix"]
+
+    # As a live call (main.handle_call), default-deny over every tenant and
+    # scenario: no network flag → no `get_delivery_cost`. The flag, not
+    # `quote_available`: here the tool is a mock and needs no Nova Poshta key.
+    if delivery_quote_on:
+        quote_mock = DeliveryCostMock(policy, claim_overrides)
+        tool_router.register(DELIVERY_COST_TOOL, quote_mock)
+        # Sees every search result, including a goldset case's own mocks
+        # registered after this function returns.
+        tool_router.set_execute_hook(quote_mock.observe)
+    else:
+        tools = [t for t in tools if t["name"] != DELIVERY_COST_TOOL]
 
     # Resolve sandbox default model from Redis config → agent primary → hardcode
     sandbox_default_model = "claude-haiku-4-5-20251001"
