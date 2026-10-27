@@ -15,6 +15,14 @@ Rules (`RULES`, first match names the refusal):
 - ``novelty`` (`AnswerTextGuards::stripNoveltyClaim`) — «новинка / щойно
   з'явилась / нова модель сезону»: nothing in the result says a model is new.
   Silent when the caller's words this turn mention new tyres («нов…»).
+- ``year`` (wave 3-C) — a production year of the one named tyre («2026 року»,
+  «26-го року», «двадцять шостого року», «поточного року», «цьогорічна»,
+  «свіжа партія», «не вказує рік виробництва») that neither the tyre's
+  ``year`` in the result nor a ``check_availability`` year of the call backs.
+  The data has the year → the truth («<бренд модель> — 2023 року випуску.»);
+  it has none → the owner's sentence «Рік випуску цієї партії уточнить
+  менеджер…». A car's year («для Тойоти 2019 року»), a warranty or storage
+  term («зберігання до 2027 року») is not the tyre's.
 - ``unbacked_rating`` (`AnswerTextGuards::stripUnbackedClaims`) — «переможець
   тестів / лідер рейтингу / №1 / рейтинг 4.7 / у всіх високий рейтинг» with
   no data behind it: no shown tyre carries ``tests`` (filled by the tyre-tests
@@ -104,6 +112,7 @@ import os
 import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import date
 from typing import TYPE_CHECKING, Any
 
 from src.agent.tyre_compare import named_items
@@ -121,9 +130,11 @@ ENV_FLAG = "TIRE_CLAIM_GUARD_ENABLED"
 
 SEARCH_TOOL = "search_tires"
 KNOWLEDGE_TOOL = "search_knowledge_base"
+AVAILABILITY_TOOL = "check_availability"
 
 RULE_CHEAPEST = "cheapest"
 RULE_NOVELTY = "novelty"
+RULE_YEAR = "year"
 RULE_UNBACKED_RATING = "unbacked_rating"
 RULE_EU_CLASS = "eu_class"
 RULE_STUD = "stud"
@@ -134,6 +145,8 @@ RULE_RESTATED_VERDICT = "restated_verdict"
 REPLACEMENTS: dict[str, str] = {
     RULE_CHEAPEST: "Ціни у варіантів різні, можу назвати кожну.",
     RULE_NOVELTY: "Даних про те, коли модель з'явилась, у мене немає.",
+    # R05, the owner's words (2026-10-27): no production year in the data.
+    RULE_YEAR: "Рік випуску цієї партії уточнить менеджер, коли передзвонить підтвердити заявку.",
     RULE_UNBACKED_RATING: "Даних тестів і рейтингів для цих шин у мене немає.",
     RULE_EU_CLASS: "Класи EU-етикетки цієї шини краще звірити з даними магазину.",
     RULE_STUD: "Чи шипована ця модель, краще звірити з даними магазину.",
@@ -302,10 +315,18 @@ class TireClaimState:
         self.knowledge_rating = False
         #: The code's comparison phrase spoken this turn (`tyre_compare`).
         self.code_phrase: str | None = None
+        #: Production years ``check_availability`` returned in this call. The
+        #: loops do not hand the tool's arguments over, so a year is not tied
+        #: to a SKU: it backs a year claim about any named tyre.
+        self._checked_years: set[str] = set()
 
     @property
     def items(self) -> list[dict[str, Any]]:
         return list(self._items)
+
+    @property
+    def checked_years(self) -> frozenset[str]:
+        return frozenset(self._checked_years)
 
     def begin_turn(self) -> None:
         self.knowledge_used = False
@@ -328,6 +349,11 @@ class TireClaimState:
             text = _normalize(raw if isinstance(raw, str) else json.dumps(raw, ensure_ascii=False))
             self.knowledge_novelty = self.knowledge_novelty or bool(_KB_NOVELTY.search(text))
             self.knowledge_rating = self.knowledge_rating or bool(_KB_RATING.search(text))
+            return
+        if tool == AVAILABILITY_TOOL:
+            year = raw.get("year") if isinstance(raw, dict) else None
+            if year is not None and str(year).strip():
+                self._checked_years.add(str(year).strip())
             return
         if tool != SEARCH_TOOL:
             return
@@ -361,6 +387,8 @@ class ClaimContext:
     knowledge_rating: bool = False
     #: The code's comparison phrase spoken this turn, if any.
     code_phrase: str | None = None
+    #: Production years ``check_availability`` returned in this call (no SKU).
+    checked_years: frozenset[str] = frozenset()
     #: The one model the previous sentence named («Вона …» refers to it).
     previous: dict[str, Any] | None = None
     #: Sentences of this reply already judged (for rules that need them).
@@ -422,6 +450,201 @@ def rule_novelty(sentence: str, ctx: ClaimContext) -> Refusal | None:
         trimmed = cut.rstrip(" ,—-.!")
         return Refusal(RULE_NOVELTY, trimmed + ".", fixed=False)
     return Refusal(RULE_NOVELTY, REPLACEMENTS[RULE_NOVELTY])
+
+
+# ── year ──────────────────────────────────────────────────────────────
+# The production year of a shown tyre (wave 3-C, R07.1): the golden set of
+# 2026-10-27 heard «Ця шина поточного року, 2026-го» over ``year=2023`` and
+# «актуальна на 2025 рік» over no year at all. Any year said about the one
+# named tyre is a claim (default-deny over the forms); a year about something
+# else is told apart by its context, not by a list of tyre phrasings.
+
+_YEAR_WORD = r"(?:року|рік|рока|года|год|р\.|г\.)"
+#: «2026», «2026-го», «2026 р.», «у 2024 році» — a price, a size or a decimal is not.
+_YEAR_FOUR = re.compile(
+    r"(?<![\w.,:/])(20[1-3]\d)(?:\s?-\s?(?:го|й|ий|ого|му))?"
+    r"(?![\d.,:/]|\s*(?:грн|гривен|гривн|₴|uah|шт|км|дб|db|мм|%))",
+    re.IGNORECASE,
+)
+#: «26-го року», «26 рік» — two digits only with the year word.
+_YEAR_TWO = re.compile(
+    rf"(?<![\w.,:/])(1[5-9]|2\d|3[0-5])(?:\s?-\s?(?:го|й|ий|ого))?\s+{_YEAR_WORD}(?!\w)",
+    re.IGNORECASE,
+)
+_ORDINAL_UNITS: dict[str, int] = {
+    "першого": 1, "первого": 1, "другого": 2, "второго": 2, "третього": 3,
+    "третьего": 3, "четвертого": 4, "п'ятого": 5, "пятого": 5, "шостого": 6,
+    "шестого": 6, "сьомого": 7, "седьмого": 7, "восьмого": 8, "дев'ятого": 9,
+    "девятого": 9,
+}  # fmt: skip
+_ORDINAL_WHOLE: dict[str, int] = {
+    "п'ятнадцятого": 15, "пятнадцатого": 15, "шістнадцятого": 16, "шестнадцатого": 16,
+    "сімнадцятого": 17, "семнадцатого": 17, "вісімнадцятого": 18, "восемнадцатого": 18,
+    "дев'ятнадцятого": 19, "девятнадцатого": 19, "двадцятого": 20, "двадцатого": 20,
+    "тридцятого": 30, "тридцатого": 30,
+}  # fmt: skip
+#: «двадцять шостого року», «дві тисячі двадцять третього року», «двадцятого року».
+_YEAR_WORDS = re.compile(
+    r"(?<!\w)(?:(?:дві|две)\s+тисяч[іи]\s+)?(?:(?:двадцять|двадцать)\s+("
+    + "|".join(_ORDINAL_UNITS)
+    + ")|("
+    + "|".join(_ORDINAL_WHOLE)
+    + rf"))(?:\s+{_YEAR_WORD}|(?=\s+(?:випуск|выпуск|виробництв|производств)))(?!\w)",
+    re.IGNORECASE,
+)
+#: «поточного року», «цьогорічна» — this year; «минулого року» — the last.
+_YEAR_THIS = re.compile(
+    r"(?<!\w)(?:поточн|цього|нинішн|сього|этого|текущ|нынешн)\w*\s+(?:року|рік|года|год)(?!\w)"
+    r"|(?<!\w)(?:цьогорічн|этогодн)\w*",
+    re.IGNORECASE,
+)
+_YEAR_LAST = re.compile(
+    r"(?<!\w)(?:минул|прошл)\w*\s+(?:року|рік|года|год)(?!\w)|(?<!\w)(?:торішн|прошлогодн)\w*",
+    re.IGNORECASE,
+)
+#: «свіжа партія», «свежего выпуска» — this year or the last.
+_YEAR_FRESH = re.compile(
+    r"(?<!\w)(?:свіж|свеж)\w*\s+(?:парті|виробництв|производств|випуск|выпуск)\w*",
+    re.IGNORECASE,
+)
+#: «не вказує рік виробництва», «рік випуску невідомий» — while the data may have it.
+_YEAR_UNKNOWN = re.compile(
+    r"(?<!\w)(?:не\s+вказ|не\s+указ)\w*\s+(?:\w+\s+)?(?:рік|року|год|года)(?!\w)"
+    r"|(?<!\w)(?:рік|год)\s+(?:виробництва|випуску|выпуска|производства)\s+"
+    r"(?:не\s+вказ|не\s+указ|невідом|неизвест)"
+    r"|(?<!\w)(?:немає|нема|нет)\s+(?:даних|інформації|данных|информации)\s+(?:про|о|об)\s+"
+    r"(?:рік|год)",
+    re.IGNORECASE,
+)
+#: The word right before the year that makes it not the tyre's («до 2027»).
+_YEAR_NOT_TYRE_PREV = re.compile(
+    r"(?:до|по|з|із|зі|с|від|от|для|після|после|понад|ніж|чем|since|until)", re.IGNORECASE
+)
+#: A word up to four before the year: a warranty, storage, season, the car,
+#: a price — the year is theirs («гарантія до 2027», «зберігання до 2027 року»).
+_YEAR_NOT_TYRE_NEAR = re.compile(
+    r"гаранті|гаранти|зберіган|хранен|термін|срок|строк|придатн|служ|сезон|авто|машин"
+    r"|автомобіл|автомобил|кузов|поколін|поколен|рестайл|цін|цен|знижк|скидк|акці|акци",
+    re.IGNORECASE,
+)
+#: Production words that make «у 2024 році» the tyre's year («вироблена у 2024 році»).
+_YEAR_PRODUCTION = re.compile(
+    r"парті|випуск|выпуск|виробни|виробле|виготов|производ|произвед|dot", re.IGNORECASE
+)
+#: The named tyre's words are replaced by this mark: «Blizzak 6» is no year.
+_TYRE_MARK = "Ⓣ"
+_YEAR_TOKEN = re.compile(rf"{_TYRE_MARK}|[^\W_][\w'-]*")
+
+
+def _this_year() -> int:
+    return date.today().year
+
+
+def _item_year(item: dict[str, Any]) -> int | None:
+    try:
+        return int(str(item.get("year") or "").strip())
+    except ValueError:
+        return None
+
+
+def _negated(sentence: str, start: int) -> bool:
+    """A negation / question / condition word in the claim's own clause."""
+    head = sentence[:start]
+    breaks = list(_CLAUSE_BREAK.finditer(head))
+    clause = head[breaks[-1].end() :] if breaks else head
+    return bool(_NOT_A_CLAIM.search(clause))
+
+
+def _tyre_year(masked: str, start: int, end: int) -> bool:
+    """Whether the year at ``masked[start:end]`` is the tyre's, not a car's or a term's."""
+    before = _YEAR_TOKEN.findall(masked[:start])[-4:]
+    prev = before[-1] if before else ""
+    if prev and prev != _TYRE_MARK:
+        if _YEAR_NOT_TYRE_PREV.fullmatch(prev):
+            return False
+        # «Тойота 2019 року», «Camry 2019»: a name that is not the tyre's.
+        if prev[0].isupper() and not _YEAR_PRODUCTION.match(prev):
+            return False
+    if any(_YEAR_NOT_TYRE_NEAR.match(w) for w in before):
+        return False
+    # «у 2024 році» — an event of that year unless production is said.
+    if re.match(r"\s*(?:році|году)(?!\w)", masked[end:], re.IGNORECASE):
+        return any(_YEAR_PRODUCTION.match(w) for w in before)
+    return True
+
+
+def _year_claims(masked: str) -> list[set[int] | None]:
+    """The affirmed years said, each as the set of years that backs it; ``None`` — «unknown»."""
+    claims: list[set[int] | None] = []
+    if masked.rstrip().endswith("?"):
+        return claims
+    now = _this_year()
+    claims.extend(None for _ in _YEAR_UNKNOWN.finditer(masked))
+    for pattern in (_YEAR_FOUR, _YEAR_TWO):
+        for match in pattern.finditer(masked):
+            if _negated(masked, match.start()):
+                continue
+            if not _tyre_year(masked, match.start(), match.end()):
+                continue
+            value = int(match.group(1))
+            claims.append({value if value >= 100 else 2000 + value})
+    for match in _YEAR_WORDS.finditer(masked):
+        if _negated(masked, match.start()):
+            continue
+        if not _tyre_year(masked, match.start(), match.end()):
+            continue
+        units, whole = match.group(1), match.group(2)
+        value = 20 + _ORDINAL_UNITS[units.lower()] if units else _ORDINAL_WHOLE[whole.lower()]
+        claims.append({2000 + value})
+    for pattern, years in (
+        (_YEAR_THIS, {now}),
+        (_YEAR_LAST, {now - 1}),
+        (_YEAR_FRESH, {now, now - 1}),
+    ):
+        for match in pattern.finditer(masked):
+            if not _negated(masked, match.start()):
+                claims.append(set(years))
+    return claims
+
+
+def _masked_for_year(sentence: str, subject: dict[str, Any]) -> str:
+    """The sentence with the tyre's brand and model words as one mark each."""
+    masked = sentence
+    words = re.split(r"[\s\-‐–]+", f"{subject.get('brand') or ''} {subject.get('model') or ''}")
+    for word in sorted({w for w in words if w}, key=len, reverse=True):
+        masked = re.sub(
+            rf"(?<![\w]){re.escape(word)}(?![\w])", _TYRE_MARK, masked, flags=re.IGNORECASE
+        )
+    return masked
+
+
+def rule_year(sentence: str, ctx: ClaimContext) -> Refusal | None:
+    """A production year of the one named tyre that the data does not back.
+
+    Backed: the year of a shown row of that model, or a year
+    ``check_availability`` returned in this call. Not backed and the data has
+    the model's year → the truth is said instead («Bridgestone Blizzak 6 —
+    2023 року випуску.»); the data has none → the owner's sentence (R05).
+    Silent: no tyre or two named, a negation or a question, a year that is
+    the car's, the warranty's or the storage's.
+    """
+    subject = _subject(sentence, ctx)
+    if subject is None:
+        return None
+    claims = _year_claims(_masked_for_year(sentence, subject))
+    if not claims:
+        return None
+    own = sorted(
+        {y for i in ctx.items if _key(i) == _key(subject) and (y := _item_year(i)) is not None}
+    )
+    known = set(own) | {int(y) for y in ctx.checked_years if y.isdigit()}
+    if all(claim is not None and claim & known for claim in claims):
+        return None
+    if not own:
+        return Refusal(RULE_YEAR, REPLACEMENTS[RULE_YEAR])
+    name = f"{subject.get('brand') or ''} {subject.get('model') or ''}".strip()
+    years = " і ".join(str(y) for y in own)
+    return Refusal(RULE_YEAR, f"{name} — {years} року випуску.")
 
 
 def _rating(item: dict[str, Any]) -> float | None:
@@ -881,6 +1104,7 @@ def rule_restated_verdict(sentence: str, ctx: ClaimContext) -> Refusal | None:
 RULES: list[tuple[str, Rule]] = [
     (RULE_CHEAPEST, rule_cheapest),
     (RULE_NOVELTY, rule_novelty),
+    (RULE_YEAR, rule_year),
     (RULE_UNBACKED_RATING, rule_unbacked_rating),
     (RULE_EU_CLASS, rule_eu_class),
     (RULE_STUD, rule_stud),
@@ -931,6 +1155,7 @@ def _refresh(ctx: ClaimContext, state: TireClaimState) -> None:
     ctx.knowledge_novelty = state.knowledge_novelty
     ctx.knowledge_rating = state.knowledge_rating
     ctx.code_phrase = state.code_phrase
+    ctx.checked_years = state.checked_years
 
 
 # ── The text path ───────────────────────────────────────────────────────
