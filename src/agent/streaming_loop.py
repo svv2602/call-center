@@ -41,6 +41,10 @@ from src.agent.intent_classifier import _TYRE_CHANGE_STEMS, _triggered_intents, 
 from src.agent.network_claim_guard import guard_network_claims, guard_text
 from src.agent.network_facts import already_said_note, turn_facts
 from src.agent.network_policy import NetworkPolicy, render_network_block
+from src.agent.operator_only_intents import PHRASES as OPERATOR_ONLY_PHRASES
+from src.agent.operator_only_intents import TRANSFER_TOOL as OPERATOR_TRANSFER_TOOL
+from src.agent.operator_only_intents import OperatorOnlyGate
+from src.agent.operator_only_intents import transferred as operator_only_transferred
 from src.agent.promotions import turn_network_overrides, turn_promotions_block
 from src.agent.prompts import (
     SYSTEM_PROMPT,
@@ -107,6 +111,7 @@ from src.monitoring.metrics import (
     history_compression_mode,
     history_messages_count,
     llm_stop_reason_total,
+    operator_only_transfer_total,
     reopened_time_choice_total,
     settled_question_redirect_skipped_total,
     settled_question_redirected_total,
@@ -1660,6 +1665,9 @@ class StreamingAgentLoop:
         # The same result whole, and this turn's knowledge-base use — what the
         # model's «найдешевша / новинка / №1» is judged against (sales only).
         self._tire_claims = TireClaimState(sales_enabled=self._sales_enabled)
+        # УБД / ПДВ / ЄДРПОУ / ТШ order+fitting: the code transfers, once per
+        # call (`operator_only_intents`, sales scope only).
+        self._operator_only = OperatorOnlyGate(network_policy)
 
     @property
     def _tts(self) -> TTSEngine:
@@ -1969,6 +1977,52 @@ class StreamingAgentLoop:
         facts = turn_facts(
             user_text, self._network_policy, self._promo_overrides, tire_progress
         )
+
+        # A request only a manager settles (`operator_only_intents`, sales
+        # only): the code says one phrase and transfers, once per call. The
+        # transfer guard judges the model's calls; the predicate is this one's
+        # evidence. Refused (after hours, no AMI) → the model speaks the
+        # executor's message in the round below.
+        only_intent = self._operator_only.plan(
+            user_text,
+            tools=tools,
+            history=conversation_history,
+            tools_called=tools_called,
+            in_fitting="fitting" in (active_scenarios or ()) or scenario == "fitting",
+        )
+        if only_intent is not None:
+            only_phrase = OPERATOR_ONLY_PHRASES[only_intent]
+            if await self._speak_code_phrase(only_phrase):
+                spoken_parts.append(only_phrase)
+            only_args = OperatorOnlyGate.args_for(only_intent, user_text, tire_progress)
+            only_raw = await run_forced_tool(
+                OPERATOR_TRANSFER_TOOL,
+                only_args,
+                self._tool_router.execute,
+                timeout=_TOOL_TIMEOUT_SEC,
+            )
+            operator_only_transfer_total.labels(intent=only_intent).inc()
+            only_content = compress_tool_result(
+                OPERATOR_TRANSFER_TOOL, only_raw, sales_enabled=self._sales_enabled, args=only_args
+            )
+            if self._pii_vault is not None:
+                only_content = self._pii_vault.mask(only_content)
+            conversation_history.extend(
+                forced_tool_messages(OPERATOR_TRANSFER_TOOL, only_args, only_content)
+            )
+            tool_calls_made += 1
+            if operator_only_transferred(only_raw):
+                conversation_history.append(
+                    {"role": "assistant", "content": [{"type": "text", "text": only_phrase}]}
+                )
+                return TurnResult(
+                    spoken_text=only_phrase,
+                    tool_calls_made=tool_calls_made,
+                    stop_reason="end_turn",
+                    total_usage=Usage(0, 0, 0),
+                    interrupted=self._barge_in is not None and self._barge_in.is_set(),
+                )
+            system += already_said_note([only_phrase])
 
         # «купити резину» with no car and no size (`vague_tyre_buy`): the
         # code's question is the whole reply and no LLM round runs — a phrase

@@ -29,6 +29,10 @@ from src.agent.history_compressor import summarize_old_messages
 from src.agent.network_claim_guard import guard_text
 from src.agent.network_facts import already_said_note, turn_facts
 from src.agent.network_policy import NetworkPolicy, render_network_block
+from src.agent.operator_only_intents import PHRASES as OPERATOR_ONLY_PHRASES
+from src.agent.operator_only_intents import TRANSFER_TOOL as OPERATOR_TRANSFER_TOOL
+from src.agent.operator_only_intents import OperatorOnlyGate
+from src.agent.operator_only_intents import transferred as operator_only_transferred
 from src.agent.promotions import turn_network_overrides, turn_promotions_block
 from src.agent.prompts import (
     ERROR_TEXT,
@@ -66,6 +70,7 @@ from src.monitoring.metrics import (
     history_compression_mode,
     history_messages_count,
     llm_stop_reason_total,
+    operator_only_transfer_total,
     system_prompt_chars,
     tool_audit_write_failures_total,
     tool_call_errors_total,
@@ -286,6 +291,9 @@ class LLMAgent:
         self._tire_claims = TireClaimState(
             sales_enabled=bool(network_policy is not None and network_policy.sales_enabled)
         )
+        # УБД / ПДВ / ЄДРПОУ / ТШ order+fitting: the code transfers, once per
+        # call (`operator_only_intents`, sales scope only).
+        self._operator_only = OperatorOnlyGate(network_policy)
         # Accumulated usage from last process_message call (all LLM rounds)
         self.last_input_tokens: int = 0
         self.last_output_tokens: int = 0
@@ -459,9 +467,51 @@ class LLMAgent:
         disk_fit_state = DiskFitClaimState()
         self._tire_claims.begin_turn()
         tool_call_count = 0
+        # Text-path twin of the streamed operator-only transfer
+        # (`operator_only_intents`): the code transfers, once per call; the
+        # phrase is the reply, or opens it when the executor refused.
+        only_said: list[str] = []
+        only_intent = self._operator_only.plan(
+            user_text,
+            tools=tools,
+            history=conversation_history,
+            tools_called=tools_called,
+            in_fitting="fitting" in (active_scenarios or ()) or scenario == "fitting",
+        )
+        if only_intent is not None:
+            only_phrase = OPERATOR_ONLY_PHRASES[only_intent]
+            only_args = OperatorOnlyGate.args_for(only_intent, user_text, self._tire_query)
+            only_raw = await run_forced_tool(
+                OPERATOR_TRANSFER_TOOL,
+                only_args,
+                self._tool_router.execute,
+                timeout=_TOOL_TIMEOUT_SEC,
+            )
+            self._call_tools.add(OPERATOR_TRANSFER_TOOL)
+            operator_only_transfer_total.labels(intent=only_intent).inc()
+            only_content = compress_tool_result(
+                OPERATOR_TRANSFER_TOOL, only_raw, sales_enabled=sales_enabled, args=only_args
+            )
+            if self._pii_vault is not None:
+                only_content = self._pii_vault.mask(only_content)
+            conversation_history.extend(
+                forced_tool_messages(OPERATOR_TRANSFER_TOOL, only_args, only_content)
+            )
+            tool_call_count += 1
+            if operator_only_transferred(only_raw):
+                conversation_history.append(
+                    {"role": "assistant", "content": [{"type": "text", "text": only_phrase}]}
+                )
+                self.last_input_tokens = 0
+                self.last_output_tokens = 0
+                self.last_cached_input_tokens = 0
+                self.last_provider_key = ""
+                self.last_error = None
+                return only_phrase, conversation_history
+            only_said.append(only_phrase)
         # Text-path twin of the spoken network facts (`network_facts`): the
         # code's phrases open the reply, and the model is told they were said.
-        facts = turn_facts(
+        facts = only_said + turn_facts(
             user_text, self._network_policy, self._promo_overrides, self._tire_query
         )
         if facts:

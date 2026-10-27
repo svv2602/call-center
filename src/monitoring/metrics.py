@@ -275,6 +275,13 @@ operator_queue_length = Gauge(
     "Number of calls waiting in operator transfer queue",
 )
 
+operator_only_transfer_total = Counter(
+    "callcenter_operator_only_transfer_total",
+    "Transfers the code made itself for an operator-only request "
+    "(military discount, VAT invoice, company code, order+fitting; sales scope)",
+    ["intent"],
+)
+
 # --- TTS cache metrics ---
 
 tts_cache_hits_total = Counter(
