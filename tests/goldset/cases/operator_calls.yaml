@@ -578,6 +578,7 @@
   source: owner:2026-10-27-several-cars
   network: [tvoya-shina]
   sales_enabled: true
+  pending: 'wave-3-D-multi-car-wiring: checked by the voice path only — the next car, the bookings list and the fourth-car transfer live in the pipeline (_run_multi_car_step, multi_car_over_cap), which the sandbox text path does not run; paid run 2026-10-27 with FF_MULTI_CAR_BOOKING=1: the model alone did not even book car 1. Verified by unit tests and the D2 test calls'
   notes: >-
     Checkable only with FF_MULTI_CAR_BOOKING=1 in the call-processor container
     env (the runner turns it on for the run); with the flag off the first turn
@@ -667,6 +668,7 @@
   source: owner:2026-10-27-several-cars
   network: [tvoya-shina]
   sales_enabled: true
+  pending: 'wave-3-D-multi-car-wiring: checked by the voice path only — the next car, the bookings list and the fourth-car transfer live in the pipeline (_run_multi_car_step, multi_car_over_cap), which the sandbox text path does not run; paid run 2026-10-27 with FF_MULTI_CAR_BOOKING=1: the model alone did not even book car 1. Verified by unit tests and the D2 test calls'
   notes: >-
     R04 — up to 3 cars per call, a fourth and more is a fleet → transfer_to_operator.
     Checkable only with FF_MULTI_CAR_BOOKING=1 in the call-processor container env
@@ -685,6 +687,7 @@
   source: owner:2026-10-27-several-cars
   network: [tvoya-shina]
   sales_enabled: true
+  pending: 'wave-3-D-multi-car-wiring: checked by the voice path only — the next car, the bookings list and the fourth-car transfer live in the pipeline (_run_multi_car_step, multi_car_over_cap), which the sandbox text path does not run; paid run 2026-10-27 with FF_MULTI_CAR_BOOKING=1: the model alone did not even book car 1. Verified by unit tests and the D2 test calls'
   notes: >-
     R05 — the bot does not offer a second car on its own; the caller asks after
     the first booking. R03 — the same station and name, the same time offered
