@@ -342,6 +342,28 @@ class TestSameTimeFirst:
         assert "09:20, 10:40" in result["next_car_hint"]
 
     @pytest.mark.asyncio
+    async def test_another_day_with_the_hour_free_offers_it_not_taken(self, flag_on: None) -> None:
+        """Blind acceptance 2026-10-27: car 2 on another day than car 1 was
+        told «цей час уже зайнятий» while 10:00 was free that day."""
+        session = _caller()
+        await _at_second_car(session)
+        session.fitting_bookings[-1]["date"] = "2099-01-01"
+        result = await _slots(session, onec=_onec(schedule=_schedule("09:20", "10:00", "10:40")))
+        assert result["slots"][0] == "10:00"
+        assert "На 10:00 є місце" in result["next_car_hint"]
+        assert "зайнятий" not in result["next_car_hint"]
+
+    @pytest.mark.asyncio
+    async def test_another_day_without_the_hour_is_not_called_taken(self, flag_on: None) -> None:
+        session = _caller()
+        await _at_second_car(session)
+        session.fitting_bookings[-1]["date"] = "2099-01-01"
+        result = await _slots(session, onec=_onec(schedule=_schedule("08:00", "09:20", "10:40")))
+        assert "зайнятий" not in result["next_car_hint"]
+        assert "місць немає" in result["next_car_hint"]
+        assert "09:20, 10:40" in result["next_car_hint"]
+
+    @pytest.mark.asyncio
     async def test_the_spoken_range_stays_chronological(self, flag_on: None) -> None:
         """A long list is read as «з X до Y» — off the ends of the day, not of
         the reordered list."""
@@ -465,6 +487,19 @@ class TestTimeGuardForTheNextCar:
         result = await _run(session, "book_fitting", _second_car_args(), onec=_onec(guid="g2"))
         assert result.get("status") == "confirmed", result
         assert [b["booking_id"] for b in session.fitting_bookings] == ["guid-1", "g2"]
+
+    @pytest.mark.asyncio
+    async def test_yes_to_the_same_hour_on_another_day_counts(self, flag_on: None) -> None:
+        """The bot offers car 1's hour on the day the caller chose for car 2,
+        the caller agrees: a choice too (blind acceptance 2026-10-27)."""
+        session = _caller()
+        await _at_second_car(session)
+        session.fitting_bookings[-1]["date"] = "2099-01-01"
+        _offer(session, "09:20", FIRST_TIME, "10:40")
+        session.add_assistant_turn("На 10:00 є місце, записати?")
+        session.add_user_turn("так")
+        result = await _run(session, "book_fitting", _second_car_args(), onec=_onec(guid="g2"))
+        assert result.get("status") == "confirmed", result
 
     @pytest.mark.asyncio
     async def test_yes_does_not_stretch_to_another_hour(self, flag_on: None) -> None:

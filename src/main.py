@@ -1757,6 +1757,8 @@ def _next_car_slots_hint(
     """What the LLM is told to offer the next car first, or None (no slots)."""
     times: list[str] = []
     same_time_free = False
+    same_time_other_date: str | None = None
+    asked_dates: set[str | None] = set()
     for slot in ordered:
         if isinstance(slot, dict):
             raw_time, slot_date = slot.get("time"), slot.get("date") or default_date
@@ -1765,8 +1767,12 @@ def _next_car_slots_hint(
         hhmm = _extract_time(str(raw_time or ""))
         if not hhmm:
             continue
-        if slot_date == prev_date and _hhmm_minutes(hhmm) == _hhmm_minutes(prev_time):
-            same_time_free = True
+        asked_dates.add(slot_date)
+        if _hhmm_minutes(hhmm) == _hhmm_minutes(prev_time):
+            if slot_date == prev_date:
+                same_time_free = True
+            elif same_time_other_date is None:
+                same_time_other_date = slot_date or ""
         times.append(hhmm)
     if not times:
         return None
@@ -1776,9 +1782,23 @@ def _next_car_slots_hint(
             f"запропонуй його першим: «На {prev_time} теж є місце, записати?» "
             "Місто, точку та ім'я НЕ перепитуй."
         )
+    if same_time_other_date is not None:
+        # Another day than the previous car's: the same hour is free there —
+        # nothing is «taken» (blind acceptance 2026-10-27, R03).
+        return (
+            f"Попередню машину записано на {prev_time}. На цей день {prev_time} "
+            f"вільний — запропонуй його першим: «На {prev_time} є місце, записати?» "
+            "Місто, точку та ім'я НЕ перепитуй."
+        )
+    if prev_date in asked_dates:
+        return (
+            f"Попередню машину записано на {prev_time}, цей час уже зайнятий. "
+            f"Запропонуй найближчі: {', '.join(times[:2])}. "
+            "Місто, точку та ім'я НЕ перепитуй."
+        )
     return (
-        f"Попередню машину записано на {prev_time}, цей час уже зайнятий. "
-        f"Запропонуй найближчі: {', '.join(times[:2])}. "
+        f"Попередню машину записано на {prev_time}; на цей день о {prev_time} місць немає. "
+        f"Запропонуй найближчі до {prev_time}: {', '.join(times[:2])}. "
         "Місто, точку та ім'я НЕ перепитуй."
     )
 
@@ -1797,8 +1817,11 @@ def _agreed_to_previous_time(
     from src.agent.confirm_detect import is_confirmation
     from src.agent.time_detect import detect_time_choice
 
-    prev_date, prev_time = prev
-    if booking_date != prev_date or _hhmm_minutes(time_raw) != _hhmm_minutes(prev_time):
+    _prev_date, prev_time = prev
+    # Any date: the bot offers the previous car's hour on the day the caller
+    # chose too (blind acceptance 2026-10-27, R03) — the bot-named-it check
+    # below is what makes a bare «так» a choice.
+    if _hhmm_minutes(time_raw) != _hhmm_minutes(prev_time):
         return False
     offered = False
     for turn in turns:
