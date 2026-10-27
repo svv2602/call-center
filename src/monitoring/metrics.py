@@ -491,8 +491,9 @@ barge_in_total = Counter(
 stt_orphan_interim_total = Counter(
     "callcenter_stt_orphan_interim_total",
     "Caller speech STT showed as interim but never finalized: promoted to a "
-    "turn, or a late final of an already promoted utterance dropped",
-    ["event"],  # promoted | late_final_dropped
+    "turn, a late final of an already promoted utterance dropped, or a final "
+    "missing words of the interim before it",
+    ["event", "language"],  # promoted | late_final_dropped | final_dropped_words
 )
 
 

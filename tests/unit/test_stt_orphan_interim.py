@@ -78,7 +78,7 @@ class TestOrphanPromotion:
         with patch("src.core.pipeline.stt_orphan_interim_total") as metric:
             t = await asyncio.wait_for(p._wait_for_final_transcript(), timeout=2)
         assert t is not None and t.is_final and t.text == "зимние без"
-        metric.labels.assert_called_once_with(event="promoted")
+        metric.labels.assert_called_once_with(event="promoted", language="")
         assert p._pending_interim is None
 
     @pytest.mark.asyncio
@@ -158,3 +158,26 @@ class TestConfirmRepromptOnOpenQuestion:
     )
     def test_yes_no_question_still_is(self, text: str) -> None:
         assert _is_pending_confirmation(text)
+
+
+class TestFinalDroppedWords:
+    @pytest.mark.asyncio
+    async def test_final_missing_interim_words_is_counted(self) -> None:
+        # Call 78139ffb: interim «18 зимние», final «5 18».
+        p = _pipeline(
+            [
+                Transcript(text="18 зимние", is_final=False, language="ru-RU"),
+                Transcript(text="5 18", is_final=True, confidence=0.6, language="uk-UA"),
+            ]
+        )
+        with patch("src.core.pipeline.stt_orphan_interim_total") as metric:
+            await p._transcript_reader_loop()
+        metric.labels.assert_called_once_with(event="final_dropped_words", language="uk-UA")
+        assert p._final_transcript_queue.get_nowait().text == "5 18"  # the turn is unchanged
+
+    @pytest.mark.asyncio
+    async def test_final_covering_the_interim_is_not_counted(self) -> None:
+        p = _pipeline([_interim("зимние без"), _final("Зимние без шипов.")])
+        with patch("src.core.pipeline.stt_orphan_interim_total") as metric:
+            await p._transcript_reader_loop()
+        metric.labels.assert_not_called()

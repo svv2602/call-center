@@ -393,35 +393,52 @@ class GoogleSTTEngine:
             if not self._running:
                 break
 
+            # A response carries at most one final result (the newly settled
+            # audio) followed by interim results for consecutive portions of
+            # the audio still being heard. The interims together are the
+            # current hypothesis: «Алло» + «девушка» is one utterance, not two
+            # (call 78139ffb promoted «девушка» alone).
+            interim_parts: list[str] = []
+            interim_language = self._config.language_code
             for result in response.results:
-                if not result.alternatives:
-                    if result.is_final:
-                        logger.info("STT final without alternatives")
-                    continue
-
-                best = result.alternatives[0]
                 language = (
                     result.language_code if result.language_code else self._config.language_code
                 )
+                if not result.alternatives:
+                    if result.is_final:
+                        logger.info("STT final without alternatives (lang=%s)", language)
+                    continue
 
-                transcript = Transcript(
-                    text=best.transcript.strip(),
-                    is_final=result.is_final,
-                    confidence=best.confidence if result.is_final else 0.0,
-                    language=language,
-                )
+                best = result.alternatives[0]
+                text = best.transcript.strip()
+                if not result.is_final:
+                    if text:
+                        interim_parts.append(text)
+                        interim_language = language
+                    continue
 
-                if not transcript.text and result.is_final:
+                if not text:
                     # Pairs with the pipeline's orphan-interim promotion:
                     # tells "final came empty" from "no final at all".
                     logger.info("STT final empty (lang=%s)", language)
-                if transcript.text:
-                    await self._transcript_queue.put(transcript)
-
-                    if result.is_final:
-                        logger.info(
-                            "STT final: '%s' (lang=%s, conf=%.2f)",
-                            transcript.text,
-                            language,
-                            best.confidence,
-                        )
+                    continue
+                await self._transcript_queue.put(
+                    Transcript(
+                        text=text, is_final=True, confidence=best.confidence, language=language
+                    )
+                )
+                logger.info(
+                    "STT final: '%s' (lang=%s, conf=%.2f)",
+                    text,
+                    language,
+                    best.confidence,
+                )
+            if interim_parts:
+                await self._transcript_queue.put(
+                    Transcript(
+                        text=" ".join(interim_parts),
+                        is_final=False,
+                        confidence=0.0,
+                        language=interim_language,
+                    )
+                )

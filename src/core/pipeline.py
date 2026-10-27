@@ -1131,6 +1131,8 @@ class CallPipeline:
         # Latest interim heard while listening and not yet finalized: text and
         # monotonic time. Cleared by a final. See _ORPHAN_INTERIM_SEC.
         self._pending_interim: tuple[str, float] | None = None
+        # STT language of the pending interim (labels the orphan metrics).
+        self._pending_interim_lang = ""
         # Text and time of the last interim promoted to a turn — a late final
         # of the same utterance is dropped (_LATE_FINAL_WINDOW_SEC).
         self._promoted_interim: tuple[str, float] | None = None
@@ -3569,6 +3571,7 @@ class CallPipeline:
         try:
             async for transcript in self._stt.get_transcripts():
                 if transcript.is_final and transcript.text.strip():
+                    self._note_final_dropped_words(transcript)
                     self._pending_interim = None
                     if self._is_late_final_of_promoted(transcript.text):
                         continue
@@ -3576,6 +3579,7 @@ class CallPipeline:
                 elif not transcript.is_final and transcript.text.strip():
                     if not self._speaking:
                         self._pending_interim = (transcript.text.strip(), time.monotonic())
+                        self._pending_interim_lang = transcript.language or ""
                     if self._speaking:
                         self._barge_in_event.set()
                         barge_in_total.inc()
@@ -4852,13 +4856,44 @@ class CallPipeline:
         """Turn an interim STT never finalized into the caller's turn."""
         self._pending_interim = None
         self._promoted_interim = (text, now)
-        stt_orphan_interim_total.labels(event="promoted").inc()
+        stt_orphan_interim_total.labels(
+            event="promoted", language=self._pending_interim_lang
+        ).inc()
         logger.info(
-            "stt_orphan_interim_promoted call=%s text=%r",
+            "stt_orphan_interim_promoted call=%s lang=%s text=%r",
             self._session.channel_uuid,
+            self._pending_interim_lang,
             text[:120],
         )
         return Transcript(text=text, is_final=True, confidence=0.0)
+
+    def _note_final_dropped_words(self, final: Transcript) -> None:
+        """Log a final missing words of the interim it settles (measurement).
+
+        Call 78139ffb: interim «18 зимние», final «5 18» — the season was lost
+        and asked again. Counted to decide between trusting the interim and
+        changing the STT language setup; nothing here changes the turn.
+        """
+        pending = self._pending_interim
+        if pending is None:
+            return
+        final_words = set(_norm_words(final.text).split())
+        missing = [w for w in _norm_words(pending[0]).split() if w not in final_words]
+        if not missing:
+            return
+        stt_orphan_interim_total.labels(
+            event="final_dropped_words", language=final.language or ""
+        ).inc()
+        logger.info(
+            "stt_final_dropped_words call=%s final_lang=%s interim_lang=%s "
+            "missing=%r interim=%r final=%r",
+            self._session.channel_uuid,
+            final.language,
+            self._pending_interim_lang,
+            missing,
+            pending[0][:120],
+            final.text[:120],
+        )
 
     def _is_late_final_of_promoted(self, final_text: str) -> bool:
         """True if a final repeats an interim already promoted to a turn.
@@ -4876,7 +4911,7 @@ class CallPipeline:
         if f" {_norm_words(final_text)} " not in f" {_norm_words(text)} ":
             return False
         self._promoted_interim = None
-        stt_orphan_interim_total.labels(event="late_final_dropped").inc()
+        stt_orphan_interim_total.labels(event="late_final_dropped", language="").inc()
         logger.info(
             "stt_orphan_late_final_dropped call=%s text=%r",
             self._session.channel_uuid,
