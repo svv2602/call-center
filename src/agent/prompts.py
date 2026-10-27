@@ -3085,6 +3085,14 @@ GREETING_TEXT_KNOWN = (
     "Ви бажаєте записатися на шиномонтаж, дізнатися вартість, скасувати чи перенести запис?"
 )
 
+# Known customer on a network whose call is not fitting-only (sales on, or no
+# fitting service at all — Про Колесо): the fitting menu above would offer a
+# service the call is not about.
+GREETING_TEXT_KNOWN_GENERAL = (
+    "{time_greeting}, {customer_name}! Це {agent_name}, {network_name}, дзвінок автоматичний. "
+    "Чим можу допомогти?"
+)
+
 SILENCE_PROMPT_TEXT = "Ви ще на лінії?"
 
 # Two-level silence timeout messages:

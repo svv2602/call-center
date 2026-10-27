@@ -47,6 +47,7 @@ from src.agent.prompt_manager import (
 )
 from src.agent.prompts import (
     GREETING_TEXT_KNOWN,
+    GREETING_TEXT_KNOWN_GENERAL,
     assemble_prompt,
     format_caller_history,
     format_customer_profile,
@@ -584,6 +585,43 @@ def _default_scenario(network_policy: NetworkPolicy) -> str:
     """Scenario of a call with no IVR intent: ``sales`` when the network has
     sales on, ``fitting`` (fitting-only scope, 2026-08-14) otherwise."""
     return "sales" if network_policy.sales_enabled else "fitting"
+
+
+_NAME_QUESTION = "Як можу до вас звертатися?"
+#: The name question as written in a tenant greeting — stress marks (U+0301)
+#: are allowed after any letter: Про Колесо's greeting carries them for TTS
+#: («Як мо́жу до вас зверта́тися?»), and a plain substring check missed it.
+_NAME_QUESTION_RE = re.compile("".join(re.escape(ch) + "\u0301?" for ch in _NAME_QUESTION))
+
+
+def _known_customer_greeting(
+    greeting: str,
+    customer_name: str,
+    *,
+    agent_name: str | None,
+    network_name: str | None,
+    network_policy: NetworkPolicy,
+) -> str:
+    """Greeting for a caller whose name is already in the profile.
+
+    A greeting that asks the name gets the name in place of the question.
+    Otherwise a standard known-customer greeting replaces it: the fitting
+    menu only when the call is fitting-scoped (sales off and the network
+    offers fitting), a neutral «Чим можу допомогти?» otherwise.
+    """
+    if _NAME_QUESTION_RE.search(greeting):
+        return _NAME_QUESTION_RE.sub(
+            lambda _m: f"{customer_name}, чим можу допомогти?", greeting, count=1
+        )
+    fitting_scope = not network_policy.sales_enabled and (
+        not network_policy.configured or "fitting" in network_policy.services
+    )
+    known = GREETING_TEXT_KNOWN if fitting_scope else GREETING_TEXT_KNOWN_GENERAL
+    known = known.replace("{customer_name}", customer_name)
+    known = known.replace("{agent_name}", agent_name or "Олена")
+    if network_name:
+        return known.replace("{network_name}", network_name)
+    return known.replace("{network_name}, ", "").replace("{network_name}", "")
 
 
 def _scenario_tool_names(scenario: str, network_policy: NetworkPolicy) -> set[str] | None:
@@ -1269,23 +1307,13 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         # Personalized greeting for known customers (after tenant override)
         if profile_name and templates:
             templates = dict(templates)  # copy to avoid mutating shared dict
-            current_greeting = templates.get("greeting", "")
-            # Replace "Як можу до вас звертатися?" with personalized version
-            if "Як можу до вас звертатися?" in current_greeting:
-                templates["greeting"] = current_greeting.replace(
-                    "Як можу до вас звертатися?",
-                    f"{profile_name}, чим можу допомогти?",
-                )
-            else:
-                # Tenant custom greeting without name question — prepend name
-                known = GREETING_TEXT_KNOWN.replace("{customer_name}", profile_name)
-                known = known.replace("{agent_name}", tenant_agent_name or "Олена")
-                if tenant_network_name:
-                    known = known.replace("{network_name}", tenant_network_name)
-                else:
-                    known = known.replace("{network_name}, ", "")
-                    known = known.replace("{network_name}", "")
-                templates["greeting"] = known
+            templates["greeting"] = _known_customer_greeting(
+                templates.get("greeting", ""),
+                profile_name,
+                agent_name=tenant_agent_name,
+                network_name=tenant_network_name,
+                network_policy=network_policy,
+            )
             logger.info(
                 "Known customer greeting: %s for call %s",
                 profile_name,
