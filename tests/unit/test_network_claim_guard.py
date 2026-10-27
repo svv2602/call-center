@@ -19,6 +19,7 @@ from src.agent.network_claim_guard import (
     ENV_FLAG,
     PASS,
     REPLACE,
+    RULE_DELIVERY_SUM,
     RULE_EXTENDED_WARRANTY,
     RULE_FREE_DELIVERY,
     RULE_ORDER_CONFIRMED,
@@ -265,6 +266,7 @@ class TestReplacements:
         RULE_SERVICE_OFFER: "Запишу вас на шиномонтаж і зберігання шин.",
         RULE_FREE_DELIVERY: "Доставка безкоштовна.",
         RULE_EXTENDED_WARRANTY: "Є розширена гарантія на Michelin.",
+        RULE_DELIVERY_SUM: "Доставка коштуватиме 950 грн.",
     }
 
     def test_every_rule_is_exercised(self) -> None:
@@ -427,3 +429,314 @@ class TestWiredIntoTheTurn:
     async def test_tvoya_shina_fitting_phrase_reaches_tts(self) -> None:
         texts = await _turn("Записала вас на шиномонтаж на 10:00.", PROD_TODAY)
         assert any("шиномонтаж" in t for t in texts)
+
+
+# ── delivery_sum: a delivery sum no quote of this call backs ────────────
+# Wave 3-E of np-delivery-quote-2026-10-27 (R04, R13, R17, R18).
+
+_QUOTE_KEY_ENV = "NP_TEST_GUARD_QUOTE_KEY"
+#: `delivery_quote.tariff_phrase` for Про Колесо (carrier «Нова Пошта»).
+PK_TARIFF = "Доставка — за тарифами перевізника Нова Пошта."
+QUOTED = "Доставка Новою поштою — орієнтовно 810 грн."
+COMPOSED = "Доставка до Львова коштуватиме 950 грн."
+
+
+def _pk_quote(*, sales: bool = True) -> NetworkPolicy:
+    raw = {
+        **PROKOLESO_CONFIG_PATCH["network_policy"],
+        "delivery_quote": "novaposhta",
+        "delivery_quote_key_env": _QUOTE_KEY_ENV,
+    }
+    return NetworkPolicy.from_tenant_config(
+        {**PROKOLESO_CONFIG_PATCH, "network_policy": raw, "sales_enabled": sales}
+    )
+
+
+PK_QUOTE = _pk_quote()
+
+
+@pytest.fixture
+def np_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(_QUOTE_KEY_ENV, "k" * 32)
+
+
+def _sum_rule(sentence: str, policy: NetworkPolicy | None, quotes: Any = ()) -> str | None:
+    verdict = check_sentence(sentence, policy, None, quotes)
+    return None if verdict.action == PASS else verdict.rule
+
+
+@pytest.mark.usefixtures("np_key")
+class TestDeliverySum:
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            COMPOSED,
+            "Доставка обойдется в 900 гривен.",
+            "Доставка до Львова — дев'ятсот п'ятдесят гривень.",
+            "Відправка Новою поштою буде близько 700 грн.",
+            "Пересилка коштуватиме 1 200 грн.",
+            "Кур'єром до дверей — ще 90 грн.",
+            "Sportrak SP709 — 3118 грн, доставка Новою поштою — орієнтовно 950 грн.",
+        ],
+    )
+    def test_unquoted_sum_is_replaced_by_the_tariff(self, sentence: str) -> None:
+        verdict = check_sentence(sentence, PK_QUOTE, None, [810])
+        assert verdict.action == REPLACE
+        assert verdict.rule == RULE_DELIVERY_SUM
+        assert verdict.replacement == PK_TARIFF
+
+    def test_every_sum_is_refused_before_a_quote(self) -> None:
+        assert _sum_rule(QUOTED, PK_QUOTE, []) == RULE_DELIVERY_SUM
+
+    @pytest.mark.parametrize(
+        ("sentence", "quotes"),
+        [
+            (QUOTED, [810]),
+            ("Доставка Новою поштою — орієнтовно вісімсот десять гривень.", [810]),
+            (
+                "Доставка Новою поштою — орієнтовно 810 грн; кур'єром до дверей — ще 60 грн.",
+                [810, 60],
+            ),
+            ("Sportrak SP709 — 3118 грн, доставка Новою поштою — орієнтовно 810 грн.", [810]),
+        ],
+    )
+    def test_quoted_sum_passes(self, sentence: str, quotes: list[int]) -> None:
+        assert _sum_rule(sentence, PK_QUOTE, quotes) is None
+
+    def test_a_second_unquoted_sum_in_the_sentence_is_caught(self) -> None:
+        sentence = "Доставка Новою поштою — орієнтовно 810 грн; кур'єром до дверей — ще 60 грн."
+        assert _sum_rule(sentence, PK_QUOTE, [810]) == RULE_DELIVERY_SUM
+
+    @pytest.mark.parametrize(
+        "sentence",
+        [
+            "Шина коштує 2400 грн.",
+            "Sportrak SP709 — 3118 грн, а доставка — за тарифами перевізника.",
+            "При накладеному платежі — ще додатково 2% від суми замовлення.",
+            "Оформлю доставку Sportrak по 3118 грн за шину.",
+            "За 3118 грн доставимо завтра.",
+            # the policy's own cash-on-delivery fee line (`cod_fee_text`)
+            "Відправка накладеним платежем — комісія 2 % + 20 грн.",
+            "Доставка — зазвичай 1–3 дні.",
+            PK_TARIFF,
+        ],
+    )
+    def test_not_a_delivery_sum_passes(self, sentence: str) -> None:
+        assert _sum_rule(sentence, PK_QUOTE, []) is None
+
+    @pytest.mark.parametrize(
+        "policy",
+        [PK_ON, PK_OFF, TS_ON, TS_OFF, PROD_TODAY, None, _pk_quote(sales=False)],
+        ids=["pk_no_flag", "pk_off", "ts_on", "ts_off", "prod_today", "none", "pk_flag_sales_off"],
+    )
+    def test_no_quote_no_rule(self, policy: NetworkPolicy | None) -> None:
+        assert _sum_rule(COMPOSED, policy, []) is None
+
+    def test_flag_without_its_key_is_off(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv(_QUOTE_KEY_ENV)
+        assert _sum_rule(COMPOSED, PK_QUOTE, []) is None
+
+    def test_a_caller_without_quotes_is_unchanged(self) -> None:
+        """`guard_text` and `blocked_rules` pass no quotes: the rule stays out."""
+        assert check_sentence(COMPOSED, PK_QUOTE).action == PASS
+        assert blocked_rules(COMPOSED, PK_QUOTE) == []
+
+    def test_replacement_passes_itself(self) -> None:
+        replacement = check_sentence(COMPOSED, PK_QUOTE, None, []).replacement
+        assert replacement is not None
+        assert check_sentence(replacement, PK_QUOTE, None, []).action == PASS
+
+    @pytest.mark.asyncio
+    async def test_filter_reads_the_quotes_live(self) -> None:
+        quotes: list[int] = []
+
+        async def _two() -> AsyncIterator[BufferEvent]:
+            yield SentenceReady(QUOTED)
+            quotes.append(810)  # `get_delivery_cost` answered between the sentences
+            yield SentenceReady(QUOTED)
+
+        before = _counter(RULE_DELIVERY_SUM)
+        out = [
+            e
+            async for e in guard_network_claims(_two(), PK_QUOTE, "call-x", delivery_quotes=quotes)
+        ]
+        assert _spoken(out) == [PK_TARIFF, QUOTED]
+        assert _counter(RULE_DELIVERY_SUM) == before + 1
+
+
+# ── delivery_sum wired into the real `run_turn` ─────────────────────────
+
+_NETWORK_RULES = (*RULES, "promo_denied")
+
+
+def _network_counts() -> dict[str, float]:
+    return {rule: _counter(rule) for rule in _NETWORK_RULES}
+
+
+async def _quote_turn(
+    text: str, policy: NetworkPolicy | None, quotes: list[int], user_text: str
+) -> list[str]:
+    from src.agent.agent import ToolRouter
+    from src.agent.streaming_loop import StreamingAgentLoop
+    from tests.unit.mocks.mock_audio_socket import MockAudioSocketConnection
+    from tests.unit.mocks.mock_llm_router import MockLLMRouter
+
+    router = MockLLMRouter(
+        [[TextDelta(text=text), StreamDone(stop_reason="end_turn", usage=Usage(1, 1))]]
+    )
+    tts = _RecordingTTS()
+    loop = StreamingAgentLoop(
+        llm_router=router,
+        tool_router=ToolRouter(),
+        tts=tts,
+        conn=MockAudioSocketConnection(),
+        barge_in_event=asyncio.Event(),
+        system_prompt="Test system prompt",
+        network_policy=policy,
+        delivery_quotes=quotes,
+    )
+    await loop.run_turn(user_text, [])
+    # Thinking fillers («Хвилинку.») are spoken too; only delivery talk is judged here.
+    return [t for t in tts.texts if "оставк" in t]
+
+
+ASK_COST = "Скільки коштує доставка до Львова?"
+
+
+@pytest.mark.usefixtures("np_key")
+class TestDeliverySumWiredIntoTheTurn:
+    """Which refusal fired is read from the metric label, not from the wording."""
+
+    @pytest.mark.asyncio
+    async def test_composed_sum_never_reaches_tts(self) -> None:
+        before = _network_counts()
+        texts = await _quote_turn(COMPOSED, PK_QUOTE, [810], ASK_COST)
+        assert not any("950" in t for t in texts)
+        assert texts == [PK_TARIFF]
+        after = _network_counts()
+        assert {r: after[r] - before[r] for r in _NETWORK_RULES} == {
+            r: (1 if r == RULE_DELIVERY_SUM else 0) for r in _NETWORK_RULES
+        }
+
+    @pytest.mark.asyncio
+    async def test_the_calls_quote_reaches_tts(self) -> None:
+        """The loop passes the call's own list: a quoted sum is spoken as is."""
+        before = _network_counts()
+        texts = await _quote_turn(QUOTED, PK_QUOTE, [810], ASK_COST)
+        # Quote on: the code says no tariff line first (`network_facts`).
+        assert texts == [QUOTED]
+        assert _network_counts() == before
+
+    @pytest.mark.asyncio
+    async def test_without_the_flag_the_turn_is_as_before(self) -> None:
+        before = _network_counts()
+        texts = await _quote_turn(COMPOSED, PK_ON, [], ASK_COST)
+        assert texts == [PK_TARIFF, COMPOSED]
+        assert _network_counts() == before
+
+    @pytest.mark.asyncio
+    async def test_tvoya_shina_is_untouched(self) -> None:
+        before = _network_counts()
+        texts = await _quote_turn(COMPOSED, TS_ON, [], ASK_COST)
+        assert COMPOSED in texts
+        assert _network_counts() == before
+
+
+# ── The tyre-price guard sits earlier in the chain ──────────────────────
+
+SPORTRAK = {
+    "id": "sp709",
+    "brand": "Sportrak",
+    "model": "Snowtrek SP709",
+    "size": "205/55 R16",
+    "season": "winter",
+    "price": 3118,
+    "in_stock": True,
+}
+TYRE_AND_DELIVERY = (
+    "Sportrak Snowtrek SP709 — 3118 грн, доставка Новою поштою — орієнтовно 810 грн."
+)
+
+
+async def _tyre_turn(reply: str, quotes: list[int]) -> list[str]:
+    import json
+
+    from src.agent.agent import ToolRouter
+    from src.agent.streaming_loop import StreamingAgentLoop
+    from src.llm.models import ToolCallDelta, ToolCallEnd
+    from tests.unit.mocks.mock_audio_socket import MockAudioSocketConnection
+    from tests.unit.mocks.mock_llm_router import MockLLMRouter
+
+    tool_router = ToolRouter()
+
+    async def _search(**_: Any) -> dict[str, Any]:
+        return {"total": 1, "items": [dict(SPORTRAK)]}
+
+    tool_router.register("search_tires", _search)
+    args = {"width": 205, "profile": 55, "diameter": 16, "season": "winter"}
+    rounds = [
+        [
+            ToolCallStart(id="s0", name="search_tires"),
+            ToolCallDelta(id="s0", arguments_chunk=json.dumps(args)),
+            ToolCallEnd(id="s0"),
+            StreamDone(stop_reason="tool_use", usage=Usage(1, 1)),
+        ],
+        [TextDelta(text=reply), StreamDone(stop_reason="end_turn", usage=Usage(1, 1))],
+    ]
+    tts = _RecordingTTS()
+    loop = StreamingAgentLoop(
+        llm_router=MockLLMRouter(rounds),
+        tool_router=tool_router,
+        tts=tts,
+        conn=MockAudioSocketConnection(),
+        barge_in_event=asyncio.Event(),
+        tools=[{"name": "search_tires", "description": "", "input_schema": {"type": "object"}}],
+        system_prompt="Test system prompt",
+        network_policy=PK_QUOTE,
+        delivery_quotes=quotes,
+    )
+    await loop.run_turn("зимові шини 205/55 R16, скільки з доставкою до Львова?", [])
+    return tts.texts
+
+
+@pytest.mark.usefixtures("np_key")
+class TestTyrePriceGuardNeighbour:
+    @pytest.mark.asyncio
+    @pytest.mark.xfail(
+        strict=True,
+        reason=(
+            "Finding (wave 3-E): tire_claim_guard `price` rewrites every amount of a "
+            "sentence naming one tyre to its price — «орієнтовно 810 грн» becomes "
+            "«орієнтовно 3118 грн», and delivery_sum then replaces the sentence with the "
+            "tariff line. The fix is in tire_price_claim.py / tire_claim_guard.py, outside "
+            "this wave's Scope (Scope drift request in PROGRESS)."
+        ),
+    )
+    async def test_tyre_and_delivery_sum_in_one_sentence_survive(self) -> None:
+        from src.agent.tire_claim_guard import RULE_PRICE
+        from src.monitoring.metrics import tire_claim_refused_total
+
+        before = tire_claim_refused_total.labels(rule=RULE_PRICE)._value.get()
+        net_before = _network_counts()
+        texts = await _tyre_turn(TYRE_AND_DELIVERY, [810])
+        assert TYRE_AND_DELIVERY in " ".join(texts)
+        assert tire_claim_refused_total.labels(rule=RULE_PRICE)._value.get() == before
+        assert _network_counts() == net_before
+
+    @pytest.mark.asyncio
+    async def test_a_rewritten_delivery_sum_never_reaches_tts(self) -> None:
+        """Until the tyre guard is fixed, `delivery_sum` keeps the caller from
+        hearing the tyre price as the delivery sum."""
+        before = _counter(RULE_DELIVERY_SUM)
+        joined = " ".join(await _tyre_turn(TYRE_AND_DELIVERY, [810]))
+        assert "орієнтовно 3118" not in joined
+        assert PK_TARIFF in joined
+        assert _counter(RULE_DELIVERY_SUM) == before + 1
+
+    @pytest.mark.asyncio
+    async def test_separate_sentences_survive_both_guards(self) -> None:
+        reply = "Sportrak Snowtrek SP709 — 3118 грн. Доставка Новою поштою — орієнтовно 810 грн."
+        texts = await _tyre_turn(reply, [810])
+        joined = " ".join(texts)
+        assert "3118 грн" in joined
+        assert QUOTED in texts

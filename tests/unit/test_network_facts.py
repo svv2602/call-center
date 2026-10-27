@@ -507,8 +507,10 @@ def test_the_guard_does_not_judge_the_code_phrase(run: Any, monkeypatch: Any) ->
 
     real = guard.check_sentence
 
-    def _cut_all(sentence: str, policy: Any, promos: Any = None) -> guard.Verdict:
-        real(sentence, policy, promos)  # same signature as the real one
+    def _cut_all(
+        sentence: str, policy: Any, promos: Any = None, delivery_quotes: Any = None
+    ) -> guard.Verdict:
+        real(sentence, policy, promos, delivery_quotes)  # same signature as the real one
         return guard.Verdict(guard.REPLACE, rule="test", replacement="ЗАМІНА.")
 
     monkeypatch.setattr(guard, "check_sentence", _cut_all)
@@ -772,3 +774,65 @@ def test_ts_fitting_request_is_left_to_the_model(run: Any) -> None:
     reply, systems, _ = run("мені треба записати на шиномонтаж дві машини", TS)
     assert not _REFUSAL.search(reply)
     assert "Вже сказано клієнту" not in systems[0]
+
+
+# ── Delivery quote on: the sum is the tool's (wave 3-E, R13, R17, R18) ──
+
+_QUOTE_KEY_ENV = "NP_TEST_FACTS_QUOTE_KEY"
+ASK_COST = "скільки коштує доставка до Львова?"
+ASK_ETA = "як швидко доставите шини у Київ?"
+#: The HEAD phrase for Про Колесо (carrier_tariff, «Нова Пошта»).
+PK_TARIFF = "Доставка — за тарифами перевізника Нова Пошта."
+
+
+def _pk_quote(sales: bool = True) -> NetworkPolicy:
+    return _pk(sales, delivery_quote="novaposhta", delivery_quote_key_env=_QUOTE_KEY_ENV)
+
+
+class TestDeliveryQuoteFacts:
+    @pytest.fixture(autouse=True)
+    def _key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(_QUOTE_KEY_ENV, "k" * 32)
+
+    def test_cost_question_is_left_to_get_delivery_cost(self) -> None:
+        assert _pk_quote().delivery_quote_enabled
+        assert nf.turn_facts(ASK_COST, _pk_quote()) == []
+        assert nf.turn_facts("сколько стоит доставка во Львов?", _pk_quote()) == []
+
+    def test_eta_phrase_is_still_said(self) -> None:
+        assert nf.turn_facts(ASK_ETA, _pk_quote()) == nf.turn_facts(ASK_ETA, PK)
+        assert nf.turn_facts(ASK_ETA, _pk_quote()) == [f"Доставка — {PK.delivery_eta_text}."]
+
+    def test_free_delivery_promotion_is_still_said(self) -> None:
+        text = "скільки коштує доставка Doublestar?"
+        (phrase,) = nf.turn_facts(text, _pk_quote(), DOUBLESTAR)
+        assert phrase == DOUBLESTAR.grants[0].bot_text
+
+    def test_other_topics_of_the_turn_are_kept(self) -> None:
+        text = "скільки коштує доставка, як швидко, і чи можна частинами?"
+        quoted = nf.turn_facts(text, _pk_quote())
+        assert PK_TARIFF not in quoted
+        assert PK_TARIFF in nf.turn_facts(text, PK)
+        # The freed slot (MAX_FACTS_PER_TURN) goes to the next topic asked.
+        assert quoted[0] == f"Доставка — {PK.delivery_eta_text}."
+        assert len(quoted) == nf.MAX_FACTS_PER_TURN
+
+    def test_flag_without_its_key_is_as_before(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv(_QUOTE_KEY_ENV)
+        assert nf.turn_facts(ASK_COST, _pk_quote()) == [PK_TARIFF]
+
+    def test_sales_off_says_nothing(self) -> None:
+        assert nf.turn_facts(ASK_COST, _pk_quote(sales=False)) == []
+
+    @pytest.mark.parametrize(
+        ("policy", "expected"),
+        [
+            (PK, [PK_TARIFF]),
+            (TS, [f"Доставка безкоштовна, перевізник — {', '.join(TS.delivery_carriers)}."]),
+        ],
+        ids=["pk_flag_off", "tsh"],
+    )
+    def test_without_the_flag_the_phrase_is_the_head_one(
+        self, policy: NetworkPolicy, expected: list[str]
+    ) -> None:
+        assert nf.turn_facts(ASK_COST, policy) == expected

@@ -2269,6 +2269,7 @@ class StreamingAgentLoop:
                         self._network_policy,
                         _current_call_id(),
                         promos=self._promo_overrides,
+                        delivery_quotes=self._delivery_quotes,
                     )
                 )
                 tts_stream = synthesize_stream(buffered, self._tts)

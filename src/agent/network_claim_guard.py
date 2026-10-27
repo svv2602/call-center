@@ -26,6 +26,15 @@ on 2026-09-28) it means "not configured" — enforcing it would cut «запис
 на шиномонтаж» out of every Твоя Шина fitting call.
 ``order_confirmed`` depends on no configured field and runs always.
 
+- ``delivery_sum`` — a hryvnia sum in a delivery clause («доставка … 950 грн»)
+  that is not one of the sums ``get_delivery_cost`` gave this call. Runs only
+  while the network may quote delivery (``delivery_quote.quote_available``:
+  sales on, flag valid, key set) and only for a caller that passes the call's
+  quotes (``delivery_quotes`` not ``None`` — the streamed filter always does).
+  Replaced by the carrier-tariff line: the model never composes a delivery
+  sum. A tyre price in a clause without a delivery word, a percentage
+  («2% від суми») and a quoted sum pass.
+
 Negations pass: a clause holding «не / ні / немає / нема / нет / ни» around the
 claim is a correct refusal («доставка не безкоштовна», «на жаль, не надаємо
 шиномонтаж», «розширеної гарантії немає»).
@@ -77,13 +86,15 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from src.agent import delivery_quote as dq
 from src.agent.network_policy import SERVICE_LABELS, NetworkPolicy
 from src.agent.parsers.tire_query import extract_tire_brands
+from src.agent.tire_price_claim import find_amounts
 from src.core.sentence_buffer import SentenceReady
 from src.monitoring.metrics import network_claim_blocked_total
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Sequence
 
     from src.agent.promotions import PromoGrant, PromoOverrides
     from src.core.sentence_buffer import BufferEvent
@@ -101,12 +112,14 @@ RULE_EXTENDED_WARRANTY = "extended_warranty"
 RULE_SERVICE_OFFER = "service_offer"
 RULE_ORDER_CONFIRMED = "order_confirmed"
 RULE_PROMO_DENIED = "promo_denied"
+RULE_DELIVERY_SUM = "delivery_sum"
 
 RULES: tuple[str, ...] = (
     RULE_ORDER_CONFIRMED,
     RULE_SERVICE_OFFER,
     RULE_FREE_DELIVERY,
     RULE_EXTENDED_WARRANTY,
+    RULE_DELIVERY_SUM,
 )
 #: Rules only a live promotion can fire (never with ``promos=None``).
 PROMO_RULES: tuple[str, ...] = (RULE_PROMO_DENIED,)
@@ -133,6 +146,21 @@ _FREE_DELIVERY = re.compile(
     rf"\b{_FREE}{_W}{{0,2}}?\s+{_DELIVERY}|\b{_DELIVERY}{_W}{{0,3}}?\s+{_FREE}",
     re.IGNORECASE,
 )
+
+#: A delivery word (ua + ru, case forms): the clause around a sum is about delivery.
+_DELIVERY_WORD = re.compile(
+    r"(?<!\w)(?:достав|відправк|отправк|пересил|кур'?єр|курьер)\w*", re.IGNORECASE
+)
+#: Clauses for the delivery sum: commas, semicolons and «а / але / но» — never a
+#: dash, which joins «доставка Новою поштою — орієнтовно 810 грн» into one claim.
+#: «… грн за шину / за штуку / за комплект» — the amount is a tyre price.
+_PER_TYRE_AFTER = re.compile(
+    r"\s*(?:за|по)\s+(?:одну\s+|одна\s+)?(?:шин\w*|штук\w*|шт\b|комплект\w*|колес\w*)",
+    re.IGNORECASE,
+)
+#: The currency word right after an amount (``find_amounts`` ends at the number).
+_CURRENCY_AT = re.compile(r"\s*(?:грн\.?|гривн\w*|гривен\w*|гривень)", re.IGNORECASE)
+_SUM_CLAUSE_SPLIT = re.compile(r"[,;]|\s(?:а|але|но|проте|однак)\s", re.IGNORECASE)
 
 _EXTENDED_WARRANTY = re.compile(
     r"\b(?:розширен|додатков|расширенн|дополнительн|продовжен|продленн)\w*"
@@ -314,15 +342,46 @@ def _replacement(rule: str, policy: NetworkPolicy, services: list[str]) -> str |
 # ── The predicate ───────────────────────────────────────────────────────
 
 
+def _unquoted_delivery_sum(text: str, policy: NetworkPolicy, quotes: Sequence[int]) -> bool:
+    """A hryvnia sum said after a delivery word, in its clause, that no quote backs.
+
+    Allowed: this call's quotes and the sums of the policy's own cash-on-delivery
+    fee line («2 % + 20 грн»). A sum before the delivery word or marked as a
+    tyre price («по 3118 грн за шину») is not a delivery sum.
+    """
+    allowed = set(quotes)
+    allowed.update(a.value for a in find_amounts(policy.cod_fee_text or ""))
+    for clause in _SUM_CLAUSE_SPLIT.split(text):
+        word = _DELIVERY_WORD.search(clause) if clause else None
+        if word is None:
+            continue
+        for amount in find_amounts(clause):
+            if amount.start < word.end() or amount.value in allowed:
+                continue
+            if _PER_TYRE_AFTER.match(clause, pos=_currency_end(clause, amount.end)):
+                continue
+            return True
+    return False
+
+
+def _currency_end(clause: str, pos: int) -> int:
+    match = _CURRENCY_AT.match(clause, pos)
+    return match.end() if match else pos
+
+
 def check_sentence(
     sentence: str,
     policy: NetworkPolicy | None,
     promos: PromoOverrides | None = None,
+    delivery_quotes: Sequence[int] | None = None,
 ) -> Verdict:
     """Judge one sentence against the network's policy and live promotions.
 
     Pure; never raises. ``promos`` only ever clears a rule; ``None`` is the
-    behaviour without promotions.
+    behaviour without promotions. ``delivery_quotes`` — the sums
+    ``get_delivery_cost`` gave this call; ``None`` (a caller that does not
+    track them) leaves ``delivery_sum`` out, an empty sequence refuses every
+    delivery sum.
     """
     if not sentence or not sentence.strip():
         return _PASS
@@ -368,6 +427,15 @@ def check_sentence(
                 return Verdict(REPLACE, RULE_FREE_DELIVERY, PROMO_DELIVERY_NEUTRAL)
             return _verdict(RULE_FREE_DELIVERY, policy, [])
         exempt.append(RULE_FREE_DELIVERY)
+
+    if (
+        delivery_quotes is not None
+        and dq.quote_available(policy)
+        and _unquoted_delivery_sum(text, policy, delivery_quotes)
+    ):
+        # The sum must be the one `get_delivery_cost` said; anything else is
+        # composed. The carrier-tariff line is what the network promises.
+        return Verdict(REPLACE, RULE_DELIVERY_SUM, dq.tariff_phrase(policy))
 
     policy_brands = {b.lower() for b in policy.extended_warranty_brands}
     promo_brands = {b.lower() for b in promos.extended_warranty_brands} if promos else set()
@@ -519,8 +587,13 @@ async def guard_network_claims(
     policy: NetworkPolicy | None,
     call_id: str = "unknown",
     promos: PromoOverrides | None = None,
+    delivery_quotes: Sequence[int] = (),
 ) -> AsyncIterator[BufferEvent]:
     """Replace sentences the network cannot promise before they reach TTS.
+
+    ``delivery_quotes`` is read live (the call's own list grows as
+    ``get_delivery_cost`` answers); the default ``()`` refuses every delivery
+    sum while the network may quote (``delivery_sum``).
 
     Fragments are held to the end of the sentence, as in
     `drop_control_plane_prose`: `buffer_sentences` splits long sentences at
@@ -542,7 +615,7 @@ async def guard_network_claims(
         if not queued:
             return []
         text = " ".join(e.text for e in queued).strip()
-        verdict = check_sentence(text, policy, promos)
+        verdict = check_sentence(text, policy, promos, delivery_quotes)
         if verdict.action == PASS:
             _log_promo_exempt(verdict, call_id, "stream", text)
             return queued

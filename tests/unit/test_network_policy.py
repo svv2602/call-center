@@ -17,6 +17,7 @@ import asyncio
 import dataclasses
 import logging
 import pathlib
+import re
 from typing import Any
 from unittest.mock import AsyncMock, create_autospec
 
@@ -577,3 +578,65 @@ class TestDeliveryQuoteFlag:
             delivery_quote_key_env="NP",
         )
         assert policy.delivery_quote_enabled is True
+
+
+# ── Delivery quote on: the block's delivery line (wave 3-E, R04, R13, R18) ──
+
+#: The HEAD delivery line of Про Колесо (carrier_tariff, flag off).
+_PK_HEAD_DELIVERY = (
+    "- Доставка: за тарифами перевізника (Нова Пошта). Вартість доставки не називай."
+)
+
+
+def _delivery_line(block: str) -> str:
+    (line,) = [ln for ln in block.splitlines() if ln.startswith("- Доставка:")]
+    return line
+
+
+class TestDeliveryQuoteBlock:
+    @pytest.fixture
+    def key(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv("NOVAPOSHTA_API_KEY", _NP_KEY)
+
+    @pytest.mark.usefixtures("key")
+    def test_quote_on_names_the_tool_and_its_limits(self) -> None:
+        line = _delivery_line(_block(_pk_quote()))
+        assert "get_delivery_cost" in line  # R04: the sum only from the tool
+        assert "«орієнтовно»" in line  # R04
+        assert "лише коли клієнт сам спитав" in line  # R13
+        assert "не в підсумку заявки" in line  # R13
+        assert "за тарифами перевізника, суму назву, коли оберемо шини й місто" in line  # R18
+        assert "Вартість доставки не називай" not in line
+
+    @pytest.mark.usefixtures("key")
+    def test_quote_on_puts_no_sum_and_no_id_in_the_prompt(self) -> None:
+        line = _delivery_line(_block(_pk_quote()))
+        assert not re.search(r"\d", line.replace("(Нова Пошта)", ""))
+
+    @pytest.mark.usefixtures("key")
+    def test_quote_on_keeps_the_rest_of_the_block(self) -> None:
+        on = _block(_pk_quote()).splitlines()
+        head = _block(_enabled(PROKOLESO_CONFIG_PATCH)).splitlines()
+        assert [ln for ln in on if not ln.startswith("- Доставка:")] == [
+            ln for ln in head if not ln.startswith("- Доставка:")
+        ]
+
+    def test_flag_without_its_key_is_the_head_block(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("NOVAPOSHTA_API_KEY", raising=False)
+        assert _block(_pk_quote()) == _block(_enabled(PROKOLESO_CONFIG_PATCH))
+        assert _delivery_line(_block(_pk_quote())) == _PK_HEAD_DELIVERY
+
+    @pytest.mark.usefixtures("key")
+    def test_flag_off_is_the_head_line(self) -> None:
+        assert _delivery_line(_block(_enabled(PROKOLESO_CONFIG_PATCH))) == _PK_HEAD_DELIVERY
+
+    @pytest.mark.usefixtures("key")
+    def test_sales_off_renders_nothing(self) -> None:
+        cfg = {**_pk_quote(), "sales_enabled": False}
+        assert render_network_block(NetworkPolicy.from_tenant_config(cfg)) is None
+
+    @pytest.mark.usefixtures("key")
+    def test_tshina_block_is_unchanged(self) -> None:
+        line = _delivery_line(_block(_enabled(TVOYA_SHINA_CONFIG_PATCH)))
+        assert line.startswith("- Доставка: безкоштовна")
+        assert "get_delivery_cost" not in line

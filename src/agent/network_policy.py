@@ -409,6 +409,14 @@ def payment_method_labels(policy: NetworkPolicy) -> list[str]:
     return methods
 
 
+def _quote_available(policy: NetworkPolicy) -> bool:
+    # Imported here: delivery_quote → promotions → prompt_manager → prompts
+    # imports this module at load time.
+    from src.agent.delivery_quote import quote_available
+
+    return quote_available(policy)
+
+
 def render_network_block(
     policy: NetworkPolicy | None, promos: PromoOverrides | None = None
 ) -> str | None:
@@ -442,6 +450,14 @@ def render_network_block(
     carriers = f" ({', '.join(policy.delivery_carriers)})" if policy.delivery_carriers else ""
     if policy.delivery_mode == "free":
         lines.append(f"- Доставка: безкоштовна{carriers}.")
+    elif policy.delivery_mode == "carrier_tariff" and _quote_available(policy):
+        lines.append(
+            f"- Доставка: за тарифами перевізника{carriers}{_promo_delivery_suffix(promos)}. "
+            "Суму доставки називай ТІЛЬКИ з результату get_delivery_cost, зі словом "
+            "«орієнтовно», і лише коли клієнт сам спитав про вартість доставки — не в "
+            "підсумку заявки. Без міста чи обраних шин — «за тарифами перевізника, суму "
+            "назву, коли оберемо шини й місто»."
+        )
     elif policy.delivery_mode == "carrier_tariff":
         lines.append(
             f"- Доставка: за тарифами перевізника{carriers}{_promo_delivery_suffix(promos)}. "

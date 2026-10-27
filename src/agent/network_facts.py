@@ -32,6 +32,7 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any
 
+from src.agent import delivery_quote as dq
 from src.agent.network_policy import BANK_LABELS, SERVICE_LABELS, payment_method_labels
 from src.agent.promotions import (
     GRANT_EXTENDED_WARRANTY,
@@ -447,6 +448,11 @@ def _phrase(
         promo = _promo_text(GRANT_FREE_DELIVERY, promos, text, tire_query)
         if promo:
             return promo
+        if dq.quote_available(policy):
+            # The sum comes from `get_delivery_cost` (the tool says the
+            # tariff line itself when the city or the tyres are missing); a
+            # tariff line said first would contradict the quoted sum.
+            return None
         if policy.delivery_mode == "free":
             return f"Доставка безкоштовна{f', перевізник — {carriers}' if carriers else ''}."
         if policy.delivery_mode == "carrier_tariff":
