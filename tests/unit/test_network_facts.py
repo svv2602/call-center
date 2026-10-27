@@ -91,6 +91,9 @@ TOPIC_UTTERANCES: dict[str, list[str]] = {
     nf.NON_STOCK_SIZE: [
         "можна поставити 225/45 R17 замість 205/55 R16?",
         "можно поставить шины шире на Октавию?",
+        # R07.4: one parameter, two values (operators' calls)
+        "скажите, если у нас 55 профиль стоит, а я поставлю 60, сильно разница будет?",
+        "якщо 55, а 60, можливо, взяти мені?",
     ],
     nf.DELIVERY_COST: [
         "скільки коштує доставка до Львова?",
@@ -561,6 +564,15 @@ class TestNonStockSize:
             "а можна поставити більший радіус?",
             "а можна інший діаметр поставити, сімнадцятий?",
             "шини ширші за заводські можна?",
+            # R07.4 «55 → 60»: one parameter said with two values
+            "скажите, если у нас 55 профиль стоит, а я поставлю 60, сильно разница будет?",
+            "скажіть, якщо у нас 55 профіль стоїть, а я поставлю 60, сильно різниця буде?",
+            "якщо 55, а 60, можливо, взяти мені?",  # call_217, about 225/55 R17
+            "стоїть 16-й радіус, можна 17-й поставити?",
+            "а если поставить 65 профиль вместо 55?",
+            "а можна замість 55 профілю поставити 60?",
+            "у мене 16 радіусом стоять, а 17 можна взяти?",
+            "205/55 R16 стоїть, а радіус 17 можна поставити?",  # the old value in the size
         ],
     )
     def test_size_change_questions(self, text: str) -> None:
@@ -577,8 +589,42 @@ class TestNonStockSize:
             "можна замість двох шин взяти чотири?",
             "чи можна доставку замість самовивозу?",
             "225/45 R17 замість 205/55 R16",  # no question
+            # True here would also stop the forced tyre search (tire_search_gate)
+            "205 на 55 чи на 65?",  # call_189: the caller is unsure of their size
+            "профіль 55 чи 65, не пам'ятаю?",
+            "профиль 55 или 65, не помню?",
+            "індекс 91 чи 94",
+            "індекс 91 чи 94 краще взяти?",
+            "ціна 55 гривень",
+            "55-й профіль",
+            "55-й профіль можна поставити?",
+            "можна поставити 225/55 R17, профіль підходить?",  # 55 and 17: not two profiles
+            "радіус 16, можна поставити 4 шини?",
+            "225/55 R17 профіль, а можна взяти 2 шини?",
+            "якщо 55, а 55 взяти?",
+            "якщо 91, а 94 взяти?",  # load indices, not profiles
+            "профіль 55, а індекс навантаження 91 можна поставити?",
+            "радиус 16, а нагрузка 94 подойдет, можно поставить?",
+            "о 16, а 17 можна поставити?",  # hours, no parameter
         ],
     )
     def test_not_a_size_change(self, text: str) -> None:
         assert not nf.is_non_stock_size_question(text)
         assert nf.NON_STOCK_SIZE not in nf.fact_topics(text)
+
+    def test_one_parameter_swap_stops_the_forced_search(self) -> None:
+        # the call site: ForcedTireSearch.plan asks the predicate before searching
+        from src.agent.tire_search_gate import ForcedTireSearch
+
+        tools = [
+            {"name": n, "description": "", "input_schema": {"type": "object"}}
+            for n in ("search_tires", "check_availability")
+        ]
+        query = {"sizes": ["225/55 R17"], "season": "summer"}
+        swap = "літні, скажите, если у нас 55 профиль стоит, а я поставлю 60, разница будет?"
+        plain = "літні 225/55 R17"
+        assert nf.NON_STOCK_SIZE in nf.fact_topics(swap)
+        gate = ForcedTireSearch(sales_enabled=True, tools=tools)
+        assert gate.plan(query, swap, [{"role": "user", "content": swap}]) is None
+        control = ForcedTireSearch(sales_enabled=True, tools=tools)
+        assert control.plan(query, plain, [{"role": "user", "content": plain}]) is not None

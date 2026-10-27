@@ -161,6 +161,49 @@ _SIZE_CHANGE = re.compile(
 _INSTEAD = re.compile(_B + r"(?:замість|замiсть|вместо)(?![\w'])")
 #: A tyre width said as a number.
 _WIDTH_NUMBER = re.compile(r"(?<!\d)(?:1[3-9]\d|2\d\d|3[0-5]\d)(?!\d)")
+#: One parameter said with two values: «55 профіль стоїть, а я поставлю 60»,
+#: «16-й радіус, можна 17-й?». The word names the parameter, the range the
+#: numbers that can be its values (so in «225/55 R17, профіль…» 17 is no profile).
+_PROFILE_WORD = re.compile(_B + r"(?:профіл\w*|профил\w*)")
+_RADIUS_WORD = re.compile(_B + r"(?:радіус\w*|радиус\w*|діаметр\w*|диаметр\w*)")
+#: Fitting or choosing the other value — without it «профіль 55 чи 65?» is the
+#: caller unsure of their own size, which the forced search must still serve.
+_PUT = re.compile(
+    _B + r"(?:постав\w*|став\w*|взят\w*|взя\w*|візьм\w*|возьм\w*|брат\w*|бра\w*"
+    r"|замість|замiсть|вместо)(?![\w'])"
+)
+#: The caller's «what if»: «якщо 55, а 60…», «если поставлю…», «різниця».
+_WHAT_IF = re.compile(_B + r"(?:якщо|якшо|если|різниц\w*|разниц\w*|скаж\w*)(?![\w'])")
+#: «якщо 55, а 60 взяти?» — two profile values with no parameter word.
+_IF_A_THEN_B = re.compile(
+    _B + r"(?:якщо|якшо|если)\s+(\d{2})(?!\d)[\s,]+(?:а|або|или)\s+(\d{2})(?!\d)"
+)
+_TWO_DIGIT = re.compile(r"(?<!\d)\d{2}(?!\d)")
+
+
+def _profile_value(n: int) -> bool:
+    return 25 <= n <= 85 and n % 5 == 0
+
+
+def _radius_value(n: int) -> bool:
+    return 12 <= n <= 24
+
+
+def _one_parameter_two_values(low: str) -> bool:
+    """«55 профіль стоїть, а я поставлю 60» — one parameter, two values, fitted."""
+    if not _PUT.search(low):
+        return False
+    numbers = {int(n) for n in _TWO_DIGIT.findall(low)}
+    if _PROFILE_WORD.search(low) and len({n for n in numbers if _profile_value(n)}) >= 2:
+        return True
+    if _RADIUS_WORD.search(low) and len({n for n in numbers if _radius_value(n)}) >= 2:
+        return True
+    pair = _IF_A_THEN_B.search(low)
+    return bool(
+        pair
+        and pair.group(1) != pair.group(2)
+        and all(_profile_value(int(g)) for g in pair.groups())
+    )
 
 
 def is_non_stock_size_question(text: str | None) -> bool:
@@ -168,6 +211,8 @@ def is_non_stock_size_question(text: str | None) -> bool:
     if not text:
         return False
     low = _normalize(text)
+    if (_ASK.search(low) or _WHAT_IF.search(low)) and _one_parameter_two_values(low):
+        return True
     if not _ASK.search(low):
         return False
     if _SIZE_CHANGE.search(low):
