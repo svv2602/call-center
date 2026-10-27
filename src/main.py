@@ -2563,6 +2563,58 @@ def _build_tool_router(
     #: Pickup point ids `get_pickup_points` offered in this call — the only
     #: ones `submit_order_request` accepts.
     offered_pickup_point_ids: set[str] = set()
+    #: Nova Poshta branch refusals in this call (R12) — after
+    #: ``dq.WAREHOUSE_MAX_REFUSALS`` the request goes through as is.
+    warehouse_refusals = 0
+
+    async def _warehouse_refusal(draft: dict[str, Any]) -> dict[str, Any] | None:
+        """A question when Nova Poshta has no such branch in the city, else None.
+
+        Default-deny towards the check: only with the network's quote on, a
+        delivery and a branch/postomat number in the address. A failed lookup
+        (``None`` — timeout, «To many requests», unknown city) is not a
+        «not found»: the request goes through unchecked.
+        """
+        nonlocal warehouse_refusals
+        if not dq.quote_available(network_policy) or draft.get("delivery_type") != "delivery":
+            return None
+        number = dq.warehouse_number(draft.get("address"))
+        if number is None:
+            return None
+        city = str(draft.get("city") or "").strip()
+        np_client = _nova_poshta_client(
+            network_policy.delivery_quote_key_env if network_policy is not None else None
+        )
+        verdict = None
+        if np_client is not None:
+            try:
+                city_ref = await np_client.resolve_city(city)
+                if city_ref is not None:
+                    verdict = await np_client.find_warehouse(city_ref, number)
+            except Exception:
+                logger.warning(
+                    "submit_order_request: Nova Poshta branch lookup raised for call %s",
+                    session.channel_uuid,
+                    exc_info=True,
+                )
+                verdict = None
+        if verdict == "found":
+            return None
+        if verdict is None:
+            outcome = dq.STATUS_WAREHOUSE_UNCHECKED
+        elif warehouse_refusals >= dq.WAREHOUSE_MAX_REFUSALS:
+            outcome = dq.STATUS_WAREHOUSE_ACCEPTED
+        else:
+            warehouse_refusals += 1
+            outcome = dq.STATUS_WAREHOUSE_NOT_FOUND
+        delivery_quote_total.labels(outcome=outcome).inc()
+        logger.info(
+            "submit_order_request: branch %s in %r — %s for call %s",
+            number, city, outcome, session.channel_uuid,
+        )
+        if outcome != dq.STATUS_WAREHOUSE_NOT_FOUND:
+            return None
+        return dq.warehouse_question(number, city)
 
     async def _submit_order_request(**kwargs: Any) -> Any:
         """Sales order in one call (wave 2-D): completeness in code, then the
@@ -2599,6 +2651,9 @@ def _build_tool_router(
                 draft["items"],
             )
             return refusal
+        warehouse_question = await _warehouse_refusal(draft)
+        if warehouse_question is not None:
+            return warehouse_question
         request = draft
 
         async def _store_fallback() -> Any:

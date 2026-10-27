@@ -628,3 +628,58 @@ class TestNovaPoshtaClientFactory:
         first = main_module._nova_poshta_client("NOVA_POSHTA_API_KEY_FACTORY_TEST2")
         assert isinstance(first, NovaPoshtaClient)
         assert main_module._nova_poshta_client("NOVA_POSHTA_API_KEY_FACTORY_TEST2") is first
+
+
+# ------------------------------------------- branch number of an order (R12)
+
+
+class TestWarehouseNumber:
+    """``dq.warehouse_number`` — the parser itself, imported from ``src``."""
+
+    @pytest.mark.parametrize(
+        ("address", "number"),
+        [
+            ("відділення 12", "12"),
+            ("Відділення №5", "5"),
+            ("відділення № 25, Київ", "25"),
+            ("№12", "12"),
+            ("12-е відділення", "12"),
+            ("3-тє відділення", "3"),
+            ("у відділенні 7", "7"),
+            ("відділення НП номер 31", "31"),
+            ("поштомат 5012", "5012"),
+            ("почтомат 3456", "3456"),
+            ("отделение 12", "12"),
+            ("отделение номер 12", "12"),
+            ("12 отделение", "12"),
+        ],
+    )
+    def test_branch_or_postomat(self, address: str, number: str) -> None:
+        assert dq.warehouse_number(address) == number
+
+    @pytest.mark.parametrize(
+        "address",
+        [
+            "вул. Шевченка 12",
+            "вул. Шевченка, буд. №12",
+            "просп. Перемоги 10, кв. 5",
+            "улица Ленина, дом №3",
+            "Нова пошта 12",
+            "відділення перевізника",
+            "",
+            None,
+            12,
+        ],
+    )
+    def test_not_a_branch_is_none(self, address: Any) -> None:
+        assert dq.warehouse_number(address) is None
+
+    def test_question_shape(self) -> None:
+        q = dq.warehouse_question("12", "Київ")
+        assert (q["status"], q["field"], q["reason"]) == (
+            "missing_field",
+            "address",
+            dq.STATUS_WAREHOUSE_NOT_FOUND,
+        )
+        assert "відділення №12 у місті Київ" in q["message"]
+        assert "НЕ створено" in q["message"]

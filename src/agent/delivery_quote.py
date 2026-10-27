@@ -226,3 +226,78 @@ def quoted_sums(quote: Quote, courier: bool) -> list[int]:
     if courier and quote.door_surcharge is not None and _uah(quote.door_surcharge) > 0:
         sums.append(_uah(quote.door_surcharge))
     return sums
+
+
+# ---------------------------------------------------------------------------
+# Nova Poshta branch check of an order request (R12)
+# ---------------------------------------------------------------------------
+
+#: `outcome` of `callcenter_delivery_quote_total` for the branch check of
+#: ``submit_order_request``. A branch that exists is not counted.
+STATUS_WAREHOUSE_NOT_FOUND = "warehouse_not_found"
+STATUS_WAREHOUSE_ACCEPTED = "warehouse_accepted_after_retries"
+STATUS_WAREHOUSE_UNCHECKED = "warehouse_unchecked"
+
+#: Refusals per call; the request after the last one goes through as is
+#: (loop-breaker: a caller sure of the number is not asked forever).
+WAREHOUSE_MAX_REFUSALS = 2
+
+#: A branch / postomat word, UA and RU, any case ending: «відділення»,
+#: «відділенні», «отделение», «поштомат», «почтомата».
+_BRANCH_WORD = r"(?:в[іi]дд[іi]лен\w*|отделени\w*|поштомат\w*|почтомат\w*)"
+_NUMBER = r"(\d{1,5})(?!\d)"
+#: «відділення 12», «відділення №12», «отделение номер 12», «поштомат #5012»,
+#: «відділення НП номер 31».
+_WORD_THEN_NUMBER_RE = re.compile(
+    rf"{_BRANCH_WORD}[\s,.:]*(?:(?:нп|нової\s+пошти|новой\s+почты)[\s,.:]*)?"
+    rf"(?:(?:номер|№|#)\s*\.?\s*)?{_NUMBER}",
+    re.IGNORECASE,
+)
+#: «12-е відділення», «12 отделение», «5012-й поштомат».
+_NUMBER_THEN_WORD_RE = re.compile(
+    rf"(?<!\d)(\d{{1,5}})\s*(?:-?\s*(?:ге|го|те|тє|ое|ий|ей|[еєийоі])(?!\w))?\s*{_BRANCH_WORD}",
+    re.IGNORECASE,
+)
+#: A bare «№12» — a branch only when nothing in the address reads as a street.
+_BARE_NUMBER_RE = re.compile(rf"(?:№|#)\s*{_NUMBER}")
+_STREET_RE = re.compile(
+    r"(?<!\w)(?:вул|вулиц\w*|ул|улиц\w*|просп\w*|пр-т|бульв\w*|бул|пров\w*|пер|переул\w*"
+    r"|площ\w*|пл|буд|будин\w*|дом|д|кв|квартир\w*|шосе|набережн\w*)(?!\w)",
+    re.IGNORECASE,
+)
+
+
+def warehouse_number(address: Any) -> str | None:
+    """The branch / postomat number a delivery address names, else ``None``.
+
+    Default-deny towards the check: a street address, a courier address or
+    anything not clearly a branch → ``None`` and Nova Poshta is not asked.
+    """
+    if not isinstance(address, str) or not address.strip():
+        return None
+    for pattern in (_WORD_THEN_NUMBER_RE, _NUMBER_THEN_WORD_RE):
+        match = pattern.search(address)
+        if match is not None:
+            return match.group(1)
+    if _STREET_RE.search(address) is None:
+        match = _BARE_NUMBER_RE.search(address)
+        if match is not None:
+            return match.group(1)
+    return None
+
+
+def warehouse_question(number: str, city: str) -> dict[str, Any]:
+    """The ``missing_field`` answer for a branch Nova Poshta does not know.
+
+    Same shape as ``tools._missing`` so the model handles it as a question.
+    """
+    return {
+        "status": "missing_field",
+        "field": "address",
+        "reason": STATUS_WAREHOUSE_NOT_FOUND,
+        "message": (
+            f"Заявку ще НЕ створено: відділення №{number} у місті {city} Нова пошта "
+            "не знайшла — уточни номер відділення у клієнта і виклич "
+            "submit_order_request ще раз з усіма полями."
+        ),
+    }

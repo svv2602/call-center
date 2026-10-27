@@ -28,6 +28,7 @@ from scripts.configure_tenants import (
     PROKOLESO_ENABLED_TOOLS,
     TVOYA_SHINA_CONFIG_PATCH,
 )
+from src.agent import delivery_quote as dq
 from src.agent.network_policy import NetworkPolicy
 from src.agent.prompts import ORDER_REQUEST_CREATED_TEXT, ORDER_REQUEST_FAILED_TEXT
 from src.agent.tools import (
@@ -38,7 +39,9 @@ from src.agent.tools import (
     filter_tools_by_state,
 )
 from src.core.call_session import CallSession
+from src.integrations.novaposhta import NovaPoshtaClient
 from src.main import _SCENARIO_TOOLS, _build_tool_router, _scenario_tool_names
+from src.monitoring.metrics import delivery_quote_total
 from src.onec_client.client import OneCClient
 from src.sandbox.agent_runner import _register_live_tools
 from src.sandbox.mock_tools import MOCK_RESPONSES, build_mock_tool_router
@@ -420,3 +423,228 @@ class TestQuantityTheCallerSaid:
         assert first["field"] == "quantity"
         assert second["status"] != "missing_field"
         onec.create_order_1c.assert_awaited_once()
+
+
+# ── Nova Poshta branch check (np-delivery-quote R12) ────────────────────────
+#
+# «Переспросить» — no such branch in the city → ask the number again; after
+# two refusals take it as is; the API unavailable → no check. Nova Poshta is a
+# `create_autospec` of the real client — never the live API. A refusal is
+# logged as success=t, so each test asserts WHOSE refusal it is (`reason` +
+# the metric label), not just `missing_field`.
+
+NP_KEY_ENV = "NP_TEST_WAREHOUSE_KEY"
+CITY_REF = "city-ref-kyiv"
+
+
+def _np_policy(*, flag: bool = True) -> NetworkPolicy:
+    raw = dict(PROKOLESO_CONFIG_PATCH["network_policy"])
+    if flag:
+        raw["delivery_quote"] = "novaposhta"
+        raw["delivery_quote_key_env"] = NP_KEY_ENV
+    return NetworkPolicy.from_tenant_config(
+        {**PROKOLESO_CONFIG_PATCH, "network_policy": raw, "sales_enabled": True}
+    )
+
+
+def _np(verdict: Any = "found", city: Any = CITY_REF) -> Any:
+    client = create_autospec(NovaPoshtaClient, instance=True)
+    client.resolve_city.return_value = city
+    if isinstance(verdict, BaseException):
+        client.find_warehouse.side_effect = verdict
+    else:
+        client.find_warehouse.return_value = verdict
+    return client
+
+
+def _wh_count(outcome: str) -> float:
+    return delivery_quote_total.labels(outcome=outcome)._value.get()
+
+
+async def _submit_many(
+    calls: list[dict[str, Any]], *, onec: Any, np_client: Any, policy: NetworkPolicy
+) -> list[Any]:
+    """Several `submit_order_request` calls through ONE router (one call)."""
+    session = CallSession(uuid.uuid4())
+    session.caller_phone = CALLER
+    session.tire_query = {"quantity": 1}
+    results = []
+    with (
+        patch("src.main._onec_client", onec),
+        patch("src.main._call_logger", None),
+        patch("src.main._redis", None),
+        patch("src.main._nova_poshta_client", return_value=np_client),
+    ):
+        router = _build_tool_router(session, store_client=_store(), network_policy=policy)
+        for args in calls:
+            results.append(await router.execute(SUBMIT_ORDER_TOOL, dict(args)))
+    return results
+
+
+BRANCH = "відділення №12"
+
+
+@pytest.mark.usefixtures("np_key_env")
+class TestWarehouseCheck:
+    @pytest.fixture
+    def np_key_env(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(NP_KEY_ENV, "k" * 32)
+
+    @pytest.mark.asyncio
+    async def test_found_branch_goes_to_1c(self) -> None:
+        onec, np_client = _onec(), _np("found")
+        before = {
+            o: _wh_count(o) for o in (dq.STATUS_WAREHOUSE_NOT_FOUND, dq.STATUS_WAREHOUSE_UNCHECKED)
+        }
+        (result,) = await _submit_many(
+            [_delivery_args(address=BRANCH)], onec=onec, np_client=np_client, policy=_np_policy()
+        )
+        assert result["status"] == "request_created"
+        onec.create_order_1c.assert_awaited_once()
+        np_client.resolve_city.assert_awaited_once_with("Київ")
+        np_client.find_warehouse.assert_awaited_once_with(CITY_REF, "12")
+        assert {o: _wh_count(o) for o in before} == before
+
+    @pytest.mark.asyncio
+    async def test_not_found_once_is_a_question_and_1c_is_not_called(self) -> None:
+        onec, np_client = _onec(), _np("not_found")
+        before = _wh_count(dq.STATUS_WAREHOUSE_NOT_FOUND)
+        (result,) = await _submit_many(
+            [_delivery_args(address=BRANCH)], onec=onec, np_client=np_client, policy=_np_policy()
+        )
+        assert result["status"] == "missing_field" and result["field"] == "address"
+        assert result["reason"] == dq.STATUS_WAREHOUSE_NOT_FOUND  # whose refusal
+        assert "№12" in result["message"] and "Київ" in result["message"]
+        assert "submit_order_request" in result["message"]
+        onec.create_order_1c.assert_not_awaited()
+        assert _wh_count(dq.STATUS_WAREHOUSE_NOT_FOUND) == before + 1
+
+    @pytest.mark.asyncio
+    async def test_third_attempt_after_two_refusals_goes_to_1c(self) -> None:
+        onec, np_client = _onec(), _np("not_found")
+        nf = _wh_count(dq.STATUS_WAREHOUSE_NOT_FOUND)
+        acc = _wh_count(dq.STATUS_WAREHOUSE_ACCEPTED)
+        first, second, third = await _submit_many(
+            [
+                _delivery_args(address=BRANCH),
+                _delivery_args(address="відділення 13"),
+                _delivery_args(address="відділення 14"),
+            ],
+            onec=onec,
+            np_client=np_client,
+            policy=_np_policy(),
+        )
+        assert first["reason"] == second["reason"] == dq.STATUS_WAREHOUSE_NOT_FOUND
+        assert third["status"] == "request_created"
+        onec.create_order_1c.assert_awaited_once()
+        assert onec.create_order_1c.await_args.kwargs["delivery_address"] == "відділення 14"
+        assert np_client.find_warehouse.await_count == 3
+        assert _wh_count(dq.STATUS_WAREHOUSE_NOT_FOUND) == nf + 2
+        assert _wh_count(dq.STATUS_WAREHOUSE_ACCEPTED) == acc + 1
+
+    @pytest.mark.asyncio
+    async def test_second_refusal_still_asks(self) -> None:
+        onec = _onec()
+        results = await _submit_many(
+            [_delivery_args(address=BRANCH)] * 2,
+            onec=onec,
+            np_client=_np("not_found"),
+            policy=_np_policy(),
+        )
+        assert [r["reason"] for r in results] == [dq.STATUS_WAREHOUSE_NOT_FOUND] * 2
+        onec.create_order_1c.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        ("verdict", "city"),
+        [
+            (None, CITY_REF),  # timeout / «To many requests»
+            (RuntimeError("boom"), CITY_REF),
+            ("found", None),  # city not resolved
+        ],
+        ids=["api-none", "api-raises", "city-unknown"],
+    )
+    async def test_api_failure_goes_through_unchecked(self, verdict: Any, city: Any) -> None:
+        onec = _onec()
+        np_client = _np(verdict, city=city)
+        before = _wh_count(dq.STATUS_WAREHOUSE_UNCHECKED)
+        nf = _wh_count(dq.STATUS_WAREHOUSE_NOT_FOUND)
+        (result,) = await _submit_many(
+            [_delivery_args(address=BRANCH)], onec=onec, np_client=np_client, policy=_np_policy()
+        )
+        assert result["status"] == "request_created"
+        onec.create_order_1c.assert_awaited_once()
+        assert _wh_count(dq.STATUS_WAREHOUSE_UNCHECKED) == before + 1
+        assert _wh_count(dq.STATUS_WAREHOUSE_NOT_FOUND) == nf
+
+    @pytest.mark.asyncio
+    async def test_api_failure_does_not_spend_a_refusal(self) -> None:
+        # None twice, then not_found: still the first refusal → a question.
+        onec, np_client = _onec(), _np()
+        np_client.find_warehouse.side_effect = [None, None, "not_found"]
+        results = await _submit_many(
+            [_delivery_args(address=BRANCH)] * 3,
+            onec=onec,
+            np_client=np_client,
+            policy=_np_policy(),
+        )
+        assert results[2]["reason"] == dq.STATUS_WAREHOUSE_NOT_FOUND
+        assert onec.create_order_1c.await_count == 2
+
+    @pytest.mark.asyncio
+    @pytest.mark.parametrize(
+        "address", ["вул. Шевченка 12", "вул. Шевченка, буд. №12, кв. 5", "відділення перевізника"]
+    )
+    async def test_street_address_is_not_checked(self, address: str) -> None:
+        onec, np_client = _onec(), _np("not_found")
+        (result,) = await _submit_many(
+            [_delivery_args(address=address)], onec=onec, np_client=np_client, policy=_np_policy()
+        )
+        assert result["status"] == "request_created"
+        np_client.resolve_city.assert_not_awaited()
+        np_client.find_warehouse.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_flag_off_is_not_checked(self) -> None:
+        onec, np_client = _onec(), _np("not_found")
+        (result,) = await _submit_many(
+            [_delivery_args(address=BRANCH)],
+            onec=onec,
+            np_client=np_client,
+            policy=_np_policy(flag=False),
+        )
+        assert result["status"] == "request_created"
+        np_client.resolve_city.assert_not_awaited()
+        np_client.find_warehouse.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_flag_on_without_key_is_not_checked(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(NP_KEY_ENV)
+        onec, np_client = _onec(), _np("not_found")
+        (result,) = await _submit_many(
+            [_delivery_args(address=BRANCH)], onec=onec, np_client=np_client, policy=_np_policy()
+        )
+        assert result["status"] == "request_created"
+        np_client.find_warehouse.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_pickup_is_not_checked(self) -> None:
+        onec, np_client = _onec(), _np("not_found")
+        session = CallSession(uuid.uuid4())
+        session.caller_phone = CALLER
+        session.tire_query = {"quantity": 2}
+        with (
+            patch("src.main._onec_client", onec),
+            patch("src.main._call_logger", None),
+            patch("src.main._redis", None),
+            patch("src.main._nova_poshta_client", return_value=np_client),
+        ):
+            router = _build_tool_router(session, store_client=_store(), network_policy=_np_policy())
+            await router.execute("get_pickup_points", {"city": "Київ"})
+            result = await router.execute(
+                SUBMIT_ORDER_TOOL, _pickup_args(address=BRANCH, city="Київ")
+            )
+        assert result["status"] == "request_created"
+        np_client.find_warehouse.assert_not_awaited()
