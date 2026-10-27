@@ -451,15 +451,24 @@ _CONFIRM_KEYWORDS: tuple[str, ...] = (
 
 
 # The utterance ends on an open question («Яка підходить?», «Який час
-# оберемо?», «…правильно? Яка марка вашого автомобіля?») — the caller has to
-# name something, so «скажіть "так" або "ні"» is the wrong re-prompt even when
-# a confirmation keyword sits in it (call f9cca234: a list of three tyres
-# ending «Яка підходить?» got the yes/no re-prompt; 5 of 205 keyword hits in
-# 60 days of prod turns had this shape).
-_OPEN_LAST_QUESTION_RE = re.compile(
-    r"(?:^|[.!?…]\s*)(?:а\s+|то\s+)?(?:яка|який|яке|які|котр\w*)\s[^.!?…]*\?\s*$",
-    re.IGNORECASE,
-)
+# оберемо?», «…правильно? Яка марка вашого автомобіля?») or a choice between
+# named options («…вірно? Шиповані чи без шипів?») — the caller has to name
+# something, so «скажіть "так" або "ні"» is the wrong re-prompt even when a
+# confirmation keyword sits in it. Calls f9cca234 and 9b3a975f; in 60 days of
+# prod turns with a keyword, 5 of 205 ended on an open question and 5 of 347
+# on a «чи» choice — every one of them a wrong yes/no re-prompt. «…чи ні?» is
+# still yes/no.
+_LAST_QUESTION_RE = re.compile(r"(?:^|[.!?…]\s*)([^.!?…]*\?)\s*$")
+_OPEN_QUESTION_START_RE = re.compile(r"^(?:а\s+|то\s+)?(?:яка|який|яке|які|котр\w*)\s")
+_CHOICE_RE = re.compile(r"\bчи\b(?!\s+ні\b)")
+
+
+def _ends_on_open_question(lowered: str) -> bool:
+    m = _LAST_QUESTION_RE.search(lowered)
+    if m is None:
+        return False
+    question = m.group(1).strip()
+    return bool(_OPEN_QUESTION_START_RE.search(question) or _CHOICE_RE.search(question))
 
 
 def _norm_words(text: str) -> str:
@@ -472,7 +481,7 @@ def _is_pending_confirmation(bot_utterance: str) -> bool:
     if not bot_utterance:
         return False
     lowered = bot_utterance.lower()
-    if _OPEN_LAST_QUESTION_RE.search(lowered):
+    if _ends_on_open_question(lowered):
         return False
     return any(kw in lowered for kw in _CONFIRM_KEYWORDS)
 
