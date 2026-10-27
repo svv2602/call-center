@@ -118,6 +118,25 @@ class TshinaApiSettings(BaseSettings):
         return bool(self.base_url.strip() and self.token.strip())
 
 
+class NovaPoshtaSettings(BaseSettings):
+    """Nova Poshta JSON API — delivery price quotes and warehouse lookup.
+
+    The API key is deliberately NOT a field here: the tenant config names the
+    env variable that holds it (``network_policy.delivery_quote_key_env``) and
+    the caller hands the key to ``NovaPoshtaClient`` as a string. Parcels are
+    sent from ``sender_city``. ``timeout_sec`` is short — the client runs
+    inside a live call.
+    """
+
+    api_url: str = "https://api.novaposhta.ua/v2.0/json/"
+    timeout_sec: float = 4.0
+    sender_city: str = "Дніпро"
+    cache_ttl_refs_sec: int = 86400
+    cache_ttl_price_sec: int = 6 * 3600
+
+    model_config = {"env_prefix": "NOVA_POSHTA_"}
+
+
 class DatabaseSettings(BaseSettings):
     url: str = "postgresql+asyncpg://callcenter:callcenter_dev_pass@localhost:5432/callcenter_dev"
 
@@ -352,6 +371,7 @@ class Settings(BaseSettings):
     store_api: StoreAPISettings = StoreAPISettings()
     onec: OneCSettings = OneCSettings()
     tshina_api: TshinaApiSettings = TshinaApiSettings()
+    nova_poshta: NovaPoshtaSettings = NovaPoshtaSettings()
     database: DatabaseSettings = DatabaseSettings()
     redis: RedisSettings = RedisSettings()
     ari: ARISettings = ARISettings()
