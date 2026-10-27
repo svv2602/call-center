@@ -75,6 +75,13 @@ or two named, another tyre or a comparison in the sentence («ніж у …», �
   availability or advice in the sentence («за 3700 гривень», «є в
   наявності», «раджу»), a negation or a question.
 
+- ``price`` — an amount said before «гривень / грн» for the one named tyre
+  that is not its shown ``price``, or a «разом / за комплект» amount that is
+  not price × the count said in the sentence (call 51f0652f: 3118 said as
+  «три тисячі», 2 × 3118 as «шість тисяч»). Only the wrong amount is replaced,
+  by digits (`tire_price_claim`); the rest of the sentence is kept. Silent:
+  two tyres named, no tyre, a total with no count said.
+
 ``novelty`` and ``unbacked_rating`` are silent in a turn whose knowledge
 base result itself backs the claim: an article that says «новинка / нова
 модель / з'явилась» backs novelty, one that says «тест / рейтинг / ADAC»
@@ -139,6 +146,7 @@ RULE_UNBACKED_RATING = "unbacked_rating"
 RULE_EU_CLASS = "eu_class"
 RULE_STUD = "stud"
 RULE_RESTATED_VERDICT = "restated_verdict"
+RULE_PRICE = "price"
 
 #: Neutral sentences — no fact the code has not checked. ``restated_verdict``
 #: has none: its sentence is dropped (the code's phrase was already said).
@@ -1101,6 +1109,25 @@ def rule_restated_verdict(sentence: str, ctx: ClaimContext) -> Refusal | None:
 
 #: The rule registry: first match wins and names the refusal. New rules
 #: are appended here; the loops never change.
+def rule_price(sentence: str, ctx: ClaimContext) -> Refusal | None:
+    """A price said for the one named tyre that is not its shown price.
+
+    The sentence is kept with only the wrong amount replaced (`tire_price_claim`).
+    """
+    from src.agent.parsers.tire_query import parse_quantity
+    from src.agent.tire_price_claim import price_corrections
+
+    subject = _subject(sentence, ctx)
+    price = _price(subject) if subject is not None else None
+    if price is None:
+        return None
+    quantity = parse_quantity(sentence)
+    fixed = price_corrections(sentence, price, quantity.count if quantity else None)
+    if fixed is None:
+        return None
+    return Refusal(RULE_PRICE, fixed, fixed=False)
+
+
 RULES: list[tuple[str, Rule]] = [
     (RULE_CHEAPEST, rule_cheapest),
     (RULE_NOVELTY, rule_novelty),
@@ -1109,6 +1136,7 @@ RULES: list[tuple[str, Rule]] = [
     (RULE_EU_CLASS, rule_eu_class),
     (RULE_STUD, rule_stud),
     (RULE_RESTATED_VERDICT, rule_restated_verdict),
+    (RULE_PRICE, rule_price),
 ]
 
 

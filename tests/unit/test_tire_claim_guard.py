@@ -329,7 +329,7 @@ class TestUnbackedRating:
     @pytest.mark.parametrize(
         "sentence",
         [
-            "Варіант номер один — Bridgestone Blizzak 6 за 4200 гривень.",
+            "Варіант номер один — Bridgestone Blizzak 6 за 8625 гривень.",
             "Номер один у списку — Firestone.",
             "Ось топ-3 варіанти у вашому розмірі.",
             "ADAC щороку тестує зимові шини.",
