@@ -702,16 +702,6 @@ async def _tyre_turn(reply: str, quotes: list[int]) -> list[str]:
 @pytest.mark.usefixtures("np_key")
 class TestTyrePriceGuardNeighbour:
     @pytest.mark.asyncio
-    @pytest.mark.xfail(
-        strict=True,
-        reason=(
-            "Finding (wave 3-E): tire_claim_guard `price` rewrites every amount of a "
-            "sentence naming one tyre to its price — «орієнтовно 810 грн» becomes "
-            "«орієнтовно 3118 грн», and delivery_sum then replaces the sentence with the "
-            "tariff line. The fix is in tire_price_claim.py / tire_claim_guard.py, outside "
-            "this wave's Scope (Scope drift request in PROGRESS)."
-        ),
-    )
     async def test_tyre_and_delivery_sum_in_one_sentence_survive(self) -> None:
         from src.agent.tire_claim_guard import RULE_PRICE
         from src.monitoring.metrics import tire_claim_refused_total
@@ -724,12 +714,14 @@ class TestTyrePriceGuardNeighbour:
         assert _network_counts() == net_before
 
     @pytest.mark.asyncio
-    async def test_a_rewritten_delivery_sum_never_reaches_tts(self) -> None:
-        """Until the tyre guard is fixed, `delivery_sum` keeps the caller from
-        hearing the tyre price as the delivery sum."""
+    async def test_an_unquoted_delivery_sum_next_to_a_tyre_never_reaches_tts(self) -> None:
+        """The tyre guard leaves a delivery sum alone (wave 4-G); a sum no quote
+        backs is still `delivery_sum`'s to replace, a tyre named or not."""
         before = _counter(RULE_DELIVERY_SUM)
-        joined = " ".join(await _tyre_turn(TYRE_AND_DELIVERY, [810]))
-        assert "орієнтовно 3118" not in joined
+        reply = TYRE_AND_DELIVERY.replace("810", "950")
+        assert reply != TYRE_AND_DELIVERY
+        joined = " ".join(await _tyre_turn(reply, [810]))
+        assert "950" not in joined
         assert PK_TARIFF in joined
         assert _counter(RULE_DELIVERY_SUM) == before + 1
 

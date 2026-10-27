@@ -6,7 +6,7 @@ from __future__ import annotations
 import pytest
 
 from src.agent.tire_claim_guard import RULE_PRICE, TireClaimState, guard_tire_claims_text
-from src.agent.tire_price_claim import find_amounts, price_corrections
+from src.agent.tire_price_claim import find_amounts, in_delivery_clause, price_corrections
 
 ITEMS = [
     {"brand": "Sportrak", "model": "Snowtrek SP709", "price": 3118},
@@ -96,3 +96,43 @@ class TestRule:
         )
         guard_tire_claims_text("Sportrak Snowtrek SP709 за три тисячі гривень.", _state(), "")
         assert seen == [RULE_PRICE]
+
+
+class TestDeliverySumIsNotATyrePrice:
+    """A sum in a delivery / courier / COD-fee clause is not the tyre's price —
+    the rule rewrote «орієнтовно 810 грн» to «орієнтовно 3118 грн»."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Sportrak Snowtrek SP709 — 3118 грн, доставка Новою поштою — орієнтовно 810 грн.",
+            "Sportrak Snowtrek SP709 — 3118 грн, кур'єром — ще 60 грн.",
+            "Sportrak Snowtrek SP709 — 3118 грн, комісія за накладений платіж — 260 грн.",
+            "Sportrak Snowtrek SP709 — 3118 грн, комісія — 260 грн.",
+            "Sportrak Snowtrek SP709 — 3118 грн; разом із доставкою 3928 грн.",
+            "Sportrak Snowtrek SP709 — 3118 грн, а відправка коштуватиме 120 гривень.",
+        ],
+    )
+    def test_delivery_sum_survives_the_guard(self, text: str) -> None:
+        assert guard_tire_claims_text(text, _state(), "") == text
+
+    def test_tyre_price_in_the_same_sentence_is_still_fixed(self) -> None:
+        text = "Sportrak Snowtrek SP709 — 3000 грн, доставка Новою поштою — орієнтовно 810 грн."
+        assert guard_tire_claims_text(text, _state(), "") == (
+            "Sportrak Snowtrek SP709 — 3118 грн, доставка Новою поштою — орієнтовно 810 грн."
+        )
+
+    def test_a_dash_does_not_end_the_delivery_clause(self) -> None:
+        text = "доставка Новою поштою — орієнтовно 810 грн"
+        assert in_delivery_clause(text, text.index("810"))
+
+    def test_a_comma_ends_the_delivery_clause(self) -> None:
+        text = "доставка безкоштовна, Sportrak за 3000 грн"
+        assert not in_delivery_clause(text, text.index("3000"))
+        assert price_corrections(text, 3118, None) == "доставка безкоштовна, Sportrak за 3118 грн"
+
+    def test_a_delivery_word_after_the_sum_does_not_count(self) -> None:
+        text = "Sportrak Snowtrek SP709 за 3000 грн з доставкою."
+        assert guard_tire_claims_text(text, _state(), "") == (
+            "Sportrak Snowtrek SP709 за 3118 грн з доставкою."
+        )

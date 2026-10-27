@@ -12,6 +12,12 @@ must equal its price; an amount after «разом / всього / загало
 комплект …» must equal price × the count said in the sentence (none said →
 not judged). Only the wrong amount is replaced, by digits — the rest of the
 sentence (the size, «вірно?», the delivery question) is kept.
+
+An amount in a delivery clause is not a tyre price: «SP709 — 3118 грн,
+доставка Новою поштою — орієнтовно 810 грн» must keep its 810. A clause is cut
+by commas, semicolons and «а / але / но / проте / однак» — never by a dash —
+and a delivery / courier / cash-on-delivery-fee word in it before the amount
+leaves the amount alone (`in_delivery_clause`).
 """
 
 from __future__ import annotations
@@ -34,6 +40,16 @@ _TOTAL_MARKER = re.compile(
 )
 _PER_SET_AFTER = re.compile(
     r"^\s*(?:за\s+комплект|за\s+(?:\d|дві|два|чотири)\s+шин)", re.IGNORECASE
+)
+
+#: Clause borders for a delivery sum — the same as network_claim_guard's: a dash
+#: joins «доставка Новою поштою — орієнтовно 810 грн» into one clause.
+_CLAUSE_SPLIT = re.compile(r"[,;]|\s(?:а|але|но|проте|однак)\s", re.IGNORECASE)
+#: Delivery, courier and cash-on-delivery-fee words: a sum after one is not a tyre price.
+_DELIVERY_WORD = re.compile(
+    r"(?<!\w)(?:достав|відправк|отправк|пересил|кур['ʼ’]?[єе]р|курьер"
+    r"|накладен|наложен|комісі|комисси)\w*",
+    re.IGNORECASE,
 )
 
 
@@ -107,12 +123,22 @@ def find_amounts(sentence: str) -> list[Amount]:
     return out
 
 
+def in_delivery_clause(sentence: str, pos: int) -> bool:
+    """A delivery / courier / COD-fee word in the clause of ``pos``, before ``pos``."""
+    start = 0
+    for border in _CLAUSE_SPLIT.finditer(sentence, 0, pos):
+        start = border.end()
+    return _DELIVERY_WORD.search(sentence, start, pos) is not None
+
+
 def price_corrections(sentence: str, price: float, count: int | None) -> str | None:
     """``sentence`` with its wrong amounts replaced, or ``None`` when all are right."""
     unit = round(price)
     fixed = sentence
     changed = False
     for amount in reversed(find_amounts(sentence)):
+        if in_delivery_clause(sentence, amount.start):
+            continue
         if amount.total:
             if count is None or count < 2:
                 continue
