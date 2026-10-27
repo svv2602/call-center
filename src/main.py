@@ -1977,7 +1977,15 @@ def _build_tool_router(
             if not vehicle or not vehicle.get("brand") or not vehicle.get("model"):
                 return {"found": False, "vehicle_resolved": False}
             params = {**params, **vehicle}
-        return await client.get_vehicle_tire_sizes(**params)
+        result = await client.get_vehicle_tire_sizes(**params)
+        if sales:
+            from src.agent.tire_size_check import vehicle_sizes
+
+            stock, acceptable = vehicle_sizes(result)
+            if stock:
+                session.vehicle_stock_sizes = stock
+                session.vehicle_acceptable_sizes = acceptable
+        return result
 
     router.register("get_vehicle_tire_sizes", _get_vehicle_tire_sizes)
 
@@ -1995,6 +2003,27 @@ def _build_tool_router(
                 logger.info(
                     "search_tires: season guard for call %s — season not named by the caller",
                     session.channel_uuid,
+                )
+                return refusal
+            # A size one number off the car's factory size: a misheard number
+            # is asked about before tyres that do not fit are offered.
+            from src.agent.tire_size_check import tire_size_refusal
+
+            caller_turns = sum(1 for t in session.dialog_history if t.speaker == "user")
+            refusal = tire_size_refusal(
+                params,
+                stock=session.vehicle_stock_sizes,
+                acceptable=session.vehicle_acceptable_sizes,
+                refused=session.tire_size_refused,
+                caller_turns=caller_turns,
+            )
+            if refusal is not None:
+                session.tire_size_refused[refusal["asked_size"]] = caller_turns
+                logger.info(
+                    "search_tires: size guard for call %s — %s asked, factory %s",
+                    session.channel_uuid,
+                    refusal["asked_size"],
+                    refusal["factory_size"],
                 )
                 return refusal
         network = session.network_id or "ProKoleso"

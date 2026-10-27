@@ -271,6 +271,12 @@ class CallSession:
         # Loop-breaker of the season guard on `search_tires`: it refuses once
         # per call, never a second time.
         self.tire_season_guard_fired: bool = False
+        # Size guard of `search_tires` (`tire_size_check`): the car's factory
+        # and acceptable sizes from its last found `get_vehicle_tire_sizes`,
+        # and each size refused → caller-turn count at the refusal.
+        self.vehicle_stock_sizes: list[str] = []
+        self.vehicle_acceptable_sizes: list[str] = []
+        self.tire_size_refused: dict[str, int] = {}
         # The last tyre offer the caller heard (sales, written by the
         # `search_tires` wrapper after a search with items): per-tyre prices
         # and ids of the shown items, and the size/season/needs it was for.
@@ -667,6 +673,9 @@ class CallSession:
             "fsm_filled_fields": dict(self.fsm_filled_fields),
             "tire_query": dict(self.tire_query),
             "tire_season_guard_fired": self.tire_season_guard_fired,
+            "vehicle_stock_sizes": list(self.vehicle_stock_sizes),
+            "vehicle_acceptable_sizes": list(self.vehicle_acceptable_sizes),
+            "tire_size_refused": dict(self.tire_size_refused),
             "last_tire_offer": dict(self.last_tire_offer) if self.last_tire_offer else None,
             "fsm_prev_state": self.fsm_prev_state,
             "fsm_history": list(self.fsm_history[-FSM_HISTORY_LIMIT:]),
@@ -783,6 +792,15 @@ class CallSession:
                 type(tire_query).__name__,
             )
         session.tire_season_guard_fired = data.get("tire_season_guard_fired") is True
+        for name in ("vehicle_stock_sizes", "vehicle_acceptable_sizes"):
+            sizes = data.get(name)
+            if isinstance(sizes, list):
+                setattr(session, name, [str(s) for s in sizes if s])
+        refused = data.get("tire_size_refused")
+        if isinstance(refused, dict):
+            session.tire_size_refused = {
+                str(k): v for k, v in refused.items() if isinstance(v, int)
+            }
         offer = data.get("last_tire_offer")
         if isinstance(offer, dict) and offer:
             session.last_tire_offer = {
