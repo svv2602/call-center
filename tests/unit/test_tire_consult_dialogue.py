@@ -278,6 +278,28 @@ class TestMergeTireQuery:
         assert merge_tire_query({}, "хочу записатись на шиномонтаж, зимову резину") == {}
 
     @pytest.mark.parametrize(
+        ("text", "season"),
+        [
+            ("з машини на Tiguan 2019 года зимние", "winter"),
+            ("мне на зиму на гольф", "winter"),
+            ("літні на octavia", "summer"),
+        ],
+    )
+    def test_first_line_season_starts(self, text: str, season: str) -> None:
+        # Call f9cca234: «зимние» in the first line was dropped and the bot
+        # asked the season again after the size.
+        state = merge_tire_query({}, text)
+        assert state == {"season": season}
+        then = merge_tire_query(state, "235/55 R18", consult_started=True)
+        assert then == {"season": season, "sizes": ["235/55 R18"]}
+
+    @pytest.mark.parametrize(
+        "text", ["хочу переобутися на зимову", "літні чи зимові краще?", "без різниці"]
+    )
+    def test_first_line_without_a_named_season_does_not_start(self, text: str) -> None:
+        assert merge_tire_query({}, text) == {}
+
+    @pytest.mark.parametrize(
         ("text", "budget"),
         [
             ("а є гума до шести тисяч", {"amount": 6000, "scope": None, "is_cap": True}),

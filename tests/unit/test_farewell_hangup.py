@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import uuid
+from types import SimpleNamespace
 from typing import Any
 from unittest.mock import patch
 
@@ -184,16 +185,21 @@ class TestGraceWindowIsActuallyUsed:
     async def _captured_timeout(*, farewell_spoken: bool) -> float:
         h = Harness(session=CallSession(uuid.uuid4()))
         h.pipeline._farewell_spoken = farewell_spoken
-        seen: list[float] = []
+        # The wait polls in short slices (orphan-interim check); a fake clock
+        # advanced by each slice gives the total time waited.
+        clock = [1000.0]
 
         async def _fake_wait_for(coro: Any, timeout: float) -> None:
-            seen.append(timeout)
+            clock[0] += timeout
             coro.close()
             raise TimeoutError
 
-        with patch.object(asyncio, "wait_for", _fake_wait_for):
+        with (
+            patch.object(asyncio, "wait_for", _fake_wait_for),
+            patch("src.core.pipeline.time", SimpleNamespace(monotonic=lambda: clock[0])),
+        ):
             assert await h.pipeline._wait_for_final_transcript() is None
-        return seen[0]
+        return clock[0] - 1000.0
 
     @pytest.mark.asyncio
     async def test_after_goodbye_the_wait_is_the_grace_window(self) -> None:

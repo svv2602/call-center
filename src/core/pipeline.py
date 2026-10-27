@@ -63,6 +63,7 @@ from src.monitoring.metrics import (
     fsm_interrupt_total,
     fsm_voice_total,
     multi_car_booking_total,
+    stt_orphan_interim_total,
     tts_delivery_ms,
 )
 from src.stt.base import STTConfig, STTEngine, Transcript
@@ -80,6 +81,18 @@ _BARGE_IN_SUPPRESSION_SEC = 0.3
 # a size with brief pauses). We buffer arrivals within this window and merge them.
 # Actual value comes from STTConfig.transcript_buffer_sec; this is a fallback only.
 _TRANSCRIPT_BUFFER_SEC_DEFAULT = 1.2
+
+# Caller speech that STT shows as interim but never finalizes. Call f9cca234
+# (2026-10-27) lost three utterances this way — «зимние без», «шины что дела…»
+# — and the caller heard 16 s of silence, then «Ви ще на лінії?». A final
+# normally lands 0.8–1.1 s after the last interim; 3 s without one means it is
+# not coming, and the last interim becomes the turn.
+_ORPHAN_INTERIM_SEC = 3.0
+# How often the final-transcript wait wakes to check for an orphan interim.
+_ORPHAN_POLL_SEC = 0.25
+# A final that still arrives this soon after its interim was promoted repeats
+# the promoted turn and is dropped.
+_LATE_FINAL_WINDOW_SEC = 10.0
 
 # Timeout for contextual farewell LLM call (seconds)
 _FAREWELL_LLM_TIMEOUT_SEC = 3
@@ -437,11 +450,30 @@ _CONFIRM_KEYWORDS: tuple[str, ...] = (
 )
 
 
+# The utterance ends on an open question («Яка підходить?», «Який час
+# оберемо?», «…правильно? Яка марка вашого автомобіля?») — the caller has to
+# name something, so «скажіть "так" або "ні"» is the wrong re-prompt even when
+# a confirmation keyword sits in it (call f9cca234: a list of three tyres
+# ending «Яка підходить?» got the yes/no re-prompt; 5 of 205 keyword hits in
+# 60 days of prod turns had this shape).
+_OPEN_LAST_QUESTION_RE = re.compile(
+    r"(?:^|[.!?…]\s*)(?:а\s+|то\s+)?(?:яка|який|яке|які|котр\w*)\s[^.!?…]*\?\s*$",
+    re.IGNORECASE,
+)
+
+
+def _norm_words(text: str) -> str:
+    """Lower-cased words joined by single spaces, punctuation dropped."""
+    return " ".join(re.findall(r"\w+", text.lower()))
+
+
 def _is_pending_confirmation(bot_utterance: str) -> bool:
     """True if bot's last utterance ended with a yes/no confirmation prompt."""
     if not bot_utterance:
         return False
     lowered = bot_utterance.lower()
+    if _OPEN_LAST_QUESTION_RE.search(lowered):
+        return False
     return any(kw in lowered for kw in _CONFIRM_KEYWORDS)
 
 
@@ -867,7 +899,7 @@ def merge_tire_query(
     """``state`` updated with what ``text`` says about the tyres wanted.
 
     Pure: returns a new dict. Collection starts on a full size, a nail type,
-    a tyre brand, a sales word (``sales_intents``) or a budget cap / scope
+    a tyre brand, a sales word (``sales_intents``), a named season or a budget cap / scope
     with a tyre word («шини до 6000») in an utterance that is not a fitting
     request; once started (``state`` non-empty or
     ``consult_started``) every later utterance is read. A newer value
@@ -918,6 +950,10 @@ def merge_tire_query(
         started = bool(full or nail or brands) or bool(
             (
                 sales_intents(text)
+                # A named season starts it too: «Tiguan 2019 года зимние» as the
+                # first line (call f9cca234) lost «зимние», and the bot asked
+                # the season again after the size.
+                or parse_tire_season(text) in ("summer", "winter", "all_season")
                 or (
                     first_budget is not None
                     and (first_budget.is_cap or first_budget.scope is not None)
@@ -1092,6 +1128,12 @@ class CallPipeline:
         self._speaking = False
         self._barge_in_event = barge_in_event or asyncio.Event()
         self._final_transcript_queue: asyncio.Queue[Transcript | None] = asyncio.Queue()
+        # Latest interim heard while listening and not yet finalized: text and
+        # monotonic time. Cleared by a final. See _ORPHAN_INTERIM_SEC.
+        self._pending_interim: tuple[str, float] | None = None
+        # Text and time of the last interim promoted to a turn — a late final
+        # of the same utterance is dropped (_LATE_FINAL_WINDOW_SEC).
+        self._promoted_interim: tuple[str, float] | None = None
         # Set once the bot has said goodbye; shortens the next silence wait to
         # _FAREWELL_HANGUP_GRACE_SEC. Cleared as soon as the caller speaks.
         self._farewell_spoken = False
@@ -1197,6 +1239,16 @@ class CallPipeline:
                         allowed,
                         self._session.channel_uuid,
                     )
+                elif not self._network_offers_fitting():
+                    # The FSM is the fitting machine. On a network without
+                    # fitting (Про Колесо) it only misreads a tyre call — call
+                    # f9cca234: intent parser_null 3/3 → escalate to TRANSFER,
+                    # held back by the classifier's confidence floor alone,
+                    # plus a ~1.4 s classifier call on every turn.
+                    logger.info(
+                        "FSM off: network has no fitting service call=%s",
+                        self._session.channel_uuid,
+                    )
                 else:
                     mode = FSM_MODE_SHADOW if fsm.shadow_mode else FSM_MODE_LIVE
         except Exception:
@@ -1268,6 +1320,19 @@ class CallPipeline:
         if selected is None and len(self._session.fitting_stations_seen) == 1:
             selected = self._session.fitting_stations_seen[0]
         return selected
+
+    def _network_offers_fitting(self) -> bool:
+        """False only when the network's configured policy leaves fitting out.
+
+        An unconfigured or missing policy says nothing about services and
+        keeps the FSM — the fitting-only scope it was built for.
+        """
+        holder = self._streaming_loop if self._streaming_loop is not None else self._agent
+        policy = getattr(holder, "_network_policy", None)
+        if policy is None or getattr(policy, "configured", False) is not True:
+            return True
+        services = getattr(policy, "services", None)
+        return not isinstance(services, frozenset) or "fitting" in services
 
     def _sales_enabled(self) -> bool:
         """``NetworkPolicy.sales_enabled`` of this call's LLM loop (off without one)."""
@@ -3504,8 +3569,13 @@ class CallPipeline:
         try:
             async for transcript in self._stt.get_transcripts():
                 if transcript.is_final and transcript.text.strip():
+                    self._pending_interim = None
+                    if self._is_late_final_of_promoted(transcript.text):
+                        continue
                     await self._final_transcript_queue.put(transcript)
                 elif not transcript.is_final and transcript.text.strip():
+                    if not self._speaking:
+                        self._pending_interim = (transcript.text.strip(), time.monotonic())
                     if self._speaking:
                         self._barge_in_event.set()
                         barge_in_total.inc()
@@ -4749,17 +4819,70 @@ class CallPipeline:
         Returns None on silence timeout. Once the bot has said goodbye the
         wait shrinks to `_FAREWELL_HANGUP_GRACE_SEC` — just enough for a
         caller who still has a question to speak up.
+
+        A caller whose speech STT shows as interim is not silent: the wait
+        never times out while an interim is pending — it ends with the final
+        or, `_ORPHAN_INTERIM_SEC` after the last interim, with that interim
+        promoted to the turn (the farewell grace window is shorter than that).
         """
         timeout = (
             _FAREWELL_HANGUP_GRACE_SEC if self._farewell_spoken else SILENCE_TIMEOUT_SEC
         )
-        try:
-            return await asyncio.wait_for(
-                self._get_next_final_transcript(),
-                timeout=timeout,
-            )
-        except TimeoutError:
-            return None
+        deadline = time.monotonic() + timeout
+        while True:
+            now = time.monotonic()
+            pending = self._pending_interim
+            if pending is not None:
+                text, heard_at = pending
+                if now - heard_at >= _ORPHAN_INTERIM_SEC:
+                    return self._promote_orphan_interim(text, now)
+            elif now >= deadline:
+                return None
+            try:
+                return await asyncio.wait_for(
+                    self._get_next_final_transcript(),
+                    timeout=min(deadline - now, _ORPHAN_POLL_SEC)
+                    if pending is None
+                    else _ORPHAN_POLL_SEC,
+                )
+            except TimeoutError:
+                continue
+
+    def _promote_orphan_interim(self, text: str, now: float) -> Transcript:
+        """Turn an interim STT never finalized into the caller's turn."""
+        self._pending_interim = None
+        self._promoted_interim = (text, now)
+        stt_orphan_interim_total.labels(event="promoted").inc()
+        logger.info(
+            "stt_orphan_interim_promoted call=%s text=%r",
+            self._session.channel_uuid,
+            text[:120],
+        )
+        return Transcript(text=text, is_final=True, confidence=0.0)
+
+    def _is_late_final_of_promoted(self, final_text: str) -> bool:
+        """True if a final repeats an interim already promoted to a turn.
+
+        Only a final that adds nothing is dropped: one carrying more words
+        than the promoted interim goes through as the caller's next turn.
+        """
+        promoted = self._promoted_interim
+        if promoted is None:
+            return False
+        text, at = promoted
+        if time.monotonic() - at > _LATE_FINAL_WINDOW_SEC:
+            self._promoted_interim = None
+            return False
+        if f" {_norm_words(final_text)} " not in f" {_norm_words(text)} ":
+            return False
+        self._promoted_interim = None
+        stt_orphan_interim_total.labels(event="late_final_dropped").inc()
+        logger.info(
+            "stt_orphan_late_final_dropped call=%s text=%r",
+            self._session.channel_uuid,
+            final_text[:120],
+        )
+        return True
 
     async def _get_next_final_transcript(self) -> Transcript:
         """Block until a final transcript with non-empty text arrives."""

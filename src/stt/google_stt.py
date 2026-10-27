@@ -395,6 +395,8 @@ class GoogleSTTEngine:
 
             for result in response.results:
                 if not result.alternatives:
+                    if result.is_final:
+                        logger.info("STT final without alternatives")
                     continue
 
                 best = result.alternatives[0]
@@ -409,6 +411,10 @@ class GoogleSTTEngine:
                     language=language,
                 )
 
+                if not transcript.text and result.is_final:
+                    # Pairs with the pipeline's orphan-interim promotion:
+                    # tells "final came empty" from "no final at all".
+                    logger.info("STT final empty (lang=%s)", language)
                 if transcript.text:
                     await self._transcript_queue.put(transcript)
 

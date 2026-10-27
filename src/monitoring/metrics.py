@@ -488,6 +488,13 @@ barge_in_total = Counter(
     "Barge-in interruptions detected (caller spoke while agent was speaking)",
 )
 
+stt_orphan_interim_total = Counter(
+    "callcenter_stt_orphan_interim_total",
+    "Caller speech STT showed as interim but never finalized: promoted to a "
+    "turn, or a late final of an already promoted utterance dropped",
+    ["event"],  # promoted | late_final_dropped
+)
+
 
 # --- Echo cancellation metrics ---
 
