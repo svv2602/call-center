@@ -125,11 +125,13 @@ class NovaPoshtaSettings(BaseSettings):
     env variable that holds it (``network_policy.delivery_quote_key_env``) and
     the caller hands the key to ``NovaPoshtaClient`` as a string. Parcels are
     sent from ``sender_city``. ``timeout_sec`` is short — the client runs
-    inside a live call.
+    inside a live call; ``deadline_sec`` caps a whole quote or branch check
+    (on a cold cache up to five requests run one after another).
     """
 
     api_url: str = "https://api.novaposhta.ua/v2.0/json/"
     timeout_sec: float = 4.0
+    deadline_sec: float = 6.0
     sender_city: str = "Дніпро"
     cache_ttl_refs_sec: int = 86400
     cache_ttl_price_sec: int = 6 * 3600

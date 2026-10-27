@@ -683,3 +683,33 @@ class TestWarehouseNumber:
         )
         assert "відділення №12 у місті Київ" in q["message"]
         assert "НЕ створено" in q["message"]
+
+
+class TestDeadline:
+    """One deadline for the whole quote: a slow Nova Poshta never holds the caller."""
+
+    def test_past_the_deadline_is_the_tariff_line(
+        self, monkeypatch: pytest.MonkeyPatch, np_key: None
+    ) -> None:
+        from types import SimpleNamespace
+
+        # Settings.nova_poshta is built at import: the deadline is patched where read.
+        monkeypatch.setattr(
+            "src.main.get_settings",
+            lambda: SimpleNamespace(nova_poshta=SimpleNamespace(deadline_sec=0.05)),
+        )
+
+        async def _slow(*_: Any, **__: Any) -> str:
+            await asyncio.sleep(1)
+            return "city-ref-kyiv"
+
+        np_client = _np(Quote(cost=810.0, door_cost=None, cod_fee=260.0))
+        np_client.resolve_city.side_effect = _slow
+        before = _count("api_failed")
+        (_, res), session = asyncio.run(
+            _drive([SEARCH, _ask([{"product_id": "t-mich", "quantity": 4}])], np_client=np_client)
+        )
+        assert res == {"status": "api_failed", "phrase": TARIFF}
+        np_client.quote.assert_not_awaited()
+        assert session.delivery_quotes == []
+        assert _count("api_failed") == before + 1

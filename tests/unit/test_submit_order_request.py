@@ -506,6 +506,33 @@ class TestWarehouseCheck:
         assert {o: _wh_count(o) for o in before} == before
 
     @pytest.mark.asyncio
+    async def test_past_the_deadline_goes_through_unchecked(
+        self, monkeypatch: pytest.MonkeyPatch, np_key_env: None
+    ) -> None:
+        import asyncio
+        from types import SimpleNamespace
+
+        # Settings.nova_poshta is built at import: the deadline is patched where read.
+        monkeypatch.setattr(
+            "src.main.get_settings",
+            lambda: SimpleNamespace(nova_poshta=SimpleNamespace(deadline_sec=0.05)),
+        )
+
+        async def _slow(*_: Any, **__: Any) -> str:
+            await asyncio.sleep(1)
+            return "not_found"
+
+        onec, np_client = _onec(), _np()
+        np_client.find_warehouse.side_effect = _slow
+        before = _wh_count(dq.STATUS_WAREHOUSE_UNCHECKED)
+        (result,) = await _submit_many(
+            [_delivery_args(address=BRANCH)], onec=onec, np_client=np_client, policy=_np_policy()
+        )
+        assert result["status"] == "request_created"
+        onec.create_order_1c.assert_awaited_once()
+        assert _wh_count(dq.STATUS_WAREHOUSE_UNCHECKED) == before + 1
+
+    @pytest.mark.asyncio
     async def test_not_found_once_is_a_question_and_1c_is_not_called(self) -> None:
         onec, np_client = _onec(), _np("not_found")
         before = _wh_count(dq.STATUS_WAREHOUSE_NOT_FOUND)

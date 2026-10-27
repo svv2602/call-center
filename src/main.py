@@ -2389,15 +2389,30 @@ def _build_tool_router(
         )
         quote = None
         if np_client is not None:
-            try:
+
+            async def _lookup() -> Any:
                 city_ref = await np_client.resolve_city(city_name)
-                if city_ref is not None:
-                    quote = await np_client.quote(
-                        city_ref,
-                        dq.cargo_lines(lines),
-                        declared_value=dq.declared_value(lines),
-                        door=door,
-                    )
+                if city_ref is None:
+                    return None
+                return await np_client.quote(
+                    city_ref,
+                    dq.cargo_lines(lines),
+                    declared_value=dq.declared_value(lines),
+                    door=door,
+                )
+
+            try:
+                # One deadline for the whole quote: on a cold cache it is up to
+                # five Nova Poshta requests in a row, and the caller is waiting.
+                quote = await asyncio.wait_for(
+                    _lookup(), timeout=get_settings().nova_poshta.deadline_sec
+                )
+            except TimeoutError:
+                logger.warning(
+                    "get_delivery_cost: Nova Poshta past the deadline for call %s",
+                    session.channel_uuid,
+                )
+                quote = None
             except Exception:
                 logger.warning(
                     "get_delivery_cost: Nova Poshta lookup raised for call %s",
@@ -2587,10 +2602,24 @@ def _build_tool_router(
         )
         verdict = None
         if np_client is not None:
-            try:
+
+            async def _lookup() -> Any:
                 city_ref = await np_client.resolve_city(city)
-                if city_ref is not None:
-                    verdict = await np_client.find_warehouse(city_ref, number)
+                if city_ref is None:
+                    return None
+                return await np_client.find_warehouse(city_ref, number)
+
+            try:
+                verdict = await asyncio.wait_for(
+                    _lookup(), timeout=get_settings().nova_poshta.deadline_sec
+                )
+            except TimeoutError:
+                logger.warning(
+                    "submit_order_request: Nova Poshta branch check past the deadline "
+                    "for call %s",
+                    session.channel_uuid,
+                )
+                verdict = None
             except Exception:
                 logger.warning(
                     "submit_order_request: Nova Poshta branch lookup raised for call %s",
