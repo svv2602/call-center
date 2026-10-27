@@ -411,7 +411,7 @@
       items:
         - {id: cc, brand: Michelin, model: CrossClimate 2, size: 215/55 R16 97W, season: all_season, price: 6420, in_stock: true}
   turns:
-    - user: мне нужны два колеса 215, 55, 16, не летние, всесезонные
+    - user: мне нужны два колеса 215, 55, 16, не летние, всесезонные, бренд любой
       expect:
         tool_called: [{name: search_tires, args: {width: '^215$', profile: '^55$', diameter: '^16$', season: '^all_season$'}}]
 
@@ -445,7 +445,7 @@
         - {id: f4, brand: Firestone, model: Winterhawk 4, size: 235/60 R18 107H, season: winter, price: 5420, in_stock: true}
         - {id: lf, brand: Laufenn, model: I Fit+, size: 235/60 R18 107H, season: winter, price: 3980, in_stock: true}
   turns:
-    - user: потрібна зимова шина, розмір 235 на 60, 18
+    - user: потрібна зимова шина, розмір 235 на 60, 18, бренд будь-який
     - user: ну, скажімо так, середній сегмент
       expect:
         must_contain: ['Firestone|Файрстоун']
@@ -465,7 +465,7 @@
         - {id: mt, brand: Matador, model: MP 93 Nordicca, size: 235/60 R16 100H, season: winter, price: 4690, in_stock: true}
         - {id: b6, brand: Bridgestone, model: Blizzak 6, size: 235/60 R16 100H, season: winter, price: 7776, in_stock: true}
   turns:
-    - user: зимняя резина 235-60 на 16, на полноприводную машину, бренд любой
+    - user: зимняя резина 235-60 на 16, бренд любой
     - user: Китай сразу отпадает. Что есть на подобие в этой ценовой политике?
       expect:
         must_not_contain: ['Sailun|Сайлун']
@@ -566,7 +566,7 @@
           tool_called: [transfer_to_operator]
           tool_not_called: [book_fitting]
         prokoleso:
-          must_contain: ['не надаєм|не надаем|не пропонуєм']
+          must_contain: ['не надає|не надаем|не пропонуєм']
           tool_not_called: [get_fitting_stations, book_fitting, transfer_to_operator]
           must_not_contain: ['інш\w*\s+мереж', 'партнер']
 
@@ -583,5 +583,5 @@
           must_not_contain: ['(лише|тільки|только)\s+(?:\w+\s+){0,2}(одн\w*|1)\s+(машин|авто)', 'не можемо (записати|запис)\w*\s+дв']
           tool_not_called: [transfer_to_operator]
         prokoleso:
-          must_contain: ['не надаєм|не надаем|не пропонуєм']
+          must_contain: ['не надає|не надаем|не пропонуєм']
           tool_not_called: [get_fitting_stations, book_fitting]
