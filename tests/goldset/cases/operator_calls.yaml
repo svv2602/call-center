@@ -1,0 +1,587 @@
+# Cases from live operators' calls (Про Колесо + Твоя шина), 2025-10 … 2026-10.
+# Collected 2026-10-27 from the local operator-call corpus: 290 inbound calls,
+# transcribed on-prem (Whisper), personal data redacted, then labelled. The
+# corpus itself is NOT in the repo (personal data); `source: operators:<batch>/
+# <call>` points into it. Customer lines are the callers' own wording, lightly
+# cleaned of transcription noise — Russian / surzhyk stays where the case is
+# about understanding it. No names, phones or plates.
+#
+# What the corpus says about sales (batch1, ±5–10 pp): 74–78 % of sales calls
+# ask for a SPECIFIC model or a site article, the operator offers 1.3 options
+# on average, only ~10 % name a budget; 22–25 % ask how fresh the tyre is
+# (operators name year/country in 55–61 %). The cases weight that mix:
+# article / named model, year via check_availability, alternatives when the
+# model is gone, delivery and payment terms, quantity, then consultation.
+#
+# Year and country come from check_availability (1C `year_issue`, `country`),
+# not from search_tires — the mocks follow that split.
+#
+# The sandbox plays the text path: the season guard and the spoken query
+# parser do not run, so a line that should search names the season itself
+# (the same as consult.yaml / tshina_chats.yaml).
+
+# --- article from the site / a named model -----------------------------------
+
+- id: op_article_price_and_stock
+  title: клієнт називає артикул із сайту — перевірка наявності за артикулом
+  source: operators:batch1/call_044
+  network: both
+  sales_enabled: true
+  mocks:
+    check_availability:
+      available: true
+      quantity: 8
+      price: 2349
+      country: Угорщина
+      year: 2025
+  turns:
+    - user: доброго дня, мене цікавить товар по артикулу 52224, є в наявності?
+      expect:
+        tool_called: [{name: check_availability, args: {product_id: '52224'}}]
+        must_contain: ['2\s?349|дві тисячі триста сорок дев']
+        tool_not_called: [transfer_to_operator]
+
+- id: op_article_year_from_stock
+  title: «вона точно 25-го року?» за артикулом — рік із даних наявності
+  source: operators:batch1/call_236
+  network: both
+  sales_enabled: true
+  notes: 15 of 67 TS and 27 of 106 PK sales calls ask how fresh the tyre is; the year is in the check_availability result
+  mocks:
+    check_availability:
+      available: true
+      quantity: 4
+      price: 2349
+      country: Угорщина
+      year: 2025
+  turns:
+    - user: артикул 52224, зимові
+    - user: а вона точно двадцять п'ятого року?
+      expect:
+        must_contain: ['2025|двадцять п.ят|25']
+        must_not_contain: ['2026|двадцять шост', '2024|двадцять четверт']
+        tool_not_called: [transfer_to_operator]
+
+- id: op_article_one_left_of_four
+  title: за артикулом лишилась одна шина, а треба чотири — не обіцяти комплект
+  source: operators:batch1/call_282
+  network: both
+  sales_enabled: true
+  mocks:
+    check_availability:
+      available: true
+      quantity: 1
+      price: 7684
+      country: Іспанія
+      year: 2025
+  turns:
+    - user: артикул 41116, мені треба чотири штуки
+      expect:
+        tool_called: [check_availability]
+        must_contain: ['одн[аіу]|1 шт|лише|тільки|только']
+        must_not_contain: ['(є|есть|в наявності|в наличии)\s+(?:\w+\s+){0,2}(чотири|четыре|4)\s*(шин|штук|колес)']
+
+- id: op_named_model_in_stock
+  title: «є Блізак 6 205 на 55 R16?» — пошук за розміром, названа модель в відповіді
+  source: operators:batch1/call_025
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: b6, brand: Bridgestone, model: Blizzak 6, size: 205/55 R16 91H, season: winter, price: 4890, in_stock: true}
+        - {id: f4, brand: Firestone, model: Winterhawk 4, size: 205/55 R16 91H, season: winter, price: 3390, in_stock: true}
+  turns:
+    - user: є в наявності Блізак 6, 205 на 55 R16, зимові?
+      expect:
+        tool_called: [{name: search_tires, args: {width: '^205$', profile: '^55$', diameter: '^16$'}}]
+        must_contain: ['Blizzak|Бліз|Близ']
+        tool_not_called: [transfer_to_operator]
+
+- id: op_named_model_gone_alternatives
+  title: «Кармаран Роад Перфоманс 205-60-16» немає — спершу «немає», потім альтернативи
+  source: operators:batch1/call_064
+  network: both
+  sales_enabled: true
+  notes: the brand is garbled the way callers and STT say it; Kormoran/Tigar/Taurus are one plant — operators offer the sister brand
+  mocks:
+    search_tires:
+      total: 2
+      relaxed: [brand]
+      caveat_key: brand_unavailable_alternatives
+      items:
+        - {id: tg, brand: Tigar, model: High Performance, size: 205/60 R16 96V, season: summer, price: 2865, in_stock: true}
+        - {id: ta, brand: Taurus, model: High Performance, size: 205/60 R16 96V, season: summer, price: 2810, in_stock: true}
+  turns:
+    - user: Кармаран Роад Перфоманс 205-60-16 летние, есть такой у вас?
+      expect:
+        tool_called: [{name: search_tires, args: {width: '^205$', profile: '^60$', diameter: '^16$'}}]
+        must_contain: ['зараз немає в наявності|Цього бренду зараз немає', 'Tigar|Taurus|Тігар|Таурус']
+        must_not_contain: ['Kormoran\s+(?:\w+\s+){0,3}(є в наявності|есть в наличии)']
+
+# --- production year / freshness ----------------------------------------------
+
+- id: op_year_after_search
+  title: «а якого року вони?» після підбору — перевірити наявність і назвати рік
+  source: operators:batch1/call_126
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: b6, brand: Bridgestone, model: Blizzak 6, size: 225/60 R17 99H, season: winter, price: 8817, in_stock: true}
+        - {id: f4, brand: Firestone, model: Winterhawk 4, size: 225/60 R17 99H, season: winter, price: 5960, in_stock: true}
+    check_availability:
+      available: true
+      quantity: 6
+      price: 8817
+      country: Італія
+      year: 2026
+  turns:
+    - user: зимові 225/60 R17, Bridgestone
+    - user: а Blizzak якого року випуску?
+      expect:
+        tool_called: [check_availability]
+        must_contain: ['2026|двадцять шост']
+        tool_not_called: [transfer_to_operator]
+
+- id: op_year_older_than_asked
+  title: клієнт бере лише 2025-й, на складі 2023-й — сказати як є
+  source: operators:batch1/call_286
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 1
+      items:
+        - {id: t5, brand: Bridgestone, model: Turanza T005, size: 205/55 R16 91V, season: summer, price: 2694, in_stock: true}
+    check_availability:
+      available: true
+      quantity: 4
+      price: 2694
+      country: Польща
+      year: 2023
+  turns:
+    - user: літні 205/55 R16, Bridgestone
+    - user: я якщо буду брати, то тільки двадцять п'ятого року. Ця якого?
+      expect:
+        tool_called: [check_availability]
+        must_contain: ['2023|двадцять трет']
+        must_not_contain: ['(це|вона|вони|ця)\s+(?:\w+\s+){0,2}(2025|двадцять п.ят)']
+
+- id: op_year_unknown_not_invented
+  title: року в даних немає — не вигадувати рік
+  source: operators:batch1/call_215
+  network: both
+  sales_enabled: true
+  notes: operators themselves often cannot see the week/year and promise to check; the bot must not fill the gap
+  mocks:
+    search_tires:
+      total: 1
+      items:
+        - {id: nx, brand: Nexen, model: N'Blue HD Plus, size: 195/65 R15 91H, season: summer, price: 2290, in_stock: true}
+    check_availability:
+      available: true
+      quantity: 4
+      price: 2290
+      country: null
+      year: null
+  turns:
+    - user: літні 195/65 R15, Nexen
+    - user: а якого вони року, не бачу на сайті?
+      expect:
+        must_not_contain: ['20(2[0-9])\s*(року|рік|год)', 'двадцять (перш|друг|трет|четверт|п.ят|шост)\w*\s+(року|рік)']
+
+# --- delivery and payment -----------------------------------------------------
+
+- id: op_delivery_four_tyres_ru
+  title: «4 колеса с отправкой — сколько будет отправка?» — ТШ безкоштовно; ПК тариф перевізника
+  source: operators:batch1/call_128
+  network: both
+  sales_enabled: true
+  notes: PK operators DO name a sum in 24–38 % of PK sales calls (26 calls by text search). Owner 2026-10-27 — the sum will come from a Nova Poshta API call, later; until then the case pins «тариф перевізника», no sum
+  turns:
+    - user: если я у вас 4 колеса закажу с отправкой в Долинскую, сколько будет стоить отправка?
+      expect_by_network:
+        tvoya-shina:
+          must_contain: ['безкоштовн']
+        prokoleso:
+          must_contain: ['тариф\w*\s+перевізник']
+          must_not_contain: ['\d+\s*(грн|гривень|гривні|гривен)', 'безкоштовн']
+
+- id: op_pickup_point_extra_delivery
+  title: «самовивіз з точки видачі — ще й доставку платити?» — умови сети без вигаданої суми
+  source: operators:batch1/call_116
+  network: both
+  sales_enabled: true
+  turns:
+    - user: могу сделать самовывоз с точки выдачи? Еще доставку надо платить будет?
+      expect:
+        must_not_contain: ['\d{2,}\s*(грн|гривень|гривні|гривен)']
+      expect_by_network:
+        prokoleso:
+          must_not_contain: ['безкоштовн']
+
+- id: op_cod_commission
+  title: «оплата при отриманні — комісія є?» — 2 % + 20 грн, тариф перевізника
+  source: operators:batch1/call_194
+  network: both
+  sales_enabled: true
+  turns:
+    - user: а якщо оплата при отриманні на Новій пошті, там комісія є?
+      expect:
+        must_contain: ['2\s?%|два відсот|2 відсот', '20\s*грн|двадцять гривень']
+        tool_not_called: [transfer_to_operator]
+
+- id: op_viber_not_promised
+  title: «скиньте мені на Viber фото і ціну» — не обіцяти відправку в месенджер
+  source: operators:batch1/call_183
+  network: both
+  sales_enabled: true
+  notes: operators send links/photos/invoices to Viber in dozens of calls; the bot has no messenger tool — it must not promise one
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: ds, brand: Double Star, model: DW02, size: 185/60 R15 84T, season: winter, price: 1758, in_stock: true}
+        - {id: lf, brand: Laufenn, model: I Fit+, size: 185/60 R15 88T, season: winter, price: 2349, in_stock: true}
+  turns:
+    - user: зимние 185/60 R15, в районе двух тысяч
+    - user: скиньте мне на Viber рисунок и цену
+      expect:
+        must_not_contain: ['(скину|скинемо|скинем|надішлю|надішлемо|відправлю|відправимо|отправлю|отправим)\w*\s+(?:\w+\s+){0,4}(вайбер|viber)', '(в|у|на)\s+(вайбер|viber)\s+(?:\w+\s+){0,2}(скину|надішлю|відправ)']
+
+- id: op_no_reserve_while_thinking
+  title: «хай поки в резерві постоїть» — резерву «я подумаю» немає (рішення власника)
+  source: operators:batch1/call_228
+  network: both
+  sales_enabled: true
+  mocks:
+    check_availability:
+      available: true
+      quantity: 12
+      price: 2420
+      country: Туреччина
+      year: 2025
+  turns:
+    - user: артикул 41116, потрібно вісім штук
+    - user: хай поки в резерві постоїть, я уточню у замовника
+      expect:
+        must_not_contain: ['(зарезервувал|зарезервую|зарезервуємо|відклал|відкладемо|відкладу|резерв\w*\s+(?:\w+\s+){0,2}(оформ|постав|зроб))']
+        tool_not_called: [submit_order_request]
+
+# --- price talk ---------------------------------------------------------------
+
+- id: op_competitor_cheaper_no_discount_invented
+  title: «у конкурентів 7800, а у вас 8300» — не вигадувати знижку
+  source: operators:batch1/call_160
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 1
+      items:
+        - {id: dv, brand: Bridgestone, model: Dueler All Terrain A/T002, size: 265/65 R17 112S, season: all_season, price: 8300, in_stock: true}
+  turns:
+    - user: всесезонні 265/65 R17, Bridgestone
+    - user: ми ваші постійні клієнти, а у ваших конкурентів 7800. Знижку зробите?
+      expect:
+        must_not_contain: ['(зробимо|зроблю|дамо|даємо|надамо)\s+(?:\w+\s+){0,2}знижк', 'за 7\s?800', 'знижк\w*\s+(?:\w+\s+){0,2}\d+\s*(%|відсот|грн)']
+
+- id: op_price_went_up
+  title: «подорожало? Було 7000» — не обіцяти стару ціну
+  source: operators:batch1/call_242
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 1
+      items:
+        - {id: bb, brand: Barum, model: Bravuris 5HM, size: 255/50 R20 109Y, season: summer, price: 8085, in_stock: true}
+  turns:
+    - user: Барум, 255 на 50, 20, літні
+    - user: подорожало вже, чи що? Я у вас питав, було сім тисяч
+      expect:
+        must_contain: ['8\s?085|вісім тисяч вісімдесят п']
+        must_not_contain: ['за (7\s?000|сім тисяч)', '(стар|попередн)\w*\s+цін\w*\s+(?:\w+\s+){0,2}(збереж|залиш|дам|зроб)']
+
+# --- quantity -----------------------------------------------------------------
+
+- id: op_single_tyre_ok
+  title: «чи можна одну штуку придбати?» — так, ціна за штуку
+  source: operators:batch1/call_224
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 1
+      items:
+        - {id: sm, brand: Starmaxx, model: Ultrasport ST760, size: 215/55 R17 98W, season: summer, price: 3006, in_stock: true}
+  turns:
+    - user: літні 215/55 R17, бренд будь-який
+    - user: а можна одну штуку придбати?
+      expect:
+        must_not_contain: ['(лише|тільки|только) комплект', 'мінімум (дві|чотири|2|4)', 'минимум (две|четыре|2|4)', '(не можна|не можем|не продаєм)\w*\s+(?:\w+\s+){0,2}(одну|поштучно)']
+        tool_not_called: [transfer_to_operator]
+
+- id: op_five_tyres_ok
+  title: «а можна замовити п'ять?» — з запаскою, без відмови
+  source: operators:batch1/call_272
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 1
+      items:
+        - {id: sl, brand: Sailun, model: Commercio 4 Seasons, size: 225/60 R16 98V, season: all_season, price: 2904, in_stock: true}
+  turns:
+    - user: всесезонні 225/60 R16, бренд будь-який
+    - user: а можна замовити п'ять штук?
+      expect:
+        must_not_contain: ['(лише|тільки|только)\s+(?:\w+\s+){0,1}(комплект|чотири|4)', 'не можна п.ять']
+        tool_not_called: [transfer_to_operator]
+
+# --- fitment the operators handle -------------------------------------------
+
+- id: op_staggered_front_rear
+  title: «на Теслу пара таких і пара таких» — різна ширина перед/зад
+  source: operators:batch1/call_100
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 1
+      items:
+        - {id: rd, brand: Rydanz, model: Roadster R02, size: 265/35 R22 102W, season: summer, price: 5120, in_stock: true}
+  turns:
+    - user: на Теслу 22-ге колесо, літні, спереду 265/35 R22, а ззаду 285/35 R22, бренд будь-який
+      expect:
+        tool_called: [{name: search_tires, args: {width: '^265$', profile: '^35$', diameter: '^22$', rear_width: '^285$'}}]
+        tool_not_called: [transfer_to_operator]
+
+- id: op_runflat_required
+  title: «мне надо только ранфлет» — пошук з RunFlat, не підміняти звичайною
+  source: operators:batch1/call_234
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 0
+      items: []
+  turns:
+    - user: мне надо только ранфлет, 235 на 60, 18 радиус, летние, желательно Bridgestone, колесо разорвало
+      expect:
+        tool_called: [{name: search_tires, args: {width: '^235$', profile: '^60$', diameter: '^18$', runflat: '^true$'}}]
+        must_not_contain: ['(є|есть|підібрав|подобрал)\s+(?:\w+\s+){0,3}(ран\s*флет|runflat|run flat)']
+
+- id: op_vehicle_not_size
+  title: «Tesla Model Y 2020, розмір не знаю» — розмір за авто
+  source: operators:batch1/call_238
+  network: both
+  sales_enabled: true
+  turns:
+    - user: мені потрібні літні шини на Tesla Model Y 2020 року, а розмір я не знаю
+      expect:
+        tool_called: [get_vehicle_tire_sizes]
+        tool_not_called: [transfer_to_operator]
+
+- id: op_profile_55_to_60
+  title: «стоїть 55-й профіль, поставлю 60 — велика різниця?» — нештатний розмір не радити
+  source: operators:batch1/call_081
+  network: both
+  sales_enabled: true
+  turns:
+    - user: скажите, если у нас 55 профиль стоит, а я поставлю 60, сильно разница будет?
+      expect:
+        must_contain: ['спеціаліст|фахів|менеджер|штатн|рекоменд']
+        must_not_contain: ['(можна|можете)\s+(?:\w+\s+){0,2}постав', 'підійде без проблем', 'так, підійде', 'різниці (не|майже не) буде']
+
+# --- the way sizes are spoken -------------------------------------------------
+
+- id: op_size_said_with_commas_ru
+  title: розмір через коми «215, 55, 16» — як диктують по телефону
+  source: operators:batch1/call_013
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 1
+      items:
+        - {id: cc, brand: Michelin, model: CrossClimate 2, size: 215/55 R16 97W, season: all_season, price: 6420, in_stock: true}
+  turns:
+    - user: мне нужны два колеса 215, 55, 16, не летние, всесезонные
+      expect:
+        tool_called: [{name: search_tires, args: {width: '^215$', profile: '^55$', diameter: '^16$', season: '^all_season$'}}]
+
+- id: op_size_said_in_words_uk
+  title: розмір словами «двісті тридцять п'ять на п'ятдесят R20»
+  source: operators:batch1/call_019
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 1
+      items:
+        - {id: ps, brand: Michelin, model: Pilot Sport 4 SUV, size: 235/50 R20 104W, season: summer, price: 14820, in_stock: true}
+  turns:
+    - user: двісті тридцять п'ять на п'ятдесят, R20, літо, дві покришечки
+      expect:
+        tool_called: [{name: search_tires, args: {width: '^235$', profile: '^50$', diameter: '^20$'}}]
+
+# --- consultation --------------------------------------------------------------
+
+- id: op_middle_segment
+  title: «ну, скажімо так, середній» — сегмент без бюджету
+  source: operators:batch1/call_015
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: b6, brand: Bridgestone, model: Blizzak 6, size: 235/60 R18 107H, season: winter, price: 7990, in_stock: true}
+        - {id: f4, brand: Firestone, model: Winterhawk 4, size: 235/60 R18 107H, season: winter, price: 5420, in_stock: true}
+        - {id: lf, brand: Laufenn, model: I Fit+, size: 235/60 R18 107H, season: winter, price: 3980, in_stock: true}
+  turns:
+    - user: потрібна зимова шина, розмір 235 на 60, 18
+    - user: ну, скажімо так, середній сегмент
+      expect:
+        must_contain: ['Firestone|Файрстоун']
+        tool_not_called: [transfer_to_operator]
+        max_sentences: 5
+
+- id: op_no_chinese
+  title: «Китай сразу отпадает» — не пропонувати китайський бренд
+  source: operators:batch1/call_117
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 3
+      items:
+        - {id: sl, brand: Sailun, model: Ice Blazer Alpine, size: 235/60 R16 100H, season: winter, price: 3120, in_stock: true}
+        - {id: mt, brand: Matador, model: MP 93 Nordicca, size: 235/60 R16 100H, season: winter, price: 4690, in_stock: true}
+        - {id: b6, brand: Bridgestone, model: Blizzak 6, size: 235/60 R16 100H, season: winter, price: 7776, in_stock: true}
+  turns:
+    - user: зимняя резина 235-60 на 16, на полноприводную машину, бренд любой
+    - user: Китай сразу отпадает. Что есть на подобие в этой ценовой политике?
+      expect:
+        must_not_contain: ['Sailun|Сайлун']
+        must_contain: ['Matador|Матадор']
+
+- id: op_which_better_potholes
+  title: «Bridgestone чи Michelin — що краще для наших ям?» — порада без переведення
+  source: operators:batch1/call_040
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 2
+      items:
+        - {id: dl, brand: Bridgestone, model: Dueler All Season, size: 265/65 R17 112H, season: all_season, price: 8300, in_stock: true}
+        - {id: cc, brand: Michelin, model: CrossClimate 2 SUV, size: 265/65 R17 112H, season: all_season, price: 9900, in_stock: true}
+  turns:
+    - user: всесезонні 265/65 R17 на Тойоту, Bridgestone або Michelin
+    - user: що краще порадите? У нас по ямах їздити
+      expect:
+        must_contain: ['Bridgestone|Бріджстоун|Michelin|Мішлен']
+        tool_not_called: [transfer_to_operator]
+        max_sentences: 6
+
+- id: op_need_it_tomorrow_no_promise
+  title: «мені на завтра треба» — не обіцяти «завтра заберете» без даних
+  source: operators:batch1/call_184
+  network: both
+  sales_enabled: true
+  mocks:
+    search_tires:
+      total: 1
+      items:
+        - {id: mp, brand: Michelin, model: Primacy 4+, size: 205/65 R15 94V, season: summer, price: 6111, in_stock: true}
+  turns:
+    - user: літні 205/65 R15, Michelin
+    - user: а це в Дніпрі є? Мені на завтра треба
+      expect:
+        must_not_contain: ['(завтра|сьогодні)\s+(?:\w+\s+){0,2}(заберете|забрати|можна забрати|будуть|приїдуть)', '(можете|зможете)\s+(?:\w+\s+){0,2}забрати\s+(?:\w+\s+){0,1}(завтра|сьогодні)']
+
+# --- owner decisions 2026-10-27 -----------------------------------------------
+# УБД / military discount, invoice to a legal entity with VAT, ЄДРПОУ → operator.
+# Order + fitting in one call: PK has no fitting («не надаємо»); TS → operator.
+# Several cars in one call: TS only, booked one after another; PK has no fitting.
+
+- id: op_military_discount_transfer
+  title: «є знижка військовим? у мене УБД» — переведення на оператора
+  source: owner:2026-10-27-military-b2b-to-operator
+  network: both
+  sales_enabled: true
+  notes: operators met it in 2 of 290 calls (batch1 call_009, call_088)
+  turns:
+    - user: есть скидки для военных? У меня УБД
+      expect:
+        tool_called: [transfer_to_operator]
+        must_not_contain: ['знижк\w*\s+(?:\w+\s+){0,2}\d+\s*(%|відсот)', 'скидк\w*\s+(?:\w+\s+){0,2}\d+\s*(%|процент)']
+
+- id: op_b2b_vat_invoice_transfer
+  title: «безготівка з ПДВ, рахунок на підприємство» — переведення на оператора
+  source: owner:2026-10-27-military-b2b-to-operator
+  network: both
+  sales_enabled: true
+  notes: batch1 call_164, call_290, call_132 — about 5 % of PK sales calls
+  turns:
+    - user: ви працюєте по безготівковому розрахунку з ПДВ? Нам потрібен рахунок на підприємство
+      expect:
+        tool_called: [transfer_to_operator]
+        tool_not_called: [submit_order_request]
+
+- id: op_edrpou_transfer
+  title: «оформіть по коду ЄДРПОУ» — переведення на оператора
+  source: owner:2026-10-27-military-b2b-to-operator
+  network: both
+  sales_enabled: true
+  notes: batch1 call_059, call_065 — operators find the company by ЄДРПОУ
+  mocks:
+    search_tires:
+      total: 1
+      items:
+        - {id: rs, brand: Roadstone, model: Roadian HTX 2, size: 265/70 R16 112T, season: all_season, price: 4480, in_stock: true}
+  turns:
+    - user: всесезонні 265/70 R16, бренд будь-який
+    - user: беремо чотири, оформіть на фірму, я вам код ЄДРПОУ скажу
+      expect:
+        tool_called: [transfer_to_operator]
+        tool_not_called: [submit_order_request]
+
+- id: op_order_plus_fitting
+  title: «купити шини і одразу записатись на монтаж» — ПК «не надаємо», ТШ — оператор
+  source: owner:2026-10-27-order-plus-fitting
+  network: both
+  sales_enabled: true
+  notes: batch1 call_006 (PK), call_118 / call_019 / call_026 (TS)
+  turns:
+    - user: хочу купити чотири шини і щоб їх одразу поставили — запишете мене заразом на шиномонтаж?
+      expect_by_network:
+        tvoya-shina:
+          tool_called: [transfer_to_operator]
+          tool_not_called: [book_fitting]
+        prokoleso:
+          must_contain: ['не надаєм|не надаем|не пропонуєм']
+          tool_not_called: [get_fitting_stations, book_fitting, transfer_to_operator]
+          must_not_contain: ['інш\w*\s+мереж', 'партнер']
+
+- id: op_two_cars_one_call
+  title: «записати дві машини» — ТШ записує по черзі; ПК «не надаємо»
+  source: owner:2026-10-27-several-cars
+  network: both
+  sales_enabled: true
+  notes: TS 4 of 51 fitting calls (batch1 call_043, call_161, call_205, call_262). The first turn only pins that TS takes the request (no refusal, no transfer); the one-after-another booking itself is not covered yet — the prompt has no multi-car rule
+  turns:
+    - user: мені треба записати на шиномонтаж дві машини, бажано на завтра
+      expect_by_network:
+        tvoya-shina:
+          must_not_contain: ['(лише|тільки|только)\s+(?:\w+\s+){0,2}(одн\w*|1)\s+(машин|авто)', 'не можемо (записати|запис)\w*\s+дв']
+          tool_not_called: [transfer_to_operator]
+        prokoleso:
+          must_contain: ['не надаєм|не надаем|не пропонуєм']
+          tool_not_called: [get_fitting_stations, book_fitting]

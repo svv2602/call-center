@@ -64,6 +64,7 @@ python -m scripts.run_goldset --include-pending --yes --json-out /tmp/goldset.js
 ## Добавить кейс
 
 1. Реальная формулировка из прода — `source: prod:<первые 8 символов id>`, без имён и телефонов.
+   Формулировка из звонка живого оператора — `source: operators:<батч>/<звонок>` (локальный корпус `~/call_corpus`, в репо его нет: персональные данные).
 2. Условие сети — `network: both` + `expect_by_network`.
 3. Ожидание недостижимо до волны — `pending: '<чеклист>: <почему>'`.
 4. `python -m scripts.run_goldset --validate`.
