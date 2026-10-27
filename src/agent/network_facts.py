@@ -32,13 +32,14 @@ import logging
 import re
 from typing import TYPE_CHECKING, Any
 
-from src.agent.network_policy import BANK_LABELS, payment_method_labels
+from src.agent.network_policy import BANK_LABELS, SERVICE_LABELS, payment_method_labels
 from src.agent.promotions import (
     GRANT_EXTENDED_WARRANTY,
     GRANT_FREE_DELIVERY,
     _brand_keys,
     _named_brands,
 )
+from src.agent.prompts import _SERVICE_NOT_PROVIDED_PHRASE
 
 if TYPE_CHECKING:
     from src.agent.network_policy import NetworkPolicy
@@ -46,6 +47,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+#: A service of ``SERVICE_LABELS`` the network does not offer («запишете на
+#: шиномонтаж?», «дві машини на шиномонтаж», «купити і щоб одразу поставили»
+#: on Про Колесо): R03/R07.3 — on gpt-4.1-mini the model asked for the city
+#: instead of saying the scope frame's «не надаємо», so the code says it.
+#: Over the whole enum (default-deny): a key without word forms here gets a
+#: pattern from its label. The tyre sale goes on — the model's turn is not cut.
+SERVICE = "service"
+SERVICE_REFUSAL_PREFIX = "На жаль, ми не надаємо"
 #: A size other than the car's own («225/45 R17 замість 205/55 R16?»): the
 #: owner's rule is «нештатний розмір підбирає спеціаліст». Network-agnostic,
 #: said by the code like the network's terms — the prompt rule held in only
@@ -65,6 +74,7 @@ RETURNS = "returns"
 
 #: The whole enum, in the order phrases are said (and cut at the cap).
 TOPICS: tuple[str, ...] = (
+    SERVICE,
     NON_STOCK_SIZE,
     DELIVERY_COST,
     DELIVERY_ETA,
@@ -225,6 +235,121 @@ def is_non_stock_size_question(text: str | None) -> bool:
     return len(sizes) >= 2 or len(set(_WIDTH_NUMBER.findall(low))) >= 2
 
 
+#: Word forms per ``SERVICE_LABELS`` key, UA and RU, every case.
+_SERVICE_FORMS: dict[str, re.Pattern[str]] = {
+    "fitting": re.compile(_B + r"(?:\w*монтаж\w*|перевзу\w*|переобу\w*|балансув\w*|балансир\w*)"),
+    "storage": re.compile(
+        _B + r"(?:зберіганн\w*|хранени\w*|зберігаєте|храните|шинн\w*\s+готел\w*"
+        r"|сезонн\w*\s+(?:зберіг\w*|хран\w*))"
+    ),
+}
+#: «купити і щоб одразу поставили», «а можна у вас одразу поставити?» — a
+#: fitting asked with no service word. Without «одразу / щоб» a «поставити»
+#: is the caller's own size choice («можна поставити 225/45 R17?»).
+_FIT_PUT = re.compile(_B + r"постав\w*")
+_FIT_PUT_FOR_ME = re.compile(
+    _B + r"(?:одразу|відразу|зразу|сразу|заодно|на\s+місці|на\s+месте)(?![\w'])"
+    r"|" + _B + r"(?:щоб|щоби|чтоб|чтобы)\s+(?:\w+\s+){0,2}постав\w*"
+)
+#: The caller fits the tyres himself.
+_FIT_PUT_NOT_US = re.compile(
+    _B + r"(?:поставлю|поставим\w*|сам|сама|самі|сами|самостійно|самостоятельно)(?![\w'])"
+)
+#: The service word as a circumstance, not asked for: «гарантія після
+#: шиномонтажу», «пошкодження під час монтажу», «без монтажу», «шини для
+#: шиномонтажу на СТО» (the caller is a fitting shop buying tyres — a sale,
+#: not a fitting request), «я з шиномонтажу». «з монтажем» (with fitting) is
+#: a request: after «з / с» only the genitive is a circumstance.
+_SERVICE_LEAD = re.compile(
+    r"(?<![\w'])(?:після|после|під\s+час|во\s+время|без|для|від|от)\s+(?:\w+\s+)?$"
+)
+_SERVICE_FROM = re.compile(r"(?<![\w'])(?:з|із|зі|с|со)\s+(?:\w+\s+)?$")
+_INSTRUMENTAL = re.compile(r"(?:ем|ом|ам|ами|ою|ой)$")
+#: «доставка на шиномонтаж до знайомого» — a delivery address, not a booking.
+_SERVICE_DESTINATION = re.compile(r"(?<![\w'])(?:на|до|в|у)\s+(?:\w+\s+)?$")
+_BOOK = re.compile(_B + r"(?:запис\w*|запиш\w*|послуг\w*|услуг\w*)")
+#: «монтаж не потрібен», «шиномонтаж не треба».
+_NO_NEED = re.compile(_B + r"(?:не|ні)\s+(?:\w+\s+)?(?:треба|потріб\w*|нуж\w*|надо)(?![\w'])")
+#: «як правильно зберігати шини», «термін зберігання шин» — tyre care (the
+#: knowledge base), not the network's storage service.
+_STORAGE_CARE = re.compile(
+    _B + r"(?:правильн\w*|вдома|дома|гараж\w*|балкон\w*|умов\w*|термін\w*|срок\w*"
+    r"|строк\w*|годност\w*|придатн\w*)"
+)
+
+
+def _service_forms(key: str) -> re.Pattern[str]:
+    forms = _SERVICE_FORMS.get(key)
+    if forms is not None:
+        return forms
+    stem = SERVICE_LABELS[key].split()[0][:-2]
+    return re.compile(_B + re.escape(stem) + r"\w*")
+
+
+def _asks_for(key: str, low: str) -> bool:
+    """One service word of ``key`` the caller asks for (not a circumstance)."""
+    delivery = _DELIVERY.search(low) is not None and not _BOOK.search(low)
+    for m in _service_forms(key).finditer(low):
+        before = low[: m.start()]
+        if _SERVICE_LEAD.search(before):
+            continue
+        if _SERVICE_FROM.search(before) and not _INSTRUMENTAL.search(m.group(0)):
+            continue
+        if delivery and _SERVICE_DESTINATION.search(before):
+            continue
+        return True
+    return False
+
+
+def asked_services(text: str | None) -> list[str]:
+    """Keys of ``SERVICE_LABELS`` the utterance asks for, in enum order."""
+    if not text:
+        return []
+    low = _normalize(text)
+    # «не треба»; the warranty / returns of tyres «після монтажу» are their terms.
+    if _NO_NEED.search(low) or _WARRANTY.search(low) or _RETURNS.search(low):
+        return []
+    out: list[str] = []
+    for key in SERVICE_LABELS:
+        if key == "storage" and _STORAGE_CARE.search(low):
+            continue
+        asked = _asks_for(key, low)
+        if not asked and key == "fitting":
+            asked = bool(
+                _FIT_PUT.search(low)
+                and _FIT_PUT_FOR_ME.search(low)
+                and not _FIT_PUT_NOT_US.search(low)
+            )
+        if asked:
+            out.append(key)
+    return out
+
+
+def _partner_offers(service: str, promos: PromoOverrides | None) -> bool:
+    """A live promotion names a partner for ``service`` — the model says its terms."""
+    return promos is not None and any(
+        e.get("service") == service and (e.get("network_label") or "").strip()
+        for e in promos.partner_services
+    )
+
+
+def _service_refusal(
+    policy: NetworkPolicy, promos: PromoOverrides | None, text: str | None
+) -> str | None:
+    """«На жаль, ми не надаємо …» for each asked service the network lacks."""
+    # Only a configured policy's empty ``services`` means «not provided».
+    if not policy.configured:
+        return None
+    missing = [
+        _SERVICE_NOT_PROVIDED_PHRASE.get(key, SERVICE_LABELS[key])
+        for key in asked_services(text)
+        if key not in policy.services and not _partner_offers(key, promos)
+    ]
+    if not missing:
+        return None
+    return f"{SERVICE_REFUSAL_PREFIX} {' і '.join(missing)}."
+
+
 def _normalize(text: str) -> str:
     return text.lower().replace("ё", "е").replace("’", "'").replace("ʼ", "'")
 
@@ -236,6 +361,8 @@ def fact_topics(text: str | None) -> list[str]:
     low = _normalize(text)
     asks = _ASK.search(low) is not None
     found: set[str] = set()
+    if asked_services(text):
+        found.add(SERVICE)
     if is_non_stock_size_question(text):
         found.add(NON_STOCK_SIZE)
 
@@ -312,6 +439,8 @@ def _phrase(
 ) -> str | None:
     """The phrase of one topic, from the policy (or a live promotion), or ``None``."""
     carriers = ", ".join(policy.delivery_carriers)
+    if topic == SERVICE:
+        return _service_refusal(policy, promos, text)
     if topic == NON_STOCK_SIZE:
         return NON_STOCK_SIZE_PHRASE
     if topic == DELIVERY_COST:
@@ -422,7 +551,16 @@ def already_said_note(phrases: list[str]) -> str:
     if not phrases:
         return ""
     quoted = " ".join(f"«{p}»" for p in phrases)
-    return (
+    note = (
         "\n\n## Вже сказано клієнту в цьому ході\n"
         f"Код уже сказав клієнту: {quoted} Не повторюй цього, відповідай далі по суті."
     )
+    if any(p.startswith(SERVICE_REFUSAL_PREFIX) for p in phrases):
+        # The refusal is said; the model must not go on to book it (city, station).
+        note += (
+            " Цієї послуги мережа не надає: НЕ питай місто, станцію чи дату для неї, "
+            "НЕ переводь на оператора, НЕ згадуй інші мережі. Якщо клієнт хоче шини — "
+            "продовжуй підбір і замовлення шин; інакше запитай, чи допомогти з підбором "
+            "або замовленням шин."
+        )
+    return note

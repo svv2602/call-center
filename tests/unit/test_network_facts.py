@@ -88,6 +88,19 @@ MICHELIN = promo_overrides(
 
 #: One utterance per topic — every member of the enum (goldset wording where it has one).
 TOPIC_UTTERANCES: dict[str, list[str]] = {
+    nf.SERVICE: [
+        "а шиномонтаж у вас є?",  # goldset services_asked_in_both
+        "мені треба записати на шиномонтаж дві машини",  # R07.3
+        "купити шини і щоб одразу поставили — запишете на шиномонтаж?",  # R03 / R07.3
+        "записатися на шиномонтаж",
+        "можно записаться на шиномонтаже?",
+        "переобуть машину можно?",
+        "треба перевзути авто",
+        "шини з монтажем можна?",
+        "хочу купить шины и сразу поставить у вас",
+        "а зберігання шин у вас є?",
+        "хранение шин есть?",
+    ],
     nf.NON_STOCK_SIZE: [
         "можна поставити 225/45 R17 замість 205/55 R16?",
         "можно поставить шины шире на Октавию?",
@@ -144,7 +157,6 @@ class TestTopics:
             "частинами",
             "яка гарантія на шиномонтаж?",
             "яка гарантія на литі диски?",
-            "записатися на шиномонтаж",
             "ось номер ТТН",  # a statement, not a question
             "можна я повернуся до цього пізніше?",
             "чи можна повернути шини після монтажу?",
@@ -628,3 +640,135 @@ class TestNonStockSize:
         assert gate.plan(query, swap, [{"role": "user", "content": swap}]) is None
         control = ForcedTireSearch(sales_enabled=True, tools=tools)
         assert control.plan(query, plain, [{"role": "user", "content": plain}]) is not None
+
+
+# ── A service the network lacks (R03, R07.3) ──────────────────────────
+
+_REFUSAL = re.compile(r"не надаєм|не надаем|не пропонуєм")  # goldset services_asked_in_both
+
+
+def _expected_refusal(*keys: str) -> str:
+    from src.agent.prompts import _SERVICE_NOT_PROVIDED_PHRASE
+
+    return (
+        f"{nf.SERVICE_REFUSAL_PREFIX} {' і '.join(_SERVICE_NOT_PROVIDED_PHRASE[k] for k in keys)}."
+    )
+
+
+class TestServiceRefusal:
+    @pytest.mark.parametrize("text", TOPIC_UTTERANCES[nf.SERVICE])
+    def test_pk_refuses_by_code(self, text: str) -> None:
+        (phrase,) = nf.turn_facts(text, PK)
+        assert _REFUSAL.search(phrase)
+        assert phrase in (_expected_refusal("fitting"), _expected_refusal("storage"))
+        # no other network, no transfer, no city question
+        assert not re.search(r"Твоя|Шина|оператор|місто|місті", phrase)
+
+    @pytest.mark.parametrize("text", TOPIC_UTTERANCES[nf.SERVICE])
+    def test_ts_offers_it_says_nothing(self, text: str) -> None:
+        assert nf.SERVICE in nf.fact_topics(text)
+        assert nf.turn_facts(text, TS) == []
+
+    def test_the_multi_car_request(self) -> None:
+        text = "мені треба записати на шиномонтаж дві машини"
+        assert nf.asked_services(text) == ["fitting"]
+        assert nf.turn_facts(text, PK) == [_expected_refusal("fitting")]
+
+    def test_order_and_fitting_in_one_call(self) -> None:
+        text = "хочу замовити шини і щоб одразу поставили"
+        assert nf.asked_services(text) == ["fitting"]
+        assert nf.turn_facts(text, PK) == [_expected_refusal("fitting")]
+
+    def test_both_services_in_one_phrase(self) -> None:
+        text = "а шиномонтаж і зберігання шин у вас є?"
+        assert nf.asked_services(text) == ["fitting", "storage"]
+        assert nf.turn_facts(text, PK) == [_expected_refusal("fitting", "storage")]
+
+    def test_ts_without_storage_refuses_only_storage(self) -> None:
+        pol = _ts(services=["fitting"])
+        text = "а шиномонтаж і зберігання шин у вас є?"
+        assert nf.turn_facts(text, pol) == [_expected_refusal("storage")]
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "шини для шиномонтажу на СТО",  # the caller is a fitting shop: a sale
+            "я з шиномонтажу, потрібні шини оптом",
+            "а гарантія після шиномонтажу?",
+            "яка гарантія на шиномонтаж?",
+            "пошкодження під час монтажу",
+            "доставка на шиномонтаж до знайомого",
+            "монтаж не потрібен",
+            "шиномонтаж не треба, тільки шини",
+            "як правильно зберігати шини?",
+            "термін зберігання шин який?",
+            "мені поставили не ті шини",
+            "можна поставити 225/45 R17 замість 205/55 R16?",
+            "одразу поставлю сам",
+            "потрібні зимові шини 205/55 R16",
+        ],
+    )
+    def test_not_a_service_request(self, text: str) -> None:
+        assert nf.asked_services(text) == []
+        assert not any(_REFUSAL.search(p) for p in nf.turn_facts(text, PK))
+
+    def test_every_service_label_is_refused(self) -> None:
+        from src.agent.network_policy import SERVICE_LABELS
+
+        for key, label in SERVICE_LABELS.items():
+            assert nf.turn_facts(f"а {label} у вас є?", PK) == [_expected_refusal(key)]
+
+    def test_a_new_service_key_is_refused_from_its_label(self, monkeypatch: Any) -> None:
+        # default-deny: a key with no word forms here still gets a pattern
+        from src.agent.network_policy import SERVICE_LABELS
+
+        monkeypatch.setitem(SERVICE_LABELS, "alignment", "розвал-сходження")
+        (phrase,) = nf.turn_facts("а розвал-сходження у вас робите?", PK)
+        assert phrase == f"{nf.SERVICE_REFUSAL_PREFIX} розвал-сходження."
+
+    def test_unconfigured_policy_says_nothing(self) -> None:
+        pol = NetworkPolicy.from_tenant_config({"sales_enabled": True})
+        assert nf.SERVICE in nf.fact_topics("а шиномонтаж у вас є?")
+        assert nf.turn_facts("а шиномонтаж у вас є?", pol) == []
+
+    def test_sales_off_says_nothing(self) -> None:
+        assert nf.turn_facts("а шиномонтаж у вас є?", _pk(sales=False)) == []
+
+    def test_a_partner_promotion_leaves_it_to_the_model(self) -> None:
+        from src.agent.promotions import PromoOverrides
+
+        promos = PromoOverrides(
+            partner_services=({"service": "fitting", "network_label": "Партнер"},)
+        )
+        assert nf.turn_facts("а шиномонтаж у вас є?", PK, promos) == []
+        # an unnamed partner clears nothing
+        bare = PromoOverrides(partner_services=({"service": "fitting"},))
+        assert nf.turn_facts("а шиномонтаж у вас є?", PK, bare) == [_expected_refusal("fitting")]
+
+    def test_the_note_keeps_the_sale_going(self) -> None:
+        phrases = nf.turn_facts("купити шини і щоб одразу поставили?", PK)
+        note = nf.already_said_note(phrases)
+        assert f"«{_expected_refusal('fitting')}»" in note
+        assert "НЕ питай місто" in note
+        assert "продовжуй підбір і замовлення шин" in note
+        other = nf.already_said_note(nf.turn_facts("сколько стоит доставка во Львов?", PK))
+        assert "НЕ питай місто" not in other
+
+
+@LOOPS
+def test_pk_refusal_is_said_first_and_the_sale_goes_on(run: Any) -> None:
+    text = "купити шини і щоб одразу поставили — запишете на шиномонтаж?"
+    phrase = _expected_refusal("fitting")
+    reply, systems, spoken_before = run(text, PK)
+    assert reply.startswith(phrase)
+    assert LLM_REPLY in reply  # the model's turn is not cut: the tyre sale goes on
+    assert nf.already_said_note([phrase]) in systems[0]
+    if spoken_before is not None:
+        assert spoken_before[0][:1] == [phrase]
+
+
+@LOOPS
+def test_ts_fitting_request_is_left_to_the_model(run: Any) -> None:
+    reply, systems, _ = run("мені треба записати на шиномонтаж дві машини", TS)
+    assert not _REFUSAL.search(reply)
+    assert "Вже сказано клієнту" not in systems[0]
