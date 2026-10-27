@@ -1621,6 +1621,7 @@ class StreamingAgentLoop:
         agent_name: str | None = None,
         echo_canceller: EchoCanceller | None = None,
         promotions: list[ActivePromotion] | None = None,
+        delivery_quotes: list[int] | None = None,
     ) -> None:
         self._llm_router = llm_router
         self._tool_router = tool_router
@@ -1645,6 +1646,9 @@ class StreamingAgentLoop:
         # Built in main.py from the promotions already loaded for the prompt
         # (sales on only); None keeps the guard as it was without promotions.
         self._promo_overrides = promo_overrides
+        # Delivery sums `get_delivery_cost` gave this call — the very
+        # `CallSession.delivery_quotes` list, so a quote is seen as it lands.
+        self._delivery_quotes: list[int] = delivery_quotes if delivery_quotes is not None else []
         # Sales scope switch — the one flag the transfer guard reads.
         self._sales_enabled = bool(network_policy is not None and network_policy.sales_enabled)
         self._is_modular = is_modular

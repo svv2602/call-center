@@ -286,6 +286,10 @@ class CallSession:
         # «А дешевше?» / «схожі за ціною» search from it — `price_mode` —
         # without asking the size again. Keys: prices, ids, params.
         self.last_tire_offer: dict[str, Any] | None = None
+        # Delivery sums `get_delivery_cost` gave the caller (whole UAH: the
+        # branch price and, when asked, the courier surcharge) — for the speech
+        # guard, which checks a spoken sum against them. Not in any prompt block.
+        self.delivery_quotes: list[int] = []
         # Main-flow state frozen while a side-state (PRICE_INTERRUPT /
         # CANCEL_INTERRUPT) is active. Wave 4-B resumes into it.
         self.fsm_prev_state: str | None = None
@@ -681,6 +685,7 @@ class CallSession:
             "tire_size_refused": dict(self.tire_size_refused),
             "order_quantity_guard_fired": self.order_quantity_guard_fired,
             "last_tire_offer": dict(self.last_tire_offer) if self.last_tire_offer else None,
+            "delivery_quotes": list(self.delivery_quotes),
             "fsm_prev_state": self.fsm_prev_state,
             "fsm_history": list(self.fsm_history[-FSM_HISTORY_LIMIT:]),
             "fsm_parser_null_counts": dict(self.fsm_parser_null_counts),
@@ -813,6 +818,12 @@ class CallSession:
                 "ids": list(offer.get("ids") or []) or None,
                 "params": dict(offer.get("params") or {}),
             }
+        quotes = data.get("delivery_quotes")
+        if isinstance(quotes, list):
+            # In place: the streaming loop holds this very list object.
+            session.delivery_quotes[:] = [
+                q for q in quotes if isinstance(q, int) and not isinstance(q, bool)
+            ]
         history = data.get("fsm_history") or []
         if isinstance(history, list):
             session.fsm_history = [h for h in history if isinstance(h, dict)][-FSM_HISTORY_LIMIT:]

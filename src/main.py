@@ -26,6 +26,7 @@ from fastapi.staticfiles import StaticFiles
 from redis.asyncio import Redis
 from sqlalchemy import text
 
+from src.agent import delivery_quote as dq
 from src.agent.agent import LLMAgent, ToolRouter
 from src.agent.booking_result import is_booking_confirmed
 from src.agent.color_translit import latin_prefix_to_color
@@ -33,7 +34,7 @@ from src.agent.confirm_detect import booking_was_confirmed
 from src.agent.network_policy import SERVICE_TOOLS, NetworkPolicy
 from src.agent.tool_result_compressor import AUDIT_ORDER_NUMBER_KEY
 from src.agent.parsers.date_parser import resolve_tool_date
-from src.agent.promotions import load_active_promotions, promo_overrides
+from src.agent.promotions import PromoOverrides, load_active_promotions, promo_overrides
 from src.agent.prompt_manager import (
     PromptManager,
     fetch_tenant_promotions,
@@ -104,6 +105,7 @@ from src.core.audio_stats import InboundAudioStats
 from src.core.call_session import SESSION_TTL, CallSession, CallState, SessionStore
 from src.core.pipeline import CallPipeline
 from src.events.publisher import publish_event
+from src.integrations.novaposhta import NovaPoshtaClient
 from src.logging.pii_vault import PIIVault
 from src.logging.structured_logger import setup_logging
 from src.monitoring.cost_tracker import CostBreakdown
@@ -115,6 +117,7 @@ from src.monitoring.metrics import (
     call_scenario_total,
     calls_resolved_by_bot_total,
     calls_total,
+    delivery_quote_total,
     fittings_booked_total,
     get_metrics,
     krok1_regression_blocked_total,
@@ -233,6 +236,9 @@ _redis: Redis | None = None
 _store_client: StoreClient | None = None
 _tts_engine: GoogleTTSEngine | None = None
 _onec_client: OneCClient | None = None
+#: Nova Poshta clients by the env variable holding the key — one per process,
+#: created on first use (each holds its own quote cache).
+_np_clients: dict[str, NovaPoshtaClient] = {}
 _embedding_task: asyncio.Task | None = None  # type: ignore[type-arg]
 _pricing_task: asyncio.Task | None = None  # type: ignore[type-arg]
 _db_engine: Any = None
@@ -1283,6 +1289,9 @@ async def handle_call(conn: AudioSocketConnection) -> None:
         tenant_agent_name = tenant.get("agent_name") if tenant else None
         tenant_network_name = tenant.get("name") if tenant else None
 
+        # Nova Poshta delivery quote: the network's flag valid AND its key set.
+        delivery_quote_on = dq.quote_available(network_policy)
+
         # Apply tenant overrides (tools filter, greeting, prompt suffix)
         if tenant:
             if tenant.get("enabled_tools"):
@@ -1295,7 +1304,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 # Sales: the tenant's list predates the sales tools (search_disks,
                 # submit_order_request; Про Колесо lacks pickup) — add the core.
                 if network_policy.sales_enabled:
-                    allowed = sales_tenant_allowlist(allowed)
+                    allowed = sales_tenant_allowlist(allowed, delivery_quote=delivery_quote_on)
                 if tools:
                     tools = [t for t in tools if t["name"] in allowed]
             if tenant.get("greeting") and templates:
@@ -1333,6 +1342,11 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 len(tools) if tools else 0,
                 conn.channel_uuid,
             )
+
+        # Default-deny over every tenant (with or without `enabled_tools`) and
+        # every scenario: no flag or no key → no `get_delivery_cost`.
+        if tools and not delivery_quote_on:
+            tools = [t for t in tools if t["name"] != dq.DELIVERY_COST_TOOL]
 
         # Apply IVR scenario emphasis to system prompt
         if session.scenario and system_prompt:
@@ -1375,7 +1389,10 @@ async def handle_call(conn: AudioSocketConnection) -> None:
 
         # Per-call tool router, PII vault, and LLM agent
         router = _build_tool_router(
-            session, store_client=tenant_store_client, network_policy=network_policy
+            session,
+            store_client=tenant_store_client,
+            network_policy=network_policy,
+            promo_overrides=claim_overrides,
         )
 
         # Wire tool call logging into the router
@@ -1485,6 +1502,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 agent_name=tenant_agent_name,
                 echo_canceller=echo_canceller,
                 promotions=live_promotions,
+                delivery_quotes=session.delivery_quotes,
             )
 
         # Run the pipeline (greeting → listen → STT → LLM → TTS loop)
@@ -1944,15 +1962,36 @@ def _split_auto_number(auto_number: str) -> tuple[str | None, str | None]:
     return colour, brand
 
 
+def _nova_poshta_client(key_env: str | None) -> NovaPoshtaClient | None:
+    """The process-wide Nova Poshta client for the key in ``key_env``, or None.
+
+    Created lazily on first use; the key is read from the environment here
+    and never logged.
+    """
+    if not key_env:
+        return None
+    key = os.environ.get(key_env, "").strip()
+    if not key:
+        return None
+    client = _np_clients.get(key_env)
+    if client is None:
+        client = NovaPoshtaClient(key, get_settings().nova_poshta, redis=_redis)
+        _np_clients[key_env] = client
+    return client
+
+
 def _build_tool_router(
     session: CallSession,
     store_client: StoreClient | None = None,
     network_policy: NetworkPolicy | None = None,
+    promo_overrides: PromoOverrides | None = None,
 ) -> ToolRouter:
     """Build a ToolRouter with all canonical tools registered.
 
     ``network_policy`` (built once per call in ``handle_call``) carries the
     network's tyre ranking — ``brand_priority`` and ``recommend_count``.
+    ``promo_overrides`` — today's live promotions (sales on only): a
+    free-delivery one spares the Nova Poshta quote.
     """
     router = ToolRouter()
 
@@ -2279,9 +2318,102 @@ def _build_tool_router(
             params["recommend_count"] = network_policy.recommend_count
         return await client.search_disks(network=network, **params)
 
-    router.register("search_tires", _search_tires)
-    router.register("search_disks", _search_disks)
-    router.register("check_availability", _check_availability)
+    # Delivery quote (sales, network flag + key): every product this call
+    # offered → its price and rim size. `get_delivery_cost` quotes only these —
+    # price and diameter never come from the model's arguments.
+    delivery_quote_on = dq.quote_available(network_policy)
+    offered_products: dict[str, dict[str, Any]] = {}
+
+    async def _search_tires_offered(**params: Any) -> Any:
+        result = await _search_tires(**params)
+        dq.remember_offered(offered_products, result, "tire")
+        return result
+
+    async def _search_disks_offered(**params: Any) -> Any:
+        result = await _search_disks(**params)
+        dq.remember_offered(offered_products, result, "wheel")
+        return result
+
+    async def _check_availability_offered(product_id: str = "", query: str = "", **kw: Any) -> Any:
+        result = await _check_availability(product_id, query, **kw)
+        # Only refreshes the price of a product already offered: the answer
+        # carries neither an id nor a size.
+        entry = offered_products.get(str(product_id or "").strip())
+        if entry is not None and isinstance(result, dict):
+            price = dq.positive_price(result.get("price"))
+            if price is not None:
+                entry["price"] = price
+        return result
+
+    if delivery_quote_on:
+        router.register("search_tires", _search_tires_offered)
+        router.register("search_disks", _search_disks_offered)
+        router.register("check_availability", _check_availability_offered)
+    else:
+        router.register("search_tires", _search_tires)
+        router.register("search_disks", _search_disks)
+        router.register("check_availability", _check_availability)
+
+    def _quote_result(status: str, phrase: str, **extra: Any) -> dict[str, Any]:
+        delivery_quote_total.labels(outcome=status).inc()
+        logger.info("get_delivery_cost: %s for call %s", status, session.channel_uuid)
+        return {"status": status, "phrase": phrase, **extra}
+
+    async def _get_delivery_cost(
+        city: str = "", items: Any = None, courier: Any = False, **_: Any
+    ) -> dict[str, Any]:
+        """Approximate Nova Poshta sum for products this call offered (sales, flag on).
+
+        Default-deny order: missing city/items or a product not offered →
+        need_more; every item under a free-delivery promotion → its text, Nova
+        Poshta not asked (some items → the manager); a failed lookup → the
+        carrier-tariff phrase. Never raises into the ToolRouter.
+        """
+        tariff = dq.tariff_phrase(network_policy)
+        city_name = city.strip() if isinstance(city, str) else ""
+        lines = dq.resolve_items(items, offered_products)
+        if not city_name or lines is None:
+            return _quote_result(
+                dq.STATUS_NEED_MORE,
+                f"{tariff} {dq.NEED_MORE_HINT}",
+                missing="city" if not city_name else "items",
+            )
+        covered, promo_text = dq.free_delivery_cover(lines, promo_overrides)
+        if covered and covered == len(lines) and promo_text:
+            return _quote_result(dq.STATUS_PROMO_FREE, promo_text)
+        if covered:
+            return _quote_result(dq.STATUS_PROMO_MIXED, dq.PROMO_MIXED_PHRASE)
+        door = courier is True
+        np_client = _nova_poshta_client(
+            network_policy.delivery_quote_key_env if network_policy is not None else None
+        )
+        quote = None
+        if np_client is not None:
+            try:
+                city_ref = await np_client.resolve_city(city_name)
+                if city_ref is not None:
+                    quote = await np_client.quote(
+                        city_ref,
+                        dq.cargo_lines(lines),
+                        declared_value=dq.declared_value(lines),
+                        door=door,
+                    )
+            except Exception:
+                logger.warning(
+                    "get_delivery_cost: Nova Poshta lookup raised for call %s",
+                    session.channel_uuid,
+                    exc_info=True,
+                )
+                quote = None
+        if quote is None:
+            return _quote_result(dq.STATUS_API_FAILED, tariff)
+        session.delivery_quotes.extend(dq.quoted_sums(quote, door))
+        return _quote_result(
+            dq.STATUS_QUOTED, dq.quote_phrase(quote, door), cost=dq.quoted_sums(quote, door)[0]
+        )
+
+    if delivery_quote_on:
+        router.register(dq.DELIVERY_COST_TOOL, _get_delivery_cost)
     router.register("get_order_status", client.search_orders)
 
     async def _create_order_draft(**kwargs: Any) -> Any:

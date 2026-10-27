@@ -249,6 +249,29 @@ orders_created_total = Counter(
     "Orders created through bot",
 )
 
+#: Outcomes of `callcenter_delivery_quote_total`: the `get_delivery_cost` tool
+#: (quoted / need_more / promo_free / promo_mixed / api_failed) and the Nova
+#: Poshta branch check of an order request (warehouse_*).
+DELIVERY_QUOTE_OUTCOMES: tuple[str, ...] = (
+    "quoted",
+    "need_more",
+    "promo_free",
+    "promo_mixed",
+    "api_failed",
+    "warehouse_not_found",
+    "warehouse_accepted_after_retries",
+    "warehouse_unchecked",
+)
+
+delivery_quote_total = Counter(
+    "callcenter_delivery_quote_total",
+    "Nova Poshta delivery quotes and branch checks by outcome; a refusal or a "
+    "fallback is an outcome too — the tool result is logged as success=t either way",
+    ["outcome"],
+)
+for _outcome in DELIVERY_QUOTE_OUTCOMES:
+    delivery_quote_total.labels(outcome=_outcome)
+
 fittings_booked_total = Counter(
     "callcenter_fittings_booked_total",
     "Fitting appointments booked through bot",

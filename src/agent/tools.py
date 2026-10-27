@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from src.agent.delivery_quote import DELIVERY_COST_TOOL
 from src.knowledge.categories import CATEGORY_VALUES
 
 # MVP tools — Claude API tool_use format
@@ -851,8 +852,67 @@ DISK_TOOLS: list[dict] = [  # type: ignore[type-arg]
     },
 ]
 
-# All tools for the agent (MVP + Orders + Fitting/Knowledge + Profile + Callback + Disks)
-ALL_TOOLS = MVP_TOOLS + ORDER_TOOLS + FITTING_TOOLS + PROFILE_TOOLS + CALLBACK_TOOLS + DISK_TOOLS
+# Nova Poshta delivery quote (sales, per-network flag `network_policy.delivery_quote`).
+# Offered only when the flag is valid and the key is in the env — `src/main.py`
+# cuts it from every other call. No literal ids in the description: an example
+# value becomes an argument.
+DELIVERY_QUOTE_TOOLS: list[dict] = [  # type: ignore[type-arg]
+    {
+        "name": DELIVERY_COST_TOOL,
+        "description": (
+            "Орієнтовна вартість доставки Новою поштою. Виклич ТІЛЬКИ коли клієнт сам "
+            "спитав про вартість доставки — не в підсумку заявки і не з власної ініціативи. "
+            "Потрібні місто клієнта і товари з показаних йому варіантів (product_id з "
+            "результатів пошуку цього дзвінка) з кількістю. courier=true — лише якщо клієнт "
+            "спитав про доставку кур'єром або до дверей. Суму рахує система: скажи клієнту "
+            "phrase з результату дослівно, своїх сум не називай."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "city": {
+                    "type": "string",
+                    "description": "Місто доставки, як назвав клієнт",
+                },
+                "items": {
+                    "type": "array",
+                    "description": "Товари з показаних клієнту варіантів і їх кількість",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "product_id": {
+                                "type": "string",
+                                "description": "id товару з результатів пошуку",
+                            },
+                            "quantity": {
+                                "type": "integer",
+                                "description": "Кількість, яку назвав клієнт",
+                            },
+                        },
+                        "required": ["product_id", "quantity"],
+                    },
+                },
+                "courier": {
+                    "type": "boolean",
+                    "description": "Клієнт спитав про доставку кур'єром / до дверей",
+                },
+            },
+            "required": ["city", "items"],
+        },
+    },
+]
+
+# All tools for the agent (MVP + Orders + Fitting/Knowledge + Profile + Callback + Disks
+# + the delivery quote, which `handle_call` cuts unless the network's flag is on)
+ALL_TOOLS = (
+    MVP_TOOLS
+    + ORDER_TOOLS
+    + FITTING_TOOLS
+    + PROFILE_TOOLS
+    + CALLBACK_TOOLS
+    + DISK_TOOLS
+    + DELIVERY_QUOTE_TOOLS
+)
 
 
 def filter_tools_by_state(
@@ -952,12 +1012,19 @@ SALES_CORE_TOOLS: frozenset[str] = frozenset(
 )
 
 
-def sales_tenant_allowlist(names: set[str] | frozenset[str]) -> set[str]:
+def sales_tenant_allowlist(
+    names: set[str] | frozenset[str], *, delivery_quote: bool = False
+) -> set[str]:
     """Under sales: the tenant's list plus the sales core, order chain swapped.
 
     Services the network does not offer are cut later by the scenario filter.
+    ``get_delivery_cost`` is added only with ``delivery_quote`` (the network's
+    flag valid and its key set — `delivery_quote.quote_available`).
     """
-    return swap_order_chain_for_submit(set(names) | SALES_CORE_TOOLS)
+    allowed = swap_order_chain_for_submit(set(names) | SALES_CORE_TOOLS)
+    if delivery_quote:
+        allowed.add(DELIVERY_COST_TOOL)
+    return allowed
 
 
 def _text(value: Any) -> str:
