@@ -346,9 +346,26 @@ def _compress_search_disks(result: dict[str, Any]) -> str:
 
 
 def _compress_check_availability(result: dict[str, Any]) -> str:
-    """Keep availability essentials, trim warehouses to first 3."""
-    essential_keys = ("available", "price", "stock_quantity")
-    out = {k: v for k, v in result.items() if k in essential_keys}
+    """Keep availability essentials, trim warehouses to first 3.
+
+    The keys are the ones `StoreClient.check_availability` returns on all three
+    paths (Redis, PostgreSQL, Store API). The list used to name
+    ``stock_quantity``, which no path returns, and dropped ``quantity``,
+    ``year`` and ``country``. The model then said «рік випуску невідомий» with
+    the year in the result, and offered four tyres when one was left (goldset
+    operator_calls, 2026-10-27). An empty value is dropped: Redis gives
+    ``""`` for an unknown year, and the model must not read it as a year.
+    """
+    essential_keys = (
+        "available",
+        "quantity",
+        "price",
+        "year",
+        "country",
+        "delivery_days",
+        "message",
+    )
+    out = {k: result[k] for k in essential_keys if result.get(k) not in (None, "")}
     warehouses = result.get("warehouses")
     if warehouses:
         out["warehouses"] = warehouses[:3]

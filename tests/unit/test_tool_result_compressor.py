@@ -8,6 +8,20 @@ from typing import Any
 from src.agent.tool_result_compressor import compress_tool_result
 from src.store_client.client import StoreClient
 
+# The three shapes `StoreClient.check_availability` returns — copied from its
+# return statements, not invented: a fixture with a key no path returns
+# (``stock_quantity``) kept the availability test green while the model saw
+# neither the stock nor the year.
+_REDIS_SHAPE = {
+    "available": True,
+    "quantity": 1,
+    "price": 7684,
+    "country": "Іспанія",
+    "year": "2025",
+}
+_PG_SHAPE = {"available": True, "quantity": 4, "price": 2694, "country": "Польща", "year": 2023}
+_STORE_API_SHAPE = {"available": True, "quantity": 6, "price": 8817, "delivery_days": 2}
+
 
 class TestCompressToolResult:
     """Tests for compress_tool_result()."""
@@ -263,7 +277,7 @@ class TestCompressToolResult:
         data = {
             "available": True,
             "price": 3200,
-            "stock_quantity": 12,
+            "quantity": 12,
             "warehouses": [
                 {"id": "w1", "name": "Центральний"},
                 {"id": "w2", "name": "Лівобережний"},
@@ -276,12 +290,44 @@ class TestCompressToolResult:
         result = compress_tool_result("check_availability", data)
         assert "true" in result
         assert "3200" in result
-        assert "stock_quantity" in result
+        assert '"quantity":12' in result
         # Warehouses trimmed to first 3
         assert "Оболонь" not in result
         # Internal fields dropped
         assert "product_id" not in result
         assert "updated_at" not in result
+
+    def test_check_availability_keeps_year_country_quantity(self) -> None:
+        for data in (_REDIS_SHAPE, _PG_SHAPE):
+            result = json.loads(compress_tool_result("check_availability", data))
+            assert result["year"] == data["year"]
+            assert result["country"] == data["country"]
+            assert result["quantity"] == data["quantity"]
+
+    def test_check_availability_keeps_delivery_days(self) -> None:
+        result = json.loads(compress_tool_result("check_availability", _STORE_API_SHAPE))
+        assert result["delivery_days"] == 2
+        assert result["quantity"] == 6
+
+    def test_check_availability_drops_empty_year(self) -> None:
+        data = {"available": True, "quantity": 3, "price": 2290, "country": "", "year": ""}
+        result = json.loads(compress_tool_result("check_availability", data))
+        assert "year" not in result
+        assert "country" not in result
+
+    def test_check_availability_keeps_zero_stock_and_not_found_message(self) -> None:
+        out_of_stock = json.loads(
+            compress_tool_result(
+                "check_availability", {"available": False, "quantity": 0, "price": 3100}
+            )
+        )
+        assert out_of_stock["quantity"] == 0
+        not_found = json.loads(
+            compress_tool_result(
+                "check_availability", {"available": False, "message": "Товар не знайдено"}
+            )
+        )
+        assert not_found["message"] == "Товар не знайдено"
 
     def test_fitting_slots_compressed(self) -> None:
         data = {
