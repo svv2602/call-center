@@ -110,16 +110,31 @@ _NEGATED_DISK = re.compile(
 )
 
 
+# «Шини на Tiguan 2019 год 18 диск» (call 51f0652f): beside a tyre word, a
+# bare diameter next to «диск» is the rim size of the tyres asked for, not a
+# wheel purchase. Cut out only with a tyre word: «диски 18» alone is wheels.
+_TYRE_WORD = re.compile(r"\b(?:шин\w*|резин\w*|гум(?:а|у|и|ою|ой)\b|покриш\w*|покрыш\w*)")
+_DIAMETER_DISK = re.compile(
+    r"\b(?:r\s?|р\s?)?(?:1[2-9]|2[0-4])(?:\s*-?\s*(?:й|го|ий|ый|ой|дюйм\w*))?\s+" + _DISK + r"\b"
+    # «шини і диски 18» asks for both: a conjunction before «диск» keeps it.
+    r"|(?<!\bі )(?<!\bи )(?<!\bта )(?<!\bй )\b" + _DISK + r"\s+(?:r\s?|р\s?)?(?:1[2-9]|2[0-4])\b",
+    re.IGNORECASE,
+)
+
+
 def has_disk_intent(text: str | None) -> bool:
     """True when the utterance asks about wheels (disks), UA or RU.
 
     A wheel phrase the caller negates («не диски», «диски не треба») is cut out
-    first, like brake discs and «шини на дисках» (`_NOT_WHEEL`).
+    first, like brake discs and «шини на дисках» (`_NOT_WHEEL`), and — beside
+    a tyre word — a diameter said with «диск» («шини … 18 диск»).
     """
     if not text:
         return False
     low = text.lower().replace("ё", "е")
     low = _NOT_WHEEL.sub(" ", low)
+    if _TYRE_WORD.search(low):
+        low = _DIAMETER_DISK.sub(" ", low)
     low = _NEGATED_DISK.sub(" ", low)
     return _WHEEL_WORDS.search(low) is not None
 

@@ -98,6 +98,37 @@ def _marked(history: list[dict[str, Any]]) -> list[str]:
 # ── Predicate ────────────────────────────────────────────────────────
 
 
+class TestDiameterWithDiskBesideTyres:
+    """Call 51f0652f: «шини на Tiguan 2019 год 18 диск» went to `search_disks`."""
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "шини на Tiguan 2019 год 18 диск",
+            "шини R18 диск",
+            "резина 17-й диск",
+            "шины, диск 16",
+            "Скажите сколько стоит шиномонтаж в Харькове 18 диски шин",
+        ],
+    )
+    def test_rim_size_of_the_tyres_is_not_wheels(self, text: str) -> None:
+        assert not has_disk_intent(text)
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "диски 18",
+            "мені 18 диски",
+            "шини і диски 18",
+            "шины и диски 17",
+            "литі диски 17 і шини до них",
+            "шини на 18 диск і ще литі диски",
+        ],
+    )
+    def test_wheels_stay_wheels(self, text: str) -> None:
+        assert has_disk_intent(text)
+
+
 class TestHasDiskIntent:
     @pytest.mark.parametrize(
         "text",
