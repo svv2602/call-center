@@ -70,6 +70,7 @@ from src.monitoring.metrics import (
     history_compression_mode,
     history_messages_count,
     llm_stop_reason_total,
+    multi_car_booking_total,
     operator_only_transfer_total,
     system_prompt_chars,
     tool_audit_write_failures_total,
@@ -89,6 +90,32 @@ logger = logging.getLogger(__name__)
 MAX_TOOL_CALLS_PER_TURN = 5
 MAX_HISTORY_MESSAGES = 25
 _TOOL_TIMEOUT_SEC = 15  # Per-tool execution timeout
+
+# --- Multi-car booking, 4+ cars (FF_MULTI_CAR_BOOKING, R04) ---
+# «Четвёртая и больше — перевод на оператора: это уже автопарк.» The code
+# transfers (`run_forced_tool`), once per call — the pipeline hands the loop
+# `multi_car_over_cap=True` on one turn only. Shared by both loops.
+MULTI_CAR_OVER_CAP_PHRASE = (
+    "Запис чотирьох і більше автомобілів оформлює менеджер — з'єдную вас з ним."
+)
+_MULTI_CAR_TRANSFER_TOOL = "transfer_to_operator"
+
+
+def multi_car_over_cap_armed(tools: list[dict[str, Any]] | None) -> bool:
+    """Default-deny: the network books fittings (``book_fitting``, Про Колесо
+    has none — R08) and the loop may transfer."""
+    names = {t.get("name") for t in tools or [] if isinstance(t, dict)}
+    return "book_fitting" in names and _MULTI_CAR_TRANSFER_TOOL in names
+
+
+def multi_car_over_cap_args(user_text: str) -> dict[str, Any]:
+    """The ``transfer_to_operator`` arguments of the 4+ cars transfer."""
+    words = " ".join((user_text or "").split())[:200]
+    return {
+        "reason": "complex_question",
+        "summary": f"Клієнт: запис на шиномонтаж більше ніж трьох автомобілів. "
+        f"Слова клієнта: «{words}».",
+    }
 
 
 class ToolRouter:
@@ -325,6 +352,8 @@ class LLMAgent:
         selected_slot: dict[str, str] | None = None,
         offered_slots: list[dict[str, str]] | None = None,
         fitting_progress: dict[str, Any] | None = None,
+        next_car_pending: bool = False,
+        multi_car_over_cap: bool = False,
     ) -> tuple[str, list[dict[str, Any]]]:
         """Process a user message and return the agent's text response.
 
@@ -339,6 +368,10 @@ class LLMAgent:
             storage_context: Formatted storage contracts section.
             customer_profile: Formatted customer profile section.
             fitting_booked: Whether a fitting has already been booked this call.
+            next_car_pending: Multi-car booking — another car of the call is
+                still to be booked; keeps the booking tools after a booking.
+            multi_car_over_cap: Multi-car booking — the caller named 4+ cars;
+                the code transfers to an operator before any LLM round (R04).
             tools_called: Set of tool names invoked during this call (for module expansion).
             scenario: Current IVR scenario (for module expansion).
             active_scenarios: All detected scenarios (for topic switching).
@@ -450,7 +483,10 @@ class LLMAgent:
 
         # Filter tools by conversation state (remove irrelevant tools)
         tools = filter_tools_by_state(
-            self._tools, order_stage=order_stage, fitting_booked=fitting_booked
+            self._tools,
+            order_stage=order_stage,
+            fitting_booked=fitting_booked,
+            next_car_pending=next_car_pending,
         )
 
         response_text = ""
@@ -471,6 +507,40 @@ class LLMAgent:
         # (`operator_only_intents`): the code transfers, once per call; the
         # phrase is the reply, or opens it when the executor refused.
         only_said: list[str] = []
+        # 4+ cars (R04): the same shape, armed by the pipeline once per call.
+        if multi_car_over_cap and multi_car_over_cap_armed(self._tools):
+            cap_args = multi_car_over_cap_args(user_text)
+            cap_raw = await run_forced_tool(
+                _MULTI_CAR_TRANSFER_TOOL,
+                cap_args,
+                self._tool_router.execute,
+                timeout=_TOOL_TIMEOUT_SEC,
+            )
+            self._call_tools.add(_MULTI_CAR_TRANSFER_TOOL)
+            multi_car_booking_total.labels(event="over_cap").inc()
+            cap_content = compress_tool_result(
+                _MULTI_CAR_TRANSFER_TOOL, cap_raw, sales_enabled=sales_enabled, args=cap_args
+            )
+            if self._pii_vault is not None:
+                cap_content = self._pii_vault.mask(cap_content)
+            conversation_history.extend(
+                forced_tool_messages(_MULTI_CAR_TRANSFER_TOOL, cap_args, cap_content)
+            )
+            tool_call_count += 1
+            if operator_only_transferred(cap_raw):
+                conversation_history.append(
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": MULTI_CAR_OVER_CAP_PHRASE}],
+                    }
+                )
+                self.last_input_tokens = 0
+                self.last_output_tokens = 0
+                self.last_cached_input_tokens = 0
+                self.last_provider_key = ""
+                self.last_error = None
+                return MULTI_CAR_OVER_CAP_PHRASE, conversation_history
+            only_said.append(MULTI_CAR_OVER_CAP_PHRASE)
         only_intent = self._operator_only.plan(
             user_text,
             tools=tools,

@@ -2688,6 +2688,16 @@ def _render_tire_progress(p: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _render_booked_cars(booked_cars: list[dict[str, Any]]) -> str:
+    """«Вже записано: …» — one line per car booked in this call."""
+    rows = []
+    for i, car in enumerate(booked_cars, start=1):
+        what = " ".join(str(v) for v in (car.get("color"), car.get("vehicle")) if v) or "авто"
+        when = " о ".join(str(v) for v in (car.get("date"), car.get("time")) if v)
+        rows.append(f"  {i}. {what}" + (f" — {when}" if when else ""))
+    return "Вже записано в цьому дзвінку:\n" + "\n".join(rows)
+
+
 def _render_fitting_progress(p: dict[str, Any]) -> str:
     """Render fitting progress block for LLM.
 
@@ -2714,13 +2724,21 @@ def _render_fitting_progress(p: dict[str, Any]) -> str:
     krok8_confab = bool(p.get("krok8_confabulation_pending"))  # Wave 6: previous Krok 8 was hallucinated
     available_slots = list(p.get("available_slots") or [])  # free «HH:MM» from 1C
     date_no_slots = p.get("date_no_slots")  # day 1С returned no slots for
+    # Multi-car booking (FF_MULTI_CAR_BOOKING): present only while the call
+    # books several cars — `_multi_car_progress` in the pipeline.
+    car_number = p.get("car_number")
+    cars_total = p.get("cars_total")
+    booked_cars = list(p.get("booked_cars") or [])
 
     if booked:
-        return (
+        done = (
             "\n## 📋 Прогрес запису"
             "\n✅ ЗАПИС СТВОРЕНО. Далі — тільки прощання або новий сценарій "
             "(наприклад другий договір, консультація)."
         )
+        if len(booked_cars) > 1:
+            done += "\n" + _render_booked_cars(booked_cars)
+        return done
 
     collected = fitting_steps_collected(p)
     checklist: list[tuple[str, bool, str]] = []
@@ -2824,6 +2842,17 @@ def _render_fitting_progress(p: dict[str, Any]) -> str:
     step_questions = [question for _, question in FITTING_STEPS]
 
     lines = ["\n## 🛑 СТАН ЗАПИСУ — читай ПЕРЕД будь-якою дією"]
+    if car_number and cars_total:
+        # The car in hand and the cars already booked. Ім'я, місто і точка
+        # stay ✅ from the first car; only the car's own rows are open (R03).
+        lines.append(f"\n🚗 **Авто {car_number} з {cars_total}.**")
+        if booked_cars:
+            lines.append(_render_booked_cars(booked_cars))
+            last = booked_cars[-1]
+            if last.get("date") and last.get("time"):
+                lines.append(
+                    f"Попереднє авто записано на {last['date']} о {last['time']} — та сама точка."
+                )
     # Wave 6 (2026-09-03) — CallerID phone enforcement banner.
     # LLM sometimes asks «Назвіть номер телефону» even though CallerID
     # is set (call fcfb26a9 turn 25: 10-turn phone-collection loop

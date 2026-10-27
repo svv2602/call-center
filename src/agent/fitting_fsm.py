@@ -1002,6 +1002,53 @@ TRANSITIONS: tuple[TransitionRule, ...] = (
         FsmState.TRANSFER,
         "explicit «оператор» → transfer_to_operator(reason=customer_request)",
     ),
+    # Multi-car booking (FF_MULTI_CAR_BOOKING, 2026-10-27). Numbered after the
+    # §2.2 table so the rows stay sorted; `find_transitions` puts the exact
+    # guard ahead of the unguarded row 27, so for this guard it is the one
+    # that applies. STORAGE and not DATE: Твоя шина keeps tyres in storage,
+    # so «свої / на зберіганні» is a question about each car (R03 — city,
+    # station and name are not asked again).
+    TransitionRule(
+        49,
+        FsmState.BOOK,
+        FsmEvent.TOOL_SUCCESS,
+        FsmState.STORAGE,
+        "next car of the call: clear the car's fields, keep city/station/name",
+        guard="next_car",
+    ),
+)
+
+#: `fsm_filled_fields` keys that belong to one car (or its slot) and are
+#: cleared by `FsmEngine.start_next_car`. Everything else — intent, city,
+#: station_id, name — belongs to the caller and is kept (R03).
+NEXT_CAR_FIELDS: tuple[str, ...] = (
+    "storage_choice",
+    "storage_contract",
+    "date",
+    "time",
+    "color",
+    "brand",
+    "confirmed",
+    "diameter",
+    "plate",
+)
+
+#: States the FSM may be in when the previous car's booking is confirmed. The
+#: LLM books on its own turn, so the machine can lag behind it anywhere past
+#: STATION; every one of these holds a car's fields and is rewound. Before
+#: STORAGE there is nothing of a car to clear, and the side-states are left to
+#: their own resume (an interrupt is not the booking flow).
+_NEXT_CAR_FROM_STATES: frozenset[FsmState] = frozenset(
+    {
+        FsmState.STORAGE,
+        FsmState.DATE,
+        FsmState.TIME,
+        FsmState.COLOR,
+        FsmState.BRAND,
+        FsmState.CONFIRM,
+        FsmState.BOOK,
+        FsmState.DONE,
+    }
 )
 
 
@@ -1186,6 +1233,41 @@ class FsmEngine:
             logger.exception(
                 "fitting_fsm: failed to emit FSM metrics for %s → %s", from_state, to_state
             )
+
+    # --- Multi-car booking ---
+
+    def start_next_car(self, car_number: int) -> FsmState | None:
+        """Rewind the machine for the next car of the call (row 49).
+
+        The caller (`CallPipeline._run_multi_car_step`) has already called
+        `CallSession.start_next_car()`, which cleared the flat `fitting_*`
+        fields. `fsm_filled_fields` is the FSM's own copy, and the progress
+        block gap-fills from it (`_build_fitting_progress`): kept, it would show
+        the first car's date, time, colour and brand as collected for the
+        second car. Pure and synchronous — session fields only.
+
+        Returns the new state, or None when the FSM has not started or sits
+        outside the car part of the flow (nothing to rewind).
+        """
+        current = FsmState.coerce(self.session.fsm_state)
+        filled = self.session.fsm_filled_fields
+        for key in NEXT_CAR_FIELDS:
+            filled.pop(key, None)
+        if current is None or current not in _NEXT_CAR_FROM_STATES:
+            return None
+        for state in (FsmState.STORAGE, FsmState.COLOR, FsmState.BRAND, FsmState.TIME):
+            self._null_counts().pop(state.value, None)
+            self._clear_fallback(state)
+        rule = find_transitions(FsmState.BOOK, FsmEvent.TOOL_SUCCESS, "next_car")[0]
+        target = rule.to_state
+        if target is None:  # pragma: no cover - row 49 names its target
+            raise ValueError("fitting_fsm: row 49 has no target state")
+        self.transition(
+            target,
+            event=FsmEvent.TOOL_SUCCESS,
+            payload={"reason": "next_car", "row": rule.row, "car": car_number},
+        )
+        return target
 
     # --- Field filling ---
 

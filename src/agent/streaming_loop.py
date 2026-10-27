@@ -16,7 +16,13 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from src.agent.agent import MAX_HISTORY_MESSAGES, MAX_TOOL_CALLS_PER_TURN
+from src.agent.agent import (
+    MAX_HISTORY_MESSAGES,
+    MAX_TOOL_CALLS_PER_TURN,
+    MULTI_CAR_OVER_CAP_PHRASE,
+    multi_car_over_cap_args,
+    multi_car_over_cap_armed,
+)
 from src.agent.booking_consent import (
     BOOKING_DECLINED_FAREWELL,
     BOOKING_OFFER,
@@ -111,6 +117,7 @@ from src.monitoring.metrics import (
     history_compression_mode,
     history_messages_count,
     llm_stop_reason_total,
+    multi_car_booking_total,
     operator_only_transfer_total,
     reopened_time_choice_total,
     settled_question_redirect_skipped_total,
@@ -1826,6 +1833,8 @@ class StreamingAgentLoop:
         fitting_progress: dict[str, Any] | None = None,
         booking_gate_mode: str | None = None,
         tire_progress: dict[str, Any] | None = None,
+        next_car_pending: bool = False,
+        multi_car_over_cap: bool = False,
     ) -> TurnResult:
         """Run a full conversation turn with streaming audio output.
 
@@ -1922,7 +1931,10 @@ class StreamingAgentLoop:
 
         # Filter tools by conversation state (remove irrelevant tools)
         tools = filter_tools_by_state(
-            self._tools or [], order_stage=order_stage, fitting_booked=fitting_booked
+            self._tools or [],
+            order_stage=order_stage,
+            fitting_booked=fitting_booked,
+            next_car_pending=next_car_pending,
         )
 
         spoken_parts: list[str] = []
@@ -1977,6 +1989,46 @@ class StreamingAgentLoop:
         facts = turn_facts(
             user_text, self._network_policy, self._promo_overrides, tire_progress
         )
+
+        # 4+ cars (multi-car booking, R04): the code says one phrase and
+        # transfers. Armed by the pipeline once per call, under the flag and
+        # without sales — fitting bookings live without sales. Refused (after
+        # hours, no AMI) → the model speaks the executor's message below.
+        if multi_car_over_cap and multi_car_over_cap_armed(self._tools):
+            if await self._speak_code_phrase(MULTI_CAR_OVER_CAP_PHRASE):
+                spoken_parts.append(MULTI_CAR_OVER_CAP_PHRASE)
+            cap_args = multi_car_over_cap_args(user_text)
+            cap_raw = await run_forced_tool(
+                OPERATOR_TRANSFER_TOOL,
+                cap_args,
+                self._tool_router.execute,
+                timeout=_TOOL_TIMEOUT_SEC,
+            )
+            multi_car_booking_total.labels(event="over_cap").inc()
+            cap_content = compress_tool_result(
+                OPERATOR_TRANSFER_TOOL, cap_raw, sales_enabled=self._sales_enabled, args=cap_args
+            )
+            if self._pii_vault is not None:
+                cap_content = self._pii_vault.mask(cap_content)
+            conversation_history.extend(
+                forced_tool_messages(OPERATOR_TRANSFER_TOOL, cap_args, cap_content)
+            )
+            tool_calls_made += 1
+            if operator_only_transferred(cap_raw):
+                conversation_history.append(
+                    {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": MULTI_CAR_OVER_CAP_PHRASE}],
+                    }
+                )
+                return TurnResult(
+                    spoken_text=MULTI_CAR_OVER_CAP_PHRASE,
+                    tool_calls_made=tool_calls_made,
+                    stop_reason="end_turn",
+                    total_usage=Usage(0, 0, 0),
+                    interrupted=self._barge_in is not None and self._barge_in.is_set(),
+                )
+            system += already_said_note([MULTI_CAR_OVER_CAP_PHRASE])
 
         # A request only a manager settles (`operator_only_intents`, sales
         # only): the code says one phrase and transfers, once per call. The

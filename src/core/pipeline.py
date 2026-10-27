@@ -20,6 +20,7 @@ from src.agent.confirm_detect import (
     is_confirmation,
     is_yes_no_question,
 )
+from src.agent.multi_car_detect import MAX_CARS_PER_CALL, MultiCarIntent, detect_multi_car
 from src.agent.parsers.storage_choice_parser import (
     _bot_is_asking_storage,
     detect_own_tires,
@@ -49,6 +50,7 @@ from src.agent.prompts import (
     detect_scenario_from_text,
 )
 from src.agent.streaming_loop import control_plane_syntax
+from src.config import FeatureFlagSettings
 from src.core.audio_socket import AUDIO_FRAME_BYTES, AudioSocketConnection, PacketType
 from src.core.call_session import SILENCE_TIMEOUT_SEC, CallSession, CallState
 from src.monitoring.metrics import (
@@ -60,6 +62,7 @@ from src.monitoring.metrics import (
     fsm_compound_preparse_fields_total,
     fsm_interrupt_total,
     fsm_voice_total,
+    multi_car_booking_total,
     tts_delivery_ms,
 )
 from src.stt.base import STTConfig, STTEngine, Transcript
@@ -1092,6 +1095,11 @@ class CallPipeline:
         # Set once the bot has said goodbye; shortens the next silence wait to
         # _FAREWELL_HANGUP_GRACE_SEC. Cleared as soon as the caller speaks.
         self._farewell_spoken = False
+        # Multi-car booking (FF_MULTI_CAR_BOOKING): the 4+ cars transfer is
+        # handed to the LLM loop at most once per call (R04), and the bookings
+        # already counted under `multi_car_booking_total{event="booked"}`.
+        self._multi_car_over_cap_fired = False
+        self._multi_car_bookings_counted = 0
 
     @property
     def _tts(self) -> TTSEngine:
@@ -1108,7 +1116,7 @@ class CallPipeline:
         under a guard's control. The actual prevention is the Krok 8 marker
         upstream; this exists so a recurrence is visible instead of silent.
         """
-        if not _claims_booking_done(bot_text) or self._session.fitting_booked:
+        if not _claims_booking_done(bot_text) or self._current_car_booked():
             return
         false_booking_claim_total.inc()
         logger.error(
@@ -1360,7 +1368,7 @@ class CallPipeline:
             "plate": self._session.fitting_plate,
             "brand": self._session.fitting_vehicle_brand,
             "caller_phone": self._session.caller_phone,
-            "booked": self._session.fitting_booked,
+            "booked": self._current_car_booked(),
             "requested_weekday": self._session.fitting_requested_weekday,
             "krok8_confirmed": krok8_confirmed,
             "krok8_confabulation_pending": self._session.krok8_confabulation_pending,
@@ -1414,7 +1422,209 @@ class CallPipeline:
         ):
             progress["date_no_slots"] = date_chosen
             progress["date"] = None
+        progress.update(self._multi_car_progress())
         return progress
+
+    def _multi_car_progress(self) -> dict[str, Any]:
+        """The multi-car keys of the progress block, or ``{}``.
+
+        Empty — not a dict of ``None`` — unless the call is booking several
+        cars under the flag, so the block of every other call is the dict it
+        was at HEAD. Written into the session ≠ seen by the LLM: «Авто N з M»
+        and the cars already booked reach the model only through here
+        (`_render_fitting_progress`). ``booked_cars`` is ``or None`` — the
+        consumers sift with ``v not in (None, "", False)`` and ``[]`` passes.
+        """
+        session = self._session
+        if not self._multi_car_armed():
+            return {}
+        bookings = session.fitting_bookings
+        expected = session.cars_expected
+        named_several = (
+            isinstance(expected, int) and not isinstance(expected, bool) and expected > 1
+        )
+        if not named_several and len(bookings) < 2:
+            return {}
+        total = min(expected if named_several else len(bookings), MAX_CARS_PER_CALL)
+        return {
+            "car_number": session.fitting_car_number,
+            "cars_total": max(total, len(bookings)),
+            "booked_cars": [
+                {
+                    "vehicle": b.get("vehicle"),
+                    "color": b.get("color"),
+                    "date": b.get("date"),
+                    "time": b.get("time"),
+                }
+                for b in bookings
+            ]
+            or None,
+        }
+
+    # ------------------------------------------------------------------
+    # Multi-car booking (FF_MULTI_CAR_BOOKING, owner request 2026-10-27)
+    # ------------------------------------------------------------------
+
+    def _books_fitting(self) -> bool:
+        """``book_fitting`` is among this call's LLM tools (Твоя шина yes, Про
+        Колесо no — R08). Default-deny: no loop, no tool list → False."""
+        holder = self._streaming_loop if self._streaming_loop is not None else self._agent
+        tools = getattr(holder, "_tools", None)
+        if not isinstance(tools, (list, tuple)):
+            return False
+        return any(isinstance(t, dict) and t.get("name") == "book_fitting" for t in tools)
+
+    def _multi_car_armed(self) -> bool:
+        """The flag is on (read per check — rollback is removing the variable)
+        and this network books fittings. No tenant slug: the tool list is
+        what decides."""
+        return FeatureFlagSettings().multi_car_booking and self._books_fitting()
+
+    def _next_car_pending(self) -> bool:
+        """What the LLM loops get as ``next_car_pending`` (keeps the booking
+        tools after a booking): armed AND ``CallSession.next_car_pending``."""
+        return self._multi_car_armed() and self._session.next_car_pending
+
+    def _current_car_booked(self) -> bool:
+        """The car being collected now is booked.
+
+        For the first car — and for every call without the flag, where
+        ``fitting_car_number`` never moves — this is ``fitting_booked``. For
+        car N>1 ``fitting_booked`` is still True from car 1, so it is the
+        bookings list that says whether *this* car has one.
+        """
+        session = self._session
+        if not session.fitting_booked:
+            return False
+        car = session.fitting_car_number
+        return car <= 1 or len(session.fitting_bookings) >= car
+
+    def _run_multi_car_step(self, transcript: Transcript) -> None:
+        """Caller turn: read «дві машини» / «ще одну», start the next car.
+
+        Synchronous, zero I/O — session fields and regex only. Runs ahead of
+        the FSM block so the FSM and the prompt of this turn see the next car.
+        Flag off: the detector only logs ``multi_car_would_continue`` (R10)
+        and nothing else changes.
+        """
+        session = self._session
+        intent = detect_multi_car(transcript.text)
+        if intent is not None:
+            if not FeatureFlagSettings().multi_car_booking:
+                logger.warning(
+                    "multi_car_would_continue call=%s count=%s more=%s over_cap=%s "
+                    "books_fitting=%s bookings=%d booked=%s text=%r",
+                    session.channel_uuid,
+                    intent.count,
+                    intent.more,
+                    intent.over_cap,
+                    self._books_fitting(),
+                    len(session.fitting_bookings),
+                    session.fitting_booked,
+                    transcript.text[:120],
+                    extra={"call_id": str(session.channel_uuid)},
+                )
+            elif self._books_fitting():
+                self._apply_multi_car_intent(intent)
+        self._maybe_start_next_car()
+
+    def _apply_multi_car_intent(self, intent: MultiCarIntent) -> None:
+        """Turn the detector's verdict into ``session.cars_expected``.
+
+        Never below the bookings already made. «ще одну» / «другу» while car N
+        is still being collected names the car in hand («друга машина —
+        Шкода»), not a car N+1: it grows the count only when nothing was named
+        yet or the current car is already booked — otherwise every mention of
+        the second car would add a third.
+        """
+        session = self._session
+        bookings = len(session.fitting_bookings)
+        expected = session.cars_expected
+        current_booked = self._current_car_booked() and bookings >= session.fitting_car_number
+        if intent.count == 1 and not intent.more:
+            new = max(1, bookings)
+        elif intent.over_cap and intent.count is None:
+            new = MAX_CARS_PER_CALL + 1
+        elif intent.more:
+            if current_booked or expected is None:
+                base = bookings if current_booked else session.fitting_car_number
+                new = max(expected or 0, base + (intent.count or 1))
+            else:
+                new = expected
+        elif intent.count is not None:
+            new = max(expected or 0, intent.count)
+        else:
+            new = max(expected or 0, 2)
+        if new != expected:
+            session.cars_expected = new
+            logger.info(
+                "multi_car_expected call=%s cars=%s was=%s bookings=%d car=%d",
+                session.channel_uuid,
+                new,
+                expected,
+                bookings,
+                session.fitting_car_number,
+                extra={"call_id": str(session.channel_uuid)},
+            )
+
+    def _maybe_start_next_car(self) -> None:
+        """The current car is booked and another is pending → start it.
+
+        One confirmed booking starts one car: `CallSession.start_next_car`
+        refuses unless ``len(fitting_bookings) >= fitting_car_number``, so a
+        second pass in the same turn, a re-asked «ще одну» or a repeated
+        booking of the same GUID (deduped in `record_fitting_booking`) cannot
+        wipe the next car's answers or skip a car.
+        """
+        from src.agent.fitting_fsm import FsmEngine
+
+        session = self._session
+        if not (self._next_car_pending() and session.fitting_booked):
+            return
+        if not session.start_next_car():
+            return
+        multi_car_booking_total.labels(event="started").inc()
+        FsmEngine(session).start_next_car(session.fitting_car_number)
+        logger.info(
+            "multi_car_next_car call=%s car=%d of=%s bookings=%d",
+            session.channel_uuid,
+            session.fitting_car_number,
+            session.cars_expected,
+            len(session.fitting_bookings),
+            extra={"call_id": str(session.channel_uuid)},
+        )
+
+    def _multi_car_over_cap_now(self) -> bool:
+        """Hand the LLM loop the 4+ cars transfer (R04) — once per call.
+
+        The loop transfers only when its tools carry both ``book_fitting`` and
+        ``transfer_to_operator``; the pipeline's stop is the once-per-call
+        one: the turns after a refused transfer are the callback it asked for.
+        """
+        if self._multi_car_over_cap_fired:
+            return False
+        if not (self._session.cars_over_cap and self._multi_car_armed()):
+            return False
+        self._multi_car_over_cap_fired = True
+        logger.info(
+            "multi_car_over_cap call=%s cars=%s",
+            self._session.channel_uuid,
+            self._session.cars_expected,
+            extra={"call_id": str(self._session.channel_uuid)},
+        )
+        return True
+
+    def _count_multi_car_bookings(self) -> None:
+        """``multi_car_booking_total{event="booked"}`` for car 2 and 3 — the
+        post-deploy check (README D). After the LLM turn, where the tool
+        handler has already recorded the booking."""
+        if not FeatureFlagSettings().multi_car_booking:
+            return
+        made = len(self._session.fitting_bookings)
+        while self._multi_car_bookings_counted < made:
+            self._multi_car_bookings_counted += 1
+            if self._multi_car_bookings_counted >= 2:
+                multi_car_booking_total.labels(event="booked").inc()
 
     def _fsm_filled_fields_snapshot(self) -> dict[str, Any]:
         """Compact truthy view of what the call has already collected."""
@@ -3613,6 +3823,9 @@ class CallPipeline:
             # FSM_ENABLED=false → the whole block is one boolean compare and the
             # turn continues exactly as it does today. That is the rollback path
             # and it must stay that cheap.
+            # Multi-car booking: zero I/O; ahead of the FSM so the machine and
+            # this turn's prompt already see the next car. Flag off → R10 log.
+            self._run_multi_car_step(transcript)
             fsm_mode = self._fsm_mode()
             fsm_took_turn = False
             if fsm_mode != FSM_MODE_OFF:
@@ -4088,6 +4301,13 @@ class CallPipeline:
             # Consume the flag: reset after passing to guard (one-shot signal).
             self._session.krok8_confabulation_pending = False
             tire_progress = self._build_tire_progress()
+            # Multi-car booking: passed only when set, so a call without the
+            # flag hands the loops the very kwargs it did at HEAD.
+            multi_car_kwargs: dict[str, bool] = {}
+            if self._next_car_pending():
+                multi_car_kwargs["next_car_pending"] = True
+            if self._multi_car_over_cap_now():
+                multi_car_kwargs["multi_car_over_cap"] = True
 
             if self._streaming_loop is not None:
                 # STREAMING PATH — add user turn to session (streaming loop uses separate _llm_history)
@@ -4128,6 +4348,7 @@ class CallPipeline:
                             fitting_progress=fitting_progress,
                             booking_gate_mode=self._booking_gate_mode(),
                             **({"tire_progress": tire_progress} if tire_progress else {}),
+                            **multi_car_kwargs,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )
@@ -4244,6 +4465,7 @@ class CallPipeline:
                             bot_filler_stripped_total.labels(pattern=pattern).inc()
                     logged_text = cleaned or result.spoken_text
                     self._flag_false_booking_claim(logged_text)
+                    self._count_multi_car_bookings()
                     self._session.reset_empty_response()
                     self._session.add_assistant_turn(logged_text)
                     await self._log_turn("bot", logged_text, llm_latency_ms=llm_latency_ms)
@@ -4302,6 +4524,7 @@ class CallPipeline:
                             offered_slots=offered_slots,
                             fitting_progress=fitting_progress,
                             booking_gate_mode=self._booking_gate_mode(),
+                            **multi_car_kwargs,
                         ),
                         timeout=AGENT_PROCESSING_TIMEOUT_SEC,
                     )
@@ -4375,6 +4598,7 @@ class CallPipeline:
                         # (defensive: never send empty text to TTS).
                         response_text = cleaned or response_text
                     self._flag_false_booking_claim(response_text)
+                    self._count_multi_car_bookings()
                     self._session.reset_empty_response()
                     self._session.add_assistant_turn(response_text)
                     await self._log_turn("bot", response_text, llm_latency_ms=llm_latency_ms)

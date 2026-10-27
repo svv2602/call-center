@@ -378,10 +378,11 @@ class TestBasicTransitions:
         assert entry["payload"] == {"reason": "customer"}
         assert isinstance(entry["t"], float)
 
-    def test_transition_table_has_48_unique_rows(self) -> None:
+    def test_transition_table_has_49_unique_rows(self) -> None:
         rows = [r.row for r in TRANSITIONS]
         assert rows == sorted(rows)
-        assert len(rows) == len(set(rows)) == 48
+        # Row 49 — multi-car booking (FF_MULTI_CAR_BOOKING, 2026-10-27).
+        assert len(rows) == len(set(rows)) == 49
 
     def test_find_transitions_prefers_exact_guard_then_wildcard(self) -> None:
         # BOOK/TOOL_ERROR fans out into the Waves 4C→12 guards (rows 28-35).
