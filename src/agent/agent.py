@@ -41,6 +41,7 @@ from src.agent.prompts import (
     build_system_prompt_with_context,
     detect_scenario_from_text,
 )
+from src.agent.quantity_question import replace_quantity_question_text
 from src.agent.tire_claim_guard import TireClaimState, guard_tire_claims_text
 from src.agent.tire_search_gate import (
     SEARCH_TOOL,
@@ -929,6 +930,10 @@ class LLMAgent:
             # Studs exist only on winter tyres: out of season the model's
             # «шиповані чи липучка?» goes (`vehicle_lookup_gate`).
             response_text = drop_stud_questions_text(
+                response_text, self._tire_query, llm_call_id_var.get(None) or "unknown"
+            )
+            # «Скільки шин?» after the caller said how many → the count.
+            response_text = replace_quantity_question_text(
                 response_text, self._tire_query, llm_call_id_var.get(None) or "unknown"
             )
             # «найдешевша / новинка / переможець тестів» the shown tyres do not

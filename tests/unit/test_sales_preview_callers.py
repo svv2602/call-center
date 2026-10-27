@@ -170,6 +170,7 @@ async def _submit(policy: NetworkPolicy) -> tuple[dict[str, Any], CallSession]:
     store.get_pickup_points.return_value = {"total": 0, "points": []}
     session = CallSession(uuid.uuid4())
     session.caller_phone = TESTER
+    session.tire_query = {"quantity": 4}  # the count the caller said
     with (
         patch("src.main._onec_client", onec),
         patch("src.main._call_logger", None),
@@ -232,6 +233,7 @@ class TestTestMarkOnStoreFallback:
         store.confirm_order.return_value = {"order_id": "o-1", "status": "confirmed"}
         session = CallSession(uuid.uuid4())
         session.caller_phone = TESTER
+        session.tire_query = {"quantity": 4}  # the count the caller said
         with (
             patch("src.main._onec_client", onec),
             patch("src.main._call_logger", None),

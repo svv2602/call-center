@@ -188,8 +188,6 @@ class TestNotTheTyresYear:
             "Bridgestone Blizzak 6 підійде для авто 2019 року.",
             # Warranty, storage, price.
             "Bridgestone Blizzak 6, гарантія 5 років, зберігання до 2027 року.",
-            "Bridgestone Blizzak 6 за 2025 гривень.",
-            "Bridgestone Blizzak 6 — 2030 грн.",
             # A question, a negation, a model's history.
             "Bridgestone Blizzak 6 вам потрібна 2026 року?",
             "Bridgestone Blizzak 6 не 2026 року.",
@@ -202,6 +200,15 @@ class TestNotTheTyresYear:
     def test_left_alone(self, sentence: str) -> None:
         assert _fired(sentence) == set()
         assert _judge(sentence) == sentence
+
+    @pytest.mark.parametrize(
+        "sentence", ["Bridgestone Blizzak 6 за 2025 гривень.", "Bridgestone Blizzak 6 — 2030 грн."]
+    )
+    def test_a_price_is_not_a_year(self, sentence: str) -> None:
+        # The amount is not the shown price (8625): the price rule corrects
+        # it — the year rule stays silent.
+        assert _fired(sentence) == {"price"}
+        assert "8625" in _judge(sentence)
 
 
 class TestCheckAvailability:

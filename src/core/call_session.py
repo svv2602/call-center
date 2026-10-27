@@ -277,6 +277,9 @@ class CallSession:
         self.vehicle_stock_sizes: list[str] = []
         self.vehicle_acceptable_sizes: list[str] = []
         self.tire_size_refused: dict[str, int] = {}
+        # Loop-breaker of the order quantity check (`order_quantity_refusal`):
+        # it refuses once per call.
+        self.order_quantity_guard_fired: bool = False
         # The last tyre offer the caller heard (sales, written by the
         # `search_tires` wrapper after a search with items): per-tyre prices
         # and ids of the shown items, and the size/season/needs it was for.
@@ -676,6 +679,7 @@ class CallSession:
             "vehicle_stock_sizes": list(self.vehicle_stock_sizes),
             "vehicle_acceptable_sizes": list(self.vehicle_acceptable_sizes),
             "tire_size_refused": dict(self.tire_size_refused),
+            "order_quantity_guard_fired": self.order_quantity_guard_fired,
             "last_tire_offer": dict(self.last_tire_offer) if self.last_tire_offer else None,
             "fsm_prev_state": self.fsm_prev_state,
             "fsm_history": list(self.fsm_history[-FSM_HISTORY_LIMIT:]),
@@ -796,6 +800,7 @@ class CallSession:
             sizes = data.get(name)
             if isinstance(sizes, list):
                 setattr(session, name, [str(s) for s in sizes if s])
+        session.order_quantity_guard_fired = data.get("order_quantity_guard_fired") is True
         refused = data.get("tire_size_refused")
         if isinstance(refused, dict):
             session.tire_size_refused = {

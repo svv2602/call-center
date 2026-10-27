@@ -105,9 +105,18 @@ async def _submit(
     store: Any,
     caller_phone: str | None = CALLER,
     offer_points: bool = True,
+    said_quantity: int | str | None = "items",
 ) -> tuple[Any, CallSession]:
     session = CallSession(uuid.uuid4())
     session.caller_phone = caller_phone
+    # The count the caller said (`order_quantity_refusal`): by default the one
+    # the request carries, so these tests judge the other fields.
+    if said_quantity == "items":
+        items = args.get("items")
+        first = items[0] if isinstance(items, list) and items else {}
+        said_quantity = first.get("quantity") if isinstance(first, dict) else None
+    if isinstance(said_quantity, int):
+        session.tire_query = {"quantity": said_quantity}
     with (
         patch("src.main._onec_client", onec),
         patch("src.main._call_logger", None),
@@ -372,3 +381,42 @@ class TestSandboxToolSet:
         names = {t["name"] for t in agent._tools}
         assert SUBMIT_ORDER_TOOL not in names
         assert names >= ORDER_CHAIN_TOOLS
+
+
+# ── the count the caller said (call 51f0652f) ────────────────────────────
+
+
+class TestQuantityTheCallerSaid:
+    @pytest.mark.asyncio
+    async def test_no_count_said_is_asked_first(self) -> None:
+        onec = _onec({"success": True, "number": "n"})
+        result, session = await _submit(
+            _delivery_args(), onec=onec, store=_store(), said_quantity=None
+        )
+        assert result["status"] == "missing_field" and result["field"] == "quantity"
+        assert session.order_quantity_guard_fired is True
+        onec.create_order_1c.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_other_count_than_said_is_refused(self) -> None:
+        onec = _onec({"success": True, "number": "n"})
+        result, _ = await _submit(_delivery_args(), onec=onec, store=_store(), said_quantity=2)
+        assert result["field"] == "quantity" and "quantity=2" in result["message"]
+        onec.create_order_1c.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_refuses_once_per_call(self) -> None:
+        onec = _onec({"success": True, "number": "n"})
+        session = CallSession(uuid.uuid4())
+        session.caller_phone = CALLER
+        with (
+            patch("src.main._onec_client", onec),
+            patch("src.main._call_logger", None),
+            patch("src.main._redis", None),
+        ):
+            router = _build_tool_router(session, store_client=_store())
+            first = await router.execute(SUBMIT_ORDER_TOOL, _delivery_args())
+            second = await router.execute(SUBMIT_ORDER_TOOL, _delivery_args())
+        assert first["field"] == "quantity"
+        assert second["status"] != "missing_field"
+        onec.create_order_1c.assert_awaited_once()

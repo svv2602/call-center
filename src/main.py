@@ -2450,6 +2450,23 @@ def _build_tool_router(
                 (question or {}).get("field"), session.channel_uuid,
             )
             return question
+        # The count the caller said, not one the model filled in (51f0652f).
+        from src.agent.quantity_question import order_quantity_refusal
+
+        refusal = order_quantity_refusal(
+            draft["items"],
+            session.tire_query.get("quantity"),
+            guard_fired=session.order_quantity_guard_fired,
+        )
+        if refusal is not None:
+            session.order_quantity_guard_fired = True
+            logger.info(
+                "submit_order_request: quantity check for call %s — said %r, items %r",
+                session.channel_uuid,
+                session.tire_query.get("quantity"),
+                draft["items"],
+            )
+            return refusal
         request = draft
 
         async def _store_fallback() -> Any:

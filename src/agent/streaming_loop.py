@@ -72,6 +72,7 @@ from src.agent.prompts import (
     fitting_steps_collected,
     next_fitting_question,
 )
+from src.agent.quantity_question import replace_quantity_question
 from src.agent.time_detect import (
     asks_which_time,
     denies_a_slot,
@@ -2251,6 +2252,8 @@ class StreamingAgentLoop:
                     # Studs exist only on winter tyres: out of season the
                     # model's «шиповані чи липучка?» goes (`vehicle_lookup_gate`).
                     judged = drop_stud_questions(judged, tire_progress, _current_call_id())
+                    # «Скільки шин?» after the caller said how many → the count.
+                    judged = replace_quantity_question(judged, tire_progress, _current_call_id())
                     # «найдешевша / новинка / переможець тестів» the shown tyres
                     # do not back is replaced (`tire_claim_guard`).
                     judged = guard_tire_claims(

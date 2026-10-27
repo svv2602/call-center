@@ -860,6 +860,15 @@ def _bot_asked_season(last_bot_text: str | None) -> bool:
         sentence.rstrip().endswith("?") and _BOT_ASKED_SEASON_RE.search(sentence)
         for sentence in _BOT_SENTENCE_RE.findall(last_bot_text or "")
     )
+def _bot_asked_quantity(last_bot_text: str | None) -> bool:
+    """Did the bot's last reply ask how many tyres (a question sentence)?"""
+    from src.agent.quantity_question import asks_quantity
+
+    return any(
+        asks_quantity(m.group(0)) for m in _BOT_SENTENCE_RE.finditer(last_bot_text or "")
+    )
+
+
 _BOT_ASKED_SIZE_RE = re.compile(
     r"розмір\w*|діаметр\w*|радіус\w*|размер\w*|диаметр\w*|радиус\w*", re.IGNORECASE
 )
@@ -932,6 +941,7 @@ def merge_tire_query(
         extract_tire_brands,
         is_tire_question,
         mentions_tyre_noun,
+        parse_answer_quantity,
         parse_budget,
         parse_load_index_refusal,
         parse_load_index_requirement,
@@ -995,6 +1005,9 @@ def merge_tire_query(
     if nail is not None:
         out["nail"] = nail
     quantity = parse_quantity(text)
+    if quantity is None and _bot_asked_quantity(last_bot_text):
+        # «Скільки шин потрібно?» — «дві» (call 51f0652f was asked again).
+        quantity = parse_answer_quantity(text)
     if quantity is not None and quantity.count is not None:
         out["quantity"] = quantity.count
     budget = parse_budget(budget_text)

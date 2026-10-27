@@ -473,6 +473,30 @@ def parse_quantity(text: str) -> QuantityParse | None:
     return None
 
 
+#: A short answer to «Скільки шин потрібно?»: one number, nothing else of note.
+_ANSWER_MAX_WORDS = 5
+
+
+def parse_answer_quantity(text: str) -> QuantityParse | None:
+    """The count in a short answer to the bot's count question: «дві», «4», «одну».
+
+    Only for that answer (the caller checks the question): a bare number
+    elsewhere is a size, a year or a time. Exactly one number 1..8 in at most
+    `_ANSWER_MAX_WORDS` words; «більше не потрібно» has none → ``None``.
+    """
+    norm = normalize_spoken_numbers(text)
+    norm = _blank(norm, _size_spans(norm))
+    if len(norm.split()) > _ANSWER_MAX_WORDS:
+        return None
+    numbers = re.findall(r"(?<![\d/.,])\d+(?![\d/.,:])", norm)
+    if len(numbers) != 1:
+        return None
+    value = int(numbers[0])
+    if _MIN_QUANTITY <= value <= _MAX_QUANTITY:
+        return QuantityParse(value)
+    return None
+
+
 # ═══════════════════════════════════════════════════════════
 #  Budget
 # ═══════════════════════════════════════════════════════════
