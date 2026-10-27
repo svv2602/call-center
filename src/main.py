@@ -97,7 +97,7 @@ from src.api.training_tools import router as training_tools_router
 from src.api.tts_config import router as tts_config_router
 from src.api.vehicles import router as vehicles_router
 from src.api.websocket import router as websocket_router
-from src.config import Settings, get_settings
+from src.config import FeatureFlagSettings, Settings, get_settings
 from src.core.audio_socket import AudioSocketConnection, AudioSocketServer
 from src.core.audio_stats import InboundAudioStats
 from src.core.call_session import SESSION_TTL, CallSession, CallState, SessionStore
@@ -1642,6 +1642,179 @@ def _extract_time(raw: str) -> str:
     return m.group(1) if m else ""
 
 
+# --- Multi-car booking (FF_MULTI_CAR_BOOKING, 2026-10-27) ---------------------
+# Several cars booked one after another in one call (R01, R04 ≤3). The session
+# side — `fitting_bookings`, `start_next_car` — lives in `call_session.py`; the
+# three helpers below are what the tool handlers need on top of it.
+
+
+def _record_confirmed_booking(
+    session: CallSession,
+    *,
+    booking_id: str,
+    station_id: str | None,
+    date: str | None,
+    time: str | None,
+    vehicle: str | None,
+    color: str | None,
+) -> None:
+    """Note a booking 1C (or the Store API) actually confirmed.
+
+    Called from the `book_fitting` handler only: the result the LLM — and the
+    tool-execute hook — sees carries no GUID (it is withheld on purpose), so
+    the handler is the one place that knows which booking this is. Never
+    called from the reschedule path: a moved booking is not another car and
+    must not take a place under the per-call cap.
+
+    `history_len` marks where in the dialog this booking happened, so the next
+    car's «did the caller name the time» guard reads only what was said after
+    it — not the hour the previous car was booked on.
+    """
+    if not booking_id:
+        return
+    if session.record_fitting_booking(
+        booking_id=booking_id,
+        station_id=station_id,
+        date=date,
+        time=time,
+        vehicle=vehicle,
+        color=color,
+    ):
+        session.fitting_bookings[-1]["history_len"] = len(session.dialog_history)
+
+
+def _hhmm_minutes(value: Any) -> int | None:
+    """«9:00», «09:00» and «09:00:00» → 540; anything else → None."""
+    hhmm = _extract_time(str(value or ""))
+    if not hhmm:
+        return None
+    hh, _, mm = hhmm.partition(":")
+    return int(hh) * 60 + int(mm)
+
+
+def _is_next_car(session: CallSession) -> bool:
+    """True while a second or third car of this call is being booked.
+
+    Default-deny on the flag as well: `fitting_car_number` only moves with the
+    flag on, but a session restored from Redis after a rollback still carries
+    it, and rollback is removing the variable.
+    """
+    return (
+        session.fitting_car_number > 1
+        and bool(session.fitting_bookings)
+        and FeatureFlagSettings().multi_car_booking
+    )
+
+
+def _previous_car_slot(session: CallSession) -> tuple[str | None, str] | None:
+    """(date, "HH:MM") of the car booked just before this one, or None."""
+    if not _is_next_car(session):
+        return None
+    prev = session.previous_booking_slot()
+    if prev is None:
+        return None
+    prev_date, prev_time = prev
+    minutes = _hhmm_minutes(prev_time)
+    if minutes is None:
+        return None
+    return prev_date, f"{minutes // 60:02d}:{minutes % 60:02d}"
+
+
+def _slots_nearest_first(
+    slots: list[Any], *, default_date: str | None, prev_date: str | None, prev_time: str
+) -> list[Any]:
+    """Order free slots for the next car: the previous car's time first, then
+    the nearest to it (R03 «то же время, иначе ближайшие соседние»).
+
+    Handles both shapes a slot list comes in: bare «HH:MM» strings (the 1C
+    branch) and `{"date", "time", …}` dicts (the Store API fallback — the
+    shape mix that crashed `_compress_fitting_slots` on f7555aac). A slot whose
+    time does not parse keeps its relative place at the end; the sort is
+    stable, so equal distances keep the chronological order 1C gave.
+    """
+    target = _hhmm_minutes(prev_time)
+    if target is None:
+        return list(slots)
+
+    def _key(slot: Any) -> tuple[int, int, int]:
+        if isinstance(slot, dict):
+            raw_time = slot.get("time")
+            slot_date = slot.get("date") or default_date
+        else:
+            raw_time = slot
+            slot_date = default_date
+        minutes = _hhmm_minutes(raw_time)
+        if minutes is None:
+            return (1, 0, 0)
+        return (0, 0 if slot_date == prev_date else 1, abs(minutes - target))
+
+    return sorted(slots, key=_key)
+
+
+def _next_car_slots_hint(
+    ordered: list[Any], *, default_date: str | None, prev_date: str | None, prev_time: str
+) -> str | None:
+    """What the LLM is told to offer the next car first, or None (no slots)."""
+    times: list[str] = []
+    same_time_free = False
+    for slot in ordered:
+        if isinstance(slot, dict):
+            raw_time, slot_date = slot.get("time"), slot.get("date") or default_date
+        else:
+            raw_time, slot_date = slot, default_date
+        hhmm = _extract_time(str(raw_time or ""))
+        if not hhmm:
+            continue
+        if slot_date == prev_date and _hhmm_minutes(hhmm) == _hhmm_minutes(prev_time):
+            same_time_free = True
+        times.append(hhmm)
+    if not times:
+        return None
+    if same_time_free:
+        return (
+            f"Попередню машину записано на {prev_time}. Цей час ще вільний — "
+            f"запропонуй його першим: «На {prev_time} теж є місце, записати?» "
+            "Місто, точку та ім'я НЕ перепитуй."
+        )
+    return (
+        f"Попередню машину записано на {prev_time}, цей час уже зайнятий. "
+        f"Запропонуй найближчі: {', '.join(times[:2])}. "
+        "Місто, точку та ім'я НЕ перепитуй."
+    )
+
+
+def _agreed_to_previous_time(
+    turns: list[Any], *, time_raw: str, booking_date: str | None, prev: tuple[str | None, str]
+) -> bool:
+    """Did the caller accept the previous car's hour when the bot offered it?
+
+    R03: the bot offers «На 14:00 теж є місце, записати?» and the caller says
+    «так» — he never names the hour himself, so the «named it» check alone
+    would refuse the very flow the owner asked for. Only the previous car's
+    exact date and time qualify, and only a bare agreement right after a bot
+    turn that named that hour.
+    """
+    from src.agent.confirm_detect import is_confirmation
+    from src.agent.time_detect import detect_time_choice
+
+    prev_date, prev_time = prev
+    if booking_date != prev_date or _hhmm_minutes(time_raw) != _hhmm_minutes(prev_time):
+        return False
+    offered = False
+    for turn in turns:
+        content = turn.content or ""
+        if turn.speaker == "assistant":
+            offered = bool(
+                detect_time_choice(content, [time_raw], allow_hour_only=True)
+                or detect_time_choice(content, [prev_time], allow_hour_only=True)
+            )
+        elif turn.speaker == "user":
+            if offered and is_confirmation(content):
+                return True
+            offered = False
+    return False
+
+
 _LETTER_FOLD = str.maketrans({
     # Fold uk↔ru near-equivalents so STT / caller input matches hints
     # written in either language: "Епіцентр"↔"Эпицентр", "Опытное"↔"Опитне",
@@ -2734,11 +2907,31 @@ def _build_tool_router(
             if time_raw and session.selected_fitting_time != time_raw:
                 from src.agent.time_detect import detect_time_choice
 
+                # Multi-car (FF_MULTI_CAR_BOOKING): for the second and third
+                # car only what was said after the last booking counts — the
+                # whole dialog holds the hour the previous car was booked on,
+                # and that would pass for this car's choice. A booking with no
+                # mark is read as «nothing said since» (default-deny).
+                turns_to_read = session.dialog_history
+                next_car = _is_next_car(session)
+                if next_car:
+                    since = session.fitting_bookings[-1].get("history_len")
+                    if not isinstance(since, int) or isinstance(since, bool):
+                        since = len(session.dialog_history)
+                    turns_to_read = session.dialog_history[since:]
                 caller_named_it = any(
                     detect_time_choice(turn.content or "", [time_raw], allow_hour_only=True)
-                    for turn in session.dialog_history
+                    for turn in turns_to_read
                     if turn.speaker == "user"
                 )
+                if not caller_named_it and next_car:
+                    prev_slot = _previous_car_slot(session)
+                    caller_named_it = prev_slot is not None and _agreed_to_previous_time(
+                        turns_to_read,
+                        time_raw=time_raw,
+                        booking_date=booking_date_str,
+                        prev=prev_slot,
+                    )
                 if not caller_named_it:
                     session.book_time_unchosen_refusals += 1
                     logger.warning(
@@ -2870,6 +3063,18 @@ def _build_tool_router(
                     # id exists. `station_id` is the post-auto-correction value,
                     # i.e. exactly what went into the request above.
                     session.last_fitting_station_id = station_id
+                    # Multi-car: every confirmed booking of the call, in order.
+                    # Not under the best-effort try below — a lost record is a
+                    # car silently dropped from the call (`37fb2d0`).
+                    _record_confirmed_booking(
+                        session,
+                        booking_id=guid,
+                        station_id=station_id,
+                        date=booking_date_str or kwargs.get("date"),
+                        time=time_raw,
+                        vehicle=kwargs.get("vehicle_info"),
+                        color=kwargs.get("auto_number"),
+                    )
                     logger.info(
                         "book_fitting success (booking_id withheld from LLM) "
                         "for call %s: guid=%s",
@@ -2981,6 +3186,16 @@ def _build_tool_router(
             # real. `{"error": "Store API 404: ..."}` carries no `id` and pins
             # nothing — that is the shape call 29ed5791 got back.
             session.last_fitting_station_id = station_id
+            if is_booking_confirmed(result):
+                _record_confirmed_booking(
+                    session,
+                    booking_id=str(result["id"]),
+                    station_id=station_id,
+                    date=booking_date_str or kwargs.get("date"),
+                    time=time_raw,
+                    vehicle=kwargs.get("vehicle_info"),
+                    color=kwargs.get("auto_number"),
+                )
         return result
 
     router.register("create_order_draft", _create_order_draft)
@@ -3880,6 +4095,26 @@ def _build_tool_router(
                         "зручніше?» Якщо клієнт назве час, якого немає в slots, — "
                         "запропонуй найближчий зі slots."
                     )
+                # Multi-car (R03): for the second / third car the previous
+                # car's time goes first, else its nearest neighbours. After
+                # `speak`, which reads the range off the chronological ends.
+                prev_slot = _previous_car_slot(session)
+                if prev_slot is not None and avail_times:
+                    prev_date, prev_time = prev_slot
+                    response["slots"] = _slots_nearest_first(
+                        avail_times,
+                        default_date=date_from,
+                        prev_date=prev_date,
+                        prev_time=prev_time,
+                    )
+                    hint = _next_car_slots_hint(
+                        response["slots"],
+                        default_date=date_from,
+                        prev_date=prev_date,
+                        prev_time=prev_time,
+                    )
+                    if hint:
+                        response["next_car_hint"] = hint
                 # Below-loop rename compat: preserve `avail` bool for empty-check
                 avail = avail_times
                 # Empty-slots hint: give the LLM concrete text so it doesn't
@@ -3947,7 +4182,7 @@ def _build_tool_router(
                     exc_info=True,
                 )
         try:
-            return await client.get_fitting_slots(**kwargs)
+            store_result = await client.get_fitting_slots(**kwargs)
         except Exception:
             logger.warning(
                 "Store API get_fitting_slots also failed for call %s",
@@ -3959,6 +4194,28 @@ def _build_tool_router(
                 "error": "Сервіс тимчасово недоступний. Спробуйте через хвилину.",
                 "slots": [],
             }
+        # Same R03 ordering on the fallback; its slots are dicts, not strings.
+        prev_slot = _previous_car_slot(session)
+        if (
+            prev_slot is not None
+            and isinstance(store_result, dict)
+            and isinstance(store_result.get("slots"), list)
+            and store_result["slots"]
+        ):
+            prev_date, prev_time = prev_slot
+            ordered = _slots_nearest_first(
+                store_result["slots"],
+                default_date=date_from,
+                prev_date=prev_date,
+                prev_time=prev_time,
+            )
+            store_result = {**store_result, "slots": ordered}
+            hint = _next_car_slots_hint(
+                ordered, default_date=date_from, prev_date=prev_date, prev_time=prev_time
+            )
+            if hint:
+                store_result["next_car_hint"] = hint
+        return store_result
 
     router.register("get_fitting_slots", _get_fitting_slots)
     router.register("book_fitting", _book_fitting_with_metric)
