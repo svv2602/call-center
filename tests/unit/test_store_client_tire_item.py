@@ -29,6 +29,8 @@ WINTER = {
     "season": "winter",
     "price": 5120,
     "stock_quantity": 8,
+    "country": None,
+    "year_issue": None,
     "runflat": False,
     "eu_fuel": None,
     "eu_wet": None,
@@ -361,7 +363,10 @@ CREATE TABLE tire_products (
     sku TEXT PRIMARY KEY, model_id INTEGER, size TEXT, width INTEGER, profile INTEGER,
     diameter INTEGER, description TEXT, commercial BOOLEAN
 );
-CREATE TABLE tire_stock (sku TEXT, trading_network TEXT, price REAL, stock_quantity INTEGER);
+CREATE TABLE tire_stock (
+    sku TEXT, trading_network TEXT, price REAL, stock_quantity INTEGER,
+    country TEXT, year_issue TEXT
+);
 CREATE TABLE tire_eu_labels (
     sku TEXT, energy_class TEXT, wet_grip_class TEXT, noise_db INTEGER, noise_class TEXT
 );
@@ -389,6 +394,18 @@ _CATALOGUE: list[tuple[str, str, str, tuple[str | None, bool | None] | None]] = 
     ("x-norow-desc-xl", "summer", "Kumho PS71 Extra Load [99Y]", None),
     ("s-norow-plain", "summer", "Continental PC7 [95Y]", None),
 ]
+
+
+#: ``tire_stock.country`` / ``year_issue`` / ``stock_quantity`` of some SKUs —
+#: the rest NULL / NULL / 4. 1C spells the country in any case, and 7 % of
+#: the rows in stock have none (prod 2026-10-27).
+_ORIGINS: dict[str, tuple[str | None, str | None, int]] = {
+    "w-noship-desc-ship": ("Китай", "2023", 1),
+    "w-ship-desc-none": ("КИТАЙ", "25-24", 4),
+    "x-null-desc-xl": ("Польща", "2024", 12),
+    "x-attr-true": ("", "", 4),
+    "s-norow-plain": (None, "2025", 2),
+}
 
 
 #: ``tire_eu_labels`` rows: ``(sku, energy_class, wet_grip_class, noise_db, noise_class)``.
@@ -462,7 +479,11 @@ class _SqliteEngine:
                 "INSERT INTO tire_products VALUES (?, ?, '225/45 R18', 225, 45, 18, ?, 0)",
                 (sku, i, description),
             )
-            self.db.execute("INSERT INTO tire_stock VALUES (?, 'ProKoleso', ?, 4)", (sku, 3000 + i))
+            country, year, qty = _ORIGINS.get(sku, (None, None, 4))
+            self.db.execute(
+                "INSERT INTO tire_stock VALUES (?, 'ProKoleso', ?, ?, ?, ?)",
+                (sku, 3000 + i, qty, country, year),
+            )
             if attr is not None:
                 self.db.execute(
                     "INSERT INTO tire_attributes VALUES (?, ?, ?, NULL, NULL)", (sku, *attr)
@@ -564,3 +585,49 @@ def test_no_filter_value_adds_no_attribute_condition() -> None:
     where = _squash(engine.queries[0]).split(" WHERE ", 1)[1]
     assert "a.studded" not in where
     assert "a.is_xl" not in where
+
+
+# ── country, production year, stock (sales operator gaps 2026-10-27) ─────
+
+
+def test_query_selects_country_and_year_of_the_stock_row() -> None:
+    client, engine = _client([])
+    asyncio.run(client._query_tire_rows("ProKoleso", {"width": 205}))
+    sql = _squash(engine.queries[0])
+    assert "s.country AS country" in sql
+    assert "s.year_issue AS year_issue" in sql
+
+
+def test_sqlite_stand_items_carry_country_year_and_quantity() -> None:
+    """The real SELECT: what 1C has reaches the item; an empty value is no key."""
+    items = _items({})
+    assert items["w-noship-desc-ship"]["country"] == "Китай"
+    assert items["w-noship-desc-ship"]["year"] == "2023"
+    assert items["w-noship-desc-ship"]["quantity"] == 1
+    assert items["x-null-desc-xl"]["quantity"] == 12
+    assert (items["w-ship-desc-none"]["country"], items["w-ship-desc-none"]["year"]) == (
+        "КИТАЙ",
+        "25-24",
+    )
+    assert "country" not in items["x-attr-true"] and "year" not in items["x-attr-true"]
+    assert "country" not in items["s-norow-plain"]
+    assert items["s-norow-plain"]["year"] == "2025"
+    assert "country" not in items["w-norow-desc-none"] and "year" not in items["w-norow-desc-none"]
+
+
+def test_sqlite_stand_drops_a_refused_country_in_any_case() -> None:
+    every = _items({})
+    found = _items({"exclude_countries": ["Китай"]})
+    assert "w-noship-desc-ship" not in found
+    assert "w-ship-desc-none" not in found  # «КИТАЙ» in 1C
+    assert "x-null-desc-xl" in found  # Польща
+    # no country known (NULL / empty) — kept, not known to be from there
+    assert {"x-attr-true", "s-norow-plain", "w-norow-desc-none"} <= set(found)
+    assert set(found) == set(every) - {"w-noship-desc-ship", "w-ship-desc-none"}
+
+
+def test_no_refused_country_adds_no_country_condition() -> None:
+    client, engine = _client([])
+    asyncio.run(client._query_tire_rows("ProKoleso", {"width": 205, "exclude_countries": []}))
+    where = _squash(engine.queries[0]).split(" WHERE ", 1)[1]
+    assert "country" not in where

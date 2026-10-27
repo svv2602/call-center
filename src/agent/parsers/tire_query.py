@@ -846,6 +846,57 @@ def excluded_tire_brands(text: str) -> list[str] | None:
     return slugs or None
 
 
+#: Countries of origin a caller refuses, ``(canonical name as in tire_stock,
+#: word pattern)``: the noun and the adjective, UA and RU, the oblique cases
+#: too — «Китай / Китаю / Китая / Китаєм / Китае», «китайські / китайских»,
+#: «китайщина», «КНР».
+_ORIGIN_COUNTRIES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("Китай", re.compile(r"(?<![\w'])(?:кита(?:й|ю|я|єм|ем|ї|е)\w*|кнр)(?![\w'])")),
+)
+#: «не Китай», «без китайських», «тільки не Китай», «крім / кроме Китаю»,
+#: «ніяких китайських» — the word right before the country (one filler from
+#: a closed list between: «без китайської резини» reads the country first).
+_COUNTRY_NEG_BEFORE_RE = re.compile(
+    r"(?<![\w'])(?:не|без|крім|окрім|кроме|ніяких|никаких|жодних)"
+    r"(?:\s+(?:треба|потрібно|надо|нужно|хочу|хочемо|хотим|бажано))?"
+    r"(?:\s+(?:шин\w*|резин\w*|гум\w*|ці|цих|эти|этих))?\s+$"
+)
+#: «Китай сразу отпадает», «китайщину не хочу», «китайські не підходять»,
+#: «Китай не розглядаю», «китайські — ні» — a refusal after the country (up
+#: to two words from a closed list between).
+_COUNTRY_NEG_AFTER_RE = re.compile(
+    r"^[\w']*(?:\s+(?:сразу|одразу|відразу|зразу|точно|взагалі|вообще|мені|мне|нам"
+    r"|шин\w*|резин\w*|гум\w*|бренд\w*)){0,2}\s*[,—-]?\s*(?:"
+    r"(?:від|от|в)?пада\w*|ні|нет"
+    r"|не\s+(?:хочу|хочемо|хотим|треба|потрібн\w*|надо|нужн\w*|підход\w*|подход\w*"
+    r"|варіант|вариант|розгляда\w*|рассматрива\w*|бер\w*|візьм\w*|возьм\w*|цікав\w*|интерес\w*)"
+    r")(?![\w'])"
+)
+
+
+def excluded_tire_countries(text: str) -> list[str] | None:
+    """Countries of origin the caller does NOT want, in order, or ``None``.
+
+    «Китай сразу отпадает», «не китай», «без китайських», «китайщину не
+    хочу», «тільки не Китай» → ``["Китай"]``. A question about the country
+    («а китайські є?», «це китайська?») names no refusal and is silent, as is
+    a country with no negation next to it. The canonical name is the one
+    ``tire_stock.country`` carries, so ``search_tires`` filters on it as is.
+    """
+    if not text:
+        return None
+    low = text.translate(_APOSTROPHES).lower()
+    found: list[str] = []
+    for name, pattern in _ORIGIN_COUNTRIES:
+        for m in pattern.finditer(low):
+            if (
+                _COUNTRY_NEG_BEFORE_RE.search(low[: m.start()])
+                or _COUNTRY_NEG_AFTER_RE.search(low[m.start() :])
+            ) and name not in found:
+                found.append(name)
+    return found or None
+
+
 #: «Аналоги?», «щось схоже», «а подібні є?», «замінник», «что-то похожее»,
 #: «в тій же ціні» — UA and RU, the oblique cases too. Bare «схоже» /
 #: «похоже» is «it seems» («схоже, мені зимові»): only with «щось / что-то»

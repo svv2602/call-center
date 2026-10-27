@@ -223,8 +223,11 @@ def _compress_search_tires(
     each offered tyre (``season``, ``studded`` of a winter tyre, ``xl``,
     ``load_index`` / ``speed_index`` — ``StoreClient._tire_item``), so the
     model reads them instead of guessing studs from the model name (a
-    friction tyre voiced as studded, code review 2026-10-26). Off —
-    byte-identical.
+    friction tyre voiced as studded, code review 2026-10-26). ``country``,
+    ``year`` (production year as 1C has it) and ``quantity`` left in stock
+    stay too: the bot invented «шина поточного року» with 2023 in the data
+    and offered four tyres when one was left (operator goldset 2026-10-27).
+    Off — byte-identical.
     """
     items = result.get("items", [])
     essential_keys: tuple[str, ...] = ("brand", "model", "size", "price", "in_stock")
@@ -240,6 +243,9 @@ def _compress_search_tires(
             "xl",
             "load_index",
             "speed_index",
+            "country",
+            "year",
+            "quantity",
         )
     compressed = [{k: v for k, v in item.items() if k in essential_keys} for item in items[:3]]
     out: dict[str, Any] = {"total": result.get("total", len(items))}

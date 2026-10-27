@@ -875,11 +875,16 @@ def merge_tire_query(
     матадор», `is_tire_question`) writes none, and a brand named as not wanted
     («аналоги / замість / не матадор», `excluded_tire_brands`) is dropped from
     what was collected — the last one leaves no ``brands`` key.
+
+    A country the caller refuses («Китай сразу отпадает», `excluded_tire_countries`)
+    is added to ``excluded_countries`` and stays for the rest of the call, so
+    «а дешевше?» on the next turn still searches without it.
     """
     from src.agent.intent_classifier import sales_intents
     from src.agent.parsers.tire_query import (
         blank_load_index_requirement,
         excluded_tire_brands,
+        excluded_tire_countries,
         extract_tire_brands,
         is_tire_question,
         mentions_tyre_noun,
@@ -954,6 +959,12 @@ def merge_tire_query(
         dropped = excluded_tire_brands(text) or []
         chosen = [] if is_tire_question(text) else [b for b in brands if b not in dropped]
         out["brands"] = chosen or [b for b in out.get("brands") or [] if b not in dropped]
+    refused_countries = excluded_tire_countries(text) or []
+    if refused_countries:
+        kept_countries = list(out.get("excluded_countries") or [])
+        out["excluded_countries"] = kept_countries + [
+            c for c in refused_countries if c not in kept_countries
+        ]
     tech = parse_tech_requirements(text)
     if tech:
         out["tech"] = list(tech)

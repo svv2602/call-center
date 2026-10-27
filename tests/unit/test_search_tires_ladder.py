@@ -573,3 +573,139 @@ class TestWiring:
         src = inspect.getsource(main_module.handle_call)
         call = src[src.index("_build_tool_router(") :].split(")")[0]
         assert "network_policy=network_policy" in call
+
+
+# ── refused country («Китай сразу отпадает», R06) ─────────────────────────
+
+
+def _origin_catalog(rows: list[dict[str, Any]]) -> Any:
+    """Responder honouring the brand filter and the refused-country condition."""
+
+    def responder(sql: str, p: dict[str, Any]) -> list[dict[str, Any]]:
+        if "FROM tire_products" not in sql:
+            return []
+        out = rows
+        if "brand" in p:
+            out = [r for r in out if r["brand"].lower() == p["brand"].lower()]
+        refused = {v for k, v in p.items() if k.startswith("xcountry_")}
+        if "s.country" in sql.split(" WHERE ", 1)[1]:
+            out = [r for r in out if (r.get("country") or "").strip() not in refused]
+        return sorted(out, key=lambda r: r["price"])
+
+    return responder
+
+
+def _with_country(row: dict[str, Any], country: str | None) -> dict[str, Any]:
+    return {**row, "country": country, "year_issue": "2024"}
+
+
+_ORIGIN_MARKET = [
+    _with_country(_row("Sailun", "Ice Blazer", 3120), "Китай"),
+    _with_country(_row("Matador", "MP 93", 4690), "Словаччина"),
+    _with_country(_row("Kumho", "WI51", 3500), None),
+]
+
+
+class TestRefusedCountry:
+    @pytest.mark.asyncio
+    async def test_every_ladder_step_keeps_the_country_filter(self) -> None:
+        """Brand relaxed → other brands, still never the refused country."""
+        client, engine = _client(_origin_catalog(_ORIGIN_MARKET))
+        result = await client.search_tires(
+            network="ProKoleso",
+            width=205,
+            brand="Michelin",
+            exclude_countries=["Китай"],
+            recommend_count=3,
+        )
+        assert result["relaxed"] == ["brand"]
+        assert {i["brand"] for i in result["items"]} == {"Matador", "Kumho"}
+        calls = _tire_sql_calls(engine)
+        assert len(calls) == 2
+        for sql, params in calls:
+            assert "s.country" in sql.split(" WHERE ", 1)[1]
+            assert "Китай" in params.values()
+
+    @pytest.mark.asyncio
+    async def test_staggered_rear_query_keeps_the_country_filter(self) -> None:
+        client, engine = _client(_origin_catalog(_ORIGIN_MARKET))
+        await client.search_tires(
+            network="ProKoleso",
+            width=205,
+            rear_width=225,
+            rear_profile=50,
+            rear_diameter=17,
+            exclude_countries=["Китай"],
+            recommend_count=3,
+        )
+        calls = _tire_sql_calls(engine)
+        assert len(calls) >= 2
+        assert all("Китай" in params.values() for _, params in calls)
+
+
+def _sales_router(tire_query: dict[str, Any], store: Any, *, sales: bool = True) -> Any:
+    session = CallSession(uuid.uuid4())
+    session.tire_query = dict(tire_query)
+    policy = NetworkPolicy(sales_enabled=sales, brand_priority=_PRIORITY, recommend_count=3)
+    return _build_tool_router(session, store_client=store, network_policy=policy)
+
+
+def _autospec_store(result: dict[str, Any]) -> Any:
+    store = create_autospec(StoreClient, instance=True)
+    store.search_tires.return_value = result
+    return store
+
+
+async def _search(router: Any, args: dict[str, Any]) -> Any:
+    with patch("src.main._call_logger", None):
+        return await router.execute("search_tires", args)
+
+
+_REFUSED_CHINA = {"season": "winter", "excluded_countries": ["Китай"]}
+
+
+class TestRefusedCountryHandler:
+    @pytest.mark.asyncio
+    async def test_handler_passes_the_callers_refused_countries(self) -> None:
+        """From ``session.tire_query``, never from the LLM's arguments."""
+        store = _autospec_store({"total": 0, "items": []})
+        router = _sales_router(_REFUSED_CHINA, store)
+        await _search(router, {"width": 205, "season": "winter", "exclude_countries": ["Польща"]})
+        assert store.search_tires.await_args.kwargs["exclude_countries"] == ["Китай"]
+
+    @pytest.mark.asyncio
+    async def test_llm_argument_alone_filters_nothing(self) -> None:
+        store = _autospec_store({"total": 0, "items": []})
+        router = _sales_router({"season": "winter"}, store)
+        await _search(router, {"width": 205, "season": "winter", "exclude_countries": ["Китай"]})
+        assert "exclude_countries" not in store.search_tires.await_args.kwargs
+
+    @pytest.mark.asyncio
+    async def test_any_engine_answer_is_cut_by_country(self) -> None:
+        """The Store API fallback has no country filter: the handler drops the items."""
+        items = [
+            {"id": "s", "brand": "Sailun", "price": 3120, "in_stock": True, "country": "китай"},
+            {"id": "m", "brand": "Matador", "price": 4690, "in_stock": True, "country": "Польща"},
+            {"id": "k", "brand": "Kumho", "price": 3500, "in_stock": True},
+        ]
+        store = _autospec_store({"total": 3, "items": items})
+        router = _sales_router(_REFUSED_CHINA, store)
+        result = await _search(router, {"width": 205, "season": "winter"})
+        assert [i["id"] for i in result["items"]] == ["m", "k"]
+        assert result["total"] == 2
+
+    @pytest.mark.asyncio
+    async def test_end_to_end_real_client_offers_no_refused_country(self) -> None:
+        client, _ = _client(_origin_catalog(_ORIGIN_MARKET))
+        router = _sales_router(_REFUSED_CHINA, client)
+        result = await _search(router, {"width": 205, "season": "winter"})
+        assert result["items"]
+        assert "Sailun" not in {i["brand"] for i in result["items"]}
+        assert all(i.get("country") != "Китай" for i in result["items"])
+
+    @pytest.mark.asyncio
+    async def test_sales_off_passes_no_country(self) -> None:
+        store = _autospec_store({"total": 0, "items": []})
+        router = _sales_router(_REFUSED_CHINA, store, sales=False)
+        await _search(router, {"width": 205, "season": "winter"})
+        assert "exclude_countries" not in store.search_tires.await_args.kwargs

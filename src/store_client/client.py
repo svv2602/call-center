@@ -1612,6 +1612,23 @@ class StoreClient:
                 bind_params[f"exclude_{i}"] = sku
                 names.append(f":exclude_{i}")
             conditions.append(f"p.sku NOT IN ({', '.join(names)})")
+        # «Китай сразу отпадает» (sales): countries the caller refused, from
+        # their own words (``tire_query.excluded_countries``). A row with no
+        # country is kept — it is not known to be from there. The case forms
+        # are bound instead of ``LOWER()``: a ``C``-locale PostgreSQL lowers
+        # ASCII only, and «КИТАЙ» would slip through.
+        exclude_countries: list[str] = []
+        for c in params.get("exclude_countries") or ():
+            name = str(c).strip()
+            for form in (name, name.lower(), name.upper(), name.capitalize()):
+                if form and form not in exclude_countries:
+                    exclude_countries.append(form)
+        if exclude_countries:
+            names = []
+            for i, country in enumerate(exclude_countries):
+                bind_params[f"xcountry_{i}"] = country
+                names.append(f":xcountry_{i}")
+            conditions.append(f"TRIM(COALESCE(s.country, '')) NOT IN ({', '.join(names)})")
 
         where_clause = " AND ".join(conditions)
         limit = int(params.get("_limit") or 50)
@@ -1632,6 +1649,7 @@ class StoreClient:
                    p.size, m.seasonality AS season,
                    COALESCE(s.price, 0) AS price,
                    COALESCE(s.stock_quantity, 0) AS stock_quantity,
+                   s.country AS country, s.year_issue AS year_issue,
                    {_RUNFLAT_COLUMN_SQL} AS runflat,
                    l.energy_class AS eu_fuel, l.wet_grip_class AS eu_wet,
                    l.noise_db AS eu_noise_db, l.noise_class AS eu_noise_class,
@@ -1665,7 +1683,15 @@ class StoreClient:
             "season": row["season"],
             "price": row["price"],
             "in_stock": row["stock_quantity"] > 0,
+            # How many are left: «залишилась одна» is not «4 шини».
+            "quantity": row["stock_quantity"],
         }
+        # Country and production year of the stock row (``tire_stock``) — the
+        # model quotes them instead of guessing; unknown → no key at all.
+        for key, column in (("country", "country"), ("year", "year_issue")):
+            value = row.get(column)
+            if value is not None and str(value).strip():
+                item[key] = str(value).strip()
         if row.get("runflat") is True:
             item["runflat"] = True
         studs = StoreClient._studs(row)

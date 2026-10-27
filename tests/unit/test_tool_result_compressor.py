@@ -363,6 +363,8 @@ def _catalog_row(**over: Any) -> dict[str, Any]:
         "season": "winter",
         "price": 5120,
         "stock_quantity": 8,
+        "country": None,
+        "year_issue": None,
         "runflat": False,
         "eu_fuel": None,
         "eu_wet": None,
@@ -437,6 +439,23 @@ def test_sales_on_keeps_the_facts_of_each_shown_tyre() -> None:
     ]
     assert "load_index" not in items[2]
     assert "id" not in items[0]
+
+
+def test_sales_on_keeps_country_year_and_quantity_of_each_tyre() -> None:
+    """Built by ``_tire_item`` from rows as the SELECT gives them (R07, R09)."""
+    rows = [
+        _catalog_row(id="c1", country="Китай", year_issue="2023", stock_quantity=1),
+        _catalog_row(id="c2", country="", year_issue="25-24"),
+        _catalog_row(id="c3", country=None, year_issue=None, stock_quantity=4),
+    ]
+    result = {"total": 3, "items": [StoreClient._tire_item(r) for r in rows]}
+    items = json.loads(compress_tool_result("search_tires", result, sales_enabled=True))["items"]
+    assert (items[0]["country"], items[0]["year"], items[0]["quantity"]) == ("Китай", "2023", 1)
+    assert "country" not in items[1] and items[1]["year"] == "25-24"
+    assert "country" not in items[2] and "year" not in items[2]
+    assert items[2]["quantity"] == 4
+    off = json.loads(compress_tool_result("search_tires", result))["items"][0]
+    assert not {"country", "year", "quantity"} & set(off)
 
 
 def test_sales_on_summer_tyre_carries_no_studs_key() -> None:

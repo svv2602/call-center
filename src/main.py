@@ -1780,6 +1780,8 @@ def _build_tool_router(
         # The caller's needs come from their own words (`merge_tire_query`),
         # never from the LLM's args — and only under sales (below).
         params.pop("needs", None)
+        # Refused countries likewise (`tire_query.excluded_countries`, sales only).
+        params.pop("exclude_countries", None)
         # Price bounds come from the last offer, never from the LLM's args.
         price_mode = params.pop("price_mode", None)
         for key in PRICE_FILTER_KEYS:
@@ -1821,7 +1823,13 @@ def _build_tool_router(
         needs = session.tire_query.get("needs")
         if needs:
             params["needs"] = list(needs)
+        # «Китай сразу отпадает»: the caller's refused countries, every later
+        # search of the call — by code, not by a prompt line (R06).
+        excluded_countries = session.tire_query.get("excluded_countries")
+        if excluded_countries:
+            params["exclude_countries"] = list(excluded_countries)
         result, applied_mode = await _search_by_price_mode(network, params, price_mode)
+        _drop_excluded_countries(result, excluded_countries)
         _apply_load_index_min(result)
         await _mark_runflat_required(result, params)
         if isinstance(result, dict):
@@ -1895,6 +1903,26 @@ def _build_tool_router(
             len(result.get("items") or []) if isinstance(result, dict) else 0,
         )
         return result, price_mode
+
+    def _drop_excluded_countries(result: Any, excluded: Any) -> None:
+        """Default-deny over every engine: no item of a refused country is offered.
+
+        The catalogue query filters in SQL; the Store API fallback knows no
+        such filter, so its items are checked here. An item with no
+        ``country`` is kept — it is not known to be from there.
+        """
+        refused = {str(c).strip().lower() for c in excluded or () if str(c).strip()}
+        if not refused or not isinstance(result, dict) or not result.get("items"):
+            return
+        items = result["items"]
+        kept = [
+            i
+            for i in items
+            if not (isinstance(i, dict) and str(i.get("country") or "").strip().lower() in refused)
+        ]
+        if len(kept) != len(items):
+            result["items"] = kept
+            result["total"] = len(kept)
 
     def _apply_load_index_min(result: Any) -> None:
         """The caller's minimum load index (wave 7-Q, ``tire_query.load_index_min``).
