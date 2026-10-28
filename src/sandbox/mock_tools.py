@@ -287,6 +287,11 @@ class DeliveryCostMock:
         city_name = city.strip() if isinstance(city, str) else ""
         lines = dq.resolve_items(items, self.offered)
         if not city_name or lines is None:
+            promo = dq.promo_answer(
+                self._policy, self._promos, self.caller_lines[-1] if self.caller_lines else None
+            )
+            if promo:
+                return {"status": dq.STATUS_PROMO_FREE, "phrase": promo}
             return {
                 "status": dq.STATUS_NEED_MORE,
                 "phrase": f"{tariff} {dq.NEED_MORE_HINT}",

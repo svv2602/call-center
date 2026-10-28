@@ -145,3 +145,117 @@ class TestStreamingPath:
         await loop.run_turn("скільки доставка до Одеси?", [])
         assert PHRASE in tts.texts
         assert tts.texts.index(PHRASE) < tts.texts.index("Оформлюємо заявку?")
+
+
+class TestNotTwice:
+    """The facts already said the promotion this turn: the tool's same phrase is not said again."""
+
+    def test_text_path_says_the_promotion_once(self) -> None:
+        from datetime import date
+
+        from scripts.configure_tenants import PROKOLESO_CONFIG_PATCH
+        from src.agent.network_policy import NetworkPolicy
+        from src.agent.promotions import ActivePromotion, promo_overrides
+
+        promos = promo_overrides(
+            [
+                ActivePromotion(
+                    title="free",
+                    bot_text="Доставка будь-якого замовлення шин — безкоштовна.",
+                    valid_to=date(2099, 1, 1),
+                    overrides={"free_delivery": True},
+                    mention_brands=(),
+                )
+            ]
+        )
+        promo_text = "Доставка будь-якого замовлення шин — безкоштовна."
+        router = ToolRouter()
+
+        async def _quote(**_: Any) -> dict[str, Any]:
+            return {"status": dq.STATUS_PROMO_FREE, "phrase": promo_text}
+
+        router.register(dq.DELIVERY_COST_TOOL, _quote)
+        llm_router = create_autospec(LLMRouter, instance=True)
+        llm_router.complete = AsyncMock(
+            side_effect=[
+                LLMResponse(
+                    text="",
+                    tool_calls=[ToolCall(id="q1", name=dq.DELIVERY_COST_TOOL, arguments={})],
+                    stop_reason="tool_use",
+                    usage=Usage(10, 5),
+                    provider="test",
+                ),
+                LLMResponse(text="Які шини обираєте?", usage=Usage(10, 5), provider="test"),
+            ]
+        )
+        agent = LLMAgent(
+            api_key="test-key",
+            system_prompt="base",
+            llm_router=llm_router,
+            tool_router=router,
+            tools=_TOOLS,
+            network_policy=NetworkPolicy.from_tenant_config(
+                {**PROKOLESO_CONFIG_PATCH, "sales_enabled": True}
+            ),
+            promo_overrides=promos,
+        )
+        text, _ = asyncio.run(agent.process_message("скільки коштує доставка?", []))
+        assert text.count(promo_text) == 1
+
+    @pytest.mark.asyncio
+    async def test_streaming_path_says_the_promotion_once(self) -> None:
+        from datetime import date
+
+        from scripts.configure_tenants import PROKOLESO_CONFIG_PATCH
+        from src.agent.network_policy import NetworkPolicy
+        from src.agent.promotions import ActivePromotion, promo_overrides
+        from src.agent.streaming_loop import StreamingAgentLoop
+        from tests.unit.mocks.mock_audio_socket import MockAudioSocketConnection
+        from tests.unit.mocks.mock_llm_router import MockLLMRouter
+
+        promo_text = "Доставка будь-якого замовлення шин — безкоштовна."
+        promos = promo_overrides(
+            [
+                ActivePromotion(
+                    title="free",
+                    bot_text=promo_text,
+                    valid_to=date(2099, 1, 1),
+                    overrides={"free_delivery": True},
+                    mention_brands=(),
+                )
+            ]
+        )
+        router = ToolRouter()
+
+        async def _quote(**_: Any) -> dict[str, Any]:
+            return {"status": dq.STATUS_PROMO_FREE, "phrase": promo_text}
+
+        router.register(dq.DELIVERY_COST_TOOL, _quote)
+        rounds = [
+            [
+                ToolCallStart(id="q1", name=dq.DELIVERY_COST_TOOL),
+                ToolCallDelta(id="q1", arguments_chunk="{}"),
+                ToolCallEnd(id="q1"),
+                StreamDone(stop_reason="tool_use", usage=Usage(1, 1)),
+            ],
+            [
+                TextDelta(text="Які шини обираєте?"),
+                StreamDone(stop_reason="end_turn", usage=Usage(1, 1)),
+            ],
+        ]
+        tts = _RecordingTTS()
+        loop = StreamingAgentLoop(
+            llm_router=MockLLMRouter(rounds),
+            tool_router=router,
+            tts=tts,
+            conn=MockAudioSocketConnection(),
+            barge_in_event=asyncio.Event(),
+            tools=_TOOLS,
+            system_prompt="Test system prompt",
+            network_policy=NetworkPolicy.from_tenant_config(
+                {**PROKOLESO_CONFIG_PATCH, "sales_enabled": True}
+            ),
+            promo_overrides=promos,
+        )
+        await loop.run_turn("скільки коштує доставка?", [])
+        assert tts.texts.count(promo_text) == 1

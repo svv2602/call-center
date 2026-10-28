@@ -427,6 +427,13 @@ def _promo_text(
     return None
 
 
+def free_delivery_promo_text(
+    promos: PromoOverrides | None, text: str | None, tire_query: dict[str, Any] | None
+) -> str | None:
+    """The live free-delivery promotion's own text when it covers this line, else ``None``."""
+    return _promo_text(GRANT_FREE_DELIVERY, promos, text, tire_query)
+
+
 def _brand_list(names: Any) -> str:
     return ", ".join(n[:1].upper() + n[1:] for n in sorted(names))
 

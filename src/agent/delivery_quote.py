@@ -383,3 +383,24 @@ def forced_quote_tool(user_text: str | None, tools: Any) -> str | None:
     from src.agent.network_facts import DELIVERY_COST, fact_topics
 
     return DELIVERY_COST_TOOL if DELIVERY_COST in fact_topics(user_text) else None
+
+
+def promo_answer(
+    policy: NetworkPolicy | None,
+    promos: PromoOverrides | None,
+    caller_line: str | None,
+    tire_query: dict[str, Any] | None = None,
+) -> str | None:
+    """The free-delivery promotion's own text when it answers this line, else ``None``.
+
+    «Скільки коштує доставка шин Doublestar?» under a Doublestar promotion: the
+    code has already said the promotion (``network_facts``); a «за тарифами
+    перевізника» from the quote tool after it contradicted it (goldset
+    2026-10-28). With no tyre chosen yet the tool answers the promotion too.
+    """
+    if policy is None or not policy.sales_enabled:
+        return None
+    # Imported here: network_facts imports this module.
+    from src.agent.network_facts import free_delivery_promo_text
+
+    return free_delivery_promo_text(promos, caller_line, tire_query)

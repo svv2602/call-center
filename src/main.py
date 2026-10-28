@@ -2376,13 +2376,23 @@ def _build_tool_router(
         tariff = dq.tariff_phrase(network_policy)
         city_name = city.strip() if isinstance(city, str) else ""
         lines = dq.resolve_items(items, offered_products)
+        caller_lines = [t.content for t in session.dialog_history if t.speaker == "user"]
         if not city_name or lines is None:
+            # No tyre chosen yet, but a live free-delivery promotion answers
+            # the caller's line: its text, never the tariff line against it.
+            promo = dq.promo_answer(
+                network_policy,
+                promo_overrides,
+                caller_lines[-1] if caller_lines else None,
+                session.tire_query,
+            )
+            if promo:
+                return _quote_result(dq.STATUS_PROMO_FREE, promo)
             return _quote_result(
                 dq.STATUS_NEED_MORE,
                 f"{tariff} {dq.NEED_MORE_HINT}",
                 missing="city" if not city_name else "items",
             )
-        caller_lines = [t.content for t in session.dialog_history if t.speaker == "user"]
         if (
             not dq.city_named_by_caller(city_name, caller_lines)
             and city_refusals < dq.CITY_MAX_REFUSALS

@@ -181,3 +181,27 @@ class TestDeliveryCostMock:
             ],
         )
         assert mixed == {"status": dq.STATUS_PROMO_MIXED, "phrase": dq.PROMO_MIXED_PHRASE}
+
+
+@pytest.mark.asyncio
+async def test_delivery_mock_answers_a_promotion_before_a_tyre_is_chosen() -> None:
+    """As live: nothing chosen yet, a promotion covers the caller's line → its text."""
+    from datetime import date
+
+    from src.agent import delivery_quote as dq
+    from src.agent.network_policy import NetworkPolicy
+    from src.agent.promotions import ActivePromotion, promo_overrides
+    from src.sandbox.mock_tools import DeliveryCostMock
+
+    promo = ActivePromotion(
+        title="free",
+        bot_text="Безкоштовна доставка на шини Michelin.",
+        valid_to=date(2099, 1, 1),
+        overrides={"free_delivery": True},
+        mention_brands=("Michelin",),
+    )
+    policy = NetworkPolicy.from_tenant_config({"sales_enabled": True, "network_policy": {}})
+    mock = DeliveryCostMock(policy, promo_overrides([promo]))
+    mock.caller_lines.append("скільки коштує доставка шин Michelin?")
+    out = await mock()
+    assert out == {"status": dq.STATUS_PROMO_FREE, "phrase": "Безкоштовна доставка на шини Michelin."}

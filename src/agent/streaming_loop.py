@@ -2547,7 +2547,8 @@ class StreamingAgentLoop:
                 # The delivery quote is said word for word by the code, like a
                 # caveat — the model retold it and lost the COD fee.
                 quote_phrase = code_spoken_phrase(tc.name, raw)
-                if quote_phrase and quote_phrase not in _caveats:
+                # Not twice: a promotion the facts already said this turn.
+                if quote_phrase and quote_phrase not in _caveats and quote_phrase not in facts:
                     _caveats.append(quote_phrase)
                 if tc.name == LOOKUP_TOOL:
                     self._vehicle_gate.note_model_call(args, raw)

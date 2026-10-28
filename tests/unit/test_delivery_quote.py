@@ -788,3 +788,38 @@ class TestCityNamedByCaller:
         assert second["status"] == "quoted"
         np_client.quote.assert_awaited_once()
         assert session.delivery_quotes == [810]
+
+
+class TestPromotionWithoutAChosenTyre:
+    """«Скільки коштує доставка шин Michelin?» under a Michelin promotion, nothing
+    chosen yet: the tool answers the promotion, not the tariff line that
+    contradicted it (goldset 2026-10-28, promo_pk_free_delivery_brand_in_scope)."""
+
+    def test_the_promotion_answers(self, np_key: None) -> None:
+        (res,), _ = asyncio.run(
+            _drive(
+                [("get_delivery_cost", {})],
+                promos=_promos(("Michelin",)),
+                session=_session("скільки коштує доставка шин Michelin?"),
+            )
+        )
+        assert res == {"status": "promo_free", "phrase": "Безкоштовна доставка на шини 0."}
+
+    def test_another_brand_is_the_tariff_line(self, np_key: None) -> None:
+        (res,), _ = asyncio.run(
+            _drive(
+                [("get_delivery_cost", {})],
+                promos=_promos(("Michelin",)),
+                session=_session("скільки коштує доставка шин Laufenn?"),
+            )
+        )
+        assert res["status"] == "need_more"
+        assert res["phrase"].startswith(TARIFF)
+
+
+def test_promo_answer_is_only_a_promotion() -> None:
+    """Not the policy's own delivery line: without a key that is the tariff phrase."""
+    assert dq.promo_answer(_pk_policy(), None, "скільки коштує доставка?") is None
+    assert (
+        dq.promo_answer(_pk_policy(sales=False), _promos(()), "скільки коштує доставка?") is None
+    )

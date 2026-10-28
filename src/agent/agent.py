@@ -889,7 +889,8 @@ class LLMAgent:
                     collect_disk_verdict(raw, disk_fit_state, caveats)
                 # Text-path twin: the delivery quote is the code's sentence.
                 quote_phrase = code_spoken_phrase(tu["name"], raw)
-                if quote_phrase and quote_phrase not in caveats:
+                # Not twice: a promotion the facts already said this turn.
+                if quote_phrase and quote_phrase not in caveats and quote_phrase not in facts:
                     caveats.append(quote_phrase)
                 if tu["name"] == LOOKUP_TOOL:
                     self._vehicle_gate.note_model_call(args, raw)
