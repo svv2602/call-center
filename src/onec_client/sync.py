@@ -221,29 +221,16 @@ class CatalogSyncService:
         logger.info("Full catalog sync completed")
 
     async def incremental_sync(self) -> None:
-        """Incremental catalog sync: changed wares + stock for both networks.
+        """Periodic sync: stock/prices + Nova Poshta. Runs every N minutes.
 
-        Runs periodically (every N minutes).
+        Wares are not taken here. 1C keeps one change queue per trading
+        network (``get_wares?TradingNetwork=…``), and ``ProKoleso``/``Tshina``
+        are the queues of the sites prokoleso.ua and tshina.ua: confirming
+        receipt (``ConfirmationOfReceipt``) cleared the change registration
+        for every ware of the network, so the site's hourly pull got nothing
+        and its characteristics went stale (2026-10-28). The catalog comes
+        from ``full_sync`` (``UploadingAll``), which does not touch the queue.
         """
-        for network in NETWORKS:
-            try:
-                resp = await self._onec.get_wares_incremental(network)
-                wares = resp.get("data", [])
-                if wares:
-                    await self._upsert_wares(wares)
-                    logger.info(
-                        "Incremental sync %s: %d models updated",
-                        network,
-                        len(wares),
-                    )
-                    # Confirm receipt so 1C doesn't send same data again
-                    await self._onec.confirm_wares_receipt(network)
-                else:
-                    logger.debug("Incremental sync %s: no changes", network)
-            except Exception:
-                logger.exception("Failed incremental sync for %s", network)
-
-        # Always refresh stock
         await self.sync_stock()
 
         # Refresh Nova Poshta reference data

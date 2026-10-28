@@ -23,6 +23,10 @@ _MAX_RETRIES = 2
 _RETRY_DELAYS = [1.0, 2.0]
 _RETRYABLE_STATUSES = {429, 503}
 
+# 1C logs the User-Agent of each request; aiohttp's default
+# («Python/3.12 aiohttp/…») told it nothing about who pulled what.
+USER_AGENT = "call-center-ai/0.1.0"
+
 # Separate circuit breaker for 1C API. ``timeout_duration`` must be a
 # timedelta: aiobreaker adds it to a datetime when the breaker opens — an int
 # raised TypeError there and left the breaker OPEN for good.
@@ -61,6 +65,7 @@ class OneCClient:
             auth=self._auth,
             headers={
                 "Accept": "application/json",
+                "User-Agent": USER_AGENT,
             },
         )
 
@@ -72,25 +77,9 @@ class OneCClient:
 
     # --- Catalog (get_wares) ---
 
-    async def get_wares_incremental(self, network: str) -> dict[str, Any]:
-        """Get changed wares for a trading network (incremental sync).
-
-        GET /Trade/hs/site/get_wares/?TradingNetwork={network}
-        """
-        return await self._get(
-            "/Trade/hs/site/get_wares/",
-            params={"TradingNetwork": network},
-        )
-
-    async def confirm_wares_receipt(self, network: str) -> dict[str, Any]:
-        """Confirm receipt of incremental wares update.
-
-        GET /Trade/hs/site/get_wares/?TradingNetwork={network}&ConfirmationOfReceipt
-        """
-        return await self._get(
-            "/Trade/hs/site/get_wares/",
-            params={"TradingNetwork": network, "ConfirmationOfReceipt": ""},
-        )
+    # No ``get_wares?TradingNetwork=…`` / ``ConfirmationOfReceipt``: those are
+    # the change queues of the sites, and confirming one empties it for the
+    # site (see ``CatalogSyncService.incremental_sync``).
 
     async def get_wares_full(self, limit: int = 0) -> dict[str, Any]:
         """Get full catalog (all wares).

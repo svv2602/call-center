@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from src.onec_client.client import OneCClient
 from src.onec_client.sync import (
     CatalogSyncService,
     _normalize_season,
@@ -175,8 +176,6 @@ class TestCatalogSyncService:
                 },
             ],
         }
-        client.get_wares_incremental.return_value = {"success": True, "data": [], "errors": []}
-        client.confirm_wares_receipt.return_value = {"success": True}
         client.get_novapost_cities.return_value = {"success": True, "data": []}
         client.get_novapost_branches.return_value = {"success": True, "data": []}
         return client
@@ -237,39 +236,21 @@ class TestCatalogSyncService:
         assert mock_conn.execute.call_count > 0
 
     @pytest.mark.asyncio
-    async def test_incremental_sync_both_networks(
-        self, mock_onec: AsyncMock, mock_engine: MagicMock, mock_redis: AsyncMock
+    async def test_incremental_sync_leaves_the_sites_change_queue(
+        self, mock_engine: MagicMock, mock_redis: AsyncMock
     ) -> None:
-        service = CatalogSyncService(mock_onec, mock_engine, mock_redis)
-        await service.incremental_sync()
+        """No get_wares request at all: TradingNetwork=ProKoleso/Tshina are the
+        sites' change queues, and confirming one emptied it for the site."""
+        client = OneCClient("http://host", "u", "p")
+        with patch.object(
+            client, "_get", new_callable=AsyncMock, return_value={"success": True, "data": []}
+        ) as mock_get:
+            await CatalogSyncService(client, mock_engine, mock_redis).incremental_sync()
 
-        # Called for both ProKoleso and Tshina
-        assert mock_onec.get_wares_incremental.call_count == 2
-
-    @pytest.mark.asyncio
-    async def test_incremental_sync_confirms_receipt(
-        self, mock_onec: AsyncMock, mock_engine: MagicMock, mock_redis: AsyncMock
-    ) -> None:
-        # Return data for incremental so receipt gets confirmed
-        mock_onec.get_wares_incremental.return_value = {
-            "success": True,
-            "data": [
-                {
-                    "model_id": "m1",
-                    "model": "Test",
-                    "manufacturer_id": "mfr1",
-                    "manufacturer": "TestBrand",
-                    "seasonality": "Летняя",
-                    "tread_pattern_type": "",
-                    "type": "1",
-                    "product": [],
-                },
-            ],
-        }
-        service = CatalogSyncService(mock_onec, mock_engine, mock_redis)
-        await service.incremental_sync()
-
-        assert mock_onec.confirm_wares_receipt.call_count == 2
+        paths = [c.args[0] for c in mock_get.call_args_list]
+        assert paths, "the periodic sync still refreshes stock"
+        assert not [p for p in paths if "get_wares" in p]
+        assert paths.count("/Trade/hs/site/get_stock/") == 2
 
     @pytest.mark.asyncio
     async def test_sync_stock_updates_redis(

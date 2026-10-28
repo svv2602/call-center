@@ -3,13 +3,15 @@
 Replaces the in-process sync that previously ran at call-processor startup.
 Two tasks:
   - catalog_full_sync: daily full catalog upload (configurable via Admin UI, default 08:00 Kyiv)
-  - catalog_incremental_sync: incremental wares + stock + Nova Poshta (every 5 min)
+  - catalog_incremental_sync: stock + Nova Poshta (every 5 min); wares only in the full sync
 """
 
 from __future__ import annotations
 
 import logging
 from typing import Any
+
+from celery.exceptions import Retry  # type: ignore[import-untyped]
 
 from src.config import get_settings
 from src.tasks.celery_app import app
@@ -39,6 +41,10 @@ def catalog_full_sync(self: Any, triggered_by: str = "manual") -> dict[str, Any]
 _LOCK_KEY = "catalog_sync:lock"
 _LOCK_TTL_FULL = 1800  # 30 min for full sync
 _LOCK_TTL_INCR = 300  # 5 min for incremental sync
+# The full sync fires at :00 together with the every-5-minutes incremental
+# one; losing the lock to it skipped the day's only catalog refresh
+# (2026-10-28 08:00). It waits for the incremental one instead.
+_BUSY_RETRY_SEC = 120
 
 
 async def _catalog_full_sync_async(task: Any, triggered_by: str) -> dict[str, Any]:
@@ -77,6 +83,7 @@ async def _catalog_full_sync_async(task: Any, triggered_by: str) -> dict[str, An
     )
     redis: Redis | None = None
     onec_client: OneCClient | None = None
+    owns_lock = False
 
     try:
         redis = Redis.from_url(settings.redis.url, decode_responses=False)
@@ -89,10 +96,12 @@ async def _catalog_full_sync_async(task: Any, triggered_by: str) -> dict[str, An
 
         # Distributed lock to prevent concurrent syncs
         if redis is not None:
-            acquired = await redis.set(_LOCK_KEY, "full", nx=True, ex=_LOCK_TTL_FULL)
-            if not acquired:
-                logger.warning("Catalog sync already running, skipping full sync")
-                return {"status": "skipped", "reason": "already_running"}
+            owns_lock = bool(await redis.set(_LOCK_KEY, "full", nx=True, ex=_LOCK_TTL_FULL))
+            if not owns_lock:
+                logger.warning(
+                    "Catalog sync already running, full sync retries in %ds", _BUSY_RETRY_SEC
+                )
+                raise task.retry(countdown=_BUSY_RETRY_SEC)
 
         # Use full_sync_timeout for the heavy UploadingAll call
         onec_client = OneCClient(
@@ -114,11 +123,13 @@ async def _catalog_full_sync_async(task: Any, triggered_by: str) -> dict[str, An
         logger.info("Full catalog sync completed successfully")
         return {"status": "ok"}
 
+    except Retry:
+        raise
     except Exception as exc:
         logger.exception("Full catalog sync failed")
         raise task.retry(countdown=300) from exc
     finally:
-        if redis is not None:
+        if redis is not None and owns_lock:
             await redis.delete(_LOCK_KEY)
         if onec_client is not None:
             await onec_client.close()
@@ -135,7 +146,7 @@ async def _catalog_full_sync_async(task: Any, triggered_by: str) -> dict[str, An
     soft_time_limit=240,
 )  # type: ignore[untyped-decorator]
 def catalog_incremental_sync(self: Any) -> dict[str, Any]:
-    """Incremental catalog sync: changed wares + stock + Nova Poshta.
+    """Periodic catalog sync: stock + Nova Poshta (wares come from the full sync).
 
     Scheduled every 5 minutes via Celery Beat.
     """
@@ -163,6 +174,7 @@ async def _catalog_incremental_sync_async(task: Any) -> dict[str, Any]:
     )
     redis: Redis | None = None
     onec_client: OneCClient | None = None
+    owns_lock = False
 
     try:
         redis = Redis.from_url(settings.redis.url, decode_responses=False)
@@ -175,8 +187,8 @@ async def _catalog_incremental_sync_async(task: Any) -> dict[str, Any]:
 
         # Distributed lock to prevent concurrent syncs
         if redis is not None:
-            acquired = await redis.set(_LOCK_KEY, "incremental", nx=True, ex=_LOCK_TTL_INCR)
-            if not acquired:
+            owns_lock = bool(await redis.set(_LOCK_KEY, "incremental", nx=True, ex=_LOCK_TTL_INCR))
+            if not owns_lock:
                 logger.info("Catalog sync already running, skipping incremental sync")
                 return {"status": "skipped", "reason": "already_running"}
 
@@ -203,7 +215,7 @@ async def _catalog_incremental_sync_async(task: Any) -> dict[str, Any]:
         logger.exception("Incremental catalog sync failed")
         raise task.retry(countdown=60) from exc
     finally:
-        if redis is not None:
+        if redis is not None and owns_lock:
             await redis.delete(_LOCK_KEY)
         if onec_client is not None:
             await onec_client.close()

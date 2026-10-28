@@ -6,7 +6,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # Patch targets — imports are deferred inside async functions,
 # so we patch at the source module level.
 _PATCH_ENGINE = "sqlalchemy.ext.asyncio.create_async_engine"
@@ -105,6 +104,59 @@ class TestCatalogFullSync:
             timeout=600,
         )
         mock_sync.full_sync.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_busy_lock_retries_instead_of_skipping(self) -> None:
+        """The incremental sync holds the lock at :00 — the full sync waits for
+        it and does not drop the other task's lock."""
+        from celery.exceptions import Retry
+
+        from src.tasks.catalog_sync_tasks import _BUSY_RETRY_SEC, _catalog_full_sync_async
+
+        mock_task = MagicMock()
+        mock_task.retry.side_effect = Retry()
+        redis = _mock_redis()
+        redis.set = AsyncMock(return_value=None)
+        redis.delete = AsyncMock()
+        mock_sync = AsyncMock()
+
+        with (
+            patch(_PATCH_SETTINGS) as mock_get_settings,
+            patch(_PATCH_ENGINE, return_value=_mock_engine()),
+            patch(_PATCH_REDIS) as mock_redis_cls,
+            patch(_PATCH_ONEC, return_value=_mock_onec()),
+            patch(_PATCH_SYNC, return_value=mock_sync),
+        ):
+            mock_get_settings.return_value = _mock_settings()
+            mock_redis_cls.from_url.return_value = redis
+            with pytest.raises(Retry):
+                await _catalog_full_sync_async(mock_task, "manual")
+
+        mock_task.retry.assert_called_once_with(countdown=_BUSY_RETRY_SEC)
+        mock_sync.full_sync.assert_not_awaited()
+        redis.delete.assert_not_awaited()
+
+    @pytest.mark.asyncio
+    async def test_own_lock_released(self) -> None:
+        from src.tasks.catalog_sync_tasks import _LOCK_KEY, _catalog_full_sync_async
+
+        redis = _mock_redis()
+        redis.set = AsyncMock(return_value=True)
+        redis.delete = AsyncMock()
+
+        with (
+            patch(_PATCH_SETTINGS) as mock_get_settings,
+            patch(_PATCH_ENGINE, return_value=_mock_engine()),
+            patch(_PATCH_REDIS) as mock_redis_cls,
+            patch(_PATCH_ONEC, return_value=_mock_onec()),
+            patch(_PATCH_SYNC, return_value=AsyncMock()),
+        ):
+            mock_get_settings.return_value = _mock_settings()
+            mock_redis_cls.from_url.return_value = redis
+            result = await _catalog_full_sync_async(MagicMock(), "manual")
+
+        assert result["status"] == "ok"
+        redis.delete.assert_awaited_once_with(_LOCK_KEY)
 
     @pytest.mark.asyncio
     async def test_cleanup_on_success(self) -> None:

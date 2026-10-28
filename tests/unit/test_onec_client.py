@@ -28,6 +28,21 @@ class TestOneCClientInit:
         assert onec_client._auth.login == "web_service"
         assert onec_client._auth.password == "44332211"
 
+    @pytest.mark.asyncio
+    async def test_requests_carry_own_user_agent(self, onec_client: OneCClient) -> None:
+        """1C tells clients apart by User-Agent; aiohttp's default named nobody."""
+        await onec_client.open()
+        try:
+            assert onec_client._session is not None
+            assert onec_client._session.headers["User-Agent"].startswith("call-center-ai/")
+        finally:
+            await onec_client.close()
+
+    def test_no_change_queue_methods(self) -> None:
+        """The sites' change queue is not ours to take or confirm."""
+        assert not hasattr(OneCClient, "get_wares_incremental")
+        assert not hasattr(OneCClient, "confirm_wares_receipt")
+
 
 class TestOneCClientNotOpened:
     @pytest.mark.asyncio
@@ -60,28 +75,6 @@ class TestOneCClientRequests:
             mock_get.assert_called_once_with(
                 "/Trade/hs/site/get_wares/",
                 params={"UploadingAll": "", "limit": 100},
-            )
-
-    @pytest.mark.asyncio
-    async def test_get_wares_incremental(self, onec_client: OneCClient) -> None:
-        with patch.object(
-            onec_client, "_get", new_callable=AsyncMock, return_value={"success": True, "data": []}
-        ) as mock_get:
-            await onec_client.get_wares_incremental("ProKoleso")
-            mock_get.assert_called_once_with(
-                "/Trade/hs/site/get_wares/",
-                params={"TradingNetwork": "ProKoleso"},
-            )
-
-    @pytest.mark.asyncio
-    async def test_confirm_wares_receipt(self, onec_client: OneCClient) -> None:
-        with patch.object(
-            onec_client, "_get", new_callable=AsyncMock, return_value={"success": True}
-        ) as mock_get:
-            await onec_client.confirm_wares_receipt("Tshina")
-            mock_get.assert_called_once_with(
-                "/Trade/hs/site/get_wares/",
-                params={"TradingNetwork": "Tshina", "ConfirmationOfReceipt": ""},
             )
 
     @pytest.mark.asyncio

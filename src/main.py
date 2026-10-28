@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 
 import aiohttp
 import uvicorn
+from aiobreaker import CircuitBreakerState
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
@@ -32,7 +33,6 @@ from src.agent.booking_result import is_booking_confirmed
 from src.agent.color_translit import latin_prefix_to_color
 from src.agent.confirm_detect import booking_was_confirmed
 from src.agent.network_policy import SERVICE_TOOLS, NetworkPolicy
-from src.agent.tool_result_compressor import AUDIT_ORDER_NUMBER_KEY
 from src.agent.parsers.date_parser import resolve_tool_date
 from src.agent.promotions import PromoOverrides, load_active_promotions, promo_overrides
 from src.agent.prompt_manager import (
@@ -56,6 +56,7 @@ from src.agent.prompts import (
     pronunciation_rules_for_policy,
 )
 from src.agent.tool_loader import get_tools_with_overrides
+from src.agent.tool_result_compressor import AUDIT_ORDER_NUMBER_KEY
 from src.agent.tools import (
     ALL_TOOLS,
     SUBMIT_ORDER_TOOL,
@@ -124,7 +125,7 @@ from src.monitoring.metrics import (
     orders_created_total,
     tenant_resolution_fallback_total,
 )
-from src.onec_client.client import OneCClient, from_1c_date, from_1c_time
+from src.onec_client.client import OneCClient, _onec_breaker, from_1c_date, from_1c_time
 from src.store_client.client import (
     BUDGET_SOURCE_CALLER,
     BUDGET_SOURCE_CORRIDOR,
@@ -425,15 +426,13 @@ async def readiness_check() -> dict[str, object]:
         return ("llm_api", "no_api_key" if not settings.anthropic.api_key else "not_initialized")
 
     async def _check_onec() -> tuple[str, str]:
+        # No request to 1C: the probe used to pull the whole ProKoleso stock
+        # on every call. The circuit breaker already knows whether 1C answers.
         if _onec_client is None or _onec_client._session is None:
             return ("onec_api", "not_configured")
-        try:
-            onec_resp: dict[str, Any] = await asyncio.wait_for(
-                _onec_client.get_stock("ProKoleso"), timeout=5.0
-            )
-            return ("onec_api", "reachable" if onec_resp.get("success") else "error")
-        except Exception:
-            return ("onec_api", "unreachable")
+        if _onec_breaker.current_state == CircuitBreakerState.OPEN:
+            return ("onec_api", "circuit_open")
+        return ("onec_api", "reachable")
 
     async def _check_stt_creds() -> tuple[str, str]:
         creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS", "")
