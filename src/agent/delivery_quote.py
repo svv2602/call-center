@@ -9,7 +9,8 @@ model passes only the city, the product ids with their counts, and whether the
 caller asked about a courier.
 
 The phrase follows the owner's words: «орієнтовно 810 грн, при накладеному
-платежі ще додатково 2% від суми замовлення»; a courier surcharge only when
+платежі ще додатково 2 % від суми замовлення + 20 грн» (the carrier's real
+fee, owner 2026-10-28); a courier surcharge only when
 the caller asked about delivery to the door. A free-delivery promotion
 covering every item answers with the promotion's own text and Nova Poshta is
 not asked; a promotion covering only some items → the neutral «уточнить
@@ -45,7 +46,9 @@ STATUS_API_FAILED = "api_failed"
 #: wording as the network-claim guard's neutral replacement).
 PROMO_MIXED_PHRASE = "Умови доставки для цих шин уточнить менеджер."
 
-COD_FEE_PHRASE = "При накладеному платежі — ще додатково 2% від суми замовлення."
+#: The carrier's real cash-on-delivery fee (owner, 2026-10-28) — the same as
+#: ``network_policy.cod_fee_text``, so the call never names two fees.
+COD_FEE_PHRASE = "При накладеному платежі — ще додатково 2 % від суми замовлення + 20 грн."
 
 NEED_MORE_HINT = "Суму назву, коли оберемо шини й місто."
 

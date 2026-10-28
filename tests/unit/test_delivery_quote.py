@@ -2,7 +2,7 @@
 
 Owner's words (2026-10-27): sent from Dnipro, the recipient pays unless the
 tyres are under a free-delivery promotion, «орієнтовно 810 грн, при
-накладеному платежі ще додатково 2% від суми замовлення», a courier surcharge
+накладеному платежі ще додатково 2% від суми замовлення» (2026-10-28: the fee is the carrier's real «2 % + 20 грн»), a courier surcharge
 only when asked about the door, declared value = the order sum, no API call
 under a promotion, the old «за тарифами перевізника» phrase on any failure.
 
@@ -42,7 +42,7 @@ from src.store_client.client import StoreClient
 _REPO = pathlib.Path(__file__).resolve().parents[2]
 KEY_ENV = "NP_TEST_QUOTE_KEY"
 TARIFF = "Доставка — за тарифами перевізника Нова Пошта."
-COD = "ще додатково 2% від суми замовлення"
+COD = "ще додатково 2 % від суми замовлення + 20 грн"
 
 
 def _pk_config(*, sales: bool = True, flag: bool = True) -> dict[str, Any]:
@@ -169,7 +169,7 @@ class TestPhrase:
         phrase = dq.quote_phrase(Quote(cost=810.0, door_cost=None, cod_fee=260.0), courier=False)
         assert phrase == (
             "Доставка Новою поштою — орієнтовно 810 грн. "
-            "При накладеному платежі — ще додатково 2% від суми замовлення."
+            "При накладеному платежі — ще додатково 2 % від суми замовлення + 20 грн."
         )
 
     def test_courier_names_the_surcharge(self) -> None:

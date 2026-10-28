@@ -189,7 +189,7 @@
       expect:
         tool_called:
           - {name: get_delivery_cost, args: {city: 'Одес|Одесс'}}
-        must_contain: ['орієнтовн|ориентировочн', '810', '2\s*%|два\s+відсотк']
+        must_contain: ['орієнтовн|ориентировочн', '810', '2\s*%|два\s+відсотк', '20\s*(грн|гривень)|двадцять\s+грив']
         must_not_contain: ['безкоштовн', 'бесплатн', 'точн\w*\s+сум']
 
 - id: pk_delivery_quote_courier
