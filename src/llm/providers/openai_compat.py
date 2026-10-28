@@ -27,6 +27,13 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+def _tool_choice_param(tool_choice: str | None) -> dict[str, Any]:
+    """OpenAI ``tool_choice`` forcing one named function, or nothing (``auto``)."""
+    if not tool_choice:
+        return {}
+    return {"tool_choice": {"type": "function", "function": {"name": tool_choice}}}
+
 _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=35)
 
 
@@ -108,6 +115,8 @@ class OpenAICompatProvider(AbstractProvider):
         tools: list[dict[str, Any]],
         system: str | None = None,
         max_tokens: int = 300,
+        *,
+        tool_choice: str | None = None,
     ) -> LLMResponse:
         openai_messages = anthropic_messages_to_openai(messages, system)
         openai_tools = anthropic_tools_to_openai(tools)
@@ -118,6 +127,7 @@ class OpenAICompatProvider(AbstractProvider):
             "tools": openai_tools,
             **self._max_tokens_param(max_tokens),
             **self._reasoning_param(),
+            **_tool_choice_param(tool_choice),
         }
 
         data = await self._post_chat(body)
@@ -129,6 +139,8 @@ class OpenAICompatProvider(AbstractProvider):
         tools: list[dict[str, Any]],
         system: str | None = None,
         max_tokens: int = 300,
+        *,
+        tool_choice: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
         openai_messages = anthropic_messages_to_openai(messages, system)
         openai_tools = anthropic_tools_to_openai(tools)
@@ -141,6 +153,7 @@ class OpenAICompatProvider(AbstractProvider):
             "stream_options": {"include_usage": True},
             **self._max_tokens_param(max_tokens),
             **self._reasoning_param(),
+            **_tool_choice_param(tool_choice),
         }
 
         session = await self._get_session()

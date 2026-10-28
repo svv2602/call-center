@@ -365,3 +365,21 @@ def code_spoken_phrase(tool_name: str, raw: Any) -> str | None:
         return None
     phrase = raw.get("phrase")
     return phrase.strip() if isinstance(phrase, str) and phrase.strip() else None
+
+
+def forced_quote_tool(user_text: str | None, tools: Any) -> str | None:
+    """``get_delivery_cost`` when this caller line asks what delivery costs, else ``None``.
+
+    The first LLM round of such a turn is made to call the tool
+    (``tool_choice``): told to call it «ЗАВЖДИ», the model still answered
+    «Записала: чотири шини.» without it (goldset 2026-10-28). The tool is in
+    the set only while the network may quote (``src/main.py`` cuts it
+    otherwise), so its presence is the switch.
+    """
+    names = {t.get("name") for t in tools or () if isinstance(t, dict)}
+    if DELIVERY_COST_TOOL not in names:
+        return None
+    # Imported here: network_facts imports this module.
+    from src.agent.network_facts import DELIVERY_COST, fact_topics
+
+    return DELIVERY_COST_TOOL if DELIVERY_COST in fact_topics(user_text) else None

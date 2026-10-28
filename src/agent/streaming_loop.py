@@ -30,7 +30,7 @@ from src.agent.booking_consent import (
     GATE_OFFER,
     is_booking_offer,
 )
-from src.agent.delivery_quote import code_spoken_phrase
+from src.agent.delivery_quote import code_spoken_phrase, forced_quote_tool
 from src.agent.disk_fit_claim_guard import (
     DiskFitClaimState,
     collect_disk_verdict,
@@ -2194,10 +2194,16 @@ class StreamingAgentLoop:
             if forced_phrase and await self._speak_code_phrase(forced_phrase):
                 spoken_parts.append(forced_phrase)
 
+        forced_quote = forced_quote_tool(user_text, tools)
         tool_round = 0
         while tool_round < self._max_tool_rounds:
             # Stream LLM → sentence buffer → TTS → audio sender
             try:
+                # A delivery-cost question: the first round must call the
+                # quote tool (`delivery_quote.forced_quote_tool`).
+                forced_choice = (
+                    {"tool_choice": forced_quote} if forced_quote and tool_round == 0 else {}
+                )
                 stream = self._llm_router.complete_stream(
                     LLMTask.AGENT,
                     conversation_history,
@@ -2205,6 +2211,7 @@ class StreamingAgentLoop:
                     tools=tools,
                     max_tokens=1024,
                     provider_override=current_provider_override,
+                    **forced_choice,
                 )
                 # `drop_control_plane_prose` sits innermost, directly on the
                 # sentence buffer, for two reasons. The other two filters reason

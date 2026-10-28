@@ -136,6 +136,7 @@ class LLMRouter:
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = 1024,
         provider_override: str | None = None,
+        tool_choice: str | None = None,
     ) -> LLMResponse:
         """Route an LLM call through the provider chain for the given task.
 
@@ -147,6 +148,8 @@ class LLMRouter:
             max_tokens: Max tokens for the response.
             provider_override: If set, bypass task routing and use this
                 provider key directly (e.g. "gemini-flash").
+            tool_choice: Name of a tool the model must call in this response
+                (every provider of the chain); ``None`` — the model decides.
 
         Tries primary provider first, then fallbacks in order.
         Raises RuntimeError if all providers fail.
@@ -157,7 +160,13 @@ class LLMRouter:
         for idx, provider_key in enumerate(chain):
             try:
                 response = await self._call_provider(
-                    provider_key, messages, system, tools, max_tokens, task=task
+                    provider_key,
+                    messages,
+                    system,
+                    tools,
+                    max_tokens,
+                    task=task,
+                    tool_choice=tool_choice,
                 )
                 if idx > 0:
                     logger.warning(
@@ -191,6 +200,7 @@ class LLMRouter:
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = 1024,
         provider_override: str | None = None,
+        tool_choice: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Streaming version of complete() with circuit breaker + fallback."""
         chain = self._resolve_chain(task, provider_override)
@@ -199,7 +209,13 @@ class LLMRouter:
         for idx, provider_key in enumerate(chain):
             try:
                 async for event in self._stream_provider(
-                    provider_key, messages, system, tools or [], max_tokens, task=task
+                    provider_key,
+                    messages,
+                    system,
+                    tools or [],
+                    max_tokens,
+                    task=task,
+                    tool_choice=tool_choice,
                 ):
                     yield event
                 # Stream completed successfully
@@ -229,13 +245,16 @@ class LLMRouter:
         tools: list[dict[str, Any]],
         max_tokens: int,
         task: LLMTask | None = None,
+        tool_choice: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Stream from a single provider with circuit breaker."""
         provider = self._providers[provider_key]
         breaker = self._breakers[provider_key]
         start = time.monotonic()
 
-        gen = provider.stream_with_tools(messages, tools, system, max_tokens)
+        # Passed only when set: a provider without the keyword keeps working.
+        extra = {"tool_choice": tool_choice} if tool_choice else {}
+        gen = provider.stream_with_tools(messages, tools, system, max_tokens, **extra)
 
         # Sentinel-first-event: await first event through circuit breaker
         async def _get_first() -> StreamEvent:
@@ -322,6 +341,7 @@ class LLMRouter:
         tools: list[dict[str, Any]] | None,
         max_tokens: int,
         task: LLMTask | None = None,
+        tool_choice: str | None = None,
     ) -> LLMResponse:
         """Call a specific provider through its circuit breaker."""
         provider = self._providers[provider_key]
@@ -330,12 +350,14 @@ class LLMRouter:
         start = time.monotonic()
 
         if tools:
+            extra = {"tool_choice": tool_choice} if tool_choice else {}
             response: LLMResponse = await breaker.call_async(
                 provider.complete_with_tools,
                 messages,
                 tools,
                 system,
                 max_tokens,
+                **extra,
             )
         else:
             response = await breaker.call_async(

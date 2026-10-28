@@ -19,6 +19,8 @@ class MockLLMRouter:
     def __init__(self, responses: list[list[StreamEvent]]) -> None:
         self._responses = list(responses)
         self._call_count = 0
+        #: ``tool_choice`` of each call, in order (``None`` — the model decides).
+        self.tool_choices: list[str | None] = []
 
     @property
     def call_count(self) -> int:
@@ -33,9 +35,11 @@ class MockLLMRouter:
         tools: Any = None,
         max_tokens: int = 1024,
         provider_override: str | None = None,
+        tool_choice: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Async generator matching real LLMRouter.complete_stream signature."""
         self._call_count += 1
+        self.tool_choices.append(tool_choice)
         if not self._responses:
             raise RuntimeError("MockLLMRouter: no more responses configured")
         events = self._responses.pop(0)

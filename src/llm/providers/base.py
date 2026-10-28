@@ -43,8 +43,14 @@ class AbstractProvider(abc.ABC):
         tools: list[dict[str, Any]],
         system: str | None = None,
         max_tokens: int = 300,
+        *,
+        tool_choice: str | None = None,
     ) -> LLMResponse:
-        """Send a completion request with tool definitions (Anthropic format)."""
+        """Send a completion request with tool definitions (Anthropic format).
+
+        ``tool_choice`` — the name of a tool the model must call in this
+        response; ``None`` lets the model decide (``auto``).
+        """
 
     @abc.abstractmethod
     async def health_check(self) -> bool:
@@ -56,9 +62,12 @@ class AbstractProvider(abc.ABC):
         tools: list[dict[str, Any]],
         system: str | None = None,
         max_tokens: int = 300,
+        *,
+        tool_choice: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Stream a completion with tools. Default: falls back to non-streaming."""
-        response = await self.complete_with_tools(messages, tools, system, max_tokens)
+        extra = {"tool_choice": tool_choice} if tool_choice else {}
+        response = await self.complete_with_tools(messages, tools, system, max_tokens, **extra)
         if response.text:
             yield TextDelta(text=response.text)
         for tc in response.tool_calls:

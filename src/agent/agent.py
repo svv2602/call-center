@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import anthropic
 
-from src.agent.delivery_quote import code_spoken_phrase
+from src.agent.delivery_quote import code_spoken_phrase, forced_quote_tool
 from src.agent.disk_fit_claim_guard import (
     DiskFitClaimState,
     collect_disk_verdict,
@@ -686,6 +686,10 @@ class LLMAgent:
         self.last_provider_key = ""
         self.last_error = None
 
+        # Text-path twin of the streamed forced quote: a delivery-cost question
+        # makes the first LLM call of the turn call `get_delivery_cost`.
+        forced_quote = forced_quote_tool(user_text, tools)
+        llm_calls = 0
         while tool_call_count < MAX_TOOL_CALLS_PER_TURN:
             start = time.monotonic()
 
@@ -699,6 +703,10 @@ class LLMAgent:
                     from src.llm.format_converter import llm_response_to_anthropic_blocks
                     from src.llm.models import LLMTask
 
+                    forced_choice = (
+                        {"tool_choice": forced_quote} if forced_quote and llm_calls == 0 else {}
+                    )
+                    llm_calls += 1
                     llm_response = await self._llm_router.complete(
                         LLMTask.AGENT,
                         conversation_history,
@@ -706,6 +714,7 @@ class LLMAgent:
                         tools=tools,
                         max_tokens=1024,
                         provider_override=self._provider_override,
+                        **forced_choice,
                     )
 
                     latency_ms = int((time.monotonic() - start) * 1000)

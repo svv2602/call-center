@@ -57,6 +57,8 @@ class AnthropicProvider(AbstractProvider):
         tools: list[dict[str, Any]],
         system: str | None = None,
         max_tokens: int = 300,
+        *,
+        tool_choice: str | None = None,
     ) -> LLMResponse:
         kwargs: dict[str, Any] = {
             "model": self._model,
@@ -66,6 +68,8 @@ class AnthropicProvider(AbstractProvider):
         }
         if system:
             kwargs["system"] = system
+        if tool_choice:
+            kwargs["tool_choice"] = {"type": "tool", "name": tool_choice}
 
         response = await self._client.messages.create(**kwargs)
         return self._parse_response(response)
@@ -87,6 +91,8 @@ class AnthropicProvider(AbstractProvider):
         tools: list[dict[str, Any]],
         system: str | None = None,
         max_tokens: int = 300,
+        *,
+        tool_choice: str | None = None,
     ) -> AsyncIterator[StreamEvent]:
         kwargs: dict[str, Any] = {
             "model": self._model,
@@ -96,6 +102,8 @@ class AnthropicProvider(AbstractProvider):
         }
         if system:
             kwargs["system"] = system
+        if tool_choice:
+            kwargs["tool_choice"] = {"type": "tool", "name": tool_choice}
 
         async with self._client.messages.stream(**kwargs) as stream:
             current_tool_id = ""
