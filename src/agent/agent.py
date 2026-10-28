@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import anthropic
 
+from src.agent.delivery_quote import code_spoken_phrase
 from src.agent.disk_fit_claim_guard import (
     DiskFitClaimState,
     collect_disk_verdict,
@@ -877,6 +878,10 @@ class LLMAgent:
                         caveats.append(phrase)
                 if sales_enabled and tu["name"] == "search_disks":
                     collect_disk_verdict(raw, disk_fit_state, caveats)
+                # Text-path twin: the delivery quote is the code's sentence.
+                quote_phrase = code_spoken_phrase(tu["name"], raw)
+                if quote_phrase and quote_phrase not in caveats:
+                    caveats.append(quote_phrase)
                 if tu["name"] == LOOKUP_TOOL:
                     self._vehicle_gate.note_model_call(args, raw)
                 content = compress_tool_result(

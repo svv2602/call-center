@@ -351,3 +351,17 @@ def warehouse_question(number: str, city: str) -> dict[str, Any]:
             "submit_order_request ще раз з усіма полями."
         ),
     }
+
+
+def code_spoken_phrase(tool_name: str, raw: Any) -> str | None:
+    """The phrase of a ``get_delivery_cost`` result the code says itself, or ``None``.
+
+    The model paraphrased the owner's wording — dropped the cash-on-delivery
+    fee, turned «ще 60 грн» into a total (goldset 2026-10-28) — so the code
+    speaks the phrase word for word, as it speaks a tyre caveat, and the tool
+    result tells the model it was said (``tool_result_compressor``).
+    """
+    if tool_name != DELIVERY_COST_TOOL or not isinstance(raw, dict):
+        return None
+    phrase = raw.get("phrase")
+    return phrase.strip() if isinstance(phrase, str) and phrase.strip() else None

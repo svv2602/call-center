@@ -30,6 +30,7 @@ from src.agent.booking_consent import (
     GATE_OFFER,
     is_booking_offer,
 )
+from src.agent.delivery_quote import code_spoken_phrase
 from src.agent.disk_fit_claim_guard import (
     DiskFitClaimState,
     collect_disk_verdict,
@@ -2536,6 +2537,11 @@ class StreamingAgentLoop:
                         _caveats.append(phrase)
                 if self._sales_enabled and tc.name == "search_disks":
                     collect_disk_verdict(raw, disk_fit_state, _caveats)
+                # The delivery quote is said word for word by the code, like a
+                # caveat — the model retold it and lost the COD fee.
+                quote_phrase = code_spoken_phrase(tc.name, raw)
+                if quote_phrase and quote_phrase not in _caveats:
+                    _caveats.append(quote_phrase)
                 if tc.name == LOOKUP_TOOL:
                     self._vehicle_gate.note_model_call(args, raw)
                 content = compress_tool_result(

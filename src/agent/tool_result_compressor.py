@@ -415,7 +415,26 @@ def _compress_fitting_slots(result: dict[str, Any]) -> str:
     return _compact(out)
 
 
+def _compress_delivery_cost(result: dict[str, Any]) -> str:
+    """``get_delivery_cost``: the phrase is said by the code (``delivery_quote.code_spoken_phrase``).
+
+    The model gets what the caller has just heard and is told not to repeat or
+    retell it — a retold quote lost the cash-on-delivery fee.
+    """
+    phrase = result.get("phrase")
+    if not isinstance(phrase, str) or not phrase.strip():
+        return _compact(result)
+    out: dict[str, Any] = {k: v for k, v in result.items() if k != "phrase"}
+    out["already_said_to_caller"] = phrase.strip()
+    out["note"] = (
+        "Код уже сказав клієнту цю фразу дослівно. Не повторюй і не переказуй її, "
+        "не називай інших сум — продовжуй розмову з наступного кроку."
+    )
+    return _compact(out)
+
+
 _COMPRESSORS: dict[str, Any] = {
+    "get_delivery_cost": _compress_delivery_cost,
     "get_vehicle_tire_sizes": _compress_vehicle_sizes,
     "get_order_status": _compress_order_status,
     "create_order_draft": _compress_order_draft,
