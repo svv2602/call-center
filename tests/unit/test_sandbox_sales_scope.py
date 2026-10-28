@@ -221,11 +221,19 @@ async def test_no_flag_no_delivery_quote() -> None:
     )
 
 
+def _caller_named_the_city(agent: Any, line: str = "доставка до Одеси") -> None:
+    """The quote mock checks the city against the caller's lines, as live."""
+    from src.agent import delivery_quote as dq
+
+    agent.tool_router._handlers[dq.DELIVERY_COST_TOOL].caller_lines.append(line)
+
+
 @pytest.mark.asyncio
 async def test_quote_needs_a_product_this_conversation_offered() -> None:
     from src.agent import delivery_quote as dq
 
     agent = await _agent(_PK_SALES)
+    _caller_named_the_city(agent)
     router = agent.tool_router
     before = await router.execute(_DELIVERY, {"city": "Одеса", "items": _TIRE_ITEMS})
     assert before["status"] == dq.STATUS_NEED_MORE
@@ -249,6 +257,7 @@ async def test_case_mock_search_results_are_quotable() -> None:
     from src.agent import delivery_quote as dq
 
     agent = await _agent(_PK_SALES)
+    _caller_named_the_city(agent, "а до Львова скільки?")
 
     async def _case_search(**_kw: Any) -> dict[str, Any]:
         return {"items": [{"id": "case-7", "brand": "Kumho", "size": "195/65 R15", "price": 2100}]}
@@ -277,8 +286,40 @@ async def test_free_delivery_promotion_answers_without_a_quote() -> None:
         mention_brands=(),
     )
     agent = await _agent_with_promos(_PK_SALES, [promo])
+    _caller_named_the_city(agent)
     await agent.tool_router.execute("search_tires", {})
     out = await agent.tool_router.execute(_DELIVERY, {"city": "Одеса", "items": _TIRE_ITEMS})
     assert out["status"] == dq.STATUS_PROMO_FREE
     assert out["phrase"] == promo.bot_text
     assert "cost" not in out
+
+
+@pytest.mark.asyncio
+async def test_sandbox_asks_a_city_the_caller_never_named() -> None:
+    """As live: the mock sees the caller's lines through ``process_sandbox_turn``."""
+    from src.agent import delivery_quote as dq
+
+    agent = await _agent(_PK_SALES)
+    _caller_named_the_city(agent, "беру Bridgestone, чотири. Скільки доставка?")
+    await agent.tool_router.execute("search_tires", {"width": 205, "profile": 55, "diameter": 16})
+    out = await agent.tool_router.execute(_DELIVERY, {"city": "Київ", "items": _TIRE_ITEMS})
+    assert out["status"] == dq.STATUS_CITY_NOT_NAMED
+
+
+@pytest.mark.asyncio
+async def test_each_sandbox_turn_hands_the_caller_line_to_the_quote_mock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The wiring: ``process_sandbox_turn`` is how the mock learns the caller's words."""
+    from src.agent import delivery_quote as dq
+    from src.sandbox.agent_runner import process_sandbox_turn
+
+    agent = await _agent(_PK_SALES)
+
+    async def _no_llm(user_text: str, history: list[Any], **_: Any) -> tuple[str, list[Any]]:
+        return "", history
+
+    monkeypatch.setattr(agent, "process_message", _no_llm)
+    await process_sandbox_turn(agent, "а до Одеси скільки доставка?", [])
+    mock = agent.tool_router._handlers[dq.DELIVERY_COST_TOOL]
+    assert mock.caller_lines == ["а до Одеси скільки доставка?"]

@@ -33,7 +33,7 @@ from src.agent.agent import ToolRouter
 from src.agent.network_policy import NetworkPolicy
 from src.agent.promotions import ActivePromotion, promo_overrides
 from src.agent.tools import ALL_TOOLS, sales_tenant_allowlist
-from src.core.call_session import CallSession
+from src.core.call_session import CallSession, DialogTurn
 from src.integrations.novaposhta import NovaPoshtaClient, Quote
 from src.main import _build_tool_router
 from src.monitoring.metrics import delivery_quote_total
@@ -120,9 +120,11 @@ def _promos(*brand_sets: tuple[str, ...]) -> Any:
     )
 
 
-def _session() -> CallSession:
+def _session(caller_line: str = "доставка до Києва скільки?") -> CallSession:
     session = CallSession(uuid.uuid4())
     session.tire_query = {"season": "summer"}
+    # The city the quote asks for is the caller's own (`city_named_by_caller`).
+    session.dialog_history.append(DialogTurn(speaker="user", content=caller_line))
     return session
 
 
@@ -188,7 +190,7 @@ class TestPhrase:
 
     def test_quoted_sums(self) -> None:
         q = Quote(cost=810.0, door_cost=870.0, cod_fee=260.0)
-        assert dq.quoted_sums(q, courier=True) == [810, 60]
+        assert dq.quoted_sums(q, courier=True) == [810, 60, 870]
         assert dq.quoted_sums(q, courier=False) == [810]
 
 
@@ -300,7 +302,7 @@ class TestHandler:
         assert res["status"] == "quoted"
         assert "кур'єром до дверей — ще 60 грн" in res["phrase"]
         assert np_client.quote.await_args.kwargs["door"] is True
-        assert session.delivery_quotes == [810, 60]
+        assert session.delivery_quotes == [810, 60, 870]
 
     def test_wheel_and_truck_lines(self) -> None:
         np_client = _np(Quote(cost=900.0, door_cost=None, cod_fee=0.0))
@@ -729,3 +731,60 @@ class TestToolContract:
         (res,), _ = asyncio.run(_drive([("get_delivery_cost", {})]))
         assert res["status"] == "need_more"
         assert res["phrase"].startswith(TARIFF)
+
+
+class TestCityNamedByCaller:
+    """The model must not quote a city the caller never said (goldset 2026-10-28:
+    «беру Bridgestone, доставка скільки?» → a sum for an invented city)."""
+
+    @pytest.mark.parametrize(
+        ("city", "line"),
+        [
+            ("Одеса", "А скільки буде доставка до Одеси?"),
+            ("Одеса", "доставка в Одессу"),
+            ("Київ", "во Киев"),
+            ("Львів", "во Львов сколько"),
+            ("Харків", "до Харькова"),
+            ("Біла Церква", "в Білу Церкву"),
+            ("Рівне", "в Ровно"),
+        ],
+    )
+    def test_named_in_any_case_or_language(self, city: str, line: str) -> None:
+        assert dq.city_named_by_caller(city, [line]) is True
+
+    @pytest.mark.parametrize(
+        ("city", "line"),
+        [
+            ("Київ", "беру Bridgestone, чотири штуки. А доставка скільки коштує?"),
+            ("Одеса", "беру одну шину, один комплект"),
+            ("Біла Церква", "біла шина"),
+        ],
+    )
+    def test_not_named(self, city: str, line: str) -> None:
+        assert dq.city_named_by_caller(city, [line]) is False
+
+    def test_an_unnamed_city_is_asked_once_then_quoted(self, np_key: None) -> None:
+        np_client = _np(Quote(cost=810.0, door_cost=None, cod_fee=260.0))
+        before = _count("city_not_named")
+        (_, first, second), session = asyncio.run(
+            _drive(
+                [
+                    SEARCH,
+                    _ask([{"product_id": "t-mich", "quantity": 4}], city="Одеса"),
+                    _ask([{"product_id": "t-mich", "quantity": 4}], city="Одеса"),
+                ],
+                np_client=np_client,
+                session=_session("беру Michelin, чотири. Скільки доставка?"),
+            )
+        )
+        assert first == {
+            "status": "city_not_named",
+            "phrase": dq.CITY_QUESTION_PHRASE,
+            "missing": "city",
+        }
+        assert _count("city_not_named") == before + 1
+        # Loop-breaker: the second call goes through (a city the matcher missed
+        # is not asked forever).
+        assert second["status"] == "quoted"
+        np_client.quote.assert_awaited_once()
+        assert session.delivery_quotes == [810]

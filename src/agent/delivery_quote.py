@@ -224,11 +224,58 @@ def quote_phrase(quote: Quote, courier: bool) -> str:
 
 
 def quoted_sums(quote: Quote, courier: bool) -> list[int]:
-    """The sums the caller hears — for the speech guard (``CallSession.delivery_quotes``)."""
+    """The sums the caller may hear — for the speech guard (``CallSession.delivery_quotes``).
+
+    With the courier: the surcharge and the door total too — «на 60 грн дорожче,
+    разом 870» is the truth the model composes from the phrase (goldset
+    2026-10-28), not an invented sum.
+    """
     sums = [_uah(quote.cost)]
     if courier and quote.door_surcharge is not None and _uah(quote.door_surcharge) > 0:
         sums.append(_uah(quote.door_surcharge))
+        sums.append(_uah(quote.cost) + _uah(quote.door_surcharge))
     return sums
+
+
+#: A city the model passed that no caller line names is asked once per call;
+#: the next call goes through (loop-breaker: a city the matcher misses is not
+#: asked forever).
+CITY_MAX_REFUSALS = 1
+STATUS_CITY_NOT_NAMED = "city_not_named"
+CITY_QUESTION_PHRASE = "Підкажіть, будь ласка, у яке місто доставити?"
+
+#: Vowels and soft signs that move between the Ukrainian and Russian forms of a
+#: city and between its cases: Львів/Львов, Київ/Киев, Харків/Харькова.
+_CITY_FOLD = str.maketrans(
+    {**{c: "и" for c in "оіїиеєыэйёуюя"}, "ь": "", "ъ": "", "'": "", "ʼ": "", "’": "", "ґ": "г"}
+)
+_WORD = re.compile(r"[^\W\d_]+(?:[-'ʼ’][^\W\d_]+)*", re.UNICODE)
+
+
+def _fold(word: str) -> str:
+    return word.casefold().translate(_CITY_FOLD)
+
+
+def city_named_by_caller(city: Any, caller_lines: list[str]) -> bool:
+    """Does a caller line name ``city`` — in any case, Ukrainian or Russian form?
+
+    Every word of the city («Біла Церква») must start a caller word on the same
+    folded stem (its first ``len - 1`` letters, at most 4): «до Одеси»,
+    «в Одессу», «Києва», «во Львов». The model passing a city the caller never
+    said («беру Bridgestone, доставка скільки?» → «Київ») is what this catches.
+    """
+    if not isinstance(city, str):
+        return False
+    city_words = [_fold(w) for w in _WORD.findall(city)]
+    city_words = [w for w in city_words if len(w) >= 2]
+    if not city_words:
+        return False
+    said = {_fold(w) for line in caller_lines for w in _WORD.findall(line or "")}
+    for word in city_words:
+        stem = word[: max(2, min(4, len(word) - 1))]
+        if not any(w.startswith(stem) for w in said):
+            return False
+    return True
 
 
 # ---------------------------------------------------------------------------

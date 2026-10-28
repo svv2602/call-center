@@ -2359,6 +2359,9 @@ def _build_tool_router(
         logger.info("get_delivery_cost: %s for call %s", status, session.channel_uuid)
         return {"status": status, "phrase": phrase, **extra}
 
+    #: Cities the model passed that no caller line named, asked back this call.
+    city_refusals = 0
+
     async def _get_delivery_cost(
         city: str = "", items: Any = None, courier: Any = False, **_: Any
     ) -> dict[str, Any]:
@@ -2369,6 +2372,7 @@ def _build_tool_router(
         Poshta not asked (some items → the manager); a failed lookup → the
         carrier-tariff phrase. Never raises into the ToolRouter.
         """
+        nonlocal city_refusals
         tariff = dq.tariff_phrase(network_policy)
         city_name = city.strip() if isinstance(city, str) else ""
         lines = dq.resolve_items(items, offered_products)
@@ -2377,6 +2381,17 @@ def _build_tool_router(
                 dq.STATUS_NEED_MORE,
                 f"{tariff} {dq.NEED_MORE_HINT}",
                 missing="city" if not city_name else "items",
+            )
+        caller_lines = [t.content for t in session.dialog_history if t.speaker == "user"]
+        if (
+            not dq.city_named_by_caller(city_name, caller_lines)
+            and city_refusals < dq.CITY_MAX_REFUSALS
+        ):
+            # The model filled in a city the caller never said: a quote to it
+            # would be a real sum for the wrong place.
+            city_refusals += 1
+            return _quote_result(
+                dq.STATUS_CITY_NOT_NAMED, dq.CITY_QUESTION_PHRASE, missing="city"
             )
         covered, promo_text = dq.free_delivery_cover(lines, promo_overrides)
         if covered and covered == len(lines) and promo_text:

@@ -258,6 +258,7 @@ DELIVERY_QUOTE_OUTCOMES: tuple[str, ...] = (
     "promo_free",
     "promo_mixed",
     "api_failed",
+    "city_not_named",
     "warehouse_not_found",
     "warehouse_accepted_after_retries",
     "warehouse_unchecked",

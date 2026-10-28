@@ -683,6 +683,10 @@ async def process_sandbox_turn(
     """
     history_copy = copy.deepcopy(history)
     tool_calls_log: list[ToolCallRecord] = []
+    # The delivery-quote mock checks a city against the caller's own lines.
+    quote_mock = agent.tool_router._handlers.get(DELIVERY_COST_TOOL)
+    if isinstance(quote_mock, DeliveryCostMock):
+        quote_mock.caller_lines.append(user_text)
 
     # Wrap tool router to capture calls
     original_execute = agent.tool_router.execute

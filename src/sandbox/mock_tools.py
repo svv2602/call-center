@@ -266,6 +266,10 @@ class DeliveryCostMock:
         self._policy = policy
         self._promos = promos
         self.offered: dict[str, dict[str, Any]] = {}
+        #: The caller's lines so far (``process_sandbox_turn`` appends each one)
+        #: — a city no line names is asked once, as live.
+        self.caller_lines: list[str] = []
+        self._city_refusals = 0
 
     async def observe(
         self, name: str, _args: Any, result: Any, _duration_ms: int, _success: bool
@@ -287,6 +291,16 @@ class DeliveryCostMock:
                 "status": dq.STATUS_NEED_MORE,
                 "phrase": f"{tariff} {dq.NEED_MORE_HINT}",
                 "missing": "city" if not city_name else "items",
+            }
+        if (
+            not dq.city_named_by_caller(city_name, self.caller_lines)
+            and self._city_refusals < dq.CITY_MAX_REFUSALS
+        ):
+            self._city_refusals += 1
+            return {
+                "status": dq.STATUS_CITY_NOT_NAMED,
+                "phrase": dq.CITY_QUESTION_PHRASE,
+                "missing": "city",
             }
         covered, promo_text = dq.free_delivery_cover(lines, self._promos)
         if covered and covered == len(lines) and promo_text:

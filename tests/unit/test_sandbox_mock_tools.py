@@ -130,6 +130,7 @@ class TestDeliveryCostMock:
     @pytest.mark.asyncio
     async def test_missing_city_is_need_more(self) -> None:
         mock = DeliveryCostMock()
+        mock.caller_lines.append("доставка до Одеси, а може до Києва")
         await self._offered(mock)
         out = await mock(city=" ", items=[{"product_id": "tire-001", "quantity": 4}])
         assert out == {
@@ -141,6 +142,7 @@ class TestDeliveryCostMock:
     @pytest.mark.asyncio
     async def test_quote_is_the_owner_wording(self) -> None:
         mock = DeliveryCostMock()
+        mock.caller_lines.append("доставка до Одеси, а може до Києва")
         await self._offered(mock)
         out = await mock(city="Одеса", items=[{"product_id": "tire-002", "quantity": 4}])
         assert out["status"] == dq.STATUS_QUOTED
@@ -167,6 +169,7 @@ class TestDeliveryCostMock:
             mention_brands=("michelin",),
         )
         mock = DeliveryCostMock(None, promo_overrides([promo]))
+        mock.caller_lines.append("доставка до Одеси, а може до Києва")
         await self._offered(mock)
         only = await mock(city="Київ", items=[{"product_id": "tire-001", "quantity": 4}])
         assert only == {"status": dq.STATUS_PROMO_FREE, "phrase": promo.bot_text}
