@@ -15,6 +15,7 @@ import json
 import logging
 import re
 import uuid
+from datetime import timedelta
 from typing import Any
 
 import aiohttp
@@ -339,8 +340,9 @@ class StoreClient:
         self._timeout = aiohttp.ClientTimeout(total=timeout)
         self._session: aiohttp.ClientSession | None = None
         # Per-instance circuit breaker: each tenant gets its own breaker
-        # so that Store API failure for one tenant doesn't block others
-        self._breaker = CircuitBreaker(fail_max=5, timeout_duration=30)
+        # so that Store API failure for one tenant doesn't block others.
+        # A timedelta, not an int: aiobreaker adds it to a datetime.
+        self._breaker = CircuitBreaker(fail_max=5, timeout_duration=timedelta(seconds=30))
         # 1C integration (MVP): PostgreSQL catalog + Redis stock cache
         self._db_engine = db_engine
         self._redis = redis

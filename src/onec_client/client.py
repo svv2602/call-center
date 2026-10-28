@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import uuid
+from datetime import timedelta
 from typing import Any
 
 import aiohttp
@@ -22,8 +23,10 @@ _MAX_RETRIES = 2
 _RETRY_DELAYS = [1.0, 2.0]
 _RETRYABLE_STATUSES = {429, 503}
 
-# Separate circuit breaker for 1C API
-_onec_breaker = CircuitBreaker(fail_max=5, timeout_duration=30)
+# Separate circuit breaker for 1C API. ``timeout_duration`` must be a
+# timedelta: aiobreaker adds it to a datetime when the breaker opens — an int
+# raised TypeError there and left the breaker OPEN for good.
+_onec_breaker = CircuitBreaker(fail_max=5, timeout_duration=timedelta(seconds=30))
 
 
 class OneCAPIError(Exception):
