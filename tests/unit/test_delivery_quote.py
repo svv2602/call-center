@@ -713,3 +713,19 @@ class TestDeadline:
         np_client.quote.assert_not_awaited()
         assert session.delivery_quotes == []
         assert _count("api_failed") == before + 1
+
+
+class TestToolContract:
+    """The model calls the tool on any delivery-cost question (R18): the code, not
+    the model, says what is missing — the model asked «що саме замовити?» instead
+    of the tariff line when nothing was required to be known (goldset 2026-10-28)."""
+
+    def test_nothing_is_required_up_front(self) -> None:
+        schema = next(t for t in ALL_TOOLS if t["name"] == dq.DELIVERY_COST_TOOL)
+        assert schema["input_schema"]["required"] == []
+        assert "ЗАВЖДИ" in schema["description"]
+
+    def test_a_bare_call_is_the_tariff_line(self, np_key: None) -> None:
+        (res,), _ = asyncio.run(_drive([("get_delivery_cost", {})]))
+        assert res["status"] == "need_more"
+        assert res["phrase"].startswith(TARIFF)

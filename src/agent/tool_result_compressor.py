@@ -213,7 +213,9 @@ def _compress_search_tires(
 ) -> str:
     """Limit to top 3 results, keep only essential fields.
 
-    Drops id (SKU), and season (already known from query context) when sales are off.
+    Drops id (SKU) and season (already known from query context) when sales are
+    off; under sales the id stays — it is the product the order and the delivery
+    quote name.
 
     ``sales_enabled``: the relaxation marks (``relaxed``, ``caveat_key``), the
     rear axle of a staggered pair (``rear_size``/``rear_price``, never
@@ -232,9 +234,19 @@ def _compress_search_tires(
     items = result.get("items", [])
     essential_keys: tuple[str, ...] = ("brand", "model", "size", "price", "in_stock")
     if sales_enabled:
+        # ``id``: the product the model passes to ``submit_order_request`` and
+        # ``get_delivery_cost`` — without it both got an invented id (goldset
+        # 2026-10-28: every delivery quote came back «need_more»).
         # ``eu_label`` (``tire_eu_labels``): the classes the model may quote
         # when asked to compare — never characteristics beyond them.
-        essential_keys = (*essential_keys, "rear_size", "rear_price", "runflat", "eu_label")
+        essential_keys = (
+            "id",
+            *essential_keys,
+            "rear_size",
+            "rear_price",
+            "runflat",
+            "eu_label",
+        )
         # Present only when true / known (``tire_attributes``, regex fallback).
         essential_keys = (
             *essential_keys,

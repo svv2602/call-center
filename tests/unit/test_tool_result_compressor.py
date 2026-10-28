@@ -438,7 +438,8 @@ def test_sales_on_keeps_the_facts_of_each_shown_tyre() -> None:
         (None, None),
     ]
     assert "load_index" not in items[2]
-    assert "id" not in items[0]
+    # The product the order and the delivery quote name (goldset 2026-10-28).
+    assert [i.get("id") for i in items] == [t["id"] for t in _tyre_fixture()["items"][:3]]
 
 
 def test_sales_on_keeps_country_year_and_quantity_of_each_tyre() -> None:

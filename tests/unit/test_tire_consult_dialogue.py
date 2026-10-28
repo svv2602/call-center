@@ -133,7 +133,9 @@ class TestCompressorSalesOn:
         out = json.loads(compress_tool_result("search_tires", STAGGERED, sales_enabled=True))
         item = out["items"][0]
         assert item["rear_size"] == "275/35 R19" and item["rear_price"] == 9000
-        assert "rear_id" not in item and "id" not in item
+        assert "rear_id" not in item
+        # The front tyre's id is the product the order names (goldset 2026-10-28).
+        assert item["id"] == STAGGERED["items"][0]["id"]
         assert out["staggered"] is True
 
     def test_vehicle_pairs_kept_and_non_stock_list_withheld(self) -> None:
