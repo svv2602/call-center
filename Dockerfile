@@ -49,6 +49,9 @@ WORKDIR /app
 COPY --from=builder /build/venv /app/venv
 RUN sed -i 's|#!/build/venv/bin/python|#!/app/venv/bin/python|' /app/venv/bin/*
 ENV PATH="/app/venv/bin:$PATH"
+# scripts/ is not part of the installed package; the tshina sync imports it
+# from celery, whose sys.path does not hold the working directory.
+ENV PYTHONPATH=/app
 
 # Copy application code and resources
 COPY src/ ./src/
