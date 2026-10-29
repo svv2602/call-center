@@ -28,9 +28,12 @@ page.
 
 Full snapshot (weekly): everything is upserted, then rows we hold that the
 snapshot lacks are deleted — only ``tire_eu_labels.source='tshina'``, tyre
-tests, ``tire_attributes.source='tshina'`` and non-manual directory rows — and only when the snapshot has at
+tests, ``tire_attributes.source='tshina'``, tshina tyre models, ommology and
+non-manual directory rows — and only when the snapshot has at
 least 90 % of our rows; otherwise nothing is deleted, the resource is marked
 failed and an ERROR is logged (a truncated answer must not wipe our data).
+A ``snapshot`` resource (ommology) comes whole on every request, so each of
+its walks is a full one.
 """
 
 from __future__ import annotations
@@ -210,6 +213,57 @@ def parse_tire_attributes(item: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+MODEL_TYPES = frozenset({"tyres", "disks"})
+
+
+def parse_tire_model(item: dict[str, Any]) -> dict[str, Any]:
+    """A tyre or disk model as the site names it (brand + model name)."""
+    brand = item.get("brand")
+    if brand is not None and not isinstance(brand, dict):
+        raise RowRejectedError(f"brand: {brand!r}")
+    brand = brand or {}
+    kind = item.get("type")
+    if kind not in MODEL_TYPES:
+        raise RowRejectedError(f"type: {kind!r}")
+    season = item.get("season")
+    if season is not None and season not in SEASONS:
+        raise RowRejectedError(f"season: {season!r}")
+    return {
+        "model_1c_id": _str(item.get("model_1c_id"), 50, "model_1c_id"),
+        "brand_slug": _opt_str(brand.get("slug"), 100, "brand.slug"),
+        "brand_title": _opt_str(brand.get("title"), 100, "brand.title"),
+        "name": _str(item.get("name"), 200, "name"),
+        "type": kind,
+        "season": season,
+        "is_published": _opt_bool(item.get("is_published"), "is_published"),
+        "updated_at": _opt_datetime(item.get("updated_at"), "updated_at"),
+    }
+
+
+def parse_product_ommology(item: dict[str, Any]) -> dict[str, Any]:
+    codes = item.get("codes")
+    if not isinstance(codes, list) or not codes:
+        raise RowRejectedError(f"codes: {codes!r}")
+    return {
+        "sku": _str(item.get("sku"), 50, "sku"),
+        "codes": [_str(c, 50, "code") for c in codes],
+    }
+
+
+def parse_ommology_code(item: dict[str, Any]) -> dict[str, Any]:
+    brands = item.get("car_brands")
+    if brands is None:
+        brands = []
+    if not isinstance(brands, list):
+        raise RowRejectedError(f"car_brands: {brands!r}")
+    return {
+        "code": _str(item.get("code"), 50, "code"),
+        "car_brands": json.dumps(brands, ensure_ascii=False),
+        "description": _opt_str(item.get("description"), 500, "description"),
+        "updated_at": _opt_datetime(item.get("updated_at"), "updated_at"),
+    }
+
+
 def _placement(p: Any, test_id: int) -> dict[str, Any]:
     if not isinstance(p, dict):
         raise RowRejectedError(f"placement: {p!r}")
@@ -349,10 +403,14 @@ class ParsedPage:
     live_keys: set[Any] = field(default_factory=set)
 
 
+#: Keys that are strings (1C codes, ommology codes); every other key is an int id.
+_STR_KEYS = frozenset({"sku", "model_1c_id", "code"})
+
+
 def _item_key(item: dict[str, Any], key: str) -> Any:
     value = item.get(key)
-    if key == "sku":
-        return _str(value, 50, "sku")
+    if key in _STR_KEYS:
+        return _str(value, 50, key)
     return _id(value, key)
 
 
@@ -440,6 +498,39 @@ ATTRIBUTES_UPSERT = """
     WHERE tire_attributes.source = 'tshina'
 """
 
+TIRE_MODEL_UPSERT = """
+    INSERT INTO tshina_tire_models
+        (model_1c_id, brand_slug, brand_title, name, type, season, is_published,
+         updated_at, synced_at)
+    VALUES (:model_1c_id, :brand_slug, :brand_title, :name, :type, :season, :is_published,
+            :updated_at, now())
+    ON CONFLICT (model_1c_id) DO UPDATE SET
+        brand_slug = EXCLUDED.brand_slug,
+        brand_title = EXCLUDED.brand_title,
+        name = EXCLUDED.name,
+        type = EXCLUDED.type,
+        season = EXCLUDED.season,
+        is_published = EXCLUDED.is_published,
+        updated_at = EXCLUDED.updated_at,
+        synced_at = now()
+"""
+
+PRODUCT_OMMOLOGY_UPSERT = """
+    INSERT INTO product_ommology (sku, codes, synced_at)
+    VALUES (:sku, :codes, now())
+    ON CONFLICT (sku) DO UPDATE SET codes = EXCLUDED.codes, synced_at = now()
+"""
+
+OMMOLOGY_CODE_UPSERT = """
+    INSERT INTO ommology_codes (code, car_brands, description, updated_at, synced_at)
+    VALUES (:code, CAST(:car_brands AS JSONB), :description, :updated_at, now())
+    ON CONFLICT (code) DO UPDATE SET
+        car_brands = EXCLUDED.car_brands,
+        description = EXCLUDED.description,
+        updated_at = EXCLUDED.updated_at,
+        synced_at = now()
+"""
+
 TEST_UPSERT = """
     INSERT INTO tire_tests
         (id, source_key, source_title, source, year, season, test_date, sizes, notes,
@@ -515,6 +606,15 @@ async def apply_tire_attributes(conn: Any, rows: list[dict[str, Any]]) -> Applie
     if rows:
         await conn.execute(text(ATTRIBUTES_UPSERT), rows)
     return Applied(upserted=len(rows))
+
+
+def _upserter(sql: str) -> Callable[[Any, list[dict[str, Any]]], Awaitable[Applied]]:
+    async def apply(conn: Any, rows: list[dict[str, Any]]) -> Applied:
+        if rows:
+            await conn.execute(text(sql), rows)
+        return Applied(upserted=len(rows))
+
+    return apply
 
 
 async def apply_tire_tests(conn: Any, rows: list[dict[str, Any]]) -> Applied:
@@ -640,6 +740,9 @@ class ResourceSpec:
     our_keys: Callable[[Any], Awaitable[set[Any]]]
     #: deletions of this resource change what aliases are generated from
     alias_source: bool = False
+    #: tshina sends the whole set every time (``snapshot: true``, no
+    #: ``updated_since``): every walk is a full one and sweeps what it lacks
+    snapshot: bool = False
 
 
 _TSHINA = "source = 'tshina'"
@@ -669,6 +772,32 @@ SPECS: dict[str, ResourceSpec] = {
         apply_tire_attributes,
         _deleter("tire_attributes", "sku", _TSHINA),
         _our_keys("tire_attributes", "sku", _TSHINA),
+    ),
+    "tire-models": ResourceSpec(
+        "tire-models",
+        "model_1c_id",
+        parse_tire_model,
+        _upserter(TIRE_MODEL_UPSERT),
+        _deleter("tshina_tire_models", "model_1c_id", "TRUE"),
+        _our_keys("tshina_tire_models", "model_1c_id", "TRUE"),
+    ),
+    "product-ommology": ResourceSpec(
+        "product-ommology",
+        "sku",
+        parse_product_ommology,
+        _upserter(PRODUCT_OMMOLOGY_UPSERT),
+        _deleter("product_ommology", "sku", "TRUE"),
+        _our_keys("product_ommology", "sku", "TRUE"),
+        snapshot=True,
+    ),
+    "ommology-codes": ResourceSpec(
+        "ommology-codes",
+        "code",
+        parse_ommology_code,
+        _upserter(OMMOLOGY_CODE_UPSERT),
+        _deleter("ommology_codes", "code", "TRUE"),
+        _our_keys("ommology_codes", "code", "TRUE"),
+        snapshot=True,
     ),
     "tire-tests": ResourceSpec(
         "tire-tests",
@@ -797,6 +926,7 @@ async def sync_resource(
 ) -> ResourceResult:
     """Walk one resource and apply it page by page (see the module docstring)."""
     res = ResourceResult(spec.name, status="dry_run" if dry_run else "ok")
+    full = full or spec.snapshot
     since: datetime | None = None
     if not full:
         async with engine.connect() as conn:

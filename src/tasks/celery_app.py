@@ -160,6 +160,13 @@ app.conf.beat_schedule = {
         "task": "src.tasks.tshina_sync_tasks.tshina_sync_incremental",
         "schedule": crontab(hour=4, minute=40, day_of_week="mon-sat"),  # Mon–Sat 04:40 Kyiv
     },
+    # Hourly the rest of the day: tyre properties come from tshina (owner's
+    # decision 2026-10-29), and tshina syncs from 1C every hour. Hour 4 is left
+    # to the entries around it so Sunday's full walk never loses the lock.
+    "tshina-sync-hourly": {
+        "task": "src.tasks.tshina_sync_tasks.tshina_sync_incremental",
+        "schedule": crontab(minute=40, hour="0-3,5-23"),
+    },
     "tshina-sync-full": {
         "task": "src.tasks.tshina_sync_tasks.tshina_sync_full",
         "schedule": crontab(hour=4, minute=40, day_of_week="sunday"),  # Sunday 04:40 Kyiv

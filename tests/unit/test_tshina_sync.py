@@ -94,7 +94,13 @@ def _scope_ok(
     return True
 
 
-KEYS = {"tire_eu_labels": "sku", "tire_attributes": "sku"}
+KEYS = {
+    "tire_eu_labels": "sku",
+    "tire_attributes": "sku",
+    "tshina_tire_models": "model_1c_id",
+    "product_ommology": "sku",
+    "ommology_codes": "code",
+}
 
 
 class FakeDb:
@@ -104,6 +110,9 @@ class FakeDb:
             for name in (
                 "tire_eu_labels",
                 "tire_attributes",
+                "tshina_tire_models",
+                "product_ommology",
+                "ommology_codes",
                 "tire_tests",
                 "tire_test_placements",
                 "vehicle_brands",
@@ -293,6 +302,11 @@ class FakeConn:
                     t["tire_attributes"][r["sku"]] = {**r, "source": "tshina"}
 
             self._effect(_attr)
+            return Result()
+        m = re.match(r"INSERT INTO (tshina_tire_models|product_ommology|ommology_codes) ", sql)
+        if m:
+            table = m.group(1)
+            self._effect(lambda: [t[table].__setitem__(r[KEYS[table]], dict(r)) for r in many])
             return Result()
         if sql.startswith("DELETE FROM tire_test_placements WHERE test_id = ANY"):
             ids = set(p["ids"])
@@ -1067,4 +1081,86 @@ def test_beat_schedule_and_routes() -> None:
     assert inc["schedule"].day_of_week == {1, 2, 3, 4, 5, 6}
     assert full["schedule"].hour == {4} and full["schedule"].minute == {40}
     assert full["schedule"].day_of_week == {0}
+    # every other hour of every day, never hour 4 — the full walk keeps its lock
+    hourly = beat["tshina-sync-hourly"]
+    assert hourly["task"] == inc["task"]
+    assert hourly["schedule"].minute == {40}
+    assert hourly["schedule"].hour == set(range(24)) - {4}
     assert "src.tasks.tshina_sync_tasks" in app.conf.include
+
+
+# ── tyre models and ommology (tyre properties from tshina, 2026-10-29) ──────
+
+
+def tire_model(model_id: str, **kw: Any) -> dict[str, Any]:
+    base = {
+        "model_1c_id": model_id,
+        "brand": {"slug": "goodyear", "title": "GoodYear"},
+        "name": "Ultra Grip 600",
+        "type": "tyres",
+        "season": "winter",
+        "is_published": True,
+        "updated_at": "2025-12-23T13:46:16Z",
+        "deleted": False,
+    }
+    return {**base, **kw}
+
+
+def test_tire_model_parses_the_live_record() -> None:
+    row = ts.parse_tire_model(tire_model("ы00017074"))
+    assert row["model_1c_id"] == "ы00017074"
+    assert (row["brand_slug"], row["brand_title"], row["name"]) == (
+        "goodyear",
+        "GoodYear",
+        "Ultra Grip 600",
+    )
+    assert row["type"] == "tyres" and row["season"] == "winter" and row["is_published"] is True
+
+
+@pytest.mark.parametrize(
+    "bad", [{"type": "trucks"}, {"season": "spring"}, {"name": ""}, {"brand": "GoodYear"}]
+)
+def test_tire_model_off_contract_is_rejected(bad: dict[str, Any]) -> None:
+    with pytest.raises(ts.RowRejectedError):
+        ts.parse_tire_model(tire_model("1", **bad))
+
+
+def test_product_ommology_needs_codes() -> None:
+    assert ts.parse_product_ommology({"sku": "00000050024", "codes": ["PE"]})["codes"] == ["PE"]
+    with pytest.raises(ts.RowRejectedError):
+        ts.parse_product_ommology({"sku": "1", "codes": []})
+
+
+async def test_tire_models_upsert_keyed_by_the_1c_model_code() -> None:
+    db = FakeDb()
+    client = FakeClient({"tire-models": [[tire_model("ы00017074")]]})
+    res = await _sync(db, client, "tire-models")
+    assert res.status == "ok" and res.upserted == 1
+    assert db.t["tshina_tire_models"]["ы00017074"]["brand_title"] == "GoodYear"
+
+
+async def test_a_snapshot_resource_sweeps_on_every_walk() -> None:
+    """``snapshot: true`` comes whole each time: the hourly walk is a full one,
+    sends no ``updated_since`` and drops codes tshina no longer has."""
+    db = FakeDb()
+    db.t["data_sync_state"]["product-ommology"] = {
+        "resource": "product-ommology",
+        "watermark": OLD_WM,
+    }
+    for i in range(10):
+        db.add("product_ommology", sku=str(i), codes=["MO"])
+    client = FakeClient(
+        {"product-ommology": [[{"sku": str(i), "codes": ["MO"]} for i in range(9)]]}
+    )
+    res = await _sync(db, client, "product-ommology")
+    assert res.status == "ok" and res.deleted == 1
+    assert client.calls == [("product-ommology", None)]
+    assert "9" not in db.t["product_ommology"]
+
+
+async def test_an_incremental_resource_does_not_sweep() -> None:
+    db = FakeDb()
+    db.add("tshina_tire_models", model_1c_id="old", name="x", type="tyres")
+    client = FakeClient({"tire-models": [[tire_model("new")]]})
+    res = await _sync(db, client, "tire-models")
+    assert res.deleted == 0 and "old" in db.t["tshina_tire_models"]
