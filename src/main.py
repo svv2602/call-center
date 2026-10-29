@@ -125,7 +125,14 @@ from src.monitoring.metrics import (
     orders_created_total,
     tenant_resolution_fallback_total,
 )
-from src.onec_client.client import OneCClient, _onec_breaker, from_1c_date, from_1c_time
+from src.onec_client.client import (
+    OneCClient,
+    _onec_breaker,
+    booking_rejection,
+    find_booking_guid,
+    from_1c_date,
+    from_1c_time,
+)
 from src.store_client.client import (
     BUDGET_SOURCE_CALLER,
     BUDGET_SOURCE_CORRIDOR,
@@ -3353,6 +3360,7 @@ def _build_tool_router(
                 kwargs.get("auto_number", ""),
             )
             onec_result: dict[str, Any] | None = None
+            rejection: str | None = None
             try:
                 onec_result = await _onec_client.book_fitting_rest(
                     person=kwargs.get("customer_name", ""),
@@ -3371,7 +3379,9 @@ def _build_tool_router(
                     session.channel_uuid,
                     str(onec_result)[:500],
                 )
-            except Exception:
+            except Exception as exc:
+                # A refusal sent with an HTTP error status is still an answer.
+                rejection = booking_rejection(exc)
                 # Wave 12 (2026-09-07): only network/protocol errors reach here.
                 # Post-processing failures (DB writes, uuid coercion) are
                 # handled below in isolated try/excepts so they NEVER cause
@@ -3388,6 +3398,20 @@ def _build_tool_router(
                     exc_info=True,
                 )
                 onec_result = None
+
+            if rejection is None and onec_result is not None:
+                rejection = booking_rejection(onec_result)
+            if rejection is not None:
+                slot_taken = await _book_fitting_rejected(
+                    rejection,
+                    station_id=str(kwargs.get("station_id", "")),
+                    date=str(kwargs.get("date", "")),
+                    time=_pad_hhmm(_extract_time(str(kwargs.get("time", "")))),
+                )
+                if isinstance(slot_taken, str):
+                    onec_result = {"success": True, "data": [{"GUID": slot_taken}]}
+                else:
+                    return slot_taken
 
             if onec_result is not None and onec_result.get("success"):
                 data_list = onec_result.get("data", [])
@@ -4562,6 +4586,56 @@ def _build_tool_router(
         hh, _, mm = value.partition(":")
         return f"{int(hh):02d}:{mm}" if hh.isdigit() else value
 
+    async def _book_fitting_rejected(
+        rejection: str, *, station_id: str, date: str, time: str
+    ) -> str | dict[str, Any]:
+        """1C refused the slot (2026-10-27: «Дата та час вже зайняті…»).
+
+        Returns the GUID when the slot is held by the caller's own booking —
+        a retry after a timeout that 1C had booked after all. Otherwise the
+        refusal for the model: no Store API fallback (it is not a transport
+        failure), and the slot leaves `fitting_slots_offered`, so the same
+        time cannot be sent again without a fresh `get_fitting_slots`.
+        """
+        logger.warning(
+            "book_fitting: 1C refused station=%s %s %s for call %s: %s",
+            station_id, date, time, session.channel_uuid, rejection,
+        )
+        if _onec_client is not None and session.caller_phone:
+            try:
+                own = await _onec_client.get_customer_bookings_rest(
+                    phone=session.caller_phone, station_id=station_id, date=date, time=time
+                )
+                guid = find_booking_guid(own.get("data"), station_id, date, time)
+                if guid:
+                    logger.info(
+                        "book_fitting: refused slot is the caller's own booking %s "
+                        "for call %s",
+                        guid, session.channel_uuid,
+                    )
+                    return guid
+            except Exception:
+                logger.warning(
+                    "book_fitting: own-booking lookup failed for call %s",
+                    session.channel_uuid, exc_info=True,
+                )
+        session.fitting_slots_offered = [
+            s
+            for s in session.fitting_slots_offered
+            if not (s.get("date") == date and _pad_hhmm(str(s.get("time", ""))) == time)
+        ]
+        return {
+            "error": True,
+            "reason": "slot_taken",
+            "message": (
+                f"⛔ Запис НЕ створено. 1С відповіла: «{rejection}». Час {time} на "
+                f"{date} уже зайнятий. Скажи клієнту, що цей час щойно зайняли, "
+                f"виклич get_fitting_slots(station_id='{station_id}', "
+                f"date_from='{date}') і запропонуй інші вільні години. "
+                "⛔ НЕ кажи, що записала."
+            ),
+        }
+
     async def _reschedule_fitting(booking_id: str, kwargs: dict[str, Any]) -> Any:
         """Move a booking, creating the new one before releasing the old.
 
@@ -4659,6 +4733,7 @@ def _build_tool_router(
             }
 
         colour, brand = _split_auto_number(str(original.get("auto_number") or ""))
+        rejection: str | None = None
         try:
             booked = await _onec_client.book_fitting_rest(
                 person=str(original.get("person") or session.fitting_customer_name or ""),
@@ -4669,12 +4744,14 @@ def _build_tool_router(
                 vehicle_info=brand or session.fitting_vehicle_brand or "",
                 auto_number=colour or session.fitting_plate or "",
             )
-        except Exception:
+        except Exception as exc:
             logger.warning(
                 "reschedule: 1C book failed for call %s — original %s kept",
                 session.channel_uuid, booking_id, exc_info=True,
             )
+            rejection = booking_rejection(exc)
             booked = {}
+        rejection = rejection or booking_rejection(booked)
 
         new_guid = ""
         if booked.get("success"):
@@ -4685,6 +4762,18 @@ def _build_tool_router(
                 "reschedule: no GUID for call %s (1C said %s) — original %s kept",
                 session.channel_uuid, str(booked)[:200], booking_id,
             )
+            if rejection is not None:
+                return {
+                    "error": True,
+                    "reason": "slot_taken",
+                    "message": (
+                        f"⛔ 1С відповіла: «{rejection}». Час {new_time} на {new_date} "
+                        "уже зайнятий, перенесення не виконано — ПОПЕРЕДНІЙ ЗАПИС НЕ "
+                        "СКАСОВАНО і лишається чинним. Скажи клієнту саме це і "
+                        f"запропонуй інший час (get_fitting_slots(station_id='{station_id}', "
+                        f"date_from='{new_date}'))."
+                    ),
+                }
             return {
                 "error": True,
                 "reason": "rebook_failed",

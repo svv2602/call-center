@@ -36,9 +36,12 @@ _onec_breaker = CircuitBreaker(fail_max=5, timeout_duration=timedelta(seconds=30
 class OneCAPIError(Exception):
     """Raised when a 1C API call fails."""
 
-    def __init__(self, status: int, message: str) -> None:
+    def __init__(self, status: int, message: str, body: str = "") -> None:
         self.status = status
         self.message = message
+        # The whole response body: `message` is cut to 200 chars, and a 1C
+        # rejection text (`booking_rejection`) can sit past that.
+        self.body = body or message
         super().__init__(f"1C API {status}: {message}")
 
 
@@ -546,7 +549,7 @@ class OneCClient:
                 body_text = raw.decode("windows-1251")
 
             if resp.status >= 400:
-                raise OneCAPIError(resp.status, body_text[:200])
+                raise OneCAPIError(resp.status, body_text[:200], body_text)
 
             if resp.status == 204:
                 return {}
@@ -579,6 +582,55 @@ def _to_1c_time(value: str) -> str:
     if len(parts) == 2:
         value = f"{value}:00"
     return f"0001-01-01T{value}"
+
+
+def booking_rejection(response: Any) -> str | None:
+    """The text 1C gives the client when it refuses a booking, or ``None``.
+
+    Since 2026-10-27 TireRecording answers a taken slot with
+    ``{"success": false, "data": [{"error": "<ua>", "error_ru": "<ru>"}],
+    "errors": ["Помилка запису на шиномонтаж"]}`` — the text is in
+    ``data[0]``, not at the top level (tshina.ua read it from the top and
+    missed it, `99cfae9b6` there). Both places are read; Ukrainian wins.
+    ``response`` is the parsed body or an ``OneCAPIError`` carrying it.
+    """
+    if isinstance(response, OneCAPIError):
+        try:
+            response = json.loads(response.body)
+        except (TypeError, ValueError):
+            return None
+    if not isinstance(response, dict):
+        return None
+    body: Any = response
+    if not isinstance(body.get("error"), str):
+        data = body.get("data")
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            body = data[0]
+    for key in ("error", "error_ru"):
+        text = body.get(key)
+        if isinstance(text, str) and text.strip():
+            return text.strip()
+    return None
+
+
+def find_booking_guid(entries: Any, station_id: str, date: str, time: str) -> str:
+    """GUID of the ListOfEntries record at this station, date and time, or ``""``.
+
+    1C refuses a slot the caller's own booking already holds — a retry after
+    a timeout that 1C had in fact booked. That refusal is the booking.
+    """
+    if not isinstance(entries, list):
+        return ""
+    for e in entries:
+        if (
+            isinstance(e, dict)
+            and str(e.get("StationID", "")) == station_id
+            and from_1c_date(str(e.get("Data", ""))) == date
+            and from_1c_time(str(e.get("Time", ""))).zfill(5) == time.zfill(5)
+            and e.get("GUID")
+        ):
+            return str(e["GUID"])
+    return ""
 
 
 def from_1c_date(value: str) -> str:
