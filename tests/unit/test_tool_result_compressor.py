@@ -515,3 +515,21 @@ def test_sales_off_load_index_flag_does_not_move_a_byte() -> None:
         "search_tires", plain
     )
     assert "load_index_below" not in compress_tool_result("search_tires", flagged)
+
+
+def test_tshina_properties_reach_the_model_under_sales() -> None:
+    """SUV, EV, noise insulation, rim protection, ply, technology and ommology
+    (tshina, 2026-10-29) are kept for the model when the item has them."""
+    keys = {
+        "ommology": ["MO"],
+        "suv": True,
+        "electric_car": True,
+        "noise_insulation": "contisilent",
+        "rim_protection": "fr",
+        "ply": "pr8",
+        "technology": ["techsealtech"],
+    }
+    item = {"id": "1", "brand": "B", "model": "M", "size": "s", "price": 1, "in_stock": True}
+    result = {"total": 1, "items": [{**item, **keys}]}
+    out = json.loads(compress_tool_result("search_tires", result, sales_enabled=True))
+    assert {k: out["items"][0].get(k) for k in keys} == keys

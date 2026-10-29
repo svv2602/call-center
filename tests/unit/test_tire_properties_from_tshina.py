@@ -10,10 +10,13 @@ not carry keeps the 1C values.
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from src.store_client.client import StoreClient
 from tests.unit.test_store_client_tire_item import _CATALOGUE, _SqliteEngine
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 #: model_id of the stand = index in ``_CATALOGUE``
 ON_SITE = "s-norow-plain"  # «Continental PC7», 1C season summer
@@ -32,7 +35,8 @@ def _stand() -> _SqliteEngine:
         (_model_id(ON_SITE),),
     )
     db.execute(
-        "INSERT INTO tire_attributes VALUES (?, NULL, NULL, '95', 'Y', 'all_season', 1)",
+        "INSERT INTO tire_attributes (sku, load_index, speed_index, season, is_runflat)"
+        " VALUES (?, '95', 'Y', 'all_season', 1)",
         (ON_SITE,),
     )
     db.execute("INSERT INTO product_ommology VALUES (?, 'MO')", (ON_SITE,))
@@ -88,3 +92,71 @@ def test_ommology_codes_reach_the_item() -> None:
     items = _items({})
     assert items[ON_SITE]["ommology"] == ["MO"]
     assert "ommology" not in items[OFF_SITE]
+
+
+# ── the extended contract (068): size, C/LT and the rest from the site ──────
+
+EXTENDED_SKU = "w-norow-desc-none"  # 1C: 225/45 R18, not commercial
+
+
+def _extended(**cols: Any) -> Callable[[dict[str, Any]], dict[str, dict[str, Any]]]:
+    engine = _stand()
+    if cols.pop("one_c_commercial", False):
+        engine.db.execute("UPDATE tire_products SET commercial = 1 WHERE sku = ?", (EXTENDED_SKU,))
+    engine.db.execute(
+        "INSERT INTO tshina_tire_models VALUES (?, 'Matador', 'Sibir Ice 2', 'winter')",
+        (_model_id(EXTENDED_SKU),),
+    )
+    names = ", ".join(cols)
+    marks = ", ".join("?" for _ in cols)
+    engine.db.execute(
+        f"INSERT INTO tire_attributes (sku, {names}) VALUES (?, {marks})",
+        (EXTENDED_SKU, *cols.values()),
+    )
+    client = StoreClient(base_url="http://localhost", api_key="k", db_engine=engine)
+
+    def run(params: dict[str, Any]) -> dict[str, dict[str, Any]]:
+        rows = asyncio.run(client._query_tire_rows("ProKoleso", params))
+        return {row["id"]: StoreClient._tire_item(row) for row in rows}
+
+    return run
+
+
+def test_the_site_size_is_searched_and_shown() -> None:
+    run = _extended(width=235, profile=40, diameter=18, size="235/40 R18")
+    assert EXTENDED_SKU not in run({"width": 225})
+    item = run({"width": 235, "profile": 40, "diameter": 18})[EXTENDED_SKU]
+    assert item["size"] == "235/40 R18"
+
+
+def test_commercial_comes_from_the_site_on_an_extended_row() -> None:
+    run = _extended(size="225/45 R18C", commercial="C")
+    assert EXTENDED_SKU in run({"width": 225, "commercial": True})
+    assert EXTENDED_SKU not in run({"width": 225, "commercial": False})
+
+
+def test_an_older_row_leaves_commercial_to_1c() -> None:
+    """No ``size`` yet: NULL ``commercial`` is unknown, not «passenger»."""
+    run = _extended(commercial=None, one_c_commercial=True)
+    assert EXTENDED_SKU in run({"width": 225, "commercial": True})
+    assert EXTENDED_SKU not in run({"width": 225, "commercial": False})
+
+
+def test_the_sku_brand_wins_over_the_model_brand() -> None:
+    run = _extended(size="225/45 R18", brand_title="Matador Rubber")
+    assert run({"width": 225})[EXTENDED_SKU]["brand"] == "Matador Rubber"
+
+
+def test_the_new_properties_reach_the_item() -> None:
+    run = _extended(
+        size="225/45 R18",
+        suv=1,
+        electric_car=0,
+        tire_insulation="contisilent",
+        tire_ply="pr8",
+        tire_technology="techsealtech",
+    )
+    item = run({"width": 225})[EXTENDED_SKU]
+    assert item["suv"] is True and "electric_car" not in item
+    assert item["noise_insulation"] == "contisilent" and item["ply"] == "pr8"
+    assert item["technology"] == ["techsealtech"]

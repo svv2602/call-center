@@ -210,6 +210,49 @@ def parse_tire_attributes(item: dict[str, Any]) -> dict[str, Any]:
         "country": _json_obj(item.get("country"), "country"),
         "year": _opt_int(item.get("year"), 2000, 2100, "year"),
         "updated_at": _opt_datetime(item.get("updated_at"), "updated_at"),
+        **_tire_properties(item),
+    }
+
+
+#: «C» by the ``R..C`` diameter, «LT» by the LT reinforcement; null = neither
+COMMERCIAL = frozenset({"C", "LT"})
+
+
+def _tire_properties(item: dict[str, Any]) -> dict[str, Any]:
+    """The fields tshina added on 2026-10-29: brand, model, size and the rest.
+
+    A record of the older contract has none of them and gets NULLs; the
+    first full walk after tshina's deploy fills every SKU.
+    """
+    brand = item.get("brand")
+    model = item.get("model")
+    for name, value in (("brand", brand), ("model", model)):
+        if value is not None and not isinstance(value, dict):
+            raise RowRejectedError(f"{name}: {value!r}")
+    brand, model = brand or {}, model or {}
+    commercial = item.get("commercial")
+    if commercial is not None and commercial not in COMMERCIAL:
+        raise RowRejectedError(f"commercial: {commercial!r}")
+    technology = item.get("tire_technology")
+    if technology is None:
+        technology = []
+    if not isinstance(technology, list):
+        raise RowRejectedError(f"tire_technology: {technology!r}")
+    return {
+        "brand_slug": _opt_str(brand.get("slug"), 100, "brand.slug"),
+        "brand_title": _opt_str(brand.get("title"), 100, "brand.title"),
+        "model_name": _opt_str(model.get("name"), 200, "model.name"),
+        "width": _opt_int(item.get("width"), 100, 500, "width"),
+        "profile": _opt_int(item.get("profile"), 10, 150, "profile"),
+        "diameter": _opt_num(item.get("diameter"), 8, 30, "diameter"),
+        "size": _opt_str(item.get("size"), 50, "size"),
+        "commercial": commercial,
+        "suv": _opt_bool(item.get("suv"), "suv"),
+        "electric_car": _opt_bool(item.get("electric_car"), "electric_car"),
+        "tire_insulation": _opt_str(item.get("tire_insulation"), 50, "tire_insulation"),
+        "tire_rim_peeling": _opt_str(item.get("tire_rim_peeling"), 50, "tire_rim_peeling"),
+        "tire_ply": _opt_str(item.get("tire_ply"), 50, "tire_ply"),
+        "tire_technology": [_str(t, 50, "tire_technology") for t in technology] or None,
     }
 
 
@@ -476,10 +519,15 @@ LABEL_UPSERT = """
 ATTRIBUTES_UPSERT = """
     INSERT INTO tire_attributes
         (sku, model_1c_id, season, studded, is_xl, is_runflat, is_snow_marker, vehicle_type,
-         reinforcement, load_index, speed_index, country, year, source, updated_at, synced_at)
+         reinforcement, load_index, speed_index, country, year, source, updated_at, synced_at,
+         brand_slug, brand_title, model_name, width, profile, diameter, size, commercial, suv,
+         electric_car, tire_insulation, tire_rim_peeling, tire_ply, tire_technology)
     VALUES (:sku, :model_1c_id, :season, :studded, :is_xl, :is_runflat, :is_snow_marker,
             :vehicle_type, :reinforcement, :load_index, :speed_index, CAST(:country AS JSONB),
-            :year, 'tshina', :updated_at, now())
+            :year, 'tshina', :updated_at, now(),
+            :brand_slug, :brand_title, :model_name, :width, :profile, :diameter, :size,
+            :commercial, :suv, :electric_car, :tire_insulation, :tire_rim_peeling, :tire_ply,
+            :tire_technology)
     ON CONFLICT (sku) DO UPDATE SET
         model_1c_id = EXCLUDED.model_1c_id,
         season = EXCLUDED.season,
@@ -494,7 +542,21 @@ ATTRIBUTES_UPSERT = """
         country = EXCLUDED.country,
         year = EXCLUDED.year,
         updated_at = EXCLUDED.updated_at,
-        synced_at = now()
+        synced_at = now(),
+        brand_slug = EXCLUDED.brand_slug,
+        brand_title = EXCLUDED.brand_title,
+        model_name = EXCLUDED.model_name,
+        width = EXCLUDED.width,
+        profile = EXCLUDED.profile,
+        diameter = EXCLUDED.diameter,
+        size = EXCLUDED.size,
+        commercial = EXCLUDED.commercial,
+        suv = EXCLUDED.suv,
+        electric_car = EXCLUDED.electric_car,
+        tire_insulation = EXCLUDED.tire_insulation,
+        tire_rim_peeling = EXCLUDED.tire_rim_peeling,
+        tire_ply = EXCLUDED.tire_ply,
+        tire_technology = EXCLUDED.tire_technology
     WHERE tire_attributes.source = 'tshina'
 """
 

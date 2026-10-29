@@ -83,11 +83,20 @@ _XL_FILTER_SQL = f"COALESCE(a.is_xl, {_XL_SQL})"
 # 1C columns stay the fallback for a SKU the site does not carry (~16 %,
 # mostly ProKoleso-only). Disks keep 1C: tshina has not synced disk
 # properties from 1C since 2025-09.
-_BRAND_SQL = "COALESCE(tm.brand_title, m.manufacturer)"
-_MODEL_SQL = "COALESCE(tm.name, m.name)"
+_BRAND_SQL = "COALESCE(a.brand_title, tm.brand_title, m.manufacturer)"
+_MODEL_SQL = "COALESCE(a.model_name, tm.name, m.name)"
+_SIZE_SQL = "COALESCE(a.size, p.size)"
+#: Width / profile / diameter the search filters on: the site's, else 1C's.
+_DIM_SQL = {dim: f"COALESCE(a.{dim}, p.{dim})" for dim in ("width", "profile", "diameter")}
+#: C / LT. ``a.size`` marks a row of tshina's extended contract (068): on an
+#: older row NULL ``commercial`` is «unknown», not «passenger», so 1C decides.
+_COMMERCIAL_SQL = "(CASE WHEN a.size IS NOT NULL THEN a.commercial IS NOT NULL ELSE p.commercial END)"
 _SEASON_SQL = "COALESCE(a.season, tm.season, m.seasonality)"
 #: A caller's brand matches either spelling: «GoodYear» (site) or «GOODYEAR» (1C).
-_BRAND_MATCH_SQL = "(LOWER(tm.brand_title) = LOWER(:brand) OR LOWER(m.manufacturer) = LOWER(:brand))"
+_BRAND_MATCH_SQL = (
+    "(LOWER(a.brand_title) = LOWER(:brand) OR LOWER(tm.brand_title) = LOWER(:brand)"
+    " OR LOWER(m.manufacturer) = LOWER(:brand))"
+)
 _RUNFLAT_FILTER_SQL = f"COALESCE(a.is_runflat, {_RUNFLAT_SQL})"
 
 #: Season of a winter tyre (tshina and the 1C sync say ``winter``; the
@@ -1568,13 +1577,13 @@ class StoreClient:
         conditions.append(_tire_types_sql(bind_params))
 
         if params.get("width"):
-            conditions.append("p.width = :width")
+            conditions.append(f"{_DIM_SQL['width']} = :width")
             bind_params["width"] = int(params["width"])
         if params.get("profile"):
-            conditions.append("p.profile = :profile")
+            conditions.append(f"{_DIM_SQL['profile']} = :profile")
             bind_params["profile"] = int(params["profile"])
         if params.get("diameter"):
-            conditions.append("p.diameter = :diameter")
+            conditions.append(f"{_DIM_SQL['diameter']} = :diameter")
             bind_params["diameter"] = int(params["diameter"])
         if params.get("season"):
             # LLM sends English enum (summer/winter/all_season),
@@ -1609,9 +1618,9 @@ class StoreClient:
             conditions.append(f"NOT {_XL_FILTER_SQL}")
         commercial = params.get("commercial")
         if commercial is True:
-            conditions.append("p.commercial IS TRUE")
+            conditions.append(f"{_COMMERCIAL_SQL} IS TRUE")
         elif commercial is False:
-            conditions.append("p.commercial IS NOT TRUE")
+            conditions.append(f"{_COMMERCIAL_SQL} IS NOT TRUE")
         # «А дешевше?» / «схожі за ціною» (sales): bounds computed by the
         # search_tires wrapper from the last offer the caller heard.
         if params.get("price_below") is not None:
@@ -1662,7 +1671,7 @@ class StoreClient:
 
         query = text(f"""
             SELECT p.sku AS id, {_BRAND_SQL} AS brand, {_MODEL_SQL} AS model,
-                   p.size, {_SEASON_SQL} AS season,
+                   {_SIZE_SQL} AS size, {_SEASON_SQL} AS season,
                    COALESCE(s.price, 0) AS price,
                    COALESCE(s.stock_quantity, 0) AS stock_quantity,
                    s.country AS country, s.year_issue AS year_issue,
@@ -1673,6 +1682,9 @@ class StoreClient:
                    COALESCE(a.load_index, NULLIF(TRIM(p.load_rating), '')) AS load_index,
                    COALESCE(a.speed_index, NULLIF(TRIM(p.speed_rating), '')) AS speed_index,
                    po.codes AS ommology,
+                   a.suv AS suv, a.electric_car AS electric_car,
+                   a.tire_insulation AS noise_insulation, a.tire_rim_peeling AS rim_protection,
+                   a.tire_ply AS ply, a.tire_technology AS technology,
                    {_STUD_WORD_COLUMN_SQL} AS desc_studded,
                    {_STUDDABLE_COLUMN_SQL} AS desc_studdable,
                    {_XL_COLUMN_SQL} AS desc_xl
@@ -1723,6 +1735,19 @@ class StoreClient:
             value = row.get(key)
             if value is not None and str(value).strip():
                 item[key] = str(value).strip()
+        for key in ("suv", "electric_car"):
+            if row.get(key):
+                item[key] = True
+        for key in ("noise_insulation", "rim_protection", "ply"):
+            value = row.get(key)
+            if value is not None and str(value).strip():
+                item[key] = str(value).strip()
+        technology = row.get("technology") or ()
+        if isinstance(technology, str):
+            technology = (technology,)
+        technology = [str(t).strip() for t in technology if str(t).strip()]
+        if technology:
+            item["technology"] = technology
         codes = row.get("ommology") or ()
         if isinstance(codes, str):  # one code, not a TEXT[] (non-PostgreSQL driver)
             codes = (codes,)

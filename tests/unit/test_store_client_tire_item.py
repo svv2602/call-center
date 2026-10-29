@@ -373,7 +373,10 @@ CREATE TABLE tire_eu_labels (
 );
 CREATE TABLE tire_attributes (
     sku TEXT PRIMARY KEY, studded TEXT, is_xl BOOLEAN, load_index TEXT, speed_index TEXT,
-    season TEXT, is_runflat BOOLEAN
+    season TEXT, is_runflat BOOLEAN, brand_title TEXT, model_name TEXT, width INTEGER,
+    profile INTEGER, diameter REAL, size TEXT, commercial TEXT, suv BOOLEAN,
+    electric_car BOOLEAN, tire_insulation TEXT, tire_rim_peeling TEXT, tire_ply TEXT,
+    tire_technology TEXT
 );
 CREATE TABLE tshina_tire_models (
     model_1c_id INTEGER PRIMARY KEY, brand_title TEXT, name TEXT, season TEXT
@@ -492,7 +495,7 @@ class _SqliteEngine:
             )
             if attr is not None:
                 self.db.execute(
-                    "INSERT INTO tire_attributes VALUES (?, ?, ?, NULL, NULL, NULL, NULL)",
+                    "INSERT INTO tire_attributes (sku, studded, is_xl) VALUES (?, ?, ?)",
                     (sku, *attr),
                 )
         for label in _LABELS:

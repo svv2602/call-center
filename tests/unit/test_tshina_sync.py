@@ -410,7 +410,11 @@ def test_label_off_scale_or_wrong_type_is_rejected_whole() -> None:
 
 
 def test_tire_attributes_parse_the_contract_record() -> None:
-    assert ts.parse_tire_attributes(attrs("00000047766")) == {
+    row = ts.parse_tire_attributes(attrs("00000047766"))
+    # the 2026-10-29 fields: absent from this older record, all NULL
+    extended = {k: row.pop(k) for k in ts._tire_properties({})}
+    assert set(extended.values()) == {None}
+    assert row == {
         "sku": "00000047766",
         "model_1c_id": "ы00020101",
         "season": "winter",
@@ -1164,3 +1168,72 @@ async def test_an_incremental_resource_does_not_sweep() -> None:
     client = FakeClient({"tire-models": [[tire_model("new")]]})
     res = await _sync(db, client, "tire-models")
     assert res.deleted == 0 and "old" in db.t["tshina_tire_models"]
+
+
+# ── tire-attributes, extended contract (tshina 2026-10-29) ──────────────────
+
+#: The sample tshina sent with the extended contract.
+EXTENDED = {
+    "sku": "00000035792",
+    "model_1c_id": "000030327",
+    "brand": {"slug": "goodyear", "title": "GoodYear"},
+    "model": {"model_1c_id": "000030327", "name": "Ultra Grip Cargo"},
+    "width": 215,
+    "profile": 70,
+    "diameter": 15,
+    "size": "215/70 R15C",
+    "commercial": "C",
+    "season": "winter",
+    "studded": "no_ship",
+    "is_xl": False,
+    "is_runflat": False,
+    "is_snow_marker": False,
+    "vehicle_type": "light_truck",
+    "reinforcement": None,
+    "suv": False,
+    "electric_car": None,
+    "tire_insulation": None,
+    "tire_rim_peeling": None,
+    "tire_ply": None,
+    "tire_technology": [],
+    "load_index": "109/107",
+    "speed_index": "S",
+    "country": {"ua": "Туреччина", "ru": "Турция"},
+    "year": 2024,
+    "updated_at": "2026-08-06T15:00:11Z",
+    "deleted": False,
+}
+
+
+def test_extended_record_parses_every_new_field() -> None:
+    row = ts.parse_tire_attributes(EXTENDED | {"tire_technology": ["techsealtech"]})
+    assert (row["brand_title"], row["model_name"]) == ("GoodYear", "Ultra Grip Cargo")
+    assert (row["width"], row["profile"], float(row["diameter"])) == (215, 70, 15.0)
+    assert row["size"] == "215/70 R15C" and row["commercial"] == "C"
+    assert row["suv"] is False and row["electric_car"] is None
+    assert row["tire_technology"] == ["techsealtech"]
+
+
+def test_full_profile_and_fractional_diameter() -> None:
+    row = ts.parse_tire_attributes(EXTENDED | {"profile": None, "diameter": 17.5})
+    assert row["profile"] is None and float(row["diameter"]) == 17.5
+
+
+def test_old_contract_record_gets_null_properties() -> None:
+    row = ts.parse_tire_attributes(attrs("1"))
+    assert row["size"] is None and row["commercial"] is None and row["tire_technology"] is None
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"commercial": "XL"},
+        {"tire_technology": "techsealtech"},
+        {"brand": "GoodYear"},
+        {"width": "215"},
+        {"suv": "yes"},
+    ],
+)
+def test_extended_fields_off_contract_reject_the_row(bad: dict[str, Any]) -> None:
+    with pytest.raises(ts.RowRejectedError):
+        ts.parse_tire_attributes(EXTENDED | bad)

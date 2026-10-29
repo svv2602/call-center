@@ -142,8 +142,8 @@ class TestFilters:
     @pytest.mark.parametrize(
         ("value", "fragment"),
         [
-            (True, "p.commercial IS TRUE"),
-            (False, "p.commercial IS NOT TRUE"),
+            (True, f"{client_mod._COMMERCIAL_SQL} IS TRUE"),
+            (False, f"{client_mod._COMMERCIAL_SQL} IS NOT TRUE"),
             (None, None),
             ("yes", None),
         ],
@@ -225,7 +225,7 @@ class TestLadder:
     @pytest.mark.asyncio
     async def test_commercial_is_never_relaxed(self) -> None:
         """A passenger tyre on a van is not an alternative: empty stays empty."""
-        client, _ = _client(_only_without("p.commercial IS TRUE"))
+        client, _ = _client(_only_without(f"{client_mod._COMMERCIAL_SQL} IS TRUE"))
         result = await client.search_tires(network="ProKoleso", commercial=True, **_SIZE)
         assert result["items"] == []
         assert "caveat_key" not in result

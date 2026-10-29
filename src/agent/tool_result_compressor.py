@@ -258,6 +258,14 @@ def _compress_search_tires(
             "country",
             "year",
             "quantity",
+            # tshina properties (2026-10-29), present only when known
+            "ommology",
+            "suv",
+            "electric_car",
+            "noise_insulation",
+            "rim_protection",
+            "ply",
+            "technology",
         )
     compressed = [{k: v for k, v in item.items() if k in essential_keys} for item in items[:3]]
     out: dict[str, Any] = {"total": result.get("total", len(items))}
