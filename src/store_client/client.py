@@ -76,8 +76,22 @@ _UNSTUDDED_FILTER_SQL = (
     f"(a.studded IN ('pod_ship', 'no_ship') OR (a.studded IS NULL AND NOT {_STUDDED_SQL}))"
 )
 _XL_FILTER_SQL = f"COALESCE(a.is_xl, {_XL_SQL})"
-#: ``tire_models.seasonality`` of a winter tyre (the 1C sync normalises to
-#: ``winter``; the search filter also accepts the 1C spelling).
+# ── Tyre properties come from tshina (owner's decision 2026-10-29) ──────
+# Brand, model name and season of the site (``tshina_tire_models``, keyed by
+# the 1C model code = ``tire_products.model_id``), the per-SKU attributes
+# (``tire_attributes`` ``a.``) and ommology (``product_ommology``) win; the
+# 1C columns stay the fallback for a SKU the site does not carry (~16 %,
+# mostly ProKoleso-only). Disks keep 1C: tshina has not synced disk
+# properties from 1C since 2025-09.
+_BRAND_SQL = "COALESCE(tm.brand_title, m.manufacturer)"
+_MODEL_SQL = "COALESCE(tm.name, m.name)"
+_SEASON_SQL = "COALESCE(a.season, tm.season, m.seasonality)"
+#: A caller's brand matches either spelling: «GoodYear» (site) or «GOODYEAR» (1C).
+_BRAND_MATCH_SQL = "(LOWER(tm.brand_title) = LOWER(:brand) OR LOWER(m.manufacturer) = LOWER(:brand))"
+_RUNFLAT_FILTER_SQL = f"COALESCE(a.is_runflat, {_RUNFLAT_SQL})"
+
+#: Season of a winter tyre (tshina and the 1C sync say ``winter``; the
+#: search filter also accepts the 1C spelling).
 _WINTER_SEASONS = frozenset({"winter", "зимова", "зимняя"})
 
 #: Rows the offer ranking chooses from (in-stock passenger SKU of one size
@@ -1571,11 +1585,11 @@ class StoreClient:
                 "all_season": "всесезонна",
             }
             db_season = _season_to_db.get(params["season"], params["season"])
-            conditions.append("m.seasonality IN (:season, :season_alt)")
+            conditions.append(f"{_SEASON_SQL} IN (:season, :season_alt)")
             bind_params["season"] = params["season"]
             bind_params["season_alt"] = db_season
         if params.get("brand"):
-            conditions.append("LOWER(m.manufacturer) = LOWER(:brand)")
+            conditions.append(_BRAND_MATCH_SQL)
             bind_params["brand"] = params["brand"]
         # Only a real bool filters; None / anything else = "not asked".
         studded = params.get("studded")
@@ -1585,9 +1599,9 @@ class StoreClient:
             conditions.append(_UNSTUDDED_FILTER_SQL)
         runflat = params.get("runflat")
         if runflat is True:
-            conditions.append(_RUNFLAT_SQL)
+            conditions.append(_RUNFLAT_FILTER_SQL)
         elif runflat is False:
-            conditions.append(f"NOT ({_RUNFLAT_SQL})")
+            conditions.append(f"NOT {_RUNFLAT_FILTER_SQL}")
         xl = params.get("xl")
         if xl is True:
             conditions.append(_XL_FILTER_SQL)
@@ -1642,21 +1656,23 @@ class StoreClient:
             prio_names.append(f":prio_{i}")
         if prio_names:
             order = (
-                f"CASE WHEN LOWER(m.manufacturer) IN ({', '.join(prio_names)}) "
+                f"CASE WHEN LOWER({_BRAND_SQL}) IN ({', '.join(prio_names)}) "
                 f"THEN 0 ELSE 1 END, {order}"
             )
 
         query = text(f"""
-            SELECT p.sku AS id, m.manufacturer AS brand, m.name AS model,
-                   p.size, m.seasonality AS season,
+            SELECT p.sku AS id, {_BRAND_SQL} AS brand, {_MODEL_SQL} AS model,
+                   p.size, {_SEASON_SQL} AS season,
                    COALESCE(s.price, 0) AS price,
                    COALESCE(s.stock_quantity, 0) AS stock_quantity,
                    s.country AS country, s.year_issue AS year_issue,
-                   {_RUNFLAT_COLUMN_SQL} AS runflat,
+                   COALESCE(a.is_runflat, {_RUNFLAT_COLUMN_SQL}) AS runflat,
                    l.energy_class AS eu_fuel, l.wet_grip_class AS eu_wet,
                    l.noise_db AS eu_noise_db, l.noise_class AS eu_noise_class,
                    a.studded AS attr_studded, a.is_xl AS attr_xl,
-                   a.load_index AS load_index, a.speed_index AS speed_index,
+                   COALESCE(a.load_index, NULLIF(TRIM(p.load_rating), '')) AS load_index,
+                   COALESCE(a.speed_index, NULLIF(TRIM(p.speed_rating), '')) AS speed_index,
+                   po.codes AS ommology,
                    {_STUD_WORD_COLUMN_SQL} AS desc_studded,
                    {_STUDDABLE_COLUMN_SQL} AS desc_studdable,
                    {_XL_COLUMN_SQL} AS desc_xl
@@ -1665,6 +1681,8 @@ class StoreClient:
             LEFT JOIN tire_stock s ON p.sku = s.sku AND s.trading_network = :network
             LEFT JOIN tire_eu_labels l ON l.sku = p.sku
             LEFT JOIN tire_attributes a ON a.sku = p.sku
+            LEFT JOIN tshina_tire_models tm ON tm.model_1c_id = p.model_id
+            LEFT JOIN product_ommology po ON po.sku = p.sku
             WHERE {where_clause}
             ORDER BY {order}
             LIMIT :result_limit
@@ -1705,6 +1723,12 @@ class StoreClient:
             value = row.get(key)
             if value is not None and str(value).strip():
                 item[key] = str(value).strip()
+        codes = row.get("ommology") or ()
+        if isinstance(codes, str):  # one code, not a TEXT[] (non-PostgreSQL driver)
+            codes = (codes,)
+        ommology = [str(c).strip() for c in codes if str(c).strip()]
+        if ommology:
+            item["ommology"] = ommology
         label = StoreClient._eu_label(row)
         if label:
             item["eu_label"] = label
@@ -1917,8 +1941,9 @@ class StoreClient:
             SELECT p.sku AS id
             FROM tire_products p
             JOIN tire_models m ON p.model_id = m.id
+            LEFT JOIN tshina_tire_models tm ON tm.model_1c_id = p.model_id
             LEFT JOIN tire_stock s ON p.sku = s.sku AND s.trading_network = :network
-            WHERE LOWER(m.manufacturer) = LOWER(:brand) AND {types_sql}
+            WHERE {_BRAND_MATCH_SQL} AND {types_sql}
             ORDER BY s.price ASC NULLS LAST
             LIMIT 1
         """)

@@ -105,8 +105,8 @@ def test_query_left_joins_the_attributes_by_sku() -> None:
     for column in (
         "a.studded AS attr_studded",
         "a.is_xl AS attr_xl",
-        "a.load_index AS load_index",
-        "a.speed_index AS speed_index",
+        "COALESCE(a.load_index, NULLIF(TRIM(p.load_rating), '')) AS load_index",
+        "COALESCE(a.speed_index, NULLIF(TRIM(p.speed_rating), '')) AS speed_index",
         "AS desc_studded",
         "AS desc_studdable",
         "AS desc_xl",
@@ -361,7 +361,8 @@ CREATE TABLE tire_models (
 );
 CREATE TABLE tire_products (
     sku TEXT PRIMARY KEY, model_id INTEGER, size TEXT, width INTEGER, profile INTEGER,
-    diameter INTEGER, description TEXT, commercial BOOLEAN
+    diameter INTEGER, description TEXT, commercial BOOLEAN, load_rating TEXT,
+    speed_rating TEXT
 );
 CREATE TABLE tire_stock (
     sku TEXT, trading_network TEXT, price REAL, stock_quantity INTEGER,
@@ -371,8 +372,13 @@ CREATE TABLE tire_eu_labels (
     sku TEXT, energy_class TEXT, wet_grip_class TEXT, noise_db INTEGER, noise_class TEXT
 );
 CREATE TABLE tire_attributes (
-    sku TEXT PRIMARY KEY, studded TEXT, is_xl BOOLEAN, load_index TEXT, speed_index TEXT
+    sku TEXT PRIMARY KEY, studded TEXT, is_xl BOOLEAN, load_index TEXT, speed_index TEXT,
+    season TEXT, is_runflat BOOLEAN
 );
+CREATE TABLE tshina_tire_models (
+    model_1c_id INTEGER PRIMARY KEY, brand_title TEXT, name TEXT, season TEXT
+);
+CREATE TABLE product_ommology (sku TEXT PRIMARY KEY, codes TEXT);
 """
 
 #: ``(sku, season, description, (studded, is_xl) of tire_attributes or None)``
@@ -476,7 +482,7 @@ class _SqliteEngine:
                 (i, description.split()[0], sku, season, type_id),
             )
             self.db.execute(
-                "INSERT INTO tire_products VALUES (?, ?, '225/45 R18', 225, 45, 18, ?, 0)",
+                "INSERT INTO tire_products VALUES (?, ?, '225/45 R18', 225, 45, 18, ?, 0, NULL, NULL)",
                 (sku, i, description),
             )
             country, year, qty = _ORIGINS.get(sku, (None, None, 4))
@@ -486,7 +492,8 @@ class _SqliteEngine:
             )
             if attr is not None:
                 self.db.execute(
-                    "INSERT INTO tire_attributes VALUES (?, ?, ?, NULL, NULL)", (sku, *attr)
+                    "INSERT INTO tire_attributes VALUES (?, ?, ?, NULL, NULL, NULL, NULL)",
+                    (sku, *attr),
                 )
         for label in _LABELS:
             self.db.execute("INSERT INTO tire_eu_labels VALUES (?, ?, ?, ?, ?)", label)

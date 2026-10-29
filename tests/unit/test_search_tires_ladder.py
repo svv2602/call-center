@@ -213,8 +213,8 @@ class TestFilters:
         client, engine = _client(lambda sql, p: [_row("Pirelli", "P7", 3000)])
         await client.search_tires(network="ProKoleso", runflat=value, width=205)
         sql = _tire_sql_calls(engine)[0][0]
-        assert (client_mod._RUNFLAT_SQL in sql) is present
-        assert (f"NOT ({client_mod._RUNFLAT_SQL})" in sql) is negated
+        assert (client_mod._RUNFLAT_FILTER_SQL in sql.split("WHERE", 1)[1]) is present
+        assert (f"NOT {client_mod._RUNFLAT_FILTER_SQL}" in sql) is negated
 
     @pytest.mark.asyncio
     async def test_non_bool_studded_does_not_filter(self) -> None:
@@ -317,7 +317,7 @@ def _limited_catalog(rows: list[dict[str, Any]]) -> Any:
             rows,
             key=lambda r: (
                 0
-                if "CASE WHEN LOWER(m.manufacturer) IN" in sql and r["brand"].lower() in prio
+                if f"CASE WHEN LOWER({client_mod._BRAND_SQL}) IN" in sql and r["brand"].lower() in prio
                 else 1,
                 r["price"],
             ),

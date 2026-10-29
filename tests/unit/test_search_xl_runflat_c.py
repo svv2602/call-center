@@ -200,7 +200,7 @@ class TestLadder:
 
     @pytest.mark.asyncio
     async def test_no_runflat_in_size_offers_regular_with_marker(self) -> None:
-        client, _ = _client(_only_without(client_mod._RUNFLAT_SQL))
+        client, _ = _client(_only_without(client_mod._RUNFLAT_FILTER_SQL))
         result = await client.search_tires(network="ProKoleso", runflat=True, **_SIZE)
         assert result["items"]
         assert result["relaxed"] == ["runflat"]
@@ -212,7 +212,7 @@ class TestLadder:
             if "FROM tire_products" not in sql:
                 return []
             where = sql.split("WHERE", 1)[1]
-            if client_mod._XL_FILTER_SQL in where or client_mod._RUNFLAT_SQL in where:
+            if client_mod._XL_FILTER_SQL in where or client_mod._RUNFLAT_FILTER_SQL in where:
                 return []
             return list(_MARKET)
 
@@ -232,7 +232,7 @@ class TestLadder:
 
     @pytest.mark.asyncio
     async def test_refused_runflat_is_not_relaxed(self) -> None:
-        client, _ = _client(_only_without(f"NOT ({client_mod._RUNFLAT_SQL})"))
+        client, _ = _client(_only_without(f"NOT {client_mod._RUNFLAT_FILTER_SQL}"))
         result = await client.search_tires(network="ProKoleso", runflat=False, **_SIZE)
         assert result["items"] == []
         assert "caveat_key" not in result
