@@ -218,6 +218,19 @@ def parse_tire_attributes(item: dict[str, Any]) -> dict[str, Any]:
 COMMERCIAL = frozenset({"C", "LT"})
 
 
+def _metric_dim(value: Any, lo: int, hi: int) -> int | None:
+    """A metric width / profile, or ``None`` for a size of another system.
+
+    Inch sizes («31x10.50 R15» → width 31) and old commercial ones («6.50
+    R16» → 6.5) come through the same fields (8 of the first 5000 live rows).
+    Their ``size`` string still says it; rejecting the row would drop the
+    SKU's studs, XL and season with it.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or not lo <= value <= hi:
+        return None
+    return value
+
+
 def _tire_properties(item: dict[str, Any]) -> dict[str, Any]:
     """The fields tshina added on 2026-10-29: brand, model, size and the rest.
 
@@ -242,8 +255,8 @@ def _tire_properties(item: dict[str, Any]) -> dict[str, Any]:
         "brand_slug": _opt_str(brand.get("slug"), 100, "brand.slug"),
         "brand_title": _opt_str(brand.get("title"), 100, "brand.title"),
         "model_name": _opt_str(model.get("name"), 200, "model.name"),
-        "width": _opt_int(item.get("width"), 100, 500, "width"),
-        "profile": _opt_int(item.get("profile"), 10, 150, "profile"),
+        "width": _metric_dim(item.get("width"), 100, 500),
+        "profile": _metric_dim(item.get("profile"), 10, 150),
         "diameter": _opt_num(item.get("diameter"), 8, 30, "diameter"),
         "size": _opt_str(item.get("size"), 50, "size"),
         "commercial": commercial,

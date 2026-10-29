@@ -1230,10 +1230,16 @@ def test_old_contract_record_gets_null_properties() -> None:
         {"commercial": "XL"},
         {"tire_technology": "techsealtech"},
         {"brand": "GoodYear"},
-        {"width": "215"},
         {"suv": "yes"},
     ],
 )
 def test_extended_fields_off_contract_reject_the_row(bad: dict[str, Any]) -> None:
     with pytest.raises(ts.RowRejectedError):
         ts.parse_tire_attributes(EXTENDED | bad)
+
+
+@pytest.mark.parametrize(("width", "size"), [(31, "31x10.50 R15"), (6.5, "6.50 R16C")])
+def test_a_non_metric_size_keeps_the_row(width: float, size: str) -> None:
+    """Live rows (2026-10-29): rejecting them dropped the SKU's studs and XL too."""
+    row = ts.parse_tire_attributes(EXTENDED | {"width": width, "size": size})
+    assert row["width"] is None and row["size"] == size and row["studded"] == "no_ship"
