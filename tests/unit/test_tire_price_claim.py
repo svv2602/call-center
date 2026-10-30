@@ -136,3 +136,82 @@ class TestDeliverySumIsNotATyrePrice:
         assert guard_tire_claims_text(text, _state(), "") == (
             "Sportrak Snowtrek SP709 за 3118 грн з доставкою."
         )
+
+
+MICHELIN = [
+    {"brand": "Michelin", "model": "X-ICE SNOW+", "price": 8952},
+    {"brand": "Michelin", "model": "X-ICE SNOW", "price": 9280},
+    {"brand": "Michelin", "model": "Pilot Alpin 5", "price": 10434},
+]
+LADDER = [
+    {"brand": "Bridgestone", "model": "Blizzak 6", "price": 7977},
+    {"brand": "Firestone", "model": "WinterHawk 4", "price": 6057},
+    {"brand": "Laufenn", "model": "I FIT+ LW31", "price": 5346},
+]
+
+
+def _shown(items: list[dict]) -> TireClaimState:
+    st = TireClaimState(sales_enabled=True)
+    st.note("search_tires", {"items": items})
+    return st
+
+
+class TestListOfTyres:
+    """Call 06311ba8 (2026-10-29): three Michelins, one price said for all."""
+
+    def test_one_price_said_for_three_tyres(self) -> None:
+        text = (
+            "Є Мішлен Ікс-аїс сно плюс за 10434 гривні, Ікс-аїс сно за 10434 гривень "
+            "і Пілот Алпін п'ять за десять тисяч чотириста тридцять чотири гривні."
+        )
+        assert guard_tire_claims_text(text, _shown(MICHELIN), "") == (
+            "Є Мішлен Ікс-аїс сно плюс за 8952 гривні, Ікс-аїс сно за 9280 гривень "
+            "і Пілот Алпін п'ять за десять тисяч чотириста тридцять чотири гривні."
+        )
+
+    def test_prices_swapped_between_named_tyres(self) -> None:
+        text = "Є Файрстоун Вінтерхок чотири за 7977 гривень і Бріджстоун Блідзак шосте за 6057 гривень."
+        assert guard_tire_claims_text(text, _shown(LADDER), "") == (
+            "Є Файрстоун Вінтерхок чотири за 6057 гривень і Бріджстоун Блідзак шосте за 7977 гривень."
+        )
+
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "Є Бріджстоун Блідзак шосте за сім тисяч дев’ятсот сімдесят сім гривень, Файрстоун "
+            "Вінтерхок чотири за шість тисяч п’ятдесят сім гривень і Лауффенн ай фіт плюс ел діб "
+            "тридцять один за п’ять тисяч триста сорок шість гривень.",
+            "Бріджстоун Блідзак шосте — 7977 гривень, Лауффенн — 5346 гривень.",
+            # a brand only, the right prices in another order
+            "Мішлен є за 10434 гривні і за 8952 гривні.",
+            # no tyre named
+            "Є варіанти за 5000 гривень і за 6000 гривень.",
+        ],
+    )
+    def test_right_or_unjudged_lists_pass(self, text: str) -> None:
+        items = MICHELIN if "Мішлен" in text else LADDER
+        assert guard_tire_claims_text(text, _shown(items), "") == text
+
+
+class TestNumberTail:
+    """Call f06909f9: «двісті п'ятьдесят дві гривні» — «дві» was read as 2 UAH."""
+
+    RECAP = (
+        "Записала: чотири шини Бріджстоун Бліцзак 6, шість тисяч вісімсот тринадцять гривень "
+        "за шину, разом двадцять сім тисяч двісті п'ятьдесят дві гривні."
+    )
+
+    def test_misspelt_tens_read_whole(self) -> None:
+        assert find_amounts(self.RECAP)[-1].value == 27252
+
+    def test_right_total_with_misspelt_tens_passes(self) -> None:
+        items = [{"brand": "Bridgestone", "model": "Blizzak 6", "price": 6813}]
+        assert guard_tire_claims_text(self.RECAP, _shown(items), "") == self.RECAP
+
+    def test_unreadable_tens_are_not_cut_to_their_tail(self) -> None:
+        # «сорокдесят» reads as nothing: «дві» after it is not 2 UAH.
+        assert [a.value for a in find_amounts("разом двісті сорокдесят дві гривні")] == []
+        assert [a.value for a in find_amounts("разом шістьдесят дві гривні")] == [62]
+
+    def test_a_diameter_before_the_price_is_not_part_of_it(self) -> None:
+        assert [a.value for a in find_amounts("ер вісімнадцять три тисячі гривень")] == [3000]

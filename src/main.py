@@ -136,14 +136,20 @@ from src.onec_client.client import (
 from src.store_client.client import (
     BUDGET_SOURCE_CALLER,
     BUDGET_SOURCE_CORRIDOR,
+    OVER_BUDGET_STEPS,
     PRICE_CORRIDOR_STEPS,
     PRICE_FILTER_KEYS,
     PRICE_MODE_CHEAPER,
     PRICE_MODE_SIMILAR,
     TIRE_OFFER_KEYS,
     StoreClient,
+    budget_filter,
+    cheapest_heard,
+    heard_tires,
+    merge_price_bounds,
     price_filter,
     shown_tire_offer,
+    sku_from_article,
     within_price_filter,
 )
 from src.stt.base import STTConfig
@@ -152,6 +158,11 @@ from src.tts.base import TTSConfig
 from src.tts.google_tts import GoogleTTSEngine
 
 logger = logging.getLogger(__name__)
+
+#: A `get_pickup_points` query about a Nova Poshta branch, not our own point.
+_NOVA_POSHTA_QUERY_RE = re.compile(
+    r"нов\w*\s+пошт|новая\s+почт|нова\s+почт|(?<![\w])нп(?![\w])|nova\s*poshta", re.IGNORECASE
+)
 
 app = FastAPI(
     title="Call Center AI",
@@ -2126,12 +2137,16 @@ def _build_tool_router(
         excluded_countries = session.tire_query.get("excluded_countries")
         if excluded_countries:
             params["exclude_countries"] = list(excluded_countries)
-        result, applied_mode = await _search_by_price_mode(network, params, price_mode)
+        budget = budget_filter(session.tire_query.get("budget"), session.tire_query.get("quantity"))
+        result, applied_mode = await _search_by_price_mode(network, params, price_mode, budget)
         _drop_excluded_countries(result, excluded_countries)
         _apply_load_index_min(result)
         await _mark_runflat_required(result, params)
         if isinstance(result, dict):
-            if session.tire_query.get("budget"):
+            if result.get("over_budget"):
+                # Over the caller's budget: «в межах вашого бюджету» is not true.
+                pass
+            elif session.tire_query.get("budget"):
                 result["budget_source"] = BUDGET_SOURCE_CALLER
             elif applied_mode:
                 result["budget_source"] = BUDGET_SOURCE_CORRIDOR
@@ -2139,15 +2154,17 @@ def _build_tool_router(
         return result
 
     async def _search_by_price_mode(
-        network: str, params: dict[str, Any], price_mode: Any
+        network: str, params: dict[str, Any], price_mode: Any, budget: dict[str, Any]
     ) -> tuple[Any, str | None]:
         """«А дешевше?» / «схожі за ціною»: a search bounded by the last offer.
 
         Size, season and needs the model left out come from the last offer —
         the caller is not asked them again. No last offer (or an unknown mode)
         → an ordinary search. ``similar`` widens the corridor once when empty.
-        Every returned item obeys the bounds (default-deny, whatever engine
-        answered).
+        Both modes leave out every tyre already heard in this size. The
+        caller's ``budget`` (`budget_filter`) bounds every search; nothing
+        within it → `_over_budget_search`. Every returned item obeys the
+        bounds (default-deny, whatever engine answered).
         """
         offer = session.last_tire_offer or {}
         prices = offer.get("prices") or []
@@ -2158,42 +2175,60 @@ def _build_tool_router(
                     price_mode,
                     session.channel_uuid,
                 )
-            return await client.search_tires(network=network, **params), None
+            result = await client.search_tires(network=network, **params, **budget)
+            if budget and isinstance(result, dict):
+                _keep_within(result, budget)
+                if not result.get("items"):
+                    return await _over_budget_search(network, params, budget, {}, ()), None
+            return result, None
         for key, value in (offer.get("params") or {}).items():
             current = params.get(key)
             if current is None or current == "" or (type(current) is int and current == 0):
                 params[key] = value
 
-        shown_ids = set(offer.get("ids") or ())
+        heard = [h for h in offer.get("heard") or [] if isinstance(h, dict)]
+        shown_ids = set(offer.get("ids") or ()) | {str(h["id"]) for h in heard if h.get("id")}
         steps = PRICE_CORRIDOR_STEPS if price_mode == PRICE_MODE_SIMILAR else (0.0,)
         result: Any = None
+        mode_bounds: dict[str, Any] = {}
         for n, step in enumerate(steps):
-            bounds = price_filter(price_mode, prices, step)
+            mode_bounds = price_filter(price_mode, prices, step)
+            bounds = merge_price_bounds(budget, mode_bounds)
             extra: dict[str, Any] = dict(bounds)
-            if price_mode == PRICE_MODE_SIMILAR and shown_ids:
+            if shown_ids:
                 extra["exclude_ids"] = sorted(shown_ids)
             result = await client.search_tires(network=network, **params, **extra)
             if not isinstance(result, dict):
                 return result, None
-            items = [
-                i
-                for i in result.get("items") or []
-                if within_price_filter(i, bounds)
-                and not (price_mode == PRICE_MODE_SIMILAR and str(i.get("id")) in shown_ids)
-            ]
-            result["items"] = items
-            result["total"] = len(items)
+            _keep_within(result, bounds, shown_ids)
             result["price_mode"] = price_mode
             if n:
                 result["price_corridor_widened"] = True
-            if items:
+            if result["items"]:
                 break
+        if isinstance(result, dict) and not result.get("items") and budget:
+            fallback = await _over_budget_search(network, params, budget, mode_bounds, shown_ids)
+            if isinstance(fallback, dict) and fallback.get("items"):
+                fallback["price_mode"] = price_mode
+                return fallback, price_mode
         if isinstance(result, dict) and not result.get("items"):
-            result["message"] = (
-                "Дешевших за показані варіанти зараз немає."
-                if price_mode == PRICE_MODE_CHEAPER
-                else "Схожих за ціною варіантів зараз немає."
-            )
+            if price_mode == PRICE_MODE_CHEAPER:
+                # tshina `6df1a1090`: name the cheapest tyre heard, so «ок,
+                # беру» after it orders that one.
+                cheapest = cheapest_heard(heard)
+                message = "Дешевших за показані варіанти зараз немає."
+                if cheapest is not None:
+                    result["cheapest_shown"] = cheapest
+                    name = " ".join(
+                        str(cheapest.get(k)) for k in ("brand", "model") if cheapest.get(k)
+                    )
+                    message += (
+                        f" Найдоступніша з уже названих — {name} за "
+                        f"{round(cheapest['price'])} грн за шину."
+                    )
+                result["message"] = message
+            else:
+                result["message"] = "Схожих за ціною варіантів зараз немає."
         logger.info(
             "search_tires: price_mode=%s for call %s → %d items",
             price_mode,
@@ -2201,6 +2236,60 @@ def _build_tool_router(
             len(result.get("items") or []) if isinstance(result, dict) else 0,
         )
         return result, price_mode
+
+    def _keep_within(
+        result: dict[str, Any], bounds: dict[str, Any], excluded: Any = ()
+    ) -> None:
+        """Default-deny over every engine: only items inside ``bounds`` and not heard."""
+        items = [
+            i
+            for i in result.get("items") or []
+            if within_price_filter(i, bounds) and str(i.get("id")) not in excluded
+        ]
+        result["items"] = items
+        result["total"] = len(items)
+
+    async def _over_budget_search(
+        network: str,
+        params: dict[str, Any],
+        budget: dict[str, Any],
+        mode_bounds: dict[str, Any],
+        excluded: Any,
+    ) -> Any:
+        """Nothing within the caller's budget: the nearest tyres over it, marked.
+
+        tshina `172043b40`: a named brand or model is shown even above the
+        budget. Here every search does so — the caller hears that nothing
+        fits the budget and the nearest prices over it (up to
+        ``OVER_BUDGET_STEPS`` over, then any), cheapest first, never a bare
+        «немає».
+        """
+        cap = budget["price_to"]
+        result: Any = None
+        for step in OVER_BUDGET_STEPS:
+            window = {"price_from": round(cap + 0.01, 2), "price_to": round(cap * step, 2)}
+            bounds = merge_price_bounds(window, mode_bounds)
+            extra: dict[str, Any] = dict(bounds)
+            if excluded:
+                extra["exclude_ids"] = sorted(excluded)
+            result = await client.search_tires(network=network, **params, **extra)
+            if not isinstance(result, dict):
+                return result
+            _keep_within(result, bounds, excluded)
+            if result["items"]:
+                break
+        if isinstance(result, dict) and result.get("items"):
+            result["items"].sort(
+                key=lambda i: p if isinstance(p := i.get("price"), int | float) and p > 0 else 1e12
+            )
+            result["over_budget"] = {
+                "budget_to": round(cap),
+                "message": (
+                    f"У межах бюджету клієнта (до {round(cap)} грн за шину) варіантів "
+                    "немає. Скажи це і запропонуй найближчі за ціною — ці, від найдешевшої."
+                ),
+            }
+        return result
 
     def _drop_excluded_countries(result: Any, excluded: Any) -> None:
         """Default-deny over every engine: no item of a refused country is offered.
@@ -2269,10 +2358,12 @@ def _build_tool_router(
         if not result.get("items"):
             return
         prices, ids = shown_tire_offer(result)
+        offer_params = {k: params[k] for k in TIRE_OFFER_KEYS if params.get(k) not in (None, "")}
         session.last_tire_offer = {
             "prices": prices or None,
             "ids": ids or None,
-            "params": {k: params[k] for k in TIRE_OFFER_KEYS if params.get(k) not in (None, "")},
+            "params": offer_params,
+            "heard": heard_tires(session.last_tire_offer, result, offer_params) or None,
         }
 
     # The car of the call, read out of the caller's own lines (the session keeps
@@ -2313,6 +2404,10 @@ def _build_tool_router(
         product_id: str = "", query: str = "", **kw: Any
     ) -> dict[str, Any]:
         network = session.network_id or "ProKoleso"
+        # «53253» from the product page is «00000053253» in 1C (`sku_from_article`).
+        if not product_id and str(query or "").strip().isdigit():
+            product_id, query = str(query).strip(), ""
+        product_id = sku_from_article(product_id)
         return await client.check_availability(product_id, query, network=network, **kw)
 
     async def _search_disks(**params: Any) -> dict[str, Any]:
@@ -3566,6 +3661,18 @@ def _build_tool_router(
 
     async def _get_pickup_points(city: str = "", query: str = "") -> dict[str, Any]:
         network = session.network_id or "ProKoleso"
+        if _NOVA_POSHTA_QUERY_RE.search(query or ""):
+            # Call f06909f9: «Нова пошта» filtered the network's own points to
+            # nothing and the bot said Dnipro had no Nova Poshta branches.
+            return {
+                "total": 0,
+                "points": [],
+                "message": (
+                    "Тут лише пункти видачі нашої мережі — відділень Нової пошти в цьому "
+                    "списку немає. Не кажи, що їх немає в місті: запитай номер відділення "
+                    "чи поштомату і передай місто та «відділення №N» в оформлення заявки."
+                ),
+            }
         cache_key = f"onec:points:{network}"
 
         result: dict[str, Any] | None = None

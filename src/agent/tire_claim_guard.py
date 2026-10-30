@@ -1113,10 +1113,25 @@ def rule_price(sentence: str, ctx: ClaimContext) -> Refusal | None:
     """A price said for the one named tyre that is not its shown price.
 
     The sentence is kept with only the wrong amount replaced (`tire_price_claim`).
+    Two or more per-tyre amounts are a list, judged tyre by tyre
+    (`list_price_corrections`).
     """
     from src.agent.parsers.tire_query import parse_quantity
-    from src.agent.tire_price_claim import price_corrections
+    from src.agent.tire_price_claim import (
+        find_amounts,
+        in_delivery_clause,
+        list_price_corrections,
+        price_corrections,
+    )
 
+    per_tyre = [
+        a
+        for a in find_amounts(sentence)
+        if not a.total and not in_delivery_clause(sentence, a.start)
+    ]
+    if len(per_tyre) >= 2:
+        listed = list_price_corrections(sentence, ctx.items, named_items)
+        return Refusal(RULE_PRICE, listed, fixed=False) if listed is not None else None
     subject = _subject(sentence, ctx)
     price = _price(subject) if subject is not None else None
     if price is None:

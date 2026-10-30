@@ -37,6 +37,9 @@ from src.main import _build_tool_router
 from src.store_client.client import (
     PRICE_CORRIDOR_STEPS,
     StoreClient,
+    budget_filter,
+    heard_tires,
+    merge_price_bounds,
     price_filter,
     shown_tire_offer,
     within_price_filter,
@@ -86,6 +89,8 @@ class _Engine:
         if "FROM tire_products" not in sql:
             return []
         rows = [r for r in self.market if r["width"] == p.get("width", r["width"])]
+        if p.get("brand"):
+            rows = [r for r in rows if r["brand"].lower() == str(p["brand"]).lower()]
         if "price_below" in p:
             rows = [r for r in rows if 0 < r["price"] < p["price_below"]]
         if "price_from" in p:
@@ -410,6 +415,125 @@ class TestBudgetSource:
         assert "budget_source" not in result
 
 
+# ── the caller's budget bounds the search (call 06311ba8, 2026-10-29) ─────
+
+
+class TestBudgetFilter:
+    def test_cap_is_the_upper_bound(self) -> None:
+        assert budget_filter({"amount": 4000, "is_cap": True}) == {
+            "price_from": 1.0,
+            "price_to": 4000.0,
+        }
+
+    def test_range(self) -> None:
+        assert budget_filter({"amount": 4500, "floor": 3500, "is_cap": True}) == {
+            "price_from": 3500.0,
+            "price_to": 4500.0,
+        }
+
+    def test_per_set_is_split_over_the_count(self) -> None:
+        budget = {"amount": 16000, "scope": "per_set", "is_cap": True}
+        assert budget_filter(budget)["price_to"] == 4000.0
+        assert budget_filter(budget, 2)["price_to"] == 8000.0
+
+    def test_target_allows_some_over(self) -> None:
+        assert budget_filter({"amount": 4000, "is_cap": False})["price_to"] == 4400.0
+
+    @pytest.mark.parametrize("budget", [None, {}, {"amount": 0}, {"amount": "x"}, "4000"])
+    def test_nothing_usable(self, budget: Any) -> None:
+        assert budget_filter(budget) == {}
+
+    def test_merge_keeps_both(self) -> None:
+        merged = merge_price_bounds(
+            {"price_from": 1.0, "price_to": 4000.0}, {"price_below": 5346.0}
+        )
+        assert merged == {"price_from": 1.0, "price_to": 4000.0, "price_below": 5346.0}
+
+    def test_merge_intersects_corridors(self) -> None:
+        merged = merge_price_bounds(
+            {"price_from": 1.0, "price_to": 4000.0}, {"price_from": 3500.0, "price_to": 4500.0}
+        )
+        assert merged == {"price_from": 3500.0, "price_to": 4000.0}
+
+
+class TestBudgetSearch:
+    @pytest.mark.asyncio
+    async def test_cap_bounds_the_search(self) -> None:
+        router, _, _ = _setup(budget={"amount": 3200, "scope": None, "is_cap": True})
+        result = await _run(router, dict(_SIZE))
+        assert result["items"]
+        assert all(p <= 3200 for p in _prices(result))
+        assert result["budget_source"] == "caller"
+
+    @pytest.mark.asyncio
+    async def test_nothing_within_the_budget_offers_the_nearest_over_it(self) -> None:
+        router, _, _ = _setup(budget={"amount": 1500, "scope": None, "is_cap": True})
+        result = await _run(router, dict(_SIZE))
+        # The nearest window over 1500 that has tyres: ×1.5 → Rosava at 2000.
+        assert _prices(result) == [2000.0]
+        assert result["over_budget"]["budget_to"] == 1500
+        assert "budget_source" not in result
+        out = json.loads(compress_tool_result("search_tires", result, sales_enabled=True))
+        assert "1500" in out["over_budget"]["say"]
+
+    @pytest.mark.asyncio
+    async def test_far_over_the_budget_still_offers_something(self) -> None:
+        market = [_row("Michelin", 5000), _row("Continental", 5100)]
+        router, _, _ = _setup(market=market, budget={"amount": 1000, "scope": None, "is_cap": True})
+        result = await _run(router, dict(_SIZE))
+        assert _prices(result) == [5000.0, 5100.0]
+        assert result["over_budget"]["budget_to"] == 1000
+
+    @pytest.mark.asyncio
+    async def test_cheaper_stays_within_the_budget(self) -> None:
+        router, session, _ = _setup()
+        await _run(router, dict(_SIZE))
+        session.tire_query["budget"] = {"amount": 3000, "scope": None, "is_cap": True}
+        result = await _run(router, {"price_mode": "cheaper"})
+        assert result["items"]
+        assert all(p <= 3000 for p in _prices(result))
+
+
+class TestHeardTyres:
+    @pytest.mark.asyncio
+    async def test_cheaper_never_offers_a_tyre_heard_earlier(self) -> None:
+        """Call 06311ba8: «дешевше» after a brand search repeated the first offer."""
+        router, _, _ = _setup()
+        first = await _run(router, dict(_SIZE))
+        heard = {i["id"] for i in first["items"][:3]}
+        nokian = await _run(router, {**_SIZE, "brand": "Nokian"})
+        assert [i["brand"] for i in nokian["items"]] == ["Nokian"]
+        result = await _run(router, {"price_mode": "cheaper"})
+        assert result["items"]
+        assert not {i["id"] for i in result["items"]} & heard
+
+    @pytest.mark.asyncio
+    async def test_a_new_size_starts_the_list_anew(self) -> None:
+        router, session, _ = _setup()
+        await _run(router, dict(_SIZE))
+        await _run(router, {**_SIZE, "width": 225})
+        heard = (session.last_tire_offer or {}).get("heard") or []
+        assert [h["id"] for h in heard] == ["Michelin-225"]
+
+    @pytest.mark.asyncio
+    async def test_nothing_cheaper_names_the_cheapest_heard(self) -> None:
+        market = [_row("Michelin", 5000), _row("Continental", 5100), _row("Bridgestone", 5200)]
+        router, _, _ = _setup(market=market)
+        await _run(router, dict(_SIZE))
+        result = await _run(router, {"price_mode": "cheaper"})
+        assert result["cheapest_shown"]["id"] == "Michelin-205"
+        assert "5000" in result["message"]
+        out = json.loads(compress_tool_result("search_tires", result, sales_enabled=True))
+        assert out["cheapest_shown"]["price"] == 5000.0
+        assert "Michelin" in out["message"]
+
+    def test_heard_keeps_the_order_and_no_duplicates(self) -> None:
+        params = {"width": 205, "profile": 55, "diameter": 16, "season": "summer"}
+        offer = {"params": params, "heard": [{"id": "a", "price": 1.0}]}
+        result = {"items": [{"id": "a", "price": 1}, {"id": "b", "price": 2, "brand": "B"}]}
+        assert [h["id"] for h in heard_tires(offer, result, params)] == ["a", "b"]
+
+
 # ── «аналоги?» → similar, by code (wave 6-M, R17) ─────────────────────────
 
 
@@ -498,7 +622,8 @@ class TestAnalogsByCode:
         router, session, engine = _setup()
         await _turn(router, session, "205/55 R16", dict(_SIZE))
         await _turn(router, session, "аналоги матадора?", {"brand": "Michelin"})
-        assert engine.tire_params()[-1]["brand"] == "Michelin"
+        # the turn's first query (an empty brand result relaxes the brand after it)
+        assert engine.tire_params()[1]["brand"] == "Michelin"
 
     @pytest.mark.asyncio
     async def test_logged(self, caplog: pytest.LogCaptureFixture) -> None:
@@ -518,7 +643,7 @@ class TestAnalogsByCode:
         )
         assert "price_mode" not in result
         assert all("price_from" not in p for p in engine.tire_params())
-        assert engine.tire_params()[-1]["brand"] == "Matador"
+        assert engine.tire_params()[1]["brand"] == "Matador"
 
 
 # ── sales off: nothing of this ───────────────────────────────────────────
@@ -552,6 +677,7 @@ class TestSession:
             "prices": [3000.0, 4000.0],
             "ids": ["a", "b"],
             "params": dict(_SIZE),
+            "heard": [{"id": "a", "brand": "A", "model": "M", "price": 3000.0}],
         }
         restored = CallSession.deserialize(session.serialize())
         assert restored.last_tire_offer == session.last_tire_offer

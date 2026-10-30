@@ -936,6 +936,7 @@ def merge_tire_query(
     from src.agent.intent_classifier import sales_intents
     from src.agent.parsers.tire_query import (
         blank_load_index_requirement,
+        drops_chosen_brand,
         excluded_tire_brands,
         excluded_tire_countries,
         extract_tire_brands,
@@ -1013,6 +1014,8 @@ def merge_tire_query(
     budget = parse_budget(budget_text)
     if budget is not None:
         out["budget"] = {"amount": budget.amount, "scope": budget.scope, "is_cap": budget.is_cap}
+        if budget.floor is not None:
+            out["budget"]["floor"] = budget.floor
     if brands:
         # Talk b1e72568 (tshina `0cb563847`): «розкажіть про матадор» put
         # Matador into the filters and «аналоги матадора?» then searched Matador
@@ -1020,6 +1023,8 @@ def merge_tire_query(
         dropped = excluded_tire_brands(text) or []
         chosen = [] if is_tire_question(text) else [b for b in brands if b not in dropped]
         out["brands"] = chosen or [b for b in out.get("brands") or [] if b not in dropped]
+    elif out.get("brands") and drops_chosen_brand(text):
+        out.pop("brands")
     refused_countries = excluded_tire_countries(text) or []
     if refused_countries:
         kept_countries = list(out.get("excluded_countries") or [])

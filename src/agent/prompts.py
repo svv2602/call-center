@@ -533,7 +533,8 @@ _MOD_TIRE_SEARCH_SALES = """\
 - Після вибору → check_availability → «Оформити заявку?»
 
 ## Сценарій: швидкий пошук за артикулом (SKU)
-- Клієнт назвав артикул → одразу check_availability(product_id=артикул). Не знайдено → запитай розмір і переходь до підбору.\
+- Клієнт назвав артикул → одразу check_availability(product_id=артикул). Не знайдено → запитай розмір і переходь до підбору.
+- Клієнт питає артикул, щоб знайти шину на сайті → назви поле article шини з результату — це артикул зі сторінки товару. Поле id не диктуй.\
 """
 
 _MOD_ORDER_FLOW = """\
@@ -658,6 +659,19 @@ _MOD_ORDER_FLOW_SALES = _replace_once(
     "- Результат зі status «missing_field» — заявку ще НЕ створено: запитай у клієнта те, що "
     "названо в message, і виклич submit_order_request ще раз.\n"
     "- submit_order_request створює ЗАЯВКУ:",
+)
+# Call f06909f9 (2026-10-29): get_pickup_points searches the network's own
+# points only, so «Нова пошта» in its query found nothing and the bot said
+# «у Дніпрі нема пунктів видачі Нової пошти». The branch is checked by
+# `submit_order_request` against the Nova Poshta API (`_warehouse_refusal`).
+_MOD_ORDER_FLOW_SALES = _replace_once(
+    _MOD_ORDER_FLOW_SALES,
+    "- Нова пошта → запитай місто та номер/адресу відділення → get_pickup_points(city, "
+    'query="Нова пошта [адреса]") → озвуч конкретне відділення з номером\n',
+    "- Нова пошта → запитай місто і номер відділення чи поштомату. get_pickup_points тут НЕ "
+    "викликай — він знає лише наші пункти видачі, відділень Нової пошти в ньому немає. "
+    "Місто передай у city, «відділення №N» — у address submit_order_request: номер "
+    "перевірить код.\n",
 )
 _MOD_ORDER_FLOW_SALES = _replace_once(
     _MOD_ORDER_FLOW_SALES,
@@ -2653,7 +2667,10 @@ def _render_tire_progress(p: dict[str, Any]) -> str:
         lines.append(f"- Кількість: ✅ {quantity} шт.")
     budget = p.get("budget")
     if isinstance(budget, dict) and budget.get("amount"):
-        text = f"{'до ' if budget.get('is_cap') else 'близько '}{budget['amount']} грн"
+        if budget.get("floor"):
+            text = f"від {budget['floor']} до {budget['amount']} грн"
+        else:
+            text = f"{'до ' if budget.get('is_cap') else 'близько '}{budget['amount']} грн"
         scope = budget.get("scope")
         if scope == "per_tire":
             text += " за шину"

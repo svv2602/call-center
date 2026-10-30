@@ -43,6 +43,10 @@ def _compress_vehicle_sizes(result: dict[str, Any], *, sales_enabled: bool = Fal
         out["acceptable_sizes_policy"] = (
             "нештатні розміри підбирає спеціаліст — не пропонуй їх клієнту"
         )
+    if result.get("did_you_mean"):
+        # A model one character off (call c096e663: «S4» for SX4): the bot asks.
+        out["did_you_mean"] = list(result["did_you_mean"])
+        out["message"] = result.get("message")
     # Keep years only if <= 5 elements
     years = result.get("years")
     if years is not None and len(years) <= 5:
@@ -271,6 +275,13 @@ def _compress_search_tires(
     out: dict[str, Any] = {"total": result.get("total", len(items))}
     out["items"] = compressed
     if sales_enabled:
+        from src.store_client.client import site_article
+
+        # The storefront's article — the 1C code without its zeros (call 9b0fcd8b).
+        for entry in compressed:
+            article = site_article(entry.get("id"))
+            if article:
+                entry["article"] = article
         out["price_per"] = "1 шина"
         if result.get("staggered"):
             out["staggered"] = True
@@ -299,6 +310,15 @@ def _compress_search_tires(
                     f"зараз немає — скажи це клієнту прямо; у показаних індекс {span}, "
                     "не кажи, що вони підходять за індексом"
                 ),
+            }
+        over = result.get("over_budget")
+        if isinstance(over, dict) and over.get("message"):
+            # Nothing within the caller's budget: these are the nearest over it.
+            out["over_budget"] = {"budget_to": over.get("budget_to"), "say": over["message"]}
+        cheapest = result.get("cheapest_shown")
+        if isinstance(cheapest, dict) and cheapest.get("id"):
+            out["cheapest_shown"] = {
+                k: cheapest[k] for k in ("id", "brand", "model", "price") if cheapest.get(k)
             }
         if result.get("budget_source"):
             out["budget_source"] = result["budget_source"]

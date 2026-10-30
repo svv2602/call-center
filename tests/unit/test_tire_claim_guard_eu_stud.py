@@ -571,11 +571,11 @@ class TestStudGroups:
 
 #: The goldset 5 replies (10-26, both networks): WinterHawk 4 is studdable.
 COMMA_LIE = (
-    "Є Bridgestone Blizzak 6 без шипів за 4150 гривень, Firestone WinterHawk 4 шиповані "
-    "за 3300 гривень, Nokian Nordman 8 шиповані за 3600 гривень."
+    "Є Bridgestone Blizzak 6 без шипів за 5200 гривень, Firestone WinterHawk 4 шиповані "
+    "за 4100 гривень, Nokian Nordman 8 шиповані за 4300 гривень."
 )
 COMMA_HEDGED_LIE = (
-    "Шипована Nokian Nordman 8 за 3600 гривень, Firestone WinterHawk 4 — шипована можливо, "
+    "Шипована Nokian Nordman 8 за 4300 гривень, Firestone WinterHawk 4 — шипована можливо, "
     "Bridgestone Blizzak 6 — без шипів."
 )
 
@@ -609,9 +609,9 @@ class TestStudCommaList:
         "sentence",
         [
             # The goldset form, every kind right.
-            "Є Bridgestone Blizzak 6 без шипів за 4150 гривень, Firestone WinterHawk 4 під шип "
-            "за 3300 гривень, Nokian Nordman 8 шиповані за 3600 гривень.",
-            "Шипована Nokian Nordman 8 за 3600 гривень, Firestone WinterHawk 4 — під шип "
+            "Є Bridgestone Blizzak 6 без шипів за 5200 гривень, Firestone WinterHawk 4 під шип "
+            "за 4100 гривень, Nokian Nordman 8 шиповані за 4300 гривень.",
+            "Шипована Nokian Nordman 8 за 4300 гривень, Firestone WinterHawk 4 — під шип "
             "можливо, Bridgestone Blizzak 6 — без шипів.",
             # «Без шипів» is true of a studdable tyre: it is sold without studs.
             "WinterHawk 4 без шипів, Nordman 8 шиповані.",
@@ -627,12 +627,12 @@ class TestStudCommaList:
         [
             # Every sentence lies about Blizzak 6; one unclear part cancels the whole cut.
             # A part with no tyre.
-            "Blizzak 6 шипована, за 4150 гривень, Nordman 8 шипована.",
+            "Blizzak 6 шипована, за 5200 гривень, Nordman 8 шипована.",
             "Blizzak 6 шипована, а ще, Nordman 8 шипована.",
             # A part with two tyres.
             "Blizzak 6 шипована, Nordman 8 і Ice Cruiser 7 шиповані.",
             # A part with no kind.
-            "Blizzak 6 шипована, Nordman 8 за 3600 гривень, Ice Cruiser 7 шипована.",
+            "Blizzak 6 шипована, Nordman 8 за 4300 гривень, Ice Cruiser 7 шипована.",
             # A part with two kinds.
             "Blizzak 6 шипована, Nordman 8 шипована або без шипів.",
             # A brand alone: which model is meant is a guess.
@@ -660,7 +660,7 @@ class TestStudCommaList:
         }
 
     def test_one_tyre_keeps_the_old_path(self) -> None:
-        sentence = "Bridgestone Blizzak 6 шипована, за 4150 гривень."
+        sentence = "Bridgestone Blizzak 6 шипована, за 5200 гривень."
         assert _fired(sentence, _group_state()) == {RULE_STUD}
         assert _judge(sentence, _group_state()) == f"Без шипів — {BLIZZAK}."
 

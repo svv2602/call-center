@@ -23,12 +23,13 @@ Loop-breakers — a forced call must tell a new request from a repeat:
 
 - once per turn (`ForcedTireSearch`);
 - the caller's utterance of this turn must itself say something about the
-  tyres (size, season, studs, brand, RunFlat/XL/C, a need, a load index) — a
+  tyres (size, season, studs, brand, RunFlat/XL/C, a need, a load index, a
+  budget) — a
   delivery question asked while a complete request sits unsearched is not a
   search request;
 - not when the arguments are already covered by the last ``search_tires`` of
-  the history AND this utterance names no need / load index that was not in
-  force at that search («уже шукали»). Needs and the load index are not
+  the history AND this utterance names no need / load index / budget that
+  was not in force at that search («уже шукали»). Needs and the load index are not
   ``search_tires`` arguments — the handler takes them from the session — so
   «для мене важливіша тиша» after a shown offer repeats the arguments of the
   last search and is still a new request (wave 8-T, R26): the offer is ranked
@@ -79,10 +80,13 @@ _REQUEST_KEYS = (
     "diameter",
     "needs",
     "load_index_min",
+    "budget",
 )
 #: What the session carries about the offer but ``search_tires`` takes no
 #: argument for — the handler reads them from ``session.tire_query``.
-_NEED_KEYS = ("needs", "load_index_min")
+#: ``budget`` (call 06311ba8): «а до 5000?» after an offer was answered from
+#: memory, wrongly — a budget not in force at the last search searches anew.
+_NEED_KEYS = ("needs", "load_index_min", "budget")
 
 
 def _size(text: Any) -> tuple[int, int, int] | None:
@@ -197,7 +201,8 @@ def _caller_text(msg: dict[str, Any]) -> str:
 
 
 def needs_already_searched(user_text: str, history: list[dict[str, Any]]) -> bool:
-    """True when the needs / load index this utterance names were in force at the last search.
+    """True when the needs / load index / budget this utterance names were in force
+    at the last search.
 
     Replays ``merge_tire_query`` (its needs and load-index keys only, refusals
     included) over the caller's lines BEFORE the last ``search_tires`` of the
@@ -210,7 +215,8 @@ def needs_already_searched(user_text: str, history: list[dict[str, Any]]) -> boo
     said = merge_tire_query({}, user_text or "", consult_started=True)
     wanted = list(said.get("needs") or [])
     load = said.get("load_index_min")
-    if not wanted and load is None:
+    budget = said.get("budget")
+    if not wanted and load is None and budget is None:
         return True
     last = _last_search(history)
     if last is None:
@@ -223,6 +229,8 @@ def needs_already_searched(user_text: str, history: list[dict[str, Any]]) -> boo
             state = {k: merged[k] for k in _NEED_KEYS if k in merged}
     in_force = state.get("needs") or []
     if any(n not in in_force for n in wanted):
+        return False
+    if budget is not None and budget != state.get("budget"):
         return False
     return load is None or load == state.get("load_index_min")
 

@@ -508,6 +508,9 @@ class Budget:
     scope: BudgetScope | None = None
     #: «до 6000» / «не дорожче 3000» — an upper bound, not a target.
     is_cap: bool = False
+    #: The lower bound of a range («від 3500 до 4500», «4000-5000 грн»);
+    #: ``amount`` is its upper bound then.
+    floor: int | None = None
 
 
 _MONEY_SUFFIX = r"(?:грн\b\.?|гривен\w*|гривн\w*|гривень|₴|uah\b|hrn\b)"
@@ -535,6 +538,38 @@ _PER_SET_RE = re.compile(
     r"|загальн\w*\s+бюджет|общий\s+бюджет|per\s+set|total"
 )
 
+#: «від 3500 до 4500», «от 4000 до 5000» (tshina `4b9579299`).
+_RANGE_FROM_TO_RE = re.compile(r"(?<!\w)(?:від|вiд|от|з)\s+(\d{1,6})\s+до\s+(\d{1,6})(?![\d:/])")
+#: «4000-5000 грн», «4-5000» («чотири-п'ять тисяч» once numbers are digits).
+_RANGE_DASH_RE = re.compile(r"(?<![\d/.,xх×])(\d{1,6})\s*[-–—]\s*(\d{1,6})(?![\d:/])")
+#: A money word: a dash range is a budget only beside one.
+_MONEY_WORD_RE = re.compile(
+    rf"{_MONEY_SUFFIX}|ціна|ціну|цін[іи]|цена|цену|бюджет|вартіст|коштує|стоит|тисяч|тысяч",
+    re.IGNORECASE,
+)
+_RANGE_MIN, _RANGE_MAX = 300, 100_000
+
+
+def _budget_range(norm: str) -> tuple[int, int] | None:
+    """``(low, high)`` of a price range in ``norm`` (sizes blanked), or ``None``.
+
+    tshina `4b9579299`: «від N до M» with N ≥ 1000 or beside a money word; a
+    dash range only beside a money word. «4-5000» is 4000-5000. Two years
+    («2019-2020») without a money word are not a range.
+    """
+    money = bool(_MONEY_WORD_RE.search(norm))
+    for regex in (_RANGE_FROM_TO_RE, _RANGE_DASH_RE):
+        for m in regex.finditer(norm):
+            low, high = int(m.group(1)), int(m.group(2))
+            if low < 100 <= 1000 <= high and high % 1000 == 0:
+                low *= 1000
+            if not _RANGE_MIN <= low < high <= _RANGE_MAX:
+                continue
+            if not money and (regex is _RANGE_DASH_RE or low < 1000 or 1950 <= low < high <= 2035):
+                continue
+            return low, high
+    return None
+
 
 def parse_budget(text: str) -> Budget | None:
     """«до шести тисяч» → Budget(6000, is_cap=True); «3000 за шину» → per tire.
@@ -546,6 +581,7 @@ def parse_budget(text: str) -> Budget | None:
     norm = normalize_spoken_numbers(text)
     norm = _blank(norm, _size_spans(norm))
 
+    span = _budget_range(norm)
     cap = _CAP_AMOUNT_RE.search(norm)
     if cap:
         amount, is_cap = int(cap.group(1)), True
@@ -555,15 +591,17 @@ def parse_budget(text: str) -> Budget | None:
             or _SCOPED_AMOUNT_RE.search(norm)
             or _TARGET_AMOUNT_RE.search(norm)
         )
-        if hit is None:
+        if hit is None and span is None:
             return None
-        amount, is_cap = int(hit.group(1)), False
+        amount, is_cap = (int(hit.group(1)), False) if hit is not None else (span[1], True)
 
     scope: BudgetScope | None = None
     if _PER_TIRE_RE.search(norm):
         scope = "per_tire"
     elif _PER_SET_RE.search(norm):
         scope = "per_set"
+    if span is not None:
+        return Budget(span[1], scope, True, span[0])
     return Budget(amount, scope, is_cap)
 
 
@@ -945,6 +983,21 @@ _ANALOG_REFUSED_RE = re.compile(
     r"|(?:аналог\w*|альтернатив\w*|подібн\w*|схож\w*|похож\w*)\s+не\s+"
     r"(?:треба|потрібн\w*|надо|нужн\w*|цікав\w*|интерес\w*)"
 )
+
+#: «Дорого», «дороговато», «дорогувато» — the offer was refused for its price.
+_TOO_EXPENSIVE_RE = re.compile(r"(?<![\w'])(?<!не\s)дорог(?:о|овато|увато|ие|і|а|ая)?(?![\w'])")
+
+
+def drops_chosen_brand(text: str) -> bool:
+    """True when the caller turns from the brand they chose to a cheaper tyre.
+
+    Call 06311ba8: «Мішлен» stayed in the request after «не, это дорого,
+    давайте что-нибудь подешевле», so a later «до 4000» would have searched
+    Michelin under 4000. A cheaper word or «дорого» drops the chosen brand;
+    a brand named in the same line is a new choice (the caller keeps it).
+    """
+    low = (text or "").lower()
+    return bool(_CHEAPER_WORD_RE.search(low) or _TOO_EXPENSIVE_RE.search(low))
 
 
 def is_analog_request(text: str) -> bool:

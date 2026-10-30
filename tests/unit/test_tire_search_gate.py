@@ -666,3 +666,36 @@ class TestGoldsetMockByArgs:
         }
         with pytest.raises(CaseError, match="when_args"):
             parse_case(raw)
+
+
+# ── Call 06311ba8 (2026-10-29): a budget after a shown offer ──────────
+
+
+@LOOPS
+def test_a_budget_after_the_offer_searches_again(run: Any) -> None:
+    """«а до 4000?» was answered «дешевше немає» from memory, with no search."""
+    rec, _, seen = run(
+        [_SHOWN, ("а є до 4000?", [], "До 4000 — Hankook."), ("а до 5000?", [], "До 5000 — ...")]
+    )
+    assert rec.ran == [_SUMMER, _SUMMER, _SUMMER]
+    assert _has_tool_result(seen[1][0][-2:])  # before round 1 of turn 2
+
+
+@LOOPS
+def test_the_same_budget_again_is_not_searched_again(run: Any) -> None:
+    rec, _, _ = run(
+        [_SHOWN, ("а є до 4000?", [], "До 4000 — Hankook."), ("так, до 4000", [], "Hankook.")]
+    )
+    assert rec.ran == [_SUMMER, _SUMMER]
+
+
+@LOOPS
+def test_too_expensive_drops_the_chosen_brand(run: Any) -> None:
+    rec, _, _ = run(
+        [
+            ("літні 205/55 R16 Michelin", [], "Є Michelin Primacy 4."),
+            ("дорого, давайте дешевше до 4000", [], "До 4000 — Hankook."),
+        ]
+    )
+    assert rec.ran[0]["brand"].lower() == "michelin"
+    assert rec.ran[1] == _SUMMER

@@ -284,7 +284,8 @@ class CallSession:
         # `search_tires` wrapper after a search with items): per-tyre prices
         # and ids of the shown items, and the size/season/needs it was for.
         # «А дешевше?» / «схожі за ціною» search from it — `price_mode` —
-        # without asking the size again. Keys: prices, ids, params.
+        # without asking the size again. Keys: prices, ids, params, heard (every
+        # tyre heard in this size — `store_client.heard_tires`).
         self.last_tire_offer: dict[str, Any] | None = None
         # Delivery sums `get_delivery_cost` gave the caller (whole UAH: the
         # branch price and, when asked, the courier surcharge) — for the speech
@@ -818,6 +819,9 @@ class CallSession:
                 "ids": list(offer.get("ids") or []) or None,
                 "params": dict(offer.get("params") or {}),
             }
+            heard = [h for h in offer.get("heard") or [] if isinstance(h, dict)]
+            if heard:
+                session.last_tire_offer["heard"] = heard
         quotes = data.get("delivery_quotes")
         if isinstance(quotes, list):
             # In place: the streaming loop holds this very list object.

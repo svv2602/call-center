@@ -24,8 +24,12 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from src.stt.numeral_parser import _lookup as _numeral_value
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 _CURRENCY = r"(?:грн\.?|гривень|гривні|гривня|гривнях|гривен|гривны|гривна|гривнями)"
 _THOUSAND = r"(?:тисяч[аіу]?|тисячами|тысяч[аиу]?)"
@@ -51,6 +55,11 @@ _DELIVERY_WORD = re.compile(
     r"|накладен|наложен|комісі|комисси)\w*",
     re.IGNORECASE,
 )
+
+
+#: Tens, hundreds or thousands the parser could not read («п'ятьдесят»
+#: misspelt): an amount right after one is the tail of a longer number.
+_UNREAD_HIGHER = re.compile(r"тисяч|тысяч|десят|сот(?!\w)|ст[іи]$", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -87,7 +96,8 @@ def _group(tokens: list[str]) -> int | None:
 
 def _parse(tokens: list[str]) -> int | None:
     """An amount from tokens: «три тисячі сто вісімнадцять», «3 118», «6236»."""
-    low = [t.lower().replace("ʼ", "'") for t in tokens]
+    # «п'ятьдесят», «шістьдесят» — the model's misspellings of the tens.
+    low = [t.lower().replace("ʼ", "'").replace("тьдесят", "тдесят") for t in tokens]
     if len(low) == 1 and low[0].isdigit():
         return int(low[0])
     if len(low) == 2 and all(t.isdigit() for t in low) and len(low[1]) == 3:
@@ -103,6 +113,17 @@ def _parse(tokens: list[str]) -> int | None:
     return value or None
 
 
+def _continues_number(prev: str) -> bool:
+    """``prev`` is tens, hundreds or thousands the parser could not read.
+
+    «двісті п'ятьдесят | дві»: the amount after it is the tail of a longer
+    number. A number word it can read never gets here before the amount —
+    joined, the longer run parses first; apart («ер вісімнадцять | три
+    тисячі гривень»), it is a diameter, a count, a model's digit.
+    """
+    return bool(_UNREAD_HIGHER.search(prev.lower()))
+
+
 def find_amounts(sentence: str) -> list[Amount]:
     """Amounts said before a currency word — the longest valid number suffix of each run."""
     out: list[Amount] = []
@@ -113,6 +134,11 @@ def find_amounts(sentence: str) -> list[Amount]:
             value = _parse([w.group(0) for w in words[i:]])
             if value is None:
                 continue
+            if i and _continues_number(words[i - 1].group(0)):
+                # Call f06909f9: «двісті п'ятьдесят дві гривні» was read as 2 and
+                # «дві» replaced by the tyre price. A number it cannot read whole
+                # is not judged.
+                break
             start = run_start + words[i].start()
             end = run_start + words[-1].end()
             before = sentence[:start]
@@ -150,3 +176,72 @@ def price_corrections(sentence: str, price: float, count: int | None) -> str | N
         fixed = fixed[: amount.start] + str(truth) + fixed[amount.end :]
         changed = True
     return fixed if changed else None
+
+
+def list_price_corrections(
+    sentence: str,
+    items: list[dict[str, Any]],
+    named: Callable[[str, list[dict[str, Any]]], list[dict[str, Any]]],
+) -> str | None:
+    """A list of shown tyres with a price each, checked tyre by tyre.
+
+    Call 06311ba8: «Є Мішлен Ікс-аїс сно плюс за 10434 гривні, Ікс-аїс сно за
+    10434 гривень і Пілот Алпін п'ять за 10434 гривні» — 8952 and 9280 were
+    shown. The whole sentence names one model (Pilot Alpin), so the one-tyre
+    rule judged every amount against it and kept them.
+
+    The sentence is cut at its per-tyre amounts; the text before each amount
+    names its tyre (``named``). A tyre named alone is taken first; an amount
+    whose text names several tyres (a brand only) or none gets the shown tyre
+    of its own price, else the next tyre not yet taken, in the result's order.
+    An amount equal to a shown price of its candidates is that tyre's, so the
+    shown prices said in another order stay. Silent: fewer than two amounts,
+    no tyre named at all. ``None`` when nothing is wrong.
+    """
+    amounts = [
+        a
+        for a in find_amounts(sentence)
+        if not a.total and not in_delivery_clause(sentence, a.start)
+    ]
+    if len(amounts) < 2:
+        return None
+    shown = [i for i in items if _item_price(i) is not None]
+    candidates: list[list[dict[str, Any]]] = []
+    start = 0
+    for amount in amounts:
+        candidates.append([i for i in named(sentence[start : amount.start], shown)])
+        start = amount.end
+    if not any(candidates):
+        return None
+    taken: dict[int, dict[str, Any]] = {}
+    for k, cands in enumerate(candidates):
+        if len(cands) == 1:
+            taken[k] = cands[0]
+    used = {id(i) for i in taken.values()}
+    for k, cands in enumerate(candidates):
+        if k in taken:
+            continue
+        pool = [i for i in (cands or shown) if id(i) not in used]
+        if not pool:
+            continue
+        same = [i for i in pool if _item_price(i) == amounts[k].value]
+        pick = same[0] if same else pool[0]
+        taken[k] = pick
+        used.add(id(pick))
+    fixed = sentence
+    changed = False
+    for k in sorted(taken, reverse=True):
+        truth = _item_price(taken[k])
+        amount = amounts[k]
+        if truth is None or amount.value == truth:
+            continue
+        fixed = fixed[: amount.start] + str(truth) + fixed[amount.end :]
+        changed = True
+    return fixed if changed else None
+
+
+def _item_price(item: dict[str, Any]) -> int | None:
+    price = item.get("price")
+    if isinstance(price, bool) or not isinstance(price, int | float) or price <= 0:
+        return None
+    return round(price)

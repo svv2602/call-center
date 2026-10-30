@@ -200,6 +200,156 @@ def price_filter(
     return {}
 
 
+def _model_key(name: Any) -> str:
+    return re.sub(r"[^0-9a-zа-яіїєґ]", "", str(name or "").lower())
+
+
+def _one_edit_apart(a: str, b: str) -> bool:
+    """``a`` and ``b`` differ by one inserted, dropped or changed character."""
+    if abs(len(a) - len(b)) > 1 or a == b:
+        return False
+    if len(a) > len(b):
+        a, b = b, a
+    i = 0
+    while i < len(a) and a[i] == b[i]:
+        i += 1
+    return a[i + (len(a) == len(b)) :] == b[i + 1 :]
+
+
+def near_model_names(heard: Any, names: list[Any], limit: int = 3) -> list[str]:
+    """Models of the brand one character away from the model heard.
+
+    Call c096e663 (2026-10-29): «Suzuki S4» — STT lost the «X» of SX4, the
+    lookup found nothing and the caller hung up. The bot asks «можливо, SX4?».
+    Keys shorter than 2 characters are never matched.
+    """
+    key = _model_key(heard)
+    if len(key) < 2:
+        return []
+    out: list[str] = []
+    for name in names:
+        if _one_edit_apart(key, _model_key(name)) and str(name) not in out:
+            out.append(str(name))
+    return out[:limit]
+
+
+#: Every 1C product code has 11 digits («00000053253»).
+ONEC_SKU_DIGITS = 11
+
+
+def site_article(sku: Any) -> str | None:
+    """The article the storefront shows for a 1C code: no leading zeros.
+
+    prokoleso.ua and tshina.ua print «Артикул: 53253» on the card of
+    «00000053253» (tshina `db8eec927`). Call 9b0fcd8b (2026-10-29): the bot
+    dictated the eleven-digit code as the article for the site.
+    """
+    text = str(sku or "").strip()
+    if not text.isdigit():
+        return None
+    return text.lstrip("0") or None
+
+
+def sku_from_article(code: Any) -> str:
+    """A storefront article («53253») as the 1C code; anything else unchanged."""
+    text = str(code or "").strip()
+    if text.isdigit() and len(text) < ONEC_SKU_DIGITS:
+        return text.zfill(ONEC_SKU_DIGITS)
+    return text
+
+
+#: «бюджет 4000» / «десь 4000» (a target, not a cap): what over it still fits.
+BUDGET_TARGET_SLACK = 0.10
+#: Tyres a «per set» budget is split over when the caller named no count.
+BUDGET_SET_SIZE = 4
+#: Nothing within the budget: the price windows over it searched in turn
+#: (× the budget's upper bound) — the nearest first, then any price.
+OVER_BUDGET_STEPS = (1.25, 1.5, 2.0, 1000.0)
+
+
+def budget_filter(budget: Any, quantity: Any = None) -> dict[str, float]:
+    """Per-tyre search bounds of the caller's budget (``tire_query["budget"]``).
+
+    Call 06311ba8: «до 4000» was answered «дешевше немає» with no search while
+    two tyres under 4000 were in stock; the budget reached only the prompt.
+    A cap or a range («від 3500 до 4500», tshina `4b9579299`) bounds the
+    search; a target («десь 4000») allows ``BUDGET_TARGET_SLACK`` over it. A
+    per-set budget is split over the count named, else ``BUDGET_SET_SIZE``.
+    Nothing usable → ``{}``.
+    """
+    if not isinstance(budget, dict):
+        return {}
+    amount = _positive_price(budget.get("amount"))
+    if amount is None:
+        return {}
+    floor = _positive_price(budget.get("floor")) or 0.0
+    if budget.get("scope") == "per_set":
+        count = quantity if type(quantity) is int and quantity > 0 else BUDGET_SET_SIZE
+        amount, floor = amount / count, floor / count
+    if not budget.get("is_cap"):
+        amount *= 1 + BUDGET_TARGET_SLACK
+    return {"price_from": round(max(floor, 1.0), 2), "price_to": round(amount, 2)}
+
+
+def merge_price_bounds(*bounds: dict[str, Any]) -> dict[str, Any]:
+    """The bounds that hold all of ``bounds`` at once (a corridor inside a budget).
+
+    ``price_from`` / ``price_to`` intersect (an empty intersection keeps the
+    later bounds' corridor, so the search is not made impossible), ``price_below``
+    takes the lowest.
+    """
+    out: dict[str, Any] = {}
+    for b in bounds:
+        if not b:
+            continue
+        if "price_below" in b:
+            out["price_below"] = min(out.get("price_below", b["price_below"]), b["price_below"])
+        if "price_from" in b and "price_to" in b:
+            if "price_from" in out:
+                low = max(out["price_from"], b["price_from"])
+                high = min(out["price_to"], b["price_to"])
+                out["price_from"], out["price_to"] = (
+                    (low, high) if low <= high else (b["price_from"], b["price_to"])
+                )
+            else:
+                out["price_from"], out["price_to"] = b["price_from"], b["price_to"]
+    return out
+
+
+def heard_tires(offer: Any, result: Any, params: dict[str, Any]) -> list[dict[str, Any]]:
+    """Every tyre the caller heard in this size: the earlier offer's plus this one's.
+
+    Call 06311ba8: «дешевше» after the Michelins offered Bridgestone, Firestone
+    and Laufenn again — heard two answers earlier. A new size or season starts
+    the list anew. Entries: ``{id, brand, model, price}``.
+    """
+    same = isinstance(offer, dict) and all(
+        (offer.get("params") or {}).get(k) == params.get(k)
+        for k in ("width", "profile", "diameter", "season")
+    )
+    heard: list[dict[str, Any]] = list(offer.get("heard") or []) if same else []
+    seen = {h.get("id") for h in heard}
+    for item in (result.get("items") or [])[:SHOWN_TIRES] if isinstance(result, dict) else []:
+        if not isinstance(item, dict) or not item.get("id") or str(item["id"]) in seen:
+            continue
+        seen.add(str(item["id"]))
+        heard.append(
+            {
+                "id": str(item["id"]),
+                "brand": item.get("brand"),
+                "model": item.get("model"),
+                "price": _positive_price(item.get("price")),
+            }
+        )
+    return heard
+
+
+def cheapest_heard(heard: Any) -> dict[str, Any] | None:
+    """The cheapest priced tyre of ``heard_tires``, or ``None``."""
+    priced = [h for h in heard or () if isinstance(h, dict) and h.get("price")]
+    return min(priced, key=lambda h: h["price"]) if priced else None
+
+
 def within_price_filter(item: Any, bounds: dict[str, Any]) -> bool:
     """An offered item obeys ``price_filter`` bounds (default-deny on no price)."""
     if not bounds:
@@ -1212,11 +1362,25 @@ class StoreClient:
             # 2. Find model
             model_row = await self._find_vehicle_model(conn, brand_row["id"], model)
             if model_row is None:
-                return {
+                names = await conn.execute(
+                    text("SELECT DISTINCT name FROM vehicle_models WHERE brand_id = :bid"),
+                    {"bid": brand_row["id"]},
+                )
+                near = near_model_names(model, [r[0] for r in names.all()])
+                message = f"Модель '{model}' не знайдено для {brand_row['name']}"
+                if near:
+                    message += (
+                        f". Схоже, клієнт мав на увазі {' або '.join(near)} — перепитай "
+                        "коротко, чи так, і після «так» шукай цю модель."
+                    )
+                out: dict[str, Any] = {
                     "found": False,
                     "brand": brand_row["name"],
-                    "message": f"Модель '{model}' не знайдено для {brand_row['name']}",
+                    "message": message,
                 }
+                if near:
+                    out["did_you_mean"] = near
+                return out
 
             # 3. Get available years
             years_result = await conn.execute(
