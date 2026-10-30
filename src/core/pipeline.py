@@ -880,9 +880,28 @@ _FITTING_REQUEST_RE = re.compile(
 )
 
 
+#: «не літні», «не зимние» — the season word right after «не / ні».
+_SEASON_NEG_BEFORE_RE = re.compile(r"(?<![\w'])(?:не|ні|нет)\s+$")
+#: «літні не потрібні», «летние не надо», «зимові — ні» — a refusal after it.
+_SEASON_NEG_AFTER_RE = re.compile(
+    r"^\s*(?:(?:шин\w*|резин\w*|гум\w*|мені|мне|нам)\s+)?[,—-]?\s*(?:"
+    r"не\s+(?:треба|потрібн\w*|надо|нужн\w*|хочу|хочемо|цікав\w*|интерес\w*|підход\w*"
+    r"|подход\w*|розгляда\w*|рассматрива\w*)|ні|нет)(?![\w'])"
+)
+
+
+def _season_refused(low: str, start: int, end: int) -> bool:
+    """The season word at ``low[start:end]`` is refused, not named (tshina `61e1b14d3`)."""
+    return bool(
+        _SEASON_NEG_BEFORE_RE.search(low[:start]) or _SEASON_NEG_AFTER_RE.search(low[end:])
+    )
+
+
 def parse_tire_season(text: str, *, bot_asked_season: bool = False) -> str | None:
     """``summer`` / ``winter`` / ``all_season`` / ``any`` — or ``None``.
 
+    A refused season («не літні», «летние не надо») is not named: «мне не
+    летние, а зимние» is winter, «не зимові» names none.
     Two seasons in one utterance («літні чи зимові?») is a question → ``None``.
     ``any`` («без різниці», «все одно») only answers a season question.
     """
@@ -890,10 +909,13 @@ def parse_tire_season(text: str, *, bot_asked_season: bool = False) -> str | Non
     found: list[str] = []
     for season, pattern in _TIRE_SEASON_PATTERNS:
         spans = [m.span() for m in pattern.finditer(low)]
-        if spans:
+        named = False
+        for start, end in spans:
+            if not _season_refused(low, start, end):
+                named = True
+            low = low[:start] + " " * (end - start) + low[end:]
+        if named:
             found.append(season)
-            for start, end in spans:
-                low = low[:start] + " " * (end - start) + low[end:]
     if len(found) == 1:
         return found[0]
     if found:

@@ -303,9 +303,18 @@ _QUANTITY_NUMBER_RE = re.compile(
 )
 
 
+#: «БМВ х3 22 року», «x5 22года», «18 г.» — a two-digit year (tshina
+#: `31516cd04`): the car's, not a diameter. A bare «р» is left alone — «18 р»
+#: may be the radius.
+_SHORT_YEAR_RE = re.compile(
+    r"(?<![\d/.,])\d{2}\s*(?:год\w*|г\.|гг\.?|р\.|рік|року|рок\w*|year\w*)(?![\w])"
+)
+
+
 def _isolated_diameter(norm: str) -> int | None:
-    """«Tiguan 18» → 18; «Tiguan 2018» → nothing. A year is only four digits."""
+    """«Tiguan 18» → 18; «Tiguan 2018», «Tiguan 18 року» → nothing."""
     masked = _YEAR_RE.sub(" ", norm)
+    masked = _SHORT_YEAR_RE.sub(" ", masked)
     masked = _BUDGET_CAP_NUMBER_RE.sub(" ", masked)
     masked = _QUANTITY_NUMBER_RE.sub(" ", masked)
     outcome = DiameterParser().parse(ParseContext(customer_text=masked))
@@ -924,13 +933,15 @@ _COUNTRY_NEG_BEFORE_RE = re.compile(
     r"(?:\s+(?:шин\w*|резин\w*|гум\w*|ці|цих|эти|этих))?\s+$"
 )
 #: «Китай сразу отпадает», «китайщину не хочу», «китайські не підходять»,
-#: «Китай не розглядаю», «китайські — ні» — a refusal after the country (up
-#: to two words from a closed list between).
+#: «Китай не розглядаю», «китайські — ні», «китайські шини мене не цікавлять»
+#: (tshina `131dad99f`) — a refusal after the country (up to three words from
+#: a closed list between).
 _COUNTRY_NEG_AFTER_RE = re.compile(
-    r"^[\w']*(?:\s+(?:сразу|одразу|відразу|зразу|точно|взагалі|вообще|мені|мне|нам"
-    r"|шин\w*|резин\w*|гум\w*|бренд\w*)){0,2}\s*[,—-]?\s*(?:"
+    r"^[\w']*(?:\s+(?:сразу|одразу|відразу|зразу|точно|взагалі|вообще|мені|мне|нам|нас"
+    r"|мене|меня|зовсім|совсем|особо|особливо|навіть|даже|вже|уже"
+    r"|шин\w*|резин\w*|гум\w*|бренд\w*)){0,3}\s*[,—-]?\s*(?:"
     r"(?:від|от|в)?пада\w*|ні|нет"
-    r"|не\s+(?:хочу|хочемо|хотим|треба|потрібн\w*|надо|нужн\w*|підход\w*|подход\w*"
+    r"|не\s+(?:(?:дуже|очень|особо|особливо|сильно)\s+)?(?:хочу|хочемо|хотим|треба|потрібн\w*|надо|нужн\w*|підход\w*|подход\w*"
     r"|варіант|вариант|розгляда\w*|рассматрива\w*|бер\w*|візьм\w*|возьм\w*|цікав\w*|интерес\w*)"
     r")(?![\w'])"
 )
