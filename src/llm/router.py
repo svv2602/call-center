@@ -126,7 +126,8 @@ def live_call_stream_options() -> dict[str, Any]:
     """``complete_stream`` keywords of a live call, read from the env right now.
 
     Empty unless FF_LLM_OVERRIDE_FALLBACK is on — the call then goes out
-    exactly as before. Only the voice loop of a real call asks for these:
+    exactly as before. Only a real call asks for these — its voice loop, and
+    its blocking agent for the chain alone (``complete`` has no deadline):
     sandbox, goldset and replays must get the one model they named, and a
     replay measures time to first event, which a deadline would cut short.
     Read here, not from ``get_settings()``: that snapshot is built at import.
@@ -323,19 +324,21 @@ class LLMRouter:
 
         ``override_fallback`` and ``first_event_timeout`` belong to live calls
         (``live_call_stream_options``); without them an override is one
-        provider, waited for as long as it takes.
+        provider, waited for as long as it takes. ``override_fallback`` also
+        stops any chain from switching once an event has been yielded.
 
         ``first_event_timeout`` — seconds each provider of the chain has to
         produce its first event; a provider that misses it is dropped like a
         failed one.
         """
         chain = self._resolve_chain(task, provider_override, override_fallback=override_fallback)
-        # A chain grown from an override switches only while the caller has
-        # heard nothing: events already yielded are being spoken, and a second
-        # provider would start the reply over. (A strict override is a chain
-        # of one — nothing to switch to either way.) The task's own chain, no
-        # override, keeps its old behaviour.
-        switch_only_before_first_event = provider_override is not None
+        # A live call under the flag — with a pinned provider or without —
+        # switches only while the caller has heard nothing: events already
+        # yielded are being spoken, and a second provider would start the
+        # reply over. Without the keyword a strict override is a chain of one
+        # (nothing to switch to either way), and the task's own chain keeps
+        # its old behaviour and switches mid-reply.
+        switch_only_before_first_event = override_fallback
 
         last_error: Exception | None = None
         for idx, provider_key in enumerate(chain):
@@ -351,11 +354,16 @@ class LLMRouter:
                     tool_choice=tool_choice,
                     first_event_timeout=first_event_timeout,
                 ):
-                    yielded = True
+                    if not yielded:
+                        yielded = True
+                        # The switch is counted when the spare starts to
+                        # answer, before the event is handed over: a caller
+                        # who barges in closes this generator at the `yield`,
+                        # and nothing below it runs.
+                        if idx > 0:
+                            self._record_fallback(chain[0], provider_key, task)
                     yield event
                 # Stream completed successfully
-                if idx > 0:
-                    self._record_fallback(chain[0], provider_key, task)
                 self._record_success(provider_key, task)
                 return
             except Exception as exc:

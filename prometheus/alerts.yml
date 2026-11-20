@@ -242,11 +242,11 @@ groups:
             It will not recover without that.
 
       # Calls were answered by a fallback provider. Informational next to the
-      # two rules above: in a stream this counter moves only when the
-      # fallback's reply was read to the end, so a turn the caller barged
-      # into is not here. Its series cannot be exported at zero (the pairs
-      # are not known in advance), hence the second branch: a series that
-      # exists now and did not 15 minutes ago is a first switch.
+      # two rules above. In a stream the counter moves at the fallback's first
+      # event, so a reply the caller barged into is counted too. Its series
+      # cannot be exported at zero (the pairs are not known in advance), hence
+      # the second branch: a series that exists now and did not 15 minutes ago
+      # is a first switch.
       - alert: LLMFallbackActivated
         expr: >
           sum by (from_provider, to_provider, task) (

@@ -16,6 +16,13 @@ What must not move:
   nothing to the caller;
 * with the flag off the call to the router is the one it always was.
 
+The blocking path of a live call (``LLMAgent``: the farewell on every call,
+every turn while FF_STREAMING_LLM is off) runs on the network's model as well,
+flag or no flag, and under the flag gets the same chain behind it. Under the
+flag a network *without* a pinned model does not switch mid-reply either. A
+switch is counted when the spare yields its first event, so a turn the caller
+barged into is counted too.
+
 Providers here are real ``AbstractProvider`` subclasses behind a real
 ``LLMRouter`` with real circuit breakers.
 """
@@ -26,8 +33,10 @@ import ast
 import asyncio
 import logging
 import pathlib
+import uuid
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
+from unittest.mock import MagicMock, patch
 
 import pytest
 from aiobreaker import CircuitBreaker
@@ -174,6 +183,16 @@ def _fallbacks(from_key: str, to_key: str) -> float:
             {"from_provider": from_key, "to_provider": to_key, "task": "agent"},
         )
         or 0.0
+    )
+
+
+def _all_fallbacks() -> float:
+    """Every switch counted so far, whatever its labels."""
+    return sum(
+        sample.value
+        for metric in REGISTRY.collect()
+        for sample in metric.samples
+        if sample.name == "callcenter_llm_fallbacks_total"
     )
 
 
@@ -324,18 +343,150 @@ class TestFailureAfterFirstEvent:
         assert _texts(heard) == ["Добрий день, слухаю"]
         assert spare.stream_calls == 0
 
-    async def test_the_task_chain_without_an_override_is_left_as_it_was(self) -> None:
+    async def test_the_task_chain_without_the_flag_is_left_as_it_was(self) -> None:
         # Not a wish, a pin: the plain primary → fallbacks chain has always
-        # switched mid-stream, and this change is not allowed to move it —
-        # neither with the live-call keyword nor without.
-        for live in ({}, {"override_fallback": True}):
-            primary = ScriptedProvider("Добрий день, слухаю", fail_after_first=True)
-            fallback = ScriptedProvider("Добрий день!")
-            router = _router({SPARE: primary, PINNED: fallback})
+        # switched mid-stream, and without the live-call keyword (flag off,
+        # or not a live call) it still does.
+        primary = ScriptedProvider("Добрий день, слухаю", fail_after_first=True)
+        fallback = ScriptedProvider("Добрий день!")
+        router = _router({SPARE: primary, PINNED: fallback})
 
-            events = await _stream(router, **live)
+        events = await _stream(router)
 
-            assert _texts(events) == ["Добрий день, слухаю", "Добрий день!"]
+        assert _texts(events) == ["Добрий день, слухаю", "Добрий день!"]
+        assert fallback.stream_calls == 1
+
+    async def test_a_live_call_without_a_pinned_model_does_not_start_over_either(self) -> None:
+        # Flag on, the network has no override: the keyword alone is what
+        # stops the switch. The spare is in the chain and up — it answers the
+        # same request when the failure comes before the first event (the
+        # next test).
+        primary = ScriptedProvider("Добрий день, слухаю", fail_after_first=True)
+        fallback = ScriptedProvider("Добрий день!")
+        router = _router({SPARE: primary, PINNED: fallback})
+        assert router._resolve_chain(LLMTask.AGENT, None, override_fallback=True) == [SPARE, PINNED]
+        heard: list[StreamEvent] = []
+
+        with pytest.raises(RuntimeError, match="All providers failed streaming"):
+            await asyncio.wait_for(
+                _collect(
+                    router.complete_stream(LLMTask.AGENT, _MESSAGES, override_fallback=True), heard
+                ),
+                timeout=_BOUND_SEC,
+            )
+
+        assert _texts(heard) == ["Добрий день, слухаю"]
+        assert (primary.stream_calls, fallback.stream_calls) == (1, 0)
+
+    async def test_a_live_call_without_a_pinned_model_still_switches_before_the_first_event(
+        self,
+    ) -> None:
+        # The other half of the pair above: same router, same keyword, the
+        # failure one step earlier — so the silence there is the rule's doing,
+        # not a spare that could not have answered.
+        primary = ScriptedProvider(fail=RuntimeError("503"))
+        fallback = ScriptedProvider("Добрий день!")
+        router = _router({SPARE: primary, PINNED: fallback})
+
+        events = await _stream(router, override_fallback=True)
+
+        assert _texts(events) == ["Добрий день!"]
+        assert (primary.stream_calls, fallback.stream_calls) == (1, 1)
+
+
+# --------------------------------------------------------------------------- #
+# When a switch is counted
+# --------------------------------------------------------------------------- #
+
+
+class TestSwitchIsCountedAtTheFirstEventOfTheSpare:
+    async def test_a_reply_the_caller_barged_into_is_counted(self) -> None:
+        # Barge-in: the consumer takes the spare's first event and closes the
+        # stream. The switch happened — the caller heard the spare.
+        pinned = ScriptedProvider(fail=RuntimeError("503"))
+        spare = ScriptedProvider("Добрий день!")
+        router = _router({PINNED: pinned, SPARE: spare})
+        before, before_all = _fallbacks(PINNED, SPARE), _all_fallbacks()
+
+        stream = router.complete_stream(
+            LLMTask.AGENT, _MESSAGES, provider_override=PINNED, override_fallback=True
+        )
+        first = await asyncio.wait_for(stream.__anext__(), timeout=_BOUND_SEC)
+        await stream.aclose()
+
+        assert isinstance(first, TextDelta) and first.text == "Добрий день!"
+        assert _fallbacks(PINNED, SPARE) == before + 1
+        assert _all_fallbacks() == before_all + 1
+
+    async def test_a_reply_read_to_the_end_is_counted_once(self) -> None:
+        # Two events come from the spare (text, done): one switch, not two.
+        pinned = ScriptedProvider(fail=RuntimeError("503"))
+        spare = ScriptedProvider("Добрий день!")
+        router = _router({PINNED: pinned, SPARE: spare})
+        before, before_all = _fallbacks(PINNED, SPARE), _all_fallbacks()
+
+        events = await _stream(router, provider_override=PINNED, override_fallback=True)
+
+        assert len(events) == 2
+        assert _fallbacks(PINNED, SPARE) == before + 1
+        assert _all_fallbacks() == before_all + 1
+
+    async def test_a_turn_cancelled_before_the_spare_answers_is_not_a_switch(self) -> None:
+        pinned = ScriptedProvider(fail=RuntimeError("503"))
+        spare = ScriptedProvider(hang=True)
+        router = _router({PINNED: pinned, SPARE: spare})
+        before = _all_fallbacks()
+        events: list[StreamEvent] = []
+
+        with pytest.raises(TimeoutError):
+            await asyncio.wait_for(
+                _collect(
+                    router.complete_stream(
+                        LLMTask.AGENT, _MESSAGES, provider_override=PINNED, override_fallback=True
+                    ),
+                    events,
+                ),
+                timeout=0.3,
+            )
+
+        assert events == []
+        assert spare.stream_calls == 1
+        assert _all_fallbacks() == before
+
+    async def test_the_first_provider_answering_is_not_a_switch(self) -> None:
+        # Under any labels: a slip here would count the provider to itself.
+        pinned = ScriptedProvider("Добрий день!")
+        router = _router({PINNED: pinned, SPARE: ScriptedProvider("spare")})
+        before = _all_fallbacks()
+
+        events = await _stream(router, provider_override=PINNED, override_fallback=True)
+
+        assert _texts(events) == ["Добрий день!"]
+        assert _all_fallbacks() == before
+
+    async def test_a_spare_that_fails_too_is_not_a_switch(self) -> None:
+        pinned = ScriptedProvider(fail=RuntimeError("503"))
+        spare = ScriptedProvider(fail=RuntimeError("also down"))
+        router = _router({PINNED: pinned, SPARE: spare})
+        before = _all_fallbacks()
+
+        with pytest.raises(RuntimeError, match="All providers failed streaming"):
+            await _stream(router, provider_override=PINNED, override_fallback=True)
+
+        assert _all_fallbacks() == before
+
+    async def test_a_mid_reply_switch_of_the_plain_chain_is_counted_once(self) -> None:
+        # Flag off, no override: the old mid-stream switch, counted at the
+        # fallback's first event like any other.
+        primary = ScriptedProvider("Добрий день, слухаю", fail_after_first=True)
+        fallback = ScriptedProvider("Добрий день!")
+        router = _router({SPARE: primary, PINNED: fallback})
+        before, before_all = _fallbacks(SPARE, PINNED), _all_fallbacks()
+
+        await _stream(router)
+
+        assert _fallbacks(SPARE, PINNED) == before + 1
+        assert _all_fallbacks() == before_all + 1
 
 
 # --------------------------------------------------------------------------- #
@@ -479,11 +630,14 @@ class TestBlockingComplete:
         spare = ScriptedProvider("Добрий день!")
         router = _router({PINNED: pinned, SPARE: spare})
 
+        before = _fallbacks(PINNED, SPARE)
+
         response = await router.complete(
             LLMTask.AGENT, _MESSAGES, provider_override=PINNED, override_fallback=True
         )
 
         assert response.text == "Добрий день!"
+        assert _fallbacks(PINNED, SPARE) == before + 1
 
     async def test_a_named_model_fails_alone(self) -> None:
         spare = ScriptedProvider("Добрий день!")
@@ -701,7 +855,9 @@ class TestWhoIsALiveCall:
             for path in _python_sources()
             if (hits := _calls_with_keyword(path, {"live_call"}))
         }
-        assert marked == {"src/main.py": [("StreamingAgentLoop", "live_call")]}
+        assert {path: sorted(hits) for path, hits in marked.items()} == {
+            "src/main.py": [("LLMAgent", "live_call"), ("StreamingAgentLoop", "live_call")]
+        }
 
         by_hand = {
             str(path.relative_to(_REPO))
@@ -710,11 +866,363 @@ class TestWhoIsALiveCall:
         }
         assert by_hand == {"src/llm/router.py"}
 
-    def test_only_the_voice_loop_reads_the_live_call_options(self) -> None:
+    def test_only_the_voice_loop_and_the_agent_read_the_live_call_options(self) -> None:
+        # Both read them behind their own `live_call` parameter, which only
+        # `main.py` sets (the test above).
         readers = {
             str(path.relative_to(_REPO))
             for path in _python_sources()
             if path.name != "router.py"
             and "live_call_stream_options" in path.read_text(encoding="utf-8")
         }
-        assert readers == {"src/agent/streaming_loop.py"}
+        assert readers == {"src/agent/agent.py", "src/agent/streaming_loop.py"}
+
+    def test_main_marks_its_agent_as_a_live_call_on_the_networks_model(self) -> None:
+        # The source half of `TestMainBuildsTheAgentOfALiveCall`: one agent is
+        # built, it is marked live by a literal, and it is handed the same
+        # variable the voice loop is.
+        tree = ast.parse((_REPO / "src/main.py").read_text(encoding="utf-8"))
+
+        def calls(name: str) -> list[ast.Call]:
+            return [
+                n
+                for n in ast.walk(tree)
+                if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == name
+            ]
+
+        def keyword(call: ast.Call, name: str) -> ast.expr | None:
+            return next((k.value for k in call.keywords if k.arg == name), None)
+
+        (agent,) = calls("LLMAgent")
+        (loop,) = calls("StreamingAgentLoop")
+        live = keyword(agent, "live_call")
+        assert isinstance(live, ast.Constant) and live.value is True
+        agent_override = keyword(agent, "provider_override")
+        loop_override = keyword(loop, "provider_override")
+        assert isinstance(agent_override, ast.Name) and isinstance(loop_override, ast.Name)
+        assert agent_override.id == loop_override.id
+
+    def test_the_sandbox_agent_is_not_a_live_call(self) -> None:
+        tree = ast.parse((_REPO / "src/sandbox/agent_runner.py").read_text(encoding="utf-8"))
+        agents = [
+            n
+            for n in ast.walk(tree)
+            if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == "LLMAgent"
+        ]
+        assert agents
+        for call in agents:
+            assert "live_call" not in {k.arg for k in call.keywords}
+            assert "provider_override" in {k.arg for k in call.keywords}
+
+
+# --------------------------------------------------------------------------- #
+# The blocking path of a live call: LLMAgent
+# --------------------------------------------------------------------------- #
+
+
+class RecordingCompleteRouter:
+    """Stands in for the router: keeps the keywords of each ``complete``."""
+
+    def __init__(self) -> None:
+        self.calls: list[dict[str, Any]] = []
+
+    async def complete(
+        self, task: LLMTask, messages: list[dict[str, Any]], **kwargs: Any
+    ) -> LLMResponse:
+        self.calls.append(kwargs)
+        return LLMResponse(text="Добрий день!", usage=Usage(1, 1))
+
+
+def _agent(router: Any, **kwargs: Any) -> LLMAgent:
+    return LLMAgent(
+        api_key="k",
+        system_prompt="base",
+        llm_router=router,
+        tool_router=ToolRouter(),
+        **kwargs,
+    )
+
+
+class TestBlockingAgentWiring:
+    async def test_flag_off_the_live_agent_adds_only_the_networks_model(self) -> None:
+        router = RecordingCompleteRouter()
+
+        await _agent(router, provider_override=PINNED, live_call=True).process_message(
+            "доброго дня", []
+        )
+
+        (call,) = router.calls
+        assert call["provider_override"] == PINNED
+        assert "override_fallback" not in call
+        assert "first_event_timeout" not in call
+
+    async def test_flag_on_the_live_agent_asks_for_the_chain_and_no_deadline(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The deadline is a stream's: `complete()` does not take the keyword.
+        monkeypatch.setenv(_FLAG, "true")
+        monkeypatch.setenv(_DEADLINE, "12.5")
+        router = RecordingCompleteRouter()
+
+        await _agent(router, provider_override=PINNED, live_call=True).process_message(
+            "доброго дня", []
+        )
+
+        (call,) = router.calls
+        assert call["provider_override"] == PINNED
+        assert call["override_fallback"] is True
+        assert "first_event_timeout" not in call
+
+    async def test_an_agent_nobody_called_live_ignores_the_flag(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # Sandbox and goldset: a named model, no live-call mark.
+        monkeypatch.setenv(_FLAG, "true")
+        monkeypatch.setenv(_DEADLINE, "12.5")
+        router = RecordingCompleteRouter()
+
+        await _agent(router, provider_override=PINNED).process_message("доброго дня", [])
+
+        (call,) = router.calls
+        assert call["provider_override"] == PINNED
+        assert "override_fallback" not in call
+        assert "first_event_timeout" not in call
+
+    async def test_a_live_agent_of_a_network_without_a_model_calls_as_before(self) -> None:
+        router = RecordingCompleteRouter()
+
+        await _agent(router, live_call=True).process_message("доброго дня", [])
+
+        (call,) = router.calls
+        assert call["provider_override"] is None
+        assert "override_fallback" not in call
+
+    async def test_the_summary_of_an_exhausted_turn_goes_the_same_way(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The second `complete` of the blocking path: asked when the tool
+        # rounds run out, spoken to the same caller.
+        monkeypatch.setenv(_FLAG, "true")
+        live, named = RecordingCompleteRouter(), RecordingCompleteRouter()
+
+        await _agent(live, provider_override=PINNED, live_call=True)._request_summary_fallback(
+            "system", []
+        )
+        await _agent(named, provider_override=PINNED)._request_summary_fallback("system", [])
+
+        (live_call,) = live.calls
+        assert live_call["provider_override"] == PINNED
+        assert live_call["override_fallback"] is True
+        (named_call,) = named.calls
+        assert named_call["provider_override"] == PINNED
+        assert "override_fallback" not in named_call
+
+
+class TestVoiceLoopSummaryWiring:
+    """The voice loop's own blocking `complete`: the summary of an exhausted turn."""
+
+    async def test_flag_on_the_summary_takes_the_networks_model_and_the_chain(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(_FLAG, "true")
+        monkeypatch.setenv(_DEADLINE, "12.5")
+        router = RecordingCompleteRouter()
+
+        await _loop(router, live_call=True)._request_summary_fallback("system", [])
+
+        (call,) = router.calls
+        assert call["provider_override"] == PINNED
+        assert call["override_fallback"] is True
+        # `complete` has no first event: the deadline must not reach it.
+        assert "first_event_timeout" not in call
+
+    async def test_flag_off_the_summary_takes_the_networks_model_alone(self) -> None:
+        router = RecordingCompleteRouter()
+
+        await _loop(router, live_call=True)._request_summary_fallback("system", [])
+
+        (call,) = router.calls
+        assert call["provider_override"] == PINNED
+        assert "override_fallback" not in call
+
+    async def test_a_loop_nobody_called_live_keeps_its_one_model(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(_FLAG, "true")
+        router = RecordingCompleteRouter()
+
+        await _loop(router)._request_summary_fallback("system", [])
+
+        (call,) = router.calls
+        assert call["provider_override"] == PINNED
+        assert "override_fallback" not in call
+
+    async def test_the_summary_against_the_real_router_leaves_a_failed_pinned_provider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The keywords the loop sends are the keywords `complete` takes.
+        monkeypatch.setenv(_FLAG, "true")
+        monkeypatch.setenv(_DEADLINE, "12.5")
+        pinned = ScriptedProvider(fail=RuntimeError("503"))
+        spare = ScriptedProvider("Знайшла два варіанти.")
+        router = _router({PINNED: pinned, SPARE: spare})
+
+        text = await _loop(router, live_call=True)._request_summary_fallback("system", [])
+
+        assert text == "Знайшла два варіанти."
+        assert (pinned.complete_calls, spare.complete_calls) == (1, 1)
+
+
+class TestBlockingAgentAgainstTheRealRouter:
+    async def test_flag_on_a_live_turn_is_answered_by_the_next_provider(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # The agent against the real router: the keywords it sends are the
+        # keywords `complete` takes.
+        monkeypatch.setenv(_FLAG, "true")
+        monkeypatch.setenv(_DEADLINE, "12.5")
+        pinned = ScriptedProvider(fail=RuntimeError("503"))
+        spare = ScriptedProvider("Добрий день!")
+        router = _router({PINNED: pinned, SPARE: spare})
+        before = _fallbacks(PINNED, SPARE)
+
+        text, _history = await _agent(
+            router, provider_override=PINNED, live_call=True
+        ).process_message("доброго дня", [])
+
+        assert text == "Добрий день!"
+        assert (pinned.complete_calls, spare.complete_calls) == (1, 1)
+        assert _fallbacks(PINNED, SPARE) == before + 1
+
+    async def test_flag_off_a_live_turn_with_a_failed_pinned_provider_is_an_error(self) -> None:
+        pinned = ScriptedProvider(fail=RuntimeError("503"))
+        spare = ScriptedProvider("Добрий день!")
+        router = _router({PINNED: pinned, SPARE: spare})
+
+        text, _history = await _agent(
+            router, provider_override=PINNED, live_call=True
+        ).process_message("доброго дня", [])
+
+        assert text == ERROR_TEXT
+        assert (pinned.complete_calls, spare.complete_calls) == (1, 0)
+
+    async def test_a_live_turn_is_answered_by_the_networks_model_not_the_task_primary(
+        self,
+    ) -> None:
+        # No flag: the network's model answers although the agent task's
+        # primary is another provider and is up.
+        pinned = ScriptedProvider("Це модель мережі")
+        task_primary = ScriptedProvider("Це основна модель задачі")
+        router = _router({PINNED: pinned, SPARE: task_primary})
+        assert router._resolve_chain(LLMTask.AGENT, None)[0] == SPARE
+
+        text, _history = await _agent(
+            router, provider_override=PINNED, live_call=True
+        ).process_message("доброго дня", [])
+
+        assert text == "Це модель мережі"
+        assert (pinned.complete_calls, task_primary.complete_calls) == (1, 0)
+
+    async def test_a_network_without_a_model_is_served_by_the_task_chain_as_before(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        for flag in (None, "true"):
+            if flag:
+                monkeypatch.setenv(_FLAG, flag)
+            task_primary = ScriptedProvider(fail=RuntimeError("503"))
+            fallback = ScriptedProvider("Добрий день!")
+            router = _router({SPARE: task_primary, PINNED: fallback})
+
+            text, _history = await _agent(router, live_call=True).process_message("доброго дня", [])
+
+            assert text == "Добрий день!"
+            assert (task_primary.complete_calls, fallback.complete_calls) == (1, 1)
+
+
+# --------------------------------------------------------------------------- #
+# The wiring from main.py: handle_call builds the agent of a live call
+# --------------------------------------------------------------------------- #
+
+
+class _FakePipeline:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    async def run(self) -> None:
+        return None
+
+
+class _FakeSTT:
+    def __init__(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+
+async def _no_event(*args: Any, **kwargs: Any) -> None:
+    return None
+
+
+async def _agent_kwargs_of_a_call(tenant_config: dict[str, Any]) -> dict[str, Any]:
+    """Run ``handle_call`` for a network with ``tenant_config``; the agent's kwargs."""
+    import src.main as main
+
+    tenant = {
+        "id": uuid.uuid4(),
+        "slug": "net",
+        "name": "Net",
+        "network_id": "net",
+        "agent_name": "Олена",
+        "greeting": None,
+        "enabled_tools": [],
+        "prompt_suffix": None,
+        "config": tenant_config,
+        "is_active": True,
+    }
+    built: list[dict[str, Any]] = []
+
+    class _FakeAgent:
+        def __init__(self, **kwargs: Any) -> None:
+            built.append(kwargs)
+
+    async def _tenant(*args: Any, **kwargs: Any) -> dict[str, Any]:
+        return tenant
+
+    conn = MagicMock(spec=["channel_uuid", "is_closed"])
+    conn.channel_uuid = uuid.uuid4()
+    conn.is_closed = False
+
+    with (
+        patch.object(main, "_db_engine", None),
+        patch.object(main, "_redis", None),
+        patch.object(main, "_llm_router", None),
+        patch.object(main, "_tts_engine", MagicMock(spec=[])),
+        patch.object(main, "_store_client", MagicMock(spec=[])),
+        patch.object(main, "_resolve_tenant", _tenant),
+        # Both ask Asterisk over HTTP; this call has neither.
+        patch.object(main, "_resolve_ivr_intent", _no_event),
+        patch.object(main, "_resolve_caller_id", _no_event),
+        patch.object(main, "GoogleSTTEngine", _FakeSTT),
+        patch.object(main, "LLMAgent", _FakeAgent),
+        patch.object(main, "CallPipeline", _FakePipeline),
+        patch.object(
+            main, "_build_tool_router", lambda *a, **k: MagicMock(spec=["set_execute_hook"])
+        ),
+        patch.object(main, "publish_event", _no_event),
+    ):
+        await main.handle_call(conn)
+
+    (kwargs,) = built
+    return kwargs
+
+
+class TestMainBuildsTheAgentOfALiveCall:
+    async def test_the_agent_gets_the_networks_model_and_the_live_mark(self) -> None:
+        kwargs = await _agent_kwargs_of_a_call({"agent_provider_override": PINNED})
+
+        assert kwargs["provider_override"] == PINNED
+        assert kwargs["live_call"] is True
+
+    async def test_a_network_without_a_model_gets_none(self) -> None:
+        kwargs = await _agent_kwargs_of_a_call({})
+
+        assert kwargs["provider_override"] is None
+        assert kwargs["live_call"] is True

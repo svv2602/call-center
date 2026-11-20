@@ -67,7 +67,7 @@ from src.agent.vehicle_lookup_gate import (
     VehicleLookupGate,
     drop_stud_questions_text,
 )
-from src.llm.router import llm_call_id_var
+from src.llm.router import live_call_stream_options, llm_call_id_var
 from src.monitoring.metrics import (
     history_compression_mode,
     history_messages_count,
@@ -270,6 +270,7 @@ class LLMAgent:
         is_modular: bool = False,
         agent_name: str | None = None,
         promotions: list[ActivePromotion] | None = None,
+        live_call: bool = False,
     ) -> None:
         self._client = anthropic.AsyncAnthropic(api_key=api_key)
         self._model = model
@@ -280,6 +281,14 @@ class LLMAgent:
         self._system_prompt = system_prompt or SYSTEM_PROMPT
         self._prompt_version_name = prompt_version_name or PROMPT_VERSION
         self._provider_override = provider_override
+        # A real call (main.py) may leave a failed pinned provider for the
+        # agent chain — FF_LLM_OVERRIDE_FALLBACK, read once per call. Whoever
+        # else builds an agent (sandbox, goldset) keeps the one model it named.
+        # Of the live-call options only the chain applies here: a blocking
+        # call has no first event to set a deadline on.
+        self._live_complete_options: dict[str, Any] = {}
+        if live_call and live_call_stream_options().get("override_fallback"):
+            self._live_complete_options = {"override_fallback": True}
         self._few_shot_context = few_shot_context
         self._safety_context = safety_context
         self._promotions_context = promotions_context
@@ -715,6 +724,7 @@ class LLMAgent:
                         max_tokens=1024,
                         provider_override=self._provider_override,
                         **forced_choice,
+                        **self._live_complete_options,
                     )
 
                     latency_ms = int((time.monotonic() - start) * 1000)
@@ -998,6 +1008,8 @@ class LLMAgent:
                         system=system,
                         tools=[],
                         max_tokens=256,
+                        provider_override=self._provider_override,
+                        **self._live_complete_options,
                     ),
                     timeout=_SUMMARY_TIMEOUT_SEC,
                 )

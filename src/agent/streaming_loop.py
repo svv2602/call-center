@@ -1649,6 +1649,13 @@ class StreamingAgentLoop:
             from src.llm.router import live_call_stream_options
 
             self._live_stream_options = live_call_stream_options()
+        # The blocking `complete` of the same call (the summary of an exhausted
+        # turn) takes the chain but not the deadline: it has no first event.
+        self._live_complete_options: dict[str, Any] = (
+            {"override_fallback": True}
+            if self._live_stream_options.get("override_fallback")
+            else {}
+        )
         self._max_tool_rounds = max_tool_rounds
         self._few_shot_context = few_shot_context
         self._safety_context = safety_context
@@ -1746,6 +1753,10 @@ class StreamingAgentLoop:
                     system=system,
                     tools=[],
                     max_tokens=256,
+                    # The network's model, as the turn itself: without it the
+                    # summary went to the agent task's primary.
+                    provider_override=self._provider_override,
+                    **self._live_complete_options,
                 ),
                 timeout=_summary_timeout_sec,
             )

@@ -1462,6 +1462,11 @@ async def handle_call(conn: AudioSocketConnection) -> None:
             is_modular=is_modular,
             agent_name=tenant_agent_name,
             promotions=live_promotions,
+            # The network's model serves the blocking path too (the farewell
+            # runs through it on every call), as it does the voice loop below.
+            provider_override=tenant_agent_provider_override,
+            # A real call: FF_LLM_OVERRIDE_FALLBACK applies, as in the loop.
+            live_call=True,
         )
 
         # Initialize pattern search (if asyncpg pool available)
@@ -1520,7 +1525,7 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 echo_canceller=echo_canceller,
                 promotions=live_promotions,
                 delivery_quotes=session.delivery_quotes,
-                # The one real-call loop: FF_LLM_OVERRIDE_FALLBACK applies here only.
+                # A real call: FF_LLM_OVERRIDE_FALLBACK applies, as to the agent above.
                 live_call=True,
             )
 
