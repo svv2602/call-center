@@ -219,7 +219,10 @@ class FeatureFlagSettings(BaseSettings):
     multi_car_booking: bool = False
     # FF_LLM_OVERRIDE_FALLBACK — a live call of a network pinned to one LLM
     # (`tenants.config.agent_provider_override`) falls back to the `agent`
-    # task chain when that provider fails before its first stream event.
+    # task chain when that provider fails: in a stream only before its first
+    # event, in a blocking call (farewell, summary, the turn itself with
+    # FF_STREAMING_LLM off) whenever it fails. With the flag on, a stream of
+    # a network without an override stops switching mid-reply as well.
     # Sandbox, goldset and replays stay on the named model either way.
     # Off by default; rollback = remove the var.
     llm_override_fallback: bool = False
@@ -228,6 +231,11 @@ class FeatureFlagSettings(BaseSettings):
     # only with FF_LLM_OVERRIDE_FALLBACK on. 0 = no deadline (the default:
     # no production latency numbers yet to pick a value from).
     llm_first_event_timeout_sec: float = 0.0
+    # FF_LLM_OUTAGE_TRANSFER — a turn on which no LLM provider answered (an
+    # error or the 45 s turn timeout, nothing spoken) ends with «спробую
+    # з'єднати вас з оператором» and a transfer attempt instead of «не почула,
+    # скажіть ще раз». Once per call. Off by default; rollback = remove the var.
+    llm_outage_transfer: bool = False
 
     model_config = {"env_prefix": "FF_"}
 

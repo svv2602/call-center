@@ -33,6 +33,8 @@ from src.agent.prompts import (
     FAREWELL_ORDER_TEXT,
     FAREWELL_TEXT,
     GREETING_TEXT,
+    LLM_OUTAGE_TRANSFER_FAILED_TEXT,
+    LLM_OUTAGE_TRANSFER_TEXT,
     SILENCE_BRAND_REPROMPT_TEXT,
     SILENCE_COLOR_REPROMPT_TEXT,
     SILENCE_CONFIRM_REPROMPT_TEXT,
@@ -63,6 +65,7 @@ from src.monitoring.metrics import (
     fsm_compound_preparse_fields_total,
     fsm_interrupt_total,
     fsm_voice_total,
+    llm_outage_transfers_total,
     multi_car_booking_total,
     stt_orphan_interim_total,
     tts_delivery_ms,
@@ -71,6 +74,13 @@ from src.stt.base import STTConfig, STTEngine, Transcript
 
 # Max time to wait for LLM agent to produce a response (seconds)
 AGENT_PROCESSING_TIMEOUT_SEC = 45
+
+# FF_LLM_OUTAGE_TRANSFER: why a turn counts as unanswered by every provider,
+# and the `reason` its transfer carries into `calls.transfer_reason` — a value
+# of its own, so reports tell these transfers from the model's.
+LLM_OUTAGE_CAUSE_ERROR = "error"
+LLM_OUTAGE_CAUSE_TIMEOUT = "timeout"
+LLM_OUTAGE_TRANSFER_REASON = "llm_outage"
 
 # Barge-in suppression window after TTS ends (seconds).
 # Prevents echo from speaker triggering false barge-in detection.
@@ -1194,6 +1204,10 @@ class CallPipeline:
         # already counted under `multi_car_booking_total{event="booked"}`.
         self._multi_car_over_cap_fired = False
         self._multi_car_bookings_counted = 0
+        # FF_LLM_OUTAGE_TRANSFER: the transfer of an unanswered turn is tried
+        # once per call, whatever came of it — a refused transfer repeated on
+        # every failing turn is the loop the cap exists to prevent.
+        self._llm_outage_transfer_attempted = False
 
     @property
     def _tts(self) -> TTSEngine:
@@ -3438,6 +3452,153 @@ class CallPipeline:
         )
         return True
 
+    def _llm_outage_transfer_armed(self) -> bool:
+        """Whether an unanswered turn may be handed to an operator right now.
+
+        The flag is read from the env on each call, not from `get_settings()`:
+        that snapshot is built at import. A call whose redirect was already
+        accepted (the model's own `transfer_to_operator`, then a failed LLM
+        round) is not armed either: a second AMI redirect would be aimed at a
+        channel that is already on its way to an operator.
+        """
+        if self._llm_outage_transfer_attempted:
+            return False
+        if self._session.transfer_redirect_initiated():
+            return False
+        return FeatureFlagSettings().llm_outage_transfer
+
+    def _streaming_llm_outage_cause(self, result: Any) -> str | None:
+        """Why the streaming turn counts as an LLM outage, or None.
+
+        Asked only where nothing was spoken and the caller neither barged in
+        nor hung up. `None` is the 45 s turn timeout, `stop_reason == "error"`
+        an exception inside the round; an `end_turn` with no text is an empty
+        reply and keeps the soft re-ask.
+        """
+        if not self._llm_outage_transfer_armed():
+            return None
+        if result is None:
+            return LLM_OUTAGE_CAUSE_TIMEOUT
+        if result.stop_reason == "error":
+            return LLM_OUTAGE_CAUSE_ERROR
+        return None
+
+    def _blocking_llm_outage_cause(self, *, timed_out: bool) -> str | None:
+        """Why the blocking turn counts as an LLM outage, or None.
+
+        `LLMAgent.process_message` swallows a provider failure and returns
+        `ERROR_TEXT` as if it were the reply; `last_error` is what tells that
+        apart from an answer. It is read only when armed, so a call without
+        the flag never touches it.
+        """
+        if not self._llm_outage_transfer_armed():
+            return None
+        if timed_out:
+            return LLM_OUTAGE_CAUSE_TIMEOUT
+        if self._agent.last_error:
+            return LLM_OUTAGE_CAUSE_ERROR
+        return None
+
+    async def _transfer_on_llm_outage(self, cause: str, llm_latency_ms: int) -> bool:
+        """End a turn no LLM provider answered: say so, then try an operator.
+
+        Returns True when AMI accepted the redirect — the caller of this
+        method leaves the turn loop. `_close_turn` is bypassed on purpose:
+        nothing more is said to a caller who is already on the way.
+
+        The order is «the phrase, then the redirect». An accepted redirect
+        tears the channel down, so anything spoken after it is not heard
+        (`_close_turn`: the `transfer` template reached none of 53 transferred
+        callers) and the caller would be moved in silence after a long wait.
+        The phrase therefore announces an attempt — «спробую з'єднати» — and
+        the attempt follows at once: what `_dispatch_transfer_verdict` warns
+        about is a promise with no transfer behind it.
+
+        The transfer goes through the same executor, by the tool router, and
+        its outcome is read off the positive marker — a refusal comes back as
+        a dict, not as an exception. A transfer that was not accepted (after
+        hours, no AMI, AMI error, no router) is followed by
+        `LLM_OUTAGE_TRANSFER_FAILED_TEXT`, a constant and not the `error`
+        template, which is edited in the admin UI. The call then goes on; the
+        next unanswered turn of this call takes the old fallback branch.
+        """
+        self._llm_outage_transfer_attempted = True
+        call_id = str(self._session.channel_uuid)
+        logger.error(
+            "LLM outage (%s) for call=%s after %dms — telling the caller and "
+            "trying an operator transfer",
+            cause,
+            call_id,
+            llm_latency_ms,
+            extra={"call_id": call_id},
+        )
+        self._session.add_assistant_turn(LLM_OUTAGE_TRANSFER_TEXT)
+        # The model's turn ended here: same row as the neighbouring fallback,
+        # written and spoken before the redirect is asked for.
+        await self._log_turn(
+            "bot",
+            LLM_OUTAGE_TRANSFER_TEXT,
+            llm_latency_ms=llm_latency_ms,
+            guards_fired=guard_trace.take(),
+        )
+        await self._persist_session()
+        await self._speak(LLM_OUTAGE_TRANSFER_TEXT)
+
+        tool_router = self._get_tool_router()
+        if tool_router is None:
+            logger.error(
+                "LLM outage (%s) for call=%s but no tool router — cannot reach an operator",
+                cause,
+                call_id,
+                extra={"call_id": call_id},
+            )
+        else:
+            try:
+                await tool_router.execute(
+                    "transfer_to_operator", {"reason": LLM_OUTAGE_TRANSFER_REASON}
+                )
+            except asyncio.CancelledError:
+                # An accepted redirect tears the channel down and the call
+                # task can be cancelled before `execute` returns.
+                if self._session.transfer_redirect_initiated():
+                    llm_outage_transfers_total.labels(outcome="transferred", cause=cause).inc()
+                raise
+            except Exception:
+                logger.error(
+                    "LLM outage (%s) for call=%s: transfer executor raised — "
+                    "treating the transfer as not initiated",
+                    cause,
+                    call_id,
+                    exc_info=True,
+                    extra={"call_id": call_id},
+                )
+
+        if self._session.transfer_redirect_initiated():
+            llm_outage_transfers_total.labels(outcome="transferred", cause=cause).inc()
+            logger.info(
+                "LLM outage (%s) for call=%s: redirected to an operator",
+                cause,
+                call_id,
+                extra={"call_id": call_id},
+            )
+            return True
+
+        llm_outage_transfers_total.labels(outcome="transfer_failed", cause=cause).inc()
+        logger.error(
+            "LLM outage (%s) for call=%s: transfer NOT accepted (outcome=%s) — "
+            "telling the caller, the call goes on",
+            cause,
+            call_id,
+            self._session.transfer_outcome,
+            extra={"call_id": call_id},
+        )
+        self._session.add_assistant_turn(LLM_OUTAGE_TRANSFER_FAILED_TEXT)
+        # A phrase spoken by code: the turn's trace went to the row above.
+        await self._log_turn("bot", LLM_OUTAGE_TRANSFER_FAILED_TEXT)
+        await self._persist_session()
+        await self._speak(LLM_OUTAGE_TRANSFER_FAILED_TEXT)
+        return False
+
     def _resolve_empty_response_fallback(self) -> str:
         """Pick a fallback phrase for an empty LLM response.
 
@@ -4632,6 +4793,9 @@ class CallPipeline:
                         self._session.channel_uuid,
                         transcript.text[:50],
                     )
+                elif (outage_cause := self._streaming_llm_outage_cause(result)) is not None:
+                    if await self._transfer_on_llm_outage(outage_cause, llm_latency_ms):
+                        break
                 else:
                     fallback = self._resolve_empty_response_fallback()
                     self._session.add_assistant_turn(fallback)
@@ -4650,6 +4814,7 @@ class CallPipeline:
                 await self._speak(wait_msg)  # contextual filler while processing
 
                 start = time.monotonic()
+                agent_timed_out = False
                 try:
                     response_text, _ = await asyncio.wait_for(
                         self._agent.process_message(
@@ -4684,6 +4849,7 @@ class CallPipeline:
                         self._session.channel_uuid,
                     )
                     response_text = ""
+                    agent_timed_out = True
 
                 llm_latency_ms = int((time.monotonic() - start) * 1000)
 
@@ -4717,7 +4883,13 @@ class CallPipeline:
                     llm_latency_ms,
                 )
 
-                if response_text:
+                outage_cause = self._blocking_llm_outage_cause(timed_out=agent_timed_out)
+                if outage_cause is not None:
+                    # Ahead of `if response_text`: on a provider failure that
+                    # text is `ERROR_TEXT`, not a reply.
+                    if await self._transfer_on_llm_outage(outage_cause, llm_latency_ms):
+                        break
+                elif response_text:
                     # Strip duplicate greeting that LLM may produce
                     response_text = _strip_greeting(response_text)
                     # Strip any leaked "## 📋 Прогрес запису … НАСТУПНИЙ КРОК"

@@ -515,6 +515,22 @@ llm_provider_failures_total = Counter(
     ["provider", "task", "reason"],
 )
 
+# A turn no LLM provider answered: the pipeline said so and tried to hand the
+# call to an operator (FF_LLM_OUTAGE_TRANSFER). `outcome`: transferred (AMI
+# accepted the redirect) / transfer_failed (after hours, no AMI, AMI refused —
+# the caller was told and stays with the bot). `cause`: error / timeout.
+# At most one increment per call.
+llm_outage_transfers_total = Counter(
+    "callcenter_llm_outage_transfers_total",
+    "Turns left unanswered by every LLM provider and handed to an operator, by outcome",
+    ["outcome", "cause"],
+)
+# Every series exists at zero from import: `increase()` cannot see the first
+# increment of a series born with the value 1, and the first one is the event.
+for _outcome in ("transferred", "transfer_failed"):
+    for _cause in ("error", "timeout"):
+        llm_outage_transfers_total.labels(outcome=_outcome, cause=_cause)
+
 # --- Tenant resolution metrics ---
 
 tenant_resolution_fallback_total = Counter(

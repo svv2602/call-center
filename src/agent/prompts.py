@@ -3144,6 +3144,19 @@ TRANSFER_TEXT = "Зараз з'єдную вас з оператором. Зал
 
 ERROR_TEXT = "Перепрошую, виникла технічна помилка. Спробуйте, будь ласка, зателефонувати ще раз."
 
+# No LLM provider answered the turn (FF_LLM_OUTAGE_TRANSFER). The first text is
+# spoken BEFORE the pipeline asks for the transfer, so it announces an attempt
+# and not its result: after an accepted redirect the channel is gone and
+# nothing more can be said. The second is spoken only when the transfer was
+# not accepted (after hours, no AMI, AMI refused). Both wordings await the
+# owner's approval.
+LLM_OUTAGE_TRANSFER_TEXT = (
+    "Перепрошую, виникла технічна затримка. Спробую з'єднати вас з оператором."
+)
+LLM_OUTAGE_TRANSFER_FAILED_TEXT = (
+    "На жаль, з'єднати з оператором зараз не вдалося. Спробуйте, будь ласка, зателефонувати ще раз."
+)
+
 # Soft fallback for a transient empty LLM response — a gentle re-ask
 # that does NOT mention an operator transfer. Used until the empty-response
 # counter crosses the escalation threshold (see call_session.MAX_EMPTY_RESPONSES_BEFORE_ESCALATE).
