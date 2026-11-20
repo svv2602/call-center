@@ -5,8 +5,8 @@ counter (no call or turn attached) and a log line that a deploy wipes with
 the container. ``call_turns`` had no column for turn metadata, so a guard
 could not be tied to the reply it shaped once the logs were gone.
 
-Schema only: nothing writes the column yet. This revision is rolled out
-and applied before the code that fills it.
+Schema only: this revision writes nothing. It is rolled out and applied
+before the code that fills the column (``src/agent/guard_trace.py``).
 
 Revision ID: 069
 Revises: 068

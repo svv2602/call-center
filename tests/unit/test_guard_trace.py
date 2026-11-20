@@ -686,6 +686,10 @@ TRACED: dict[str, dict[str, int]] = {
     "bot_filler_stripped_total": {"src/core/pipeline.py": 2},
     "transfer_promise_suppressed_total": {"src/agent/streaming_loop.py": 1},
     "reopened_time_choice_total": {"src/agent/streaming_loop.py": 1},
+    # Tool handlers: the model's call was refused. They run inside the turn
+    # (the tool round of `run_turn`), so the turn's trace is theirs too.
+    "book_fitting_unchosen_time_total": {"src/main.py": 1},
+    "krok1_regression_blocked_total": {"src/main.py": 1},
 }
 
 #: Counters of a guard that decided NOT to step in. The model's words went out
@@ -829,7 +833,7 @@ class TestRegistry:
             found.setdefault(counter, {}).setdefault(rel, 0)
             found[counter][rel] += 1
         assert found == {**TRACED, **NOT_TRACED}
-        assert len(records) == sum(n for sites in TRACED.values() for n in sites.values()) == 16
+        assert len(records) == sum(n for sites in TRACED.values() for n in sites.values()) == 18
 
     def test_the_guard_that_stood_aside_is_not_a_firing(self) -> None:
         increments, records, _problems = _scan()

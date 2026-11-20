@@ -28,6 +28,7 @@ from redis.asyncio import Redis
 from sqlalchemy import text
 
 from src.agent import delivery_quote as dq
+from src.agent import guard_trace
 from src.agent.agent import LLMAgent, ToolRouter
 from src.agent.booking_result import is_booking_confirmed
 from src.agent.color_translit import latin_prefix_to_color
@@ -3387,6 +3388,7 @@ def _build_tool_router(
                         session.book_time_unchosen_refusals,
                     )
                     book_fitting_unchosen_time_total.inc()
+                    guard_trace.record("book_fitting_unchosen_time")
                     # A caller the STT cannot render answers no better on the
                     # third ask than the first — `8b355205` spent the whole call
                     # returning «записатися на шиномонтаж» to every question.
@@ -3814,6 +3816,7 @@ def _build_tool_router(
         )
         if _regression is not None:
             krok1_regression_blocked_total.inc()
+            guard_trace.record("krok1_regression_blocked")
             logger.warning(
                 "get_fitting_stations: Wave 9/10 Krok 1 regression guard "
                 "triggered (%s) for call %s (station_id=%s pinned in %r; "
