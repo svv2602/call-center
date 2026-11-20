@@ -38,6 +38,19 @@ docker compose logs --timestamps --since 1h call-processor | head -50
 
 ---
 
+### 2a. **llm-provider-failure.md** — Отказ LLM-провайдера на живом звонке
+**Приоритет:** HIGH (квота и ключ — CRITICAL) | **Владелец:** DevOps / SRE
+
+Оповещения `LLMProviderFailure`, `LLMProviderQuotaOrAuth`, `LLMFallbackActivated`: провайдер не ответил на ход звонка. Причина — в тексте оповещения (`quota`, `auth`, `rate_limit`, `timeout`, `http_5xx`, `network`, `other`).
+
+**Быстрая диагностика:**
+```bash
+docker compose logs --since 1h call-processor | grep -E "failed for task .*reason="
+docker compose exec -T call-processor env | grep -E "^FF_LLM_"
+```
+
+---
+
 ### 3. **high-latency.md** — Высокая задержка (p95 > 2.5s)
 **Приоритет:** HIGH | **Владелец:** DevOps / Performance Engineering
 
