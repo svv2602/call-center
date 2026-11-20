@@ -8,7 +8,7 @@ survives: the bot's row in `call_turns.guards_fired`.
 Shape of one entry: the counter's name without `callcenter_` / `_total`, plus
 the counter's own labels under their own names::
 
-    {"guard": "tire_claim_refused", "rule": "cheapest_unbacked"}
+    {"guard": "tire_claim_refused", "rule": "cheapest"}
     {"guard": "control_plane_prose_dropped", "form": "json", "site": "stream"}
 
 Nothing else goes in. `call_turns.content` already holds the reply, and a trace
