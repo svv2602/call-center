@@ -36,6 +36,15 @@ Usage (inside the call-processor container: DB for the prompt, provider keys):
 
 A paid run happens only with ``--yes``; without it the script prints the plan
 and the cost estimate and exits.
+
+One pass cannot tell a broken case from model noise. ``--repeat N`` plays every
+(case × network) pair N times — a fresh agent and an empty history each time —
+and the report sorts the pairs into stable green (N/N), stable red (0/N) and
+flaky (k/N), listing the flaky ones with what failed in which repeat. The cost
+estimate is multiplied by N. With one repeat (the default) the report is the
+single-pass one, unchanged.
+
+    python -m scripts.run_goldset --network both --repeat 3 --yes --json-out /tmp/g.json
 """
 
 from __future__ import annotations
@@ -137,6 +146,8 @@ _ID_RE = re.compile(r"^[a-z0-9_]+$")
 _PENDING_RE = re.compile(r"^wave-\d+-[A-Z]-[a-z0-9-]+: \S")
 _SENTENCE_END_RE = re.compile(r"[.!?…]+(?=\s|$)")
 _FLAGS = re.IGNORECASE | re.UNICODE
+# The failure of the turn itself (provider error, timeout), not of an assertion.
+TURN_ERROR = "turn_error"
 
 
 # ── Case model ────────────────────────────────────────────────────────────
@@ -447,7 +458,7 @@ def evaluate_turn(
 ) -> list[AssertionResult]:
     results: list[AssertionResult] = []
     if obs.error:
-        results.append(AssertionResult("turn_error", False, obs.error))
+        results.append(AssertionResult(TURN_ERROR, False, obs.error))
     if "must_contain" in expect:
         results.append(check_must_contain(expect["must_contain"], obs))
     if "must_not_contain" in expect:
@@ -480,6 +491,8 @@ class TurnReport:
     response: str
     tools: list[str]
     results: list[AssertionResult]
+    # The calls of ``tools`` with their arguments, in call order.
+    tool_calls: list[ToolCall] = field(default_factory=list)
 
 
 @dataclass
@@ -489,10 +502,17 @@ class RunResult:
     turns: list[TurnReport]
     input_tokens: int = 0
     output_tokens: int = 0
+    # Which repeat of the (case × network) pair this is, from 1.
+    repeat: int = 1
 
     @property
     def passed(self) -> bool:
         return all(r.passed for t in self.turns for r in t.results)
+
+    @property
+    def errored(self) -> bool:
+        """A turn itself failed: the assertions never saw a real answer."""
+        return any(f.name == TURN_ERROR for f in self.failures())
 
     def failures(self) -> list[AssertionResult]:
         return [r for t in self.turns for r in t.results if not r.passed]
@@ -542,25 +562,159 @@ async def run_case(run: Run, make_agent: AgentFactory, play_turn: TurnPlayer) ->
                 response=obs.response_text,
                 tools=[c.name for c in obs.tool_calls],
                 results=checks,
+                tool_calls=list(obs.tool_calls),
             )
         )
     return result
 
 
 async def run_all(
-    runs: list[Run], make_agent: AgentFactory, play_turn: TurnPlayer
+    runs: list[Run], make_agent: AgentFactory, play_turn: TurnPlayer, repeat: int = 1
 ) -> list[RunResult]:
+    """Play every run ``repeat`` times: one ``RunResult`` per (run, repeat).
+
+    A repeat is a whole pass over ``runs``, so the repeats of one pair are
+    spread in time: a provider outage of a minute then reads as a turn error in
+    one repeat of several pairs, not as one pair red in all of its repeats.
+    Every repeat goes through ``run_case`` — a fresh agent, an empty history.
+    """
+    if repeat < 1:
+        raise ValueError(f"repeat must be >= 1, got {repeat}")
     results = []
-    for run in runs:
-        res = await run_case(run, make_agent, play_turn)
-        mark = "OK  " if res.passed else "FAIL"
-        print(f"  {mark} {res.case_id} [{res.network}]", file=sys.stderr)
-        results.append(res)
+    for number in range(1, repeat + 1):
+        for run in runs:
+            res = await run_case(run, make_agent, play_turn)
+            res.repeat = number
+            mark = "OK  " if res.passed else "FAIL"
+            nth = f" повтор {number}/{repeat}" if repeat > 1 else ""
+            print(f"  {mark} {res.case_id} [{res.network}]{nth}", file=sys.stderr)
+            results.append(res)
     return results
 
 
+GREEN, RED, FLAKY = "green", "red", "flaky"
+
+
+@dataclass
+class PairStability:
+    """Every repeat of one (case × network) pair, in the order played."""
+
+    case_id: str
+    network: str
+    repeats: list[RunResult] = field(default_factory=list)
+
+    @property
+    def green(self) -> int:
+        return sum(1 for r in self.repeats if r.passed)
+
+    @property
+    def verdict(self) -> str:
+        """Green only when every repeat passed; red when none did; else flaky."""
+        if self.green == len(self.repeats):
+            return GREEN
+        return FLAKY if self.green else RED
+
+
+def group_pairs(results: list[RunResult]) -> list[PairStability]:
+    """Results folded by (case, network), pairs in the order they were first played."""
+    pairs: dict[tuple[str, str], PairStability] = {}
+    for r in results:
+        pair = pairs.setdefault((r.case_id, r.network), PairStability(r.case_id, r.network))
+        pair.repeats.append(r)
+    return list(pairs.values())
+
+
+def exit_code(results: list[RunResult]) -> int:
+    """0 only when every pair is green in every repeat: a flaky pair is not a pass."""
+    return 0 if all(p.verdict == GREEN for p in group_pairs(results)) else 1
+
+
+def _skipped_lines(skipped: list[tuple[str, str]]) -> list[str]:
+    if not skipped:
+        return []
+    return [f"Пропущено (pending): {len(skipped)}", *(f"  {cid}: {why}" for cid, why in skipped)]
+
+
+def _repeat_lines(r: RunResult) -> list[str]:
+    """One repeat of a pair: its outcome and, when red, what failed on which turn."""
+    if r.passed:
+        return [f"      повтор {r.repeat}: OK"]
+    kind = "помилка ходу (turn_error)" if r.errored else "провал асерта"
+    lines = [f"      повтор {r.repeat}: {kind}"]
+    for n, t in enumerate(r.turns, 1):
+        failed = [x for x in t.results if not x.passed]
+        if failed:
+            lines.append(
+                f"        хід {n} «{t.user[:50]}» бот: {t.response[:160]!r} tools={t.tools}"
+            )
+            lines.extend(f"          {f.name}: {f.detail}" for f in failed)
+    return lines
+
+
+def _format_stability_report(results: list[RunResult], skipped: list[tuple[str, str]]) -> str:
+    """Several repeats: pairs by stability, the flaky and the red ones repeat by repeat."""
+    pairs = group_pairs(results)
+    n = max(len(p.repeats) for p in pairs)
+    groups = {v: [p for p in pairs if p.verdict == v] for v in (GREEN, RED, FLAKY)}
+    lines = [
+        f"Повторів на пару: {n}; пар (кейс × мережа): {len(pairs)}; зіграно прогонів: {len(results)}",
+        f"Стабільно зелені ({n}/{n}): {len(groups[GREEN])}/{len(pairs)}",
+        f"Стабільно червоні (0/{n}): {len(groups[RED])}/{len(pairs)}",
+        f"Плаваючі (k/{n}): {len(groups[FLAKY])}/{len(pairs)}",
+    ]
+    for net in NETWORKS:
+        net_pairs = [p for p in pairs if p.network == net]
+        if net_pairs:
+            count = Counter(p.verdict for p in net_pairs)
+            lines.append(
+                f"  {net}: стабільно зелені {count[GREEN]}, стабільно червоні {count[RED]}, "
+                f"плаваючі {count[FLAKY]} (пар {len(net_pairs)})"
+            )
+    # The single-pass headline of every repeat: how far «N/M» itself moves.
+    per_repeat = []
+    for number in sorted({r.repeat for r in results}):
+        played = [r for r in results if r.repeat == number]
+        per_repeat.append(f"№{number} {sum(1 for r in played if r.passed)}/{len(played)}")
+    lines.append("Зелених за повторами: " + ", ".join(per_repeat))
+
+    red = [r for r in results if not r.passed]
+    if red:
+        errored = sum(1 for r in red if r.errored)
+        lines.append(
+            f"Червоних повторів: {len(red)} — помилка ходу (turn_error): {errored}, "
+            f"провал асерта: {len(red) - errored}"
+        )
+    for title, verdict in (("Плаваючі", FLAKY), ("Стабільно червоні", RED)):
+        if not groups[verdict]:
+            continue
+        lines.append(f"{title}:")
+        for p in groups[verdict]:
+            total = len(p.repeats)
+            errored = sum(1 for r in p.repeats if r.errored)
+            lines.append(
+                f"  {p.case_id} [{p.network}]: зелених {p.green}/{total}, "
+                f"червоних {total - p.green}/{total}"
+                + (f" (з них помилка ходу: {errored})" if errored else "")
+            )
+            for r in p.repeats:
+                lines.extend(_repeat_lines(r))
+    breakdown = Counter(f.name for r in results for f in r.failures())
+    if breakdown:
+        lines.append("Провали за асертами (повтори × ходи):")
+        lines.extend(f"  {name}: {count}" for name, count in breakdown.most_common())
+    lines.extend(_skipped_lines(skipped))
+    return "\n".join(lines)
+
+
 def format_report(results: list[RunResult], skipped: list[tuple[str, str]]) -> str:
-    """«Зелёних кейсів N/M» over (case × network) runs + failure breakdown by assertion."""
+    """«Зелёних кейсів N/M» over (case × network) runs + failure breakdown by assertion.
+
+    That is the report of one repeat. Results of several repeats get the
+    stability summary instead: «N/M» over pairs × repeats would count a flaky
+    pair as partly green.
+    """
+    if any(r.repeat > 1 for r in results):
+        return _format_stability_report(results, skipped)
     green = sum(1 for r in results if r.passed)
     lines = [f"Зелёних кейсів: {green}/{len(results)} (кейс × мережа)"]
     for net in NETWORKS:
@@ -587,9 +741,7 @@ def format_report(results: list[RunResult], skipped: list[tuple[str, str]]) -> s
                         f"  {r.case_id} [{r.network}] «{t.user[:50]}» {f.name}: {f.detail}"
                     )
                     lines.append(f"      бот: {t.response[:160]!r} tools={t.tools}")
-    if skipped:
-        lines.append(f"Пропущено (pending): {len(skipped)}")
-        lines.extend(f"  {cid}: {why}" for cid, why in skipped)
+    lines.extend(_skipped_lines(skipped))
     return "\n".join(lines)
 
 
@@ -615,9 +767,10 @@ def estimate_cost(
     model: str,
     input_per_turn: int = DEFAULT_INPUT_TOKENS_PER_TURN,
     output_per_turn: int = DEFAULT_OUTPUT_TOKENS_PER_TURN,
+    repeat: int = 1,
 ) -> tuple[int, float | None]:
-    """(turns, USD or None when the model has no price here)."""
-    turns = sum(len(r.case.turns) for r in runs)
+    """(turns, USD or None when the model has no price here), each run played ``repeat`` times."""
+    turns = sum(len(r.case.turns) for r in runs) * repeat
     price = next((p for key, p in PRICES.items() if key in model), None)
     if price is None:
         return turns, None
@@ -788,7 +941,36 @@ async def _load_tenants(engine: Any) -> dict[str, dict[str, Any]]:
     return tenants
 
 
-async def _live(runs: list[Run], skipped: list[tuple[str, str]], opts: argparse.Namespace) -> int:
+def results_to_json(results: list[RunResult]) -> list[dict[str, Any]]:
+    """The ``--json-out`` records: one per (case × network × repeat).
+
+    ``tools`` are the names, as before; ``tool_calls`` are the same calls with
+    their arguments, in call order.
+    """
+    return [
+        {
+            "case": r.case_id,
+            "network": r.network,
+            "repeat": r.repeat,
+            "passed": r.passed,
+            "turns": [
+                {
+                    "user": t.user,
+                    "response": t.response,
+                    "tools": t.tools,
+                    "tool_calls": [{"name": c.name, "args": c.args} for c in t.tool_calls],
+                    "failed": [f.__dict__ for f in t.results if not f.passed],
+                }
+                for t in r.turns
+            ],
+        }
+        for r in results
+    ]
+
+
+async def _live(
+    runs: list[Run], skipped: list[tuple[str, str]], opts: argparse.Namespace, repeat: int = 1
+) -> int:
     from sqlalchemy.ext.asyncio import create_async_engine
 
     from src.config import get_settings
@@ -807,10 +989,11 @@ async def _live(runs: list[Run], skipped: list[tuple[str, str]], opts: argparse.
                 raise SystemExit(f"provider {provider!r} not initialised (API key env var?)")
             model = (router.config.get("providers", {}).get(provider) or {}).get("model", provider)
             net_runs = [r for r in runs if r.network == net]
-            turns, usd = estimate_cost(net_runs, model, opts.input_tokens_per_turn)
+            turns, usd = estimate_cost(net_runs, model, opts.input_tokens_per_turn, repeat=repeat)
             total_turns += turns
+            times = f" × {repeat} повторів" if repeat > 1 else ""
             print(
-                f"{net}: {len(net_runs)} runs, {turns} turns, provider={provider} ({model}), "
+                f"{net}: {len(net_runs)} runs{times}, {turns} turns, provider={provider} ({model}), "
                 f"≈ {f'${usd:.2f}' if usd is not None else 'ціна невідома'}"
             )
             total_usd += usd or 0.0
@@ -820,7 +1003,7 @@ async def _live(runs: list[Run], skipped: list[tuple[str, str]], opts: argparse.
         if not opts.yes:
             print("Платний прогін не запущено: додайте --yes.")
             return 0
-        results = await run_all(runs, factory, _play_sandbox_turn)
+        results = await run_all(runs, factory, _play_sandbox_turn, repeat=repeat)
     finally:
         await router.close()
         await engine.dispose()
@@ -828,30 +1011,21 @@ async def _live(runs: list[Run], skipped: list[tuple[str, str]], opts: argparse.
     print(format_report(results, skipped))
     if opts.json_out:
         Path(opts.json_out).write_text(
-            json.dumps(
-                [
-                    {
-                        "case": r.case_id,
-                        "network": r.network,
-                        "passed": r.passed,
-                        "turns": [
-                            {
-                                "user": t.user,
-                                "response": t.response,
-                                "tools": t.tools,
-                                "failed": [f.__dict__ for f in t.results if not f.passed],
-                            }
-                            for t in r.turns
-                        ],
-                    }
-                    for r in results
-                ],
-                ensure_ascii=False,
-                indent=2,
-            ),
+            # default=str: an argument json cannot encode must not cost a paid run its report.
+            json.dumps(results_to_json(results), ensure_ascii=False, indent=2, default=str),
             encoding="utf-8",
         )
-    return 0 if all(r.passed for r in results) else 1
+    return exit_code(results)
+
+
+def _repeat_count(value: str) -> int:
+    try:
+        number = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"not an integer: {value!r}") from None
+    if number < 1:
+        raise argparse.ArgumentTypeError(f"must be 1 or more, got {number}")
+    return number
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -873,7 +1047,14 @@ def main(argv: list[str] | None = None) -> int:
         "--validate", action="store_true", help="only load and validate the cases (free)"
     )
     parser.add_argument("--input-tokens-per-turn", type=int, default=DEFAULT_INPUT_TOKENS_PER_TURN)
-    parser.add_argument("--json-out", default="", help="per-run JSON report path")
+    parser.add_argument(
+        "--repeat",
+        type=_repeat_count,
+        default=1,
+        metavar="N",
+        help="play every (case × network) pair N times and report its stability (default 1)",
+    )
+    parser.add_argument("--json-out", default="", help="per-run, per-repeat JSON report path")
     parser.add_argument("--yes", action="store_true", help="run the paid LLM pass")
     opts = parser.parse_args(argv)
 
@@ -881,6 +1062,7 @@ def main(argv: list[str] | None = None) -> int:
     runs, skipped = expand_runs(cases, opts.network, opts.case or None, opts.include_pending)
     print(
         f"Кейсів: {len(cases)}; прогонів (кейс × мережа): {len(runs)}; pending пропущено: {len(skipped)}"
+        + (f"; повторів на пару: {opts.repeat}" if opts.repeat > 1 else "")
     )
     for cid, why in skipped:
         print(f"  skip {cid}: {why}")
@@ -889,7 +1071,7 @@ def main(argv: list[str] | None = None) -> int:
     if not runs:
         print("Нічого запускати.")
         return 0
-    return asyncio.run(_live(runs, skipped, opts))
+    return asyncio.run(_live(runs, skipped, opts, repeat=opts.repeat))
 
 
 if __name__ == "__main__":
