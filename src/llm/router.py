@@ -6,6 +6,7 @@ and automatic fallback to alternative providers on failure.
 
 from __future__ import annotations
 
+import asyncio
 import contextvars
 import copy
 import json
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from aiobreaker import CircuitBreaker
 
+from src.config import FeatureFlagSettings
 from src.llm.models import (
     DEFAULT_ROUTING_CONFIG,
     LLMResponse,
@@ -44,6 +46,24 @@ llm_call_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 llm_tenant_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "llm_tenant_id", default=None
 )
+
+
+def live_call_stream_options() -> dict[str, Any]:
+    """``complete_stream`` keywords of a live call, read from the env right now.
+
+    Empty unless FF_LLM_OVERRIDE_FALLBACK is on — the call then goes out
+    exactly as before. Only the voice loop of a real call asks for these:
+    sandbox, goldset and replays must get the one model they named, and a
+    replay measures time to first event, which a deadline would cut short.
+    Read here, not from ``get_settings()``: that snapshot is built at import.
+    """
+    flags = FeatureFlagSettings()
+    if not flags.llm_override_fallback:
+        return {}
+    options: dict[str, Any] = {"override_fallback": True}
+    if flags.llm_first_event_timeout_sec > 0:
+        options["first_event_timeout"] = flags.llm_first_event_timeout_sec
+    return options
 
 
 class LLMRouter:
@@ -106,20 +126,41 @@ class LLMRouter:
         self._breakers.clear()
         await self.initialize(redis)
 
-    def _resolve_chain(self, task: LLMTask, provider_override: str | None) -> list[str]:
-        """Build ordered provider chain for a task."""
+    def _task_chain(self, task: LLMTask) -> list[str]:
+        """The task's configured providers (primary, then fallbacks) that are up."""
+        task_config = self._config.get("tasks", {}).get(task.value, {})
+        primary = task_config.get("primary", "")
+        fallbacks = task_config.get("fallbacks", [])
+        return [key for key in [primary, *fallbacks] if key in self._providers]
+
+    def _resolve_chain(
+        self,
+        task: LLMTask,
+        provider_override: str | None,
+        *,
+        override_fallback: bool = False,
+    ) -> list[str]:
+        """Build ordered provider chain for a task.
+
+        An override is the whole chain: whoever names a model (sandbox,
+        goldset, replay) gets that model or an error. ``override_fallback``
+        — a live call — makes the override the first choice instead, followed
+        by the task's own chain without repeats.
+        """
         if provider_override is not None:
             if provider_override not in self._providers:
                 raise RuntimeError(
                     f"Provider override '{provider_override}' not found. "
                     f"Available: {list(self._providers.keys())}"
                 )
-            return [provider_override]
+            chain = [provider_override]
+            if override_fallback:
+                for key in self._task_chain(task):
+                    if key not in chain:
+                        chain.append(key)
+            return chain
 
-        task_config = self._config.get("tasks", {}).get(task.value, {})
-        primary = task_config.get("primary", "")
-        fallbacks = task_config.get("fallbacks", [])
-        chain = [key for key in [primary, *fallbacks] if key in self._providers]
+        chain = self._task_chain(task)
 
         if not chain:
             raise RuntimeError(
@@ -137,6 +178,8 @@ class LLMRouter:
         max_tokens: int = 1024,
         provider_override: str | None = None,
         tool_choice: str | None = None,
+        *,
+        override_fallback: bool = False,
     ) -> LLMResponse:
         """Route an LLM call through the provider chain for the given task.
 
@@ -150,11 +193,13 @@ class LLMRouter:
                 provider key directly (e.g. "gemini-flash").
             tool_choice: Name of a tool the model must call in this response
                 (every provider of the chain); ``None`` — the model decides.
+            override_fallback: The override is the first choice, not the only
+                one — the task's chain follows it (see ``_resolve_chain``).
 
         Tries primary provider first, then fallbacks in order.
         Raises RuntimeError if all providers fail.
         """
-        chain = self._resolve_chain(task, provider_override)
+        chain = self._resolve_chain(task, provider_override, override_fallback=override_fallback)
 
         last_error: Exception | None = None
         for idx, provider_key in enumerate(chain):
@@ -201,12 +246,31 @@ class LLMRouter:
         max_tokens: int = 1024,
         provider_override: str | None = None,
         tool_choice: str | None = None,
+        *,
+        override_fallback: bool = False,
+        first_event_timeout: float | None = None,
     ) -> AsyncIterator[StreamEvent]:
-        """Streaming version of complete() with circuit breaker + fallback."""
-        chain = self._resolve_chain(task, provider_override)
+        """Streaming version of complete() with circuit breaker + fallback.
+
+        ``override_fallback`` and ``first_event_timeout`` belong to live calls
+        (``live_call_stream_options``); without them an override is one
+        provider, waited for as long as it takes.
+
+        ``first_event_timeout`` — seconds each provider of the chain has to
+        produce its first event; a provider that misses it is dropped like a
+        failed one.
+        """
+        chain = self._resolve_chain(task, provider_override, override_fallback=override_fallback)
+        # A chain grown from an override switches only while the caller has
+        # heard nothing: events already yielded are being spoken, and a second
+        # provider would start the reply over. (A strict override is a chain
+        # of one — nothing to switch to either way.) The task's own chain, no
+        # override, keeps its old behaviour.
+        switch_only_before_first_event = provider_override is not None
 
         last_error: Exception | None = None
         for idx, provider_key in enumerate(chain):
+            yielded = False
             try:
                 async for event in self._stream_provider(
                     provider_key,
@@ -216,7 +280,9 @@ class LLMRouter:
                     max_tokens,
                     task=task,
                     tool_choice=tool_choice,
+                    first_event_timeout=first_event_timeout,
                 ):
+                    yielded = True
                     yield event
                 # Stream completed successfully
                 if idx > 0:
@@ -232,6 +298,8 @@ class LLMRouter:
                     exc,
                 )
                 self._record_error(provider_key, task)
+                if yielded and switch_only_before_first_event:
+                    break
 
         raise RuntimeError(
             f"All providers failed streaming for task {task.value}: {last_error}"
@@ -246,6 +314,7 @@ class LLMRouter:
         max_tokens: int,
         task: LLMTask | None = None,
         tool_choice: str | None = None,
+        first_event_timeout: float | None = None,
     ) -> AsyncIterator[StreamEvent]:
         """Stream from a single provider with circuit breaker."""
         provider = self._providers[provider_key]
@@ -256,9 +325,30 @@ class LLMRouter:
         extra = {"tool_choice": tool_choice} if tool_choice else {}
         gen = provider.stream_with_tools(messages, tools, system, max_tokens, **extra)
 
-        # Sentinel-first-event: await first event through circuit breaker
+        # Sentinel-first-event: await first event through circuit breaker.
+        # The deadline lives inside the guarded call: the breaker counts an
+        # `Exception` raised in here, and would not count a cancellation
+        # (`BaseException`) coming from a timeout wrapped around it.
         async def _get_first() -> StreamEvent:
-            return await gen.__anext__()
+            if first_event_timeout is None:
+                return await gen.__anext__()
+            try:
+                async with asyncio.timeout(first_event_timeout) as deadline:
+                    return await gen.__anext__()
+            except TimeoutError:
+                if not deadline.expired():
+                    raise  # the provider's own timeout, not this deadline
+                # Nobody will read this stream, and nothing is left to close:
+                # the cancellation has already unwound the provider's
+                # generator and, with it, its HTTP response.
+                logger.warning(
+                    "LLM first event deadline missed: provider=%s, task=%s, deadline=%.1fs",
+                    provider_key,
+                    task.value if task is not None else "",
+                    first_event_timeout,
+                )
+                self._record_first_event_timeout(provider_key, task)
+                raise
 
         first_event = await breaker.call_async(_get_first)
         yield first_event
@@ -469,6 +559,18 @@ class LLMRouter:
             from src.monitoring.metrics import llm_provider_latency_ms
 
             llm_provider_latency_ms.labels(provider=provider_key).observe(latency_ms)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _record_first_event_timeout(provider_key: str, task: LLMTask | None) -> None:
+        """Record a stream dropped for missing the first-event deadline."""
+        try:
+            from src.monitoring.metrics import llm_first_event_timeouts_total
+
+            llm_first_event_timeouts_total.labels(
+                provider=provider_key, task=task.value if task is not None else ""
+            ).inc()
         except Exception:
             pass
 

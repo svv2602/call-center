@@ -1520,6 +1520,8 @@ async def handle_call(conn: AudioSocketConnection) -> None:
                 echo_canceller=echo_canceller,
                 promotions=live_promotions,
                 delivery_quotes=session.delivery_quotes,
+                # The one real-call loop: FF_LLM_OVERRIDE_FALLBACK applies here only.
+                live_call=True,
             )
 
         # Run the pipeline (greeting → listen → STT → LLM → TTS loop)

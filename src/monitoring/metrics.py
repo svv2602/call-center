@@ -498,6 +498,12 @@ llm_fallbacks_total = Counter(
     ["from_provider", "to_provider", "task"],
 )
 
+llm_first_event_timeouts_total = Counter(
+    "callcenter_llm_first_event_timeouts_total",
+    "LLM streams abandoned because the first event missed the live-call deadline",
+    ["provider", "task"],
+)
+
 # --- Tenant resolution metrics ---
 
 tenant_resolution_fallback_total = Counter(

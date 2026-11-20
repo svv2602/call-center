@@ -1623,6 +1623,7 @@ class StreamingAgentLoop:
         echo_canceller: EchoCanceller | None = None,
         promotions: list[ActivePromotion] | None = None,
         delivery_quotes: list[int] | None = None,
+        live_call: bool = False,
     ) -> None:
         self._llm_router = llm_router
         self._tool_router = tool_router
@@ -1633,6 +1634,14 @@ class StreamingAgentLoop:
         self._system_prompt = system_prompt or SYSTEM_PROMPT
         self._pii_vault = pii_vault
         self._provider_override = provider_override
+        # A real call (main.py) may leave a failed or silent pinned provider
+        # for the agent chain — FF_LLM_OVERRIDE_FALLBACK, read once per call.
+        # Anything else that builds a loop keeps the strict single provider.
+        self._live_stream_options: dict[str, Any] = {}
+        if live_call:
+            from src.llm.router import live_call_stream_options
+
+            self._live_stream_options = live_call_stream_options()
         self._max_tool_rounds = max_tool_rounds
         self._few_shot_context = few_shot_context
         self._safety_context = safety_context
@@ -2212,6 +2221,7 @@ class StreamingAgentLoop:
                     max_tokens=1024,
                     provider_override=current_provider_override,
                     **forced_choice,
+                    **self._live_stream_options,
                 )
                 # `drop_control_plane_prose` sits innermost, directly on the
                 # sentence buffer, for two reasons. The other two filters reason

@@ -217,6 +217,17 @@ class FeatureFlagSettings(BaseSettings):
     # FF_MULTI_CAR_BOOKING — several cars booked one after another in one call
     # (owner request 2026-10-27). Off by default; rollback = remove the var.
     multi_car_booking: bool = False
+    # FF_LLM_OVERRIDE_FALLBACK — a live call of a network pinned to one LLM
+    # (`tenants.config.agent_provider_override`) falls back to the `agent`
+    # task chain when that provider fails before its first stream event.
+    # Sandbox, goldset and replays stay on the named model either way.
+    # Off by default; rollback = remove the var.
+    llm_override_fallback: bool = False
+    # FF_LLM_FIRST_EVENT_TIMEOUT_SEC — how long a live call waits for a
+    # provider's first stream event before moving on down the chain. Works
+    # only with FF_LLM_OVERRIDE_FALLBACK on. 0 = no deadline (the default:
+    # no production latency numbers yet to pick a value from).
+    llm_first_event_timeout_sec: float = 0.0
 
     model_config = {"env_prefix": "FF_"}
 
