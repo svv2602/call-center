@@ -87,6 +87,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from src.agent import delivery_quote as dq
+from src.agent import guard_trace
 from src.agent.network_policy import SERVICE_LABELS, NetworkPolicy
 from src.agent.parsers.tire_query import extract_tire_brands
 from src.agent.tire_price_claim import find_amounts
@@ -565,6 +566,7 @@ def guard_text(
             continue
         changed = True
         network_claim_blocked_total.labels(rule=verdict.rule).inc()
+        guard_trace.record("network_claim_blocked", rule=verdict.rule)
         logger.warning(
             "network_claim_blocked: call=%s, site=%s, rule=%s, action=%s, text=%r",
             call_id,
@@ -620,6 +622,7 @@ async def guard_network_claims(
             _log_promo_exempt(verdict, call_id, "stream", text)
             return queued
         network_claim_blocked_total.labels(rule=verdict.rule).inc()
+        guard_trace.record("network_claim_blocked", rule=verdict.rule)
         logger.warning(
             "network_claim_blocked: call=%s, rule=%s, action=%s, text=%r",
             call_id,

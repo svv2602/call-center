@@ -122,6 +122,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import TYPE_CHECKING, Any
 
+from src.agent import guard_trace
 from src.agent.tyre_compare import named_items
 from src.core.sentence_buffer import SentenceReady
 from src.monitoring.metrics import tire_claim_refused_total
@@ -1177,6 +1178,7 @@ def _advance(sentence: str, ctx: ClaimContext) -> None:
 
 def _refused(refusal: Refusal, call_id: str, site: str, text: str) -> None:
     tire_claim_refused_total.labels(rule=refusal.rule).inc()
+    guard_trace.record("tire_claim_refused", rule=refusal.rule)
     logger.info(
         "tire_claim_refused: call=%s, site=%s, rule=%s, text=%r",
         call_id,

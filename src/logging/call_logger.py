@@ -14,6 +14,7 @@ from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 if TYPE_CHECKING:
@@ -23,6 +24,30 @@ logger = logging.getLogger(__name__)
 
 _REDIS_LOG_BUFFER_KEY = "call_log_buffer"
 _REDIS_LOG_BUFFER_TTL = 3600  # 1 hour buffer
+
+# The turn insert as it has always been: it does not name `guards_fired`, so it
+# keeps working on a database where migration 069 has not been applied yet.
+_INSERT_TURN = """
+            INSERT INTO call_turns (id, call_id, turn_number, speaker, content,
+                                     stt_confidence, stt_latency_ms, llm_latency_ms,
+                                     tts_latency_ms, language, created_at)
+            VALUES (:id, :call_id, :turn_number, :speaker, :content,
+                    :stt_confidence, :stt_latency_ms, :llm_latency_ms,
+                    :tts_latency_ms, :language, :created_at)
+            """
+
+# The same row with the guard trace. The JSON goes in as text and is cast, the
+# way `cost_breakdown` / `audio_stats` are written above.
+_INSERT_TURN_WITH_GUARDS = """
+            INSERT INTO call_turns (id, call_id, turn_number, speaker, content,
+                                     stt_confidence, stt_latency_ms, llm_latency_ms,
+                                     tts_latency_ms, language, created_at,
+                                     guards_fired)
+            VALUES (:id, :call_id, :turn_number, :speaker, :content,
+                    :stt_confidence, :stt_latency_ms, :llm_latency_ms,
+                    :tts_latency_ms, :language, :created_at,
+                    CAST(:guards_fired AS jsonb))
+            """
 
 
 def _merge_vehicles(
@@ -200,31 +225,74 @@ class CallLogger:
         llm_latency_ms: int | None = None,
         tts_latency_ms: int | None = None,
         language: str | None = None,
+        guards_fired: list[dict[str, str]] | None = None,
     ) -> None:
-        """Log a single dialog turn."""
-        await self._execute(
-            """
-            INSERT INTO call_turns (id, call_id, turn_number, speaker, content,
-                                     stt_confidence, stt_latency_ms, llm_latency_ms,
-                                     tts_latency_ms, language, created_at)
-            VALUES (:id, :call_id, :turn_number, :speaker, :content,
-                    :stt_confidence, :stt_latency_ms, :llm_latency_ms,
-                    :tts_latency_ms, :language, :created_at)
-            """,
-            {
-                "id": str(uuid.uuid4()),
-                "call_id": str(call_id),
-                "turn_number": turn_number,
-                "speaker": speaker,
-                "content": content,
-                "stt_confidence": stt_confidence,
-                "stt_latency_ms": stt_latency_ms,
-                "llm_latency_ms": llm_latency_ms,
-                "tts_latency_ms": tts_latency_ms,
-                "language": language,
-                "created_at": datetime.now(UTC),
-            },
-        )
+        """Log a single dialog turn.
+
+        `guards_fired` is the guard trace of a bot reply the model produced
+        (`src/agent/guard_trace.py`). `None` writes SQL `NULL` — there is no
+        trace (a caller's turn, a phrase spoken by code); `[]` writes `[]` —
+        there is one and no guard fired. They are not interchangeable.
+
+        The trace never costs the turn itself. If it cannot be serialized, or
+        the database refuses the statement that names the column (migration
+        069 not applied — it has to go out before this code), the turn is
+        written without the trace and the failure is logged with the call.
+        """
+        params: dict[str, Any] = {
+            "id": str(uuid.uuid4()),
+            "call_id": str(call_id),
+            "turn_number": turn_number,
+            "speaker": speaker,
+            "content": content,
+            "stt_confidence": stt_confidence,
+            "stt_latency_ms": stt_latency_ms,
+            "llm_latency_ms": llm_latency_ms,
+            "tts_latency_ms": tts_latency_ms,
+            "language": language,
+            "created_at": datetime.now(UTC),
+        }
+        if guards_fired is None:
+            await self._execute(_INSERT_TURN, params)
+            return
+
+        try:
+            trace_json = json.dumps(guards_fired, ensure_ascii=False)
+        except (TypeError, ValueError):
+            logger.warning(
+                "Guard trace is not JSON-serializable — turn written WITHOUT it: "
+                "call_id=%s turn_number=%s",
+                call_id,
+                turn_number,
+                exc_info=True,
+            )
+            await self._execute(_INSERT_TURN, params)
+            return
+
+        traced = {**params, "guards_fired": trace_json}
+        try:
+            async with self._session_factory() as session, session.begin():
+                await session.execute(text(_INSERT_TURN_WITH_GUARDS), traced)
+            self._db_available = True
+        except ProgrammingError as exc:
+            # The database is up and rejected the statement itself: the column
+            # is not there. Say so — «PostgreSQL unavailable» would send whoever
+            # reads this to the wrong place — and keep the turn. `exc.orig` and
+            # not `exc`: the wrapper's text carries the parameters, i.e. the
+            # reply and whatever the caller dictated.
+            logger.error(
+                "call_turns write with guards_fired REJECTED (%s) — is migration 069 "
+                "applied? Turn written WITHOUT its guard trace: call_id=%s turn_number=%s",
+                str(getattr(exc, "orig", None) or type(exc).__name__)[:300],
+                call_id,
+                turn_number,
+            )
+            await self._execute(_INSERT_TURN, params)
+        except Exception:
+            # Same road as `_execute`: an outage buffers the row, trace included.
+            self._db_available = False
+            logger.warning("PostgreSQL unavailable, buffering log to Redis")
+            await self._buffer_to_redis(_INSERT_TURN_WITH_GUARDS, traced)
 
     async def log_tool_call(
         self,

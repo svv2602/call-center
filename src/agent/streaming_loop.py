@@ -16,6 +16,7 @@ import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from src.agent import guard_trace
 from src.agent.agent import (
     MAX_HISTORY_MESSAGES,
     MAX_TOOL_CALLS_PER_TURN,
@@ -833,6 +834,7 @@ async def hold_unconfirmed_transfer_promise(
             if blocked is not None:
                 reason_label = str(args.get("reason", "unknown"))
                 transfer_promise_suppressed_total.labels(reason=reason_label).inc()
+                guard_trace.record("transfer_promise_suppressed", reason=reason_label)
                 logger.warning(
                     "Withholding transfer promise — guard blocks reason=%s",
                     reason_label,
@@ -1099,11 +1101,13 @@ async def offer_booking_before_checklist(
             # (da525a9a, 2026-09-25: «Записуємо на шиномонтаж? Записати вас на
             # шиномонтаж?»). Stop the turn at its own offer.
             booking_offer_redirected_total.labels(field=field_key).inc()
+            guard_trace.record("booking_offer_redirected", field=field_key)
             gate.offered = True
             held, pending = [], ""
             continue
         if field_key is not None:
             booking_offer_redirected_total.labels(field=field_key).inc()
+            guard_trace.record("booking_offer_redirected", field=field_key)
             logger.warning(
                 "Price consult: bot asked %s before the caller agreed to book — "
                 "saying %r instead: %r",
@@ -1218,6 +1222,7 @@ async def redirect_settled_question(
             tail = None if ends_sentence(pending) else "speak"
         else:
             settled_question_redirected_total.labels(field=field_key).inc()
+            guard_trace.record("settled_question_redirected", field=field_key)
             logger.warning(
                 "Redirecting a settled question: asked %s, speaking %r instead",
                 field_key,
@@ -1366,6 +1371,7 @@ async def confirm_settled_time(
         # slot and then re-read the whole list — would otherwise have the second
         # half reach the caller behind an acceptance of the first.
         reopened_time_choice_total.inc()
+        guard_trace.record("reopened_time_choice")
         logger.warning(
             "Caller already picked %s off the offered list — speaking %r "
             "instead of re-opening the choice with %r",
@@ -1544,6 +1550,7 @@ async def drop_control_plane_prose(
         if form is None:
             return queued
         control_plane_prose_dropped_total.labels(form=form, site="stream").inc()
+        guard_trace.record("control_plane_prose_dropped", form=form, site="stream")
         logger.warning(
             "Dropping machinery written as speech: call=%s, form=%s, text=%r",
             call_id,
@@ -1759,6 +1766,9 @@ class StreamingAgentLoop:
                     control_plane_prose_dropped_total.labels(
                         form=form, site="summary_fallback"
                     ).inc()
+                    guard_trace.record(
+                        "control_plane_prose_dropped", form=form, site="summary_fallback"
+                    )
                     logger.warning(
                         "Summary fallback carried machinery (form=%s) — speaking the "
                         "static fallback instead: %r",
@@ -2467,6 +2477,7 @@ class StreamingAgentLoop:
                     if block_msg is not None:
                         reason_label = str(args.get("reason", "unknown"))
                         false_transfer_blocked_total.labels(reason=reason_label).inc()
+                        guard_trace.record("false_transfer_blocked", reason=reason_label)
                         logger.warning(
                             "Blocked hallucinated transfer_to_operator "
                             "(reason=%s, user_turns=%d): %r",
@@ -2498,6 +2509,9 @@ class StreamingAgentLoop:
                     guard_refusal_repeated_total.labels(
                         tool_name=tc.name, reason=REPEAT_ALREADY_DONE
                     ).inc()
+                    guard_trace.record(
+                        "guard_refusal_repeated", tool_name=tc.name, reason=REPEAT_ALREADY_DONE
+                    )
                     logger.warning(
                         "Tool %s already ran this turn with the same arguments — not run again",
                         tc.name,
@@ -2513,6 +2527,9 @@ class StreamingAgentLoop:
                     guard_refusal_repeated_total.labels(
                         tool_name=tc.name, reason=already_refused
                     ).inc()
+                    guard_trace.record(
+                        "guard_refusal_repeated", tool_name=tc.name, reason=already_refused
+                    )
                     logger.warning(
                         "Tool %s already refused this turn (reason=%s) — not run again",
                         tc.name,

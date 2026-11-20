@@ -15,6 +15,7 @@ import time
 import zoneinfo
 from typing import TYPE_CHECKING, Any
 
+from src.agent import guard_trace
 from src.agent.confirm_detect import (
     asked_for_confirmation,
     is_confirmation,
@@ -1226,8 +1227,14 @@ class CallPipeline:
         stt_confidence: float | None = None,
         llm_latency_ms: int | None = None,
         language: str | None = None,
+        guards_fired: list[dict[str, str]] | None = None,
     ) -> None:
-        """Log a turn to the database (fire-and-forget)."""
+        """Log a turn to the database (fire-and-forget).
+
+        `guards_fired` is passed only by the call sites that write the reply
+        ending a model turn (`guard_trace.take()`); every other row — the
+        caller's, and every phrase spoken by code — leaves it None → NULL.
+        """
         if self._call_logger is None:
             return
         turn_number = self._turn_counter
@@ -1241,6 +1248,7 @@ class CallPipeline:
                 stt_confidence=stt_confidence,
                 llm_latency_ms=llm_latency_ms,
                 language=language,
+                guards_fired=guards_fired,
             )
         except Exception:
             logger.warning("log_turn failed for call %s", self._session.channel_uuid)
@@ -3866,11 +3874,15 @@ class CallPipeline:
                 # Silence timeout
                 should_end = self._session.record_timeout()
                 if should_end:
+                    # A turn the caller barged into leaves its trace open; the
+                    # farewell is not that turn. The trace reopens inside
+                    # `_generate_contextual_farewell` only if the model is asked.
+                    guard_trace.discard()
                     farewell = await self._generate_contextual_farewell()
                     if farewell is None:
                         farewell = self._templates.get("farewell", FAREWELL_TEXT)
                     self._session.add_assistant_turn(farewell)
-                    await self._log_turn("bot", farewell)
+                    await self._log_turn("bot", farewell, guards_fired=guard_trace.take())
                     await self._persist_session()
                     await self._speak(farewell)
                     break
@@ -3932,6 +3944,10 @@ class CallPipeline:
             # "17:25 → 1725" only fire when we were asking for a plate.
             transcript = await self._apply_stt_corrections(transcript)
             transcript = self._apply_entity_normalization(transcript)
+
+            # Guards that fire from here to the bot's reply are written on
+            # that reply's row (`call_turns.guards_fired`).
+            guard_trace.begin_turn(self._session.channel_uuid)
 
             # Got a final transcript — reset timeout and track language
             self._session.timeout_count = 0
@@ -4586,12 +4602,18 @@ class CallPipeline:
                         )
                         for pattern, _snippet in stripped:
                             bot_filler_stripped_total.labels(pattern=pattern).inc()
+                            guard_trace.record("bot_filler_stripped", pattern=pattern)
                     logged_text = cleaned or result.spoken_text
                     self._flag_false_booking_claim(logged_text)
                     self._count_multi_car_bookings()
                     self._session.reset_empty_response()
                     self._session.add_assistant_turn(logged_text)
-                    await self._log_turn("bot", logged_text, llm_latency_ms=llm_latency_ms)
+                    await self._log_turn(
+                        "bot",
+                        logged_text,
+                        llm_latency_ms=llm_latency_ms,
+                        guards_fired=guard_trace.take(),
+                    )
                     await self._persist_session()
                     logger.info(
                         "Streaming turn completed: call=%s, user='%s', agent='%s', "
@@ -4613,7 +4635,9 @@ class CallPipeline:
                 else:
                     fallback = self._resolve_empty_response_fallback()
                     self._session.add_assistant_turn(fallback)
-                    await self._log_turn("bot", fallback)
+                    # The model's turn ended here too: a guard that cut the whole
+                    # reply is why the caller hears this phrase.
+                    await self._log_turn("bot", fallback, guards_fired=guard_trace.take())
                     await self._persist_session()
                     await self._speak(fallback)
             else:
@@ -4719,6 +4743,7 @@ class CallPipeline:
                         )
                         for pattern, _snippet in stripped:
                             bot_filler_stripped_total.labels(pattern=pattern).inc()
+                            guard_trace.record("bot_filler_stripped", pattern=pattern)
                         # Fall back to original if stripping emptied the text
                         # (defensive: never send empty text to TTS).
                         response_text = cleaned or response_text
@@ -4726,14 +4751,19 @@ class CallPipeline:
                     self._count_multi_car_bookings()
                     self._session.reset_empty_response()
                     self._session.add_assistant_turn(response_text)
-                    await self._log_turn("bot", response_text, llm_latency_ms=llm_latency_ms)
+                    await self._log_turn(
+                        "bot",
+                        response_text,
+                        llm_latency_ms=llm_latency_ms,
+                        guards_fired=guard_trace.take(),
+                    )
                     await self._persist_session()
                     await self._speak_streaming(response_text)
                 else:
                     # Never leave the caller in silence — speak an error fallback
                     fallback = self._resolve_empty_response_fallback()
                     self._session.add_assistant_turn(fallback)
-                    await self._log_turn("bot", fallback)
+                    await self._log_turn("bot", fallback, guards_fired=guard_trace.take())
                     await self._persist_session()
                     await self._speak(fallback)
 
@@ -4829,6 +4859,8 @@ class CallPipeline:
         # Falls back to session.messages_for_llm if _llm_history is empty
         # (shouldn't happen in practice, but safe).
         history = self._llm_history if self._llm_history else self._session.messages_for_llm
+        # The model is asked from here on: the farewell row carries a trace.
+        guard_trace.begin_turn(self._session.channel_uuid)
         try:
             response_text, _ = await asyncio.wait_for(
                 self._agent.process_message(
@@ -4848,6 +4880,7 @@ class CallPipeline:
                 form = control_plane_syntax(farewell)
                 if form is not None:
                     control_plane_prose_dropped_total.labels(form=form, site="farewell").inc()
+                    guard_trace.record("control_plane_prose_dropped", form=form, site="farewell")
                     logger.warning(
                         "Contextual farewell carried machinery (form=%s) — falling back "
                         "to the template: call=%s text=%r",
