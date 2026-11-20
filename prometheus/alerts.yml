@@ -194,18 +194,78 @@ groups:
             Bot resolution rate is {{ $value | humanizePercentage }} over the last 6 hours.
             Threshold: 40%. Check prompt quality and tool availability.
 
-      # LLM provider fallback rate high
-      - alert: LLMFallbackRateHigh
+      # --- LLM provider outage ---
+      # Traffic is a handful of calls a day, so these fire on a single event:
+      # a rate threshold is never reached. No `for:` either — the event is
+      # over by the next evaluation; the alert stays up for the 15m window
+      # and resolves by itself.
+      # The Telegram template prints the description only, and as HTML: the
+      # reason goes into the description, and no angle brackets or ampersands.
+
+      # A provider failed on a live call (the agent task). The router exports
+      # every series of this counter at zero on start-up, so increase() sees
+      # the first failure as well. quota / auth have their own rule below.
+      - alert: LLMProviderFailure
         expr: >
-          sum(rate(callcenter_llm_fallbacks_total[1h])) > 0.1
-        for: 10m
+          sum by (provider, reason) (
+            increase(callcenter_llm_provider_failures_total{task="agent", reason!~"quota|auth"}[15m])
+          ) > 0
+        labels:
+          severity: high
+        annotations:
+          summary: "LLM provider {{ $labels.provider }} failed on a live call: {{ $labels.reason }}"
+          description: >
+            LLM provider {{ $labels.provider }} failed on the agent task,
+            reason: {{ $labels.reason }}
+            ({{ $value | printf "%.0f" }} failed attempts in the last 15 minutes).
+            Reason "other" includes calls turned away by an open circuit breaker.
+            The alert resolves 15 minutes after the last failure, which does
+            not mean the provider has recovered.
+
+      # Out of balance or a rejected key, on any task: nothing but a person
+      # fixes these.
+      - alert: LLMProviderQuotaOrAuth
+        expr: >
+          sum by (provider, reason) (
+            increase(callcenter_llm_provider_failures_total{reason=~"quota|auth"}[15m])
+          ) > 0
+        labels:
+          severity: critical
+        annotations:
+          summary: "LLM provider {{ $labels.provider }} refuses requests: {{ $labels.reason }}"
+          description: >
+            LLM provider {{ $labels.provider }} refuses requests,
+            reason: {{ $labels.reason }}
+            ({{ $value | printf "%.0f" }} failed attempts in the last 15 minutes).
+            quota: the account is out of balance, top it up.
+            auth: the API key was rejected, replace it.
+            It will not recover without that.
+
+      # Calls were answered by a fallback provider. Informational next to the
+      # two rules above: in a stream this counter moves only when the
+      # fallback's reply was read to the end, so a turn the caller barged
+      # into is not here. Its series cannot be exported at zero (the pairs
+      # are not known in advance), hence the second branch: a series that
+      # exists now and did not 15 minutes ago is a first switch.
+      - alert: LLMFallbackActivated
+        expr: >
+          sum by (from_provider, to_provider, task) (
+            increase(callcenter_llm_fallbacks_total[15m])
+          ) > 0
+          or
+          sum by (from_provider, to_provider, task) (
+            callcenter_llm_fallbacks_total
+            unless callcenter_llm_fallbacks_total offset 15m
+          ) > 0
         labels:
           severity: medium
         annotations:
-          summary: "High LLM provider fallback rate"
+          summary: "LLM calls moved from {{ $labels.from_provider }} to {{ $labels.to_provider }}"
           description: >
-            LLM fallback rate is {{ $value | humanize }}/s.
-            Primary provider may be experiencing issues.
+            LLM calls of the {{ $labels.task }} task were answered by
+            {{ $labels.to_provider }} instead of {{ $labels.from_provider }}
+            in the last 15 minutes. The first provider is failing: the reason
+            is in LLMProviderFailure or LLMProviderQuotaOrAuth.
 
       # Redis connection issues (no health check update)
       - alert: RedisUnhealthy

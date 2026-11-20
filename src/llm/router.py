@@ -12,11 +12,16 @@ import copy
 import json
 import logging
 import os
+import socket
+import ssl
 import time
 from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
-from aiobreaker import CircuitBreaker
+import aiohttp
+import anthropic
+import httpx  # the Anthropic SDK's transport; its errors surface mid-stream unwrapped
+from aiobreaker import CircuitBreaker, CircuitBreakerError
 
 from src.config import FeatureFlagSettings
 from src.llm.models import (
@@ -27,7 +32,12 @@ from src.llm.models import (
     StreamDone,
 )
 from src.llm.providers.anthropic_provider import AnthropicProvider
-from src.llm.providers.openai_compat import OpenAICompatProvider
+from src.llm.providers.openai_compat import (
+    FAILURE_REASONS,
+    OpenAICompatProvider,
+    ProviderHTTPError,
+    classify_http_failure,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -46,6 +56,70 @@ llm_call_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
 llm_tenant_id_var: contextvars.ContextVar[str | None] = contextvars.ContextVar(
     "llm_tenant_id", default=None
 )
+
+# Checked before the network errors: ``TimeoutError`` is an ``OSError``, and
+# the timeouts of aiohttp, httpx and the Anthropic SDK inherit from their
+# connection errors.
+_TIMEOUT_ERRORS: tuple[type[BaseException], ...] = (
+    TimeoutError,
+    anthropic.APITimeoutError,
+    httpx.TimeoutException,
+)
+_NETWORK_ERRORS: tuple[type[BaseException], ...] = (
+    aiohttp.ClientConnectionError,
+    aiohttp.ClientPayloadError,
+    anthropic.APIConnectionError,
+    httpx.TransportError,
+    ConnectionError,
+    socket.gaierror,
+    ssl.SSLError,
+)
+
+# The exception text in the failure log: an HTTP error message already carries
+# no more than 300 characters of the reply, the rest is cut to the same order.
+_LOG_ERROR_CHARS = 400
+
+
+def _provider_error(exc: BaseException) -> BaseException:
+    """The provider's own exception behind the one the circuit breaker raised.
+
+    The failure that opens a breaker arrives as ``CircuitBreakerError`` with
+    the real one in ``__cause__``. A breaker that was already open has no
+    cause — the provider was not called — and stays what it is.
+    """
+    if isinstance(exc, CircuitBreakerError) and exc.__cause__ is not None:
+        return exc.__cause__
+    return exc
+
+
+def failure_reason(exc: BaseException) -> str:
+    """Why a provider attempt failed — one of ``FAILURE_REASONS``.
+
+    Default-deny: whatever matches nothing below is ``other``, including a
+    call an open circuit breaker turned away. A missed first-event deadline
+    and a provider's own timeout are both ``timeout``; what tells them apart
+    is ``callcenter_llm_first_event_timeouts_total``.
+    """
+    exc = _provider_error(exc)
+    if isinstance(exc, ProviderHTTPError):
+        return exc.reason if exc.reason in FAILURE_REASONS else "other"
+    if isinstance(exc, anthropic.APIStatusError):
+        return classify_http_failure(exc.status_code, exc.body)
+    if isinstance(exc, _TIMEOUT_ERRORS):
+        return "timeout"
+    if isinstance(exc, _NETWORK_ERRORS):
+        return "network"
+    return "other"
+
+
+def _failure_status(exc: BaseException) -> int | None:
+    """HTTP status of a failed attempt, when the failure was an HTTP reply."""
+    exc = _provider_error(exc)
+    for name in ("status", "status_code"):
+        status = getattr(exc, name, None)
+        if isinstance(status, int):
+            return status
+    return None
 
 
 def live_call_stream_options() -> dict[str, Any]:
@@ -116,6 +190,7 @@ class LLMRouter:
                 )
                 logger.info("LLM provider initialized: %s (%s)", key, provider_cfg.get("model"))
 
+        self._export_failure_series()
         self._initialized = True
         logger.info("LLM router initialized: %d providers active", len(self._providers))
 
@@ -225,13 +300,7 @@ class LLMRouter:
                 return response
             except Exception as exc:
                 last_error = exc
-                logger.warning(
-                    "Provider %s failed for task %s: %s",
-                    provider_key,
-                    task.value,
-                    exc,
-                )
-                self._record_error(provider_key, task)
+                self._note_failure("Provider", provider_key, task, exc)
 
         raise RuntimeError(
             f"All providers failed for task {task.value}: {last_error}"
@@ -291,13 +360,7 @@ class LLMRouter:
                 return
             except Exception as exc:
                 last_error = exc
-                logger.warning(
-                    "Stream provider %s failed for task %s: %s",
-                    provider_key,
-                    task.value,
-                    exc,
-                )
-                self._record_error(provider_key, task)
+                self._note_failure("Stream provider", provider_key, task, exc)
                 if yielded and switch_only_before_first_event:
                     break
 
@@ -551,6 +614,55 @@ class LLMRouter:
             llm_errors_total.labels(provider=provider_key, task=task.value).inc()
         except Exception:
             pass
+
+    def _note_failure(self, what: str, provider_key: str, task: LLMTask, exc: Exception) -> None:
+        """Log one failed provider attempt and count it, once, with its reason."""
+        reason = failure_reason(exc)
+        logger.warning(
+            "%s %s failed for task %s: reason=%s, status=%s: %s",
+            what,
+            provider_key,
+            task.value,
+            reason,
+            _failure_status(exc),
+            str(exc)[:_LOG_ERROR_CHARS],
+        )
+        self._record_error(provider_key, task)
+        self._record_failure(provider_key, task, reason)
+
+    @staticmethod
+    def _record_failure(provider_key: str, task: LLMTask, reason: str) -> None:
+        """Count a failed provider attempt under its reason."""
+        try:
+            from src.monitoring.metrics import llm_provider_failures_total
+
+            llm_provider_failures_total.labels(
+                provider=provider_key, task=task.value, reason=reason
+            ).inc()
+        except Exception:
+            # Never fatal to the call, never silent either: the outage alerts
+            # stand on this counter.
+            logger.exception("LLM provider failure was not counted: provider=%s", provider_key)
+
+    def _export_failure_series(self) -> None:
+        """Export the failure counter of every active provider at zero.
+
+        A series that first appears with the value 1 gives ``increase()``
+        nothing to compare it with, so the alert on a single failure would
+        miss the first one after each restart — with a handful of calls a day
+        that is most of them.
+        """
+        try:
+            from src.monitoring.metrics import llm_provider_failures_total
+
+            for provider_key in self._providers:
+                for task in LLMTask:
+                    for reason in FAILURE_REASONS:
+                        llm_provider_failures_total.labels(
+                            provider=provider_key, task=task.value, reason=reason
+                        )
+        except Exception:
+            logger.exception("LLM provider failure series were not exported")
 
     @staticmethod
     def _record_latency(provider_key: str, latency_ms: int) -> None:

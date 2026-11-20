@@ -36,6 +36,88 @@ def _tool_choice_param(tool_choice: str | None) -> dict[str, Any]:
 
 _REQUEST_TIMEOUT = aiohttp.ClientTimeout(total=35)
 
+#: Why a provider call failed — the ``reason`` label of
+#: ``callcenter_llm_provider_failures_total``. The list is closed: whatever is
+#: not recognised is ``other``, so a new shape of failure is still counted.
+FAILURE_REASONS: tuple[str, ...] = (
+    "timeout",
+    "quota",
+    "rate_limit",
+    "auth",
+    "http_5xx",
+    "network",
+    "other",
+)
+
+# ``code`` / ``type`` of an error body that mean "the account is out of money".
+# OpenAI answers 429 for this as well as for a rate limit, and only the body
+# tells them apart. ``billing_error`` is Anthropic's.
+_QUOTA_MARKERS = frozenset(
+    {
+        "insufficient_quota",
+        "billing_hard_limit_reached",
+        "billing_not_active",
+        "billing_error",
+    }
+)
+# Anthropic reports an empty balance as a plain 400 ``invalid_request_error``.
+_QUOTA_MESSAGES = ("credit balance is too low",)
+
+
+def _error_fields(body: object) -> tuple[frozenset[str], str]:
+    """Lower-cased ``code`` / ``type`` / ``status`` and ``message`` of an error body.
+
+    Takes the raw text or already parsed JSON. A body that is not the
+    ``{"error": {...}}`` object gives nothing.
+    """
+    if isinstance(body, (bytes, bytearray)):
+        body = body.decode("utf-8", errors="replace")
+    if isinstance(body, str):
+        try:
+            body = json.loads(body)
+        except ValueError:
+            return frozenset(), ""
+    if not isinstance(body, dict):
+        return frozenset(), ""
+    error = body.get("error")
+    if not isinstance(error, dict):
+        return frozenset(), ""
+    values = (error.get(key) for key in ("code", "type", "status"))
+    markers = frozenset(value.lower() for value in values if isinstance(value, str))
+    message = error.get("message")
+    return markers, message.lower() if isinstance(message, str) else ""
+
+
+def classify_http_failure(status: int, body: object) -> str:
+    """Reason (one of ``FAILURE_REASONS``) for a non-200 reply of an LLM API.
+
+    ``body`` is the whole reply — text or parsed JSON — not the 300 characters
+    that go into the exception message. Never raises.
+    """
+    markers, message = _error_fields(body)
+    if markers & _QUOTA_MARKERS or any(text in message for text in _QUOTA_MESSAGES):
+        return "quota"
+    if status == 402:  # Payment Required (DeepSeek: "Insufficient Balance")
+        return "quota"
+    if status == 429:
+        return "rate_limit"
+    if status in (401, 403):
+        return "auth"
+    if status == 408:
+        return "timeout"
+    if 500 <= status <= 599:
+        return "http_5xx"
+    return "other"
+
+
+class ProviderHTTPError(RuntimeError):
+    """A non-200 reply; ``reason`` was read from the body while it was whole."""
+
+    def __init__(self, message: str, *, status: int, reason: str) -> None:
+        super().__init__(message)
+        self.status = status
+        self.reason = reason
+
 
 class OpenAICompatProvider(AbstractProvider):
     """LLM provider for OpenAI-compatible APIs (OpenAI, DeepSeek, Gemini).
@@ -163,8 +245,10 @@ class OpenAICompatProvider(AbstractProvider):
         async with session.post(url, json=body) as resp:
             if resp.status != 200:
                 error_text = await resp.text()
-                raise RuntimeError(
-                    f"OpenAI-compat streaming error {resp.status}: {error_text[:300]}"
+                raise ProviderHTTPError(
+                    f"OpenAI-compat streaming error {resp.status}: {error_text[:300]}",
+                    status=resp.status,
+                    reason=classify_http_failure(resp.status, error_text),
                 )
             async for line in resp.content:
                 text = line.decode("utf-8").strip()
@@ -222,8 +306,10 @@ class OpenAICompatProvider(AbstractProvider):
                     self._provider_key,
                     error_text[:300],
                 )
-                raise RuntimeError(
-                    f"OpenAI-compat API error {resp.status} from {self._provider_key}: {error_text[:300]}"
+                raise ProviderHTTPError(
+                    f"OpenAI-compat API error {resp.status} from {self._provider_key}: {error_text[:300]}",
+                    status=resp.status,
+                    reason=classify_http_failure(resp.status, error_text),
                 )
             data: dict[str, Any] = await resp.json()
             return data

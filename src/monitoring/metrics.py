@@ -504,6 +504,17 @@ llm_first_event_timeouts_total = Counter(
     ["provider", "task"],
 )
 
+# One increment per failed provider attempt, like `callcenter_llm_errors_total`
+# (the dashboards are built on that one, it stays as it is), plus the reason
+# from the closed list `FAILURE_REASONS`. The router exports every series at
+# zero on start-up: the alerts read `increase()`, and that cannot see the
+# first failure of a series born with the value 1.
+llm_provider_failures_total = Counter(
+    "callcenter_llm_provider_failures_total",
+    "Failed LLM provider attempts by provider, task and reason",
+    ["provider", "task", "reason"],
+)
+
 # --- Tenant resolution metrics ---
 
 tenant_resolution_fallback_total = Counter(
