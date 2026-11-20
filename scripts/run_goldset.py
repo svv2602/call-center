@@ -54,8 +54,10 @@ import asyncio
 import copy
 import fnmatch
 import json
+import os
 import re
 import sys
+import traceback
 from collections import Counter
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
@@ -569,7 +571,11 @@ async def run_case(run: Run, make_agent: AgentFactory, play_turn: TurnPlayer) ->
 
 
 async def run_all(
-    runs: list[Run], make_agent: AgentFactory, play_turn: TurnPlayer, repeat: int = 1
+    runs: list[Run],
+    make_agent: AgentFactory,
+    play_turn: TurnPlayer,
+    repeat: int = 1,
+    on_result: Callable[[list[RunResult]], None] | None = None,
 ) -> list[RunResult]:
     """Play every run ``repeat`` times: one ``RunResult`` per (run, repeat).
 
@@ -577,6 +583,10 @@ async def run_all(
     spread in time: a provider outage of a minute then reads as a turn error in
     one repeat of several pairs, not as one pair red in all of its repeats.
     Every repeat goes through ``run_case`` — a fresh agent, an empty history.
+
+    ``on_result`` (optional) is called after every played pair with the list of
+    everything played so far, so a caller can keep the paid results when a later
+    pair raises. It sees the live list: copy it if it must outlive the call.
     """
     if repeat < 1:
         raise ValueError(f"repeat must be >= 1, got {repeat}")
@@ -589,6 +599,8 @@ async def run_all(
             nth = f" повтор {number}/{repeat}" if repeat > 1 else ""
             print(f"  {mark} {res.case_id} [{res.network}]{nth}", file=sys.stderr)
             results.append(res)
+            if on_result is not None:
+                on_result(results)
     return results
 
 
@@ -622,6 +634,9 @@ def group_pairs(results: list[RunResult]) -> list[PairStability]:
         pair = pairs.setdefault((r.case_id, r.network), PairStability(r.case_id, r.network))
         pair.repeats.append(r)
     return list(pairs.values())
+
+
+EXIT_ABORTED = 3  # 0 green, 1 red/flaky, 2 argparse; 3 = the run broke off midway
 
 
 def exit_code(results: list[RunResult]) -> int:
@@ -968,6 +983,35 @@ def results_to_json(results: list[RunResult]) -> list[dict[str, Any]]:
     ]
 
 
+def write_json_atomic(path: Path, results: list[RunResult]) -> None:
+    """Write the ``--json-out`` file so a reader never sees half of it.
+
+    The temporary file sits in the same directory (``os.replace`` is atomic only
+    within one filesystem), so a crash mid-write leaves the previous file intact.
+    """
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        tmp.write_text(
+            # default=str: an argument json cannot encode must not cost a paid run its report.
+            json.dumps(results_to_json(results), ensure_ascii=False, indent=2, default=str),
+            encoding="utf-8",
+        )
+        os.replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def abort_banner(played: int, total: int, cause: BaseException) -> str:
+    """First line of the report of a run that broke off: how much was played, and why."""
+    why = f"{type(cause).__name__}: {cause}" if str(cause) else type(cause).__name__
+    return (
+        f"ПРОГІН ПЕРЕРВАНО: зіграно {played} з {total} (пара × повтор), "
+        f"не зіграно {total - played}; причина: {why}\n"
+        "Нижче - звіт лише за зіграну частину."
+    )
+
+
 async def _live(
     runs: list[Run], skipped: list[tuple[str, str]], opts: argparse.Namespace, repeat: int = 1
 ) -> int:
@@ -1003,18 +1047,39 @@ async def _live(
         if not opts.yes:
             print("Платний прогін не запущено: додайте --yes.")
             return 0
-        results = await run_all(runs, factory, _play_sandbox_turn, repeat=repeat)
+        played: list[RunResult] = []
+
+        def on_pair(done: list[RunResult]) -> None:
+            played[:] = done
+            if not opts.json_out:
+                return
+            try:
+                write_json_atomic(Path(opts.json_out), done)
+            except OSError as exc:
+                # The run is paid for: a failed checkpoint is loud, but does not stop it.
+                print(f"  УВАГА: не вдалося записати {opts.json_out}: {exc}", file=sys.stderr)
+
+        aborted: BaseException | None = None
+        try:
+            results = await run_all(
+                runs, factory, _play_sandbox_turn, repeat=repeat, on_result=on_pair
+            )
+        except (Exception, asyncio.CancelledError, KeyboardInterrupt) as exc:
+            aborted = exc
+            results = list(played)
+            # The cause stays visible: stderr gets the full traceback, not a summary.
+            print("Прогін перервано, причина:", file=sys.stderr)
+            traceback.print_exception(exc, file=sys.stderr)
     finally:
         await router.close()
         await engine.dispose()
 
+    if aborted is not None:
+        print(abort_banner(len(results), len(runs) * repeat, aborted))
     print(format_report(results, skipped))
-    if opts.json_out:
-        Path(opts.json_out).write_text(
-            # default=str: an argument json cannot encode must not cost a paid run its report.
-            json.dumps(results_to_json(results), ensure_ascii=False, indent=2, default=str),
-            encoding="utf-8",
-        )
+    # --json-out is already current: on_pair rewrote it after the last pair.
+    if aborted is not None:
+        return EXIT_ABORTED
     return exit_code(results)
 
 
